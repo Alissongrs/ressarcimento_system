@@ -1,0 +1,262 @@
+Já existe um serviço de API front-end em @services/ocrService.js com a função:
+
+ocrAnalyze(files, instruction, opts)
+
+Ela faz POST /ocr/analyze para o backend.
+
+O backend do serviço de OCR já faz:
+
+OCR de PDFs/imagens;
+
+aplicação de regras locais, especialmente:
+
+BANDEIRA_ENEL_SP_GB (regra de bandeira tarifária ENEL SP, Grupo B, ref. 09/2024);
+
+opcionalmente ICMS;
+
+Ele retorna um JSON no formato:
+
+{
+  "results": [
+    {
+      "file_name": "Exemplo bandeira incorreta.pdf",
+      "raw_text": "texto OCR...",
+      "rule_results": {
+        "META": {
+          "numero_cliente": "10093089",
+          "unidade_consumidora": "xxxxxx",
+          "referencia": "09/2024"
+        },
+        "BANDEIRA_ENEL_SP_GB": {
+          "elegivel": true,
+          "bandeira_lida": "vermelha",
+          "dias_mes": 6,
+          "dias_total": 30,
+          "tusd_quant_kwh": 11764.8,
+          "bandeira_valor_rs": 236.69,
+          "valor_calc_4_463": 105.013,
+          "valor_calc_7_877": 185.343,
+          "bandeira_incorreta": false,
+          "diferenca_para_4_463": 131.677,
+          "status": "ok",
+          "issues": []
+        },
+        "ICMS": {
+          // campos de ICMS quando ativado (pode existir ou não)
+        }
+      }
+    }
+  ]
+}
+
+Objetivo da tela
+
+A IA deve “agir por trás”: o usuário não conversa com a IA, ele só:
+
+seleciona/arrasta as faturas;
+
+clica em um botão para rodar o OCR;
+
+e recebe o resultado direto em formato de tabela.
+
+Não quero mais o componente de chat dentro dessa página.
+
+Layout desejado
+
+Componente React padrão, export default function Ocr() { ... }.
+
+Estilo compatível com o restante do projeto:
+
+usar as classes que já existem no sistema: glass-card, panel-bg-60, panel-border, bg-[var(--accent)], text-[var(--fg)], etc.;
+
+grid simples:
+
+pode ser 1 coluna full ou 2 colunas (superior upload + inferior tabela).
+
+você pode simplificar a estrutura, desde que a UX fique clara.
+
+Funcionalidades
+
+Upload de arquivos
+
+Zona de drag and drop para PDFs e imagens (.pdf, .png, .jpg, .jpeg) com texto:
+
+mostrar mensagem tipo “Arraste e solte faturas (PDF, PNG, JPG)”.
+
+também permitir seleção via <input type="file" multiple />.
+
+Listar arquivos selecionados em uma lista simples com botão “X” para remover cada um.
+
+Parâmetros de análise
+
+Campo de texto multi-linha (textarea) “Instruções (opcional)” que será enviado como instruction para ocrAnalyze.
+
+Checkbox para habilitar a regra ICMS (além da regra de bandeira que já será sempre enviada):
+
+label: “Aplicar também regra ICMS”.
+
+Botão principal
+
+Botão “Iniciar auditoria” ou “Enviar para OCR”.
+
+Ao clicar:
+
+se não houver arquivos, não faz nada;
+
+desabilita o botão e mostra estado de carregando, ex: texto “Processando…”;
+
+chama ocrAnalyze(files, instruction, opts) com:
+
+const rules = ['BANDEIRA_ENEL_SP_GB'];
+if (ruleICMSMarcado) rules.push('ICMS');
+
+const results = await ocrAnalyze(files, instruction, {
+  useLocalRules: true,
+  rules,
+  lang: 'por+eng',
+  max_pages: 3,
+});
+
+
+Transformação dos resultados em linhas de tabela
+
+Manter um estado rows que é uma lista de objetos, onde cada objeto representa uma fatura (um arquivo).
+
+Para cada item de results retornado do backend:
+
+usar res.file_name e res.rule_results para montar uma linha com os campos:
+
+arquivo → res.file_name
+
+numeroCliente → res.rule_results?.META?.numero_cliente || ''
+
+uc → res.rule_results?.META?.unidade_consumidora || ''
+
+referencia → res.rule_results?.META?.referencia || '09/2024'
+
+elegivel → res.rule_results?.BANDEIRA_ENEL_SP_GB?.elegivel
+
+bandeiraLida → res.rule_results?.BANDEIRA_ENEL_SP_GB?.bandeira_lida
+
+diasMes → res.rule_results?.BANDEIRA_ENEL_SP_GB?.dias_mes
+
+diasTotal → res.rule_results?.BANDEIRA_ENEL_SP_GB?.dias_total
+
+tusdKwh → res.rule_results?.BANDEIRA_ENEL_SP_GB?.tusd_quant_kwh
+
+valorBandeira → res.rule_results?.BANDEIRA_ENEL_SP_GB?.bandeira_valor_rs
+
+valorCalc4463 → res.rule_results?.BANDEIRA_ENEL_SP_GB?.valor_calc_4_463
+
+valorCalc7877 → res.rule_results?.BANDEIRA_ENEL_SP_GB?.valor_calc_7_877
+
+bandeiraIncorreta → res.rule_results?.BANDEIRA_ENEL_SP_GB?.bandeira_incorreta
+
+diferencaPara4463 → res.rule_results?.BANDEIRA_ENEL_SP_GB?.diferenca_para_4_463
+
+issues → res.rule_results?.BANDEIRA_ENEL_SP_GB?.issues || []
+
+Importante:
+
+Quando o usuário rodar o OCR de novo com outra leva de arquivos, as novas linhas devem entrar no topo da tabela:
+
+setRows((prev) => [...novasLinhas, ...prev]);
+
+
+Ou seja, a tabela é um histórico, onde a requisição mais recente fica em cima.
+
+Renderização da tabela
+
+Mostrar a tabela na própria página de OCR, logo abaixo dos controles.
+
+Cabeçalho da tabela com as colunas (em português):
+
+Arquivo
+
+Nº Cliente
+
+UC
+
+Referência
+
+Elegível
+
+Bandeira
+
+Dias mês
+
+Dias total
+
+kWh TUSD
+
+Valor Bandeira (R$)
+
+Calc 4,463
+
+Calc 7,877
+
+Bandeira incorreta?
+
+Cada rows[i] é uma linha.
+
+Regras de exibição:
+
+Elegível: exibir “Sim” ou “Não” (ou “-” se indefinido).
+
+Bandeira incorreta?:
+
+se true → texto “Sim” em vermelho (ex: text-red-400 font-semibold);
+
+se false → texto “Não” em verde (ex: text-emerald-400);
+
+se null/undefined → “-” com opacidade.
+
+Números (kWh, valores, diferença) podem ser exibidos com:
+
+toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 })
+quando forem números, para ficar com vírgula.
+
+Resultados brutos (debug)
+
+Opcional, mas desejável:
+
+Abaixo da tabela, exibir um bloco de “Resultados brutos (debug)” com o JSON do objeto retornado, usando <pre> e JSON.stringify.
+
+Isso ajuda a depurar novas regras depois.
+
+Remover o chat antigo
+
+Não quero mais aquele layout de 2 colunas com chat de um lado e upload do outro.
+
+A nova página pode ser:
+
+um card único com:
+
+upload + parâmetros;
+
+botão “Enviar para OCR”;
+
+tabela de resultados;
+
+bloco de debug opcional.
+
+Nenhum input de texto tipo chat, nenhuma lista de mensagens, nenhum ocrChat sendo chamado.
+
+Detalhes de implementação
+
+Usar React hooks (useState, useMemo, etc.) normalmente.
+
+Manter o código limpo, organizado e autoexplicativo.
+
+Não alterar outros arquivos além de src/pages/Ocr.jsx.
+
+Import a ser usado:
+
+import { ocrAnalyze } from '@services/ocrService.js';
+
+
+(não use ocrChat).
+
+Garanta que o componente default export seja export default function Ocr() { ... }.
+
+Gere o código completo de src/pages/Ocr.jsx de acordo com essas especificações.

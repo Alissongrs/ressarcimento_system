@@ -1,0 +1,1229 @@
+﻿// src/pages/AdminEditor.jsx
+import React, { useEffect, useState, useRef } from 'react';
+import { saveProcessoFull, getNextProcessID } from '../services/adminEditorService';
+import {
+  getRequisicaoById,
+  getHistoricoById,
+  atualizarRequisicaoCompleta,
+  getProcessosKanbanFast,
+  getFluxoRessarcimento,
+  getFaturamento,
+} from '../services/requisicaoService';
+import { listPlanilha } from '../services/adminPlanilhaService';
+import { useAuth } from '../context/AuthContext.jsx';
+import { getEtapas, getSubEtapas, getEtapaSubMap } from '../services/filtersService';
+import './admin-editor.css';
+// Toast substituído por modal centralizado nesta tela
+import AdminPlanilha from './AdminPlanilha.jsx';
+
+export default function AdminEditor() {
+  const { user } = useAuth();
+  const isAdmin = String(user?.tipo_conta || '').toLowerCase() === 'admin';
+
+  const [processoId, setProcessoId] = useState('');
+  const [criarNovo, setcriarNovo] = useState(false);
+  const [ucBusca, setUcBusca] = useState('');
+
+  const [req, setReq] = useState({});
+  const [proc, setProc] = useState({});
+  const [deferimento, setDeferimento] = useState({});
+  const [fluxo, setFluxo] = useState([]);
+  const [fat, setFat] = useState([]);
+  const [hist, setHist] = useState([]);
+  const [histDeletes, setHistDeletes] = useState([]);
+
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState('');
+  const [selectedColuna, setSelectedColuna] = useState('');
+  const [toast, setToast] = useState({ open: false, type: 'info', text: '' });
+
+  // Bulk por UC (modal)
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkInput, setBulkInput] = useState('');
+  const [bulkResolvido, setBulkResolvido] = useState([]); // [{ uc, ids:[], selectedId:null|number, status:'ok'|'dup'|'miss', msg?:string }]
+  const [bulkEtapa, setBulkEtapa] = useState('Improcedente');
+  const [bulkCSimples, setBulkCSimples] = useState(''); // número ou lista CSV
+  const [bulkDSimples, setBulkDSimples] = useState(''); // data dd/mm/aaaa ou CSV
+  const [bulkCDobro, setBulkCDobro] = useState(''); // número ou CSV
+  const [bulkDDobro, setBulkDDobro] = useState(''); // data dd/mm/aaaa ou CSV
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkApplying, setBulkApplying] = useState(false);
+  const [planilhaOpen, setPlanilhaOpen] = useState(false);
+
+  const [etapasOpts, setEtapasOpts] = useState([]);
+  const [subEtapasOpts, setSubEtapasOpts] = useState([]);
+  const [etapaSubMap, setEtapaSubMap] = useState({});
+
+  const colToEtapa = {
+    Ativos: 'Andamento',
+    Deferidos: 'Pendente',
+    'Fluxo de Ressarcimento': 'Enviado ao Financeiro',
+    Faturamento: 'Ressarcimento',
+    'Concluídos': 'Concluído',
+    Indeferidos: 'Indeferido',
+  };
+
+  // Helpers de data (exibição BR e normalização para envio)
+  const toBRDateTime = (s) => {
+    if (!s) return '';
+    const str = String(s).trim().replace('T', ' ');
+    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}:\d{2}:\d{2}|\d{2}:\d{2}))?/);
+    if (m) {
+      const [, y, mo, d, t] = m;
+      return `${d}/${mo}/${y}${t ? ` ${t}` : ''}`;
+    }
+    return str;
+  };
+
+  const normalizeDateInput = (s) => {
+    const raw = String(s || '').trim();
+    if (!raw) return null;
+    const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(.+))?$/);
+    if (m) {
+      const [, d, mo, y, t] = m;
+      return `${y}-${mo}-${d}${t ? ` ${t.trim()}` : ''}`;
+    }
+    return raw;
+  };
+
+  // Refs para foco automático em Sub-etapa
+  const subProcRef = useRef(null);
+  const subHistRefs = useRef({});
+
+  useEffect(() => {
+    setMsg('');
+  }, [processoId, criarNovo]);
+
+  // Quando marcar "Criar novo", sugere automaticamente o próximo ID
+  useEffect(() => {
+    (async () => {
+      try {
+        if (criarNovo) {
+          const next = await getNextProcessID();
+          if (next) setProcessoId(String(next));
+        }
+      } catch {
+        /* silencioso */
+      }
+    })();
+  }, [criarNovo]);
+
+  // Carregar opções de etapas/subetapas
+  useEffect(() => {
+    (async () => {
+      try {
+        const [e, s, m] = await Promise.all([getEtapas(), getSubEtapas(), getEtapaSubMap()]);
+        setEtapasOpts(e || []);
+        setSubEtapasOpts(s || []);
+        setEtapaSubMap(m || {});
+      } catch {
+        /* silencioso */
+      }
+    })();
+  }, []);
+
+  const filteredSubFor = (etapaNome) => {
+    const key = String(etapaNome || '').trim();
+    const arr = etapaSubMap[key];
+    if (Array.isArray(arr) && arr.length) return arr;
+    return subEtapasOpts;
+  };
+
+  const clearAll = () => {
+    setProcessoId('');
+    setUcBusca('');
+    setReq({});
+    setProc({});
+    setDeferimento({});
+    setFluxo([]);
+    setFat([]);
+    setHist([]);
+    setHistDeletes([]);
+    setSelectedStatus('');
+    setSelectedColuna('');
+    setMsg('');
+    setToast((t) => ({ ...t, open: false, text: '' }));
+  };
+
+  const Toolbar = () => (
+    <div className="mb-4 flex items-center gap-2">
+      <button className="px-4 py-2 border rounded" onClick={() => setPlanilhaOpen((v) => !v)}>
+        {planilhaOpen ? 'Voltar ao editor' : 'Em Massa'}
+      </button>
+    </div>
+  );
+
+  const loadById = async () => {
+    try {
+      let idStr = String(processoId || '').trim();
+
+      if (!idStr) {
+        // Buscar por UC quando não houver ID
+        const q = String((ucBusca || req?.uc || '')).trim();
+        if (!q) return;
+
+        const dataFast = await getProcessosKanbanFast();
+        const colunas = dataFast?.colunas || {};
+        const matches = [];
+        for (const [, itens] of Object.entries(colunas)) {
+          (itens || []).forEach((it) => {
+            const ucStr = String(it?.uc ?? '').trim();
+            if (ucStr && ucStr.toLowerCase() === q.toLowerCase()) matches.push(Number(it.id));
+          });
+        }
+        if (matches.length === 0) {
+          setToast({ open: true, type: 'info', text: `Nenhum processo encontrado para a UC ${q}.` });
+          return;
+        }
+        if (matches.length > 1) {
+          setToast({
+            open: true,
+            type: 'warning',
+            text: `UC duplicada: ${q} em ${matches.length} processos (IDs: ${matches.join(', ')}).`,
+          });
+          return;
+        }
+        idStr = String(matches[0]);
+        setProcessoId(idStr);
+        setcriarNovo(false);
+      }
+
+      const data = await getRequisicaoById(idStr);
+      setReq({
+        uc: data?.uc ?? '',
+        cliente: data?.cliente?.String ?? data?.cliente ?? '',
+        concessionaria: data?.concessionaria ?? '',
+        cnpj: data?.cnpj ?? '',
+        endereco_completo: data?.endereco_completo ?? '',
+        razao_social_fatura: data?.razao_social_fatura ?? '',
+        ressarcimento_estimado: data?.valor_estimado ?? data?.ressarcimento_estimado ?? '',
+        link_fatura: data?.link_fatura ?? '',
+        data_criacao_requisicao: data?.data_criacao ? toBRDateTime(data.data_criacao) : '',
+      });
+      setProc({
+        etapa: data?.etapa ?? '',
+        sub_etapa: data?.sub_etapa ?? '',
+        relevancia: !!data?.relevancia,
+        data_alerta: data?.data_alerta ? toBRDateTime(data.data_alerta).slice(0, 10) : '',
+        ultima_atualizacao: data?.ultima_atualizacao ? toBRDateTime(data.ultima_atualizacao) : '',
+      });
+      // Deferimento direto do processo, se vier no payload principal
+      if (data?.deferimento) {
+        const def = data.deferimento;
+        setDeferimento({
+          data_Procedência: toBRDateTime(def.data_procedencia || def.DataProcedencia || '').slice(0, 10),
+          Crédito_simples: def.credito_simples ?? def.CreditoSimples ?? '',
+          Crédito_dobro: def.credito_dobro ?? def.CreditoDobro ?? '',
+          data_Crédito_dobro: toBRDateTime(def.data_credito_dobro || def.DataCreditoDobro || '').slice(0, 10),
+        });
+      }
+
+      const [h, fluxoSaved, fatSaved, planRows] = await Promise.all([
+        getHistoricoById(idStr),
+        getFluxoRessarcimento(idStr).catch(() => null),
+        getFaturamento(idStr).catch(() => null),
+        listPlanilha({ q: idStr, limit: 1 }).catch(() => []),
+      ]);
+      setHist(
+        (h || []).map((x) => ({
+          id_historico: x.id_historico || x.idhistorico || x.id,
+          data: toBRDateTime(x.data_movimentacao || x.data || x.created_at),
+          comentario: x.comentario || '',
+          etapa_anterior: x.etapa_anterior || '',
+          etapa_nova: x.etapa_nova || '',
+          sub_etapa: x.sub_etapa || '',
+          status_anterior: x.status_anterior || '',
+          status_novo: x.status_novo || '',
+          relevancia_anterior: parseBoolLoose(x.relevancia_anterior),
+          relevancia_nova: parseBoolLoose(x.relevancia_nova),
+        })),
+      );
+      const fluxArr = Array.isArray(fluxoSaved?.itens) ? fluxoSaved.itens : Array.isArray(fluxoSaved) ? fluxoSaved : [];
+      setFluxo(
+        (fluxArr || []).map((it) => ({
+          forma_devolucao: it.forma_devolucao || it.formaDevolucao || 'Fatura',
+          valor: it.valor ?? it.valor_fluxo ?? it.valorFluxo ?? 0,
+          data_devolucao: toBRDateTime(it.data_devolucao || it.dataDevolucao || '').slice(0, 10),
+          data_envio_financeiro: toBRDateTime(it.data_envio_financeiro || it.dataEnvioFinanceiro || '').slice(0, 10),
+        })),
+      );
+      const fatArr = Array.isArray(fatSaved?.itens) ? fatSaved.itens : Array.isArray(fatSaved) ? fatSaved : [];
+      setFat(
+        (fatArr || []).map((it) => ({
+          numero_nf: it.numero_nf || it.numero || it.nf || '',
+          data_emissao: toBRDateTime(it.data_emissao || '').slice(0, 10),
+          data_vencimento: toBRDateTime(it.data_vencimento || '').slice(0, 10),
+          data_pagamento: toBRDateTime(it.data_pagamento || '').slice(0, 10),
+          valor: it.valor ?? it.valor_nf ?? it.valorNf ?? 0,
+        })),
+      );
+      const row = Array.isArray(planRows) && planRows.length ? planRows[0] : null;
+      if (row) {
+        setDeferimento({
+          data_Procedência: row.data_simples ? toBRDateTime(row.data_simples).slice(0, 10) : '',
+          Crédito_simples: row.credito_simples ?? '',
+          Crédito_dobro: row.credito_dobro ?? '',
+          data_Crédito_dobro: row.data_dobro ? toBRDateTime(row.data_dobro).slice(0, 10) : '',
+        });
+      }
+    } catch (e) {
+      setMsg(e?.response?.data?.error || e?.message || 'Falha ao carregar processo');
+    }
+  };
+
+  const addFluxo = () =>
+    setFluxo((prev) => [
+      ...prev,
+      { forma_devolucao: 'Fatura', valor: 0, data_devolucao: '', data_envio_financeiro: '' },
+    ]);
+  const addFat = () =>
+    setFat((prev) => [
+      ...prev,
+      { numero_nf: '', data_emissao: '', data_vencimento: '', data_pagamento: '', valor: 0 },
+    ]);
+  const addHist = () =>
+    setHist((prev) => [
+      ...prev,
+      {
+        data: new Date().toISOString().slice(0, 19).replace('T', ' '),
+        comentario: '',
+        etapa_anterior: '',
+        etapa_nova: '',
+        sub_etapa: '',
+        status_anterior: '',
+        status_novo: '',
+        relevancia_anterior: null,
+        relevancia_nova: null,
+      },
+    ]);
+
+  const save = async () => {
+    try {
+      setSaving(true);
+      setMsg('');
+
+      // Aviso de UC duplicada antes de salvar (não bloqueia)
+      try {
+        const uc = String(req?.uc || '').trim();
+        if (uc) {
+          const data = await getProcessosKanbanFast();
+          const colunas = data?.colunas || {};
+          const ids = [];
+          for (const [, itens] of Object.entries(colunas)) {
+            (itens || []).forEach((it) => {
+              const u = String(it?.uc ?? '').trim();
+              if (u && u.toLowerCase() === uc.toLowerCase()) ids.push(Number(it.id));
+            });
+          }
+          const uniq = Array.from(new Set(ids.filter(Number.isFinite)));
+          const currIdNum = Number(processoId);
+          const isCreate = !!criarNovo;
+          let duplicated = false;
+          if (isCreate) duplicated = uniq.length >= 1;
+          else if (currIdNum > 0) duplicated = uniq.filter((id) => id !== currIdNum).length >= 1;
+          else duplicated = uniq.length > 1;
+
+          if (duplicated) {
+            setToast({
+              open: true,
+              type: 'warning',
+              text: `UC duplicada: ${uc} em processos (IDs: ${uniq.join(', ')}).`,
+            });
+          }
+        }
+      } catch {
+        /* silencioso */
+      }
+
+      const payload = {
+        criar_novo: !!criarNovo,
+        processo_id: criarNovo ? undefined : Number(processoId),
+
+        uc: emptyToNull(req.uc),
+        cliente: emptyToNull(req.cliente),
+        concessionaria: emptyToNull(req.concessionaria),
+        cnpj: emptyToNull(req.cnpj),
+        endereco_completo: emptyToNull(req.endereco_completo),
+        razao_social_fatura: emptyToNull(req.razao_social_fatura),
+        ressarcimento_estimado: req.ressarcimento_estimado === '' ? null : Number(req.ressarcimento_estimado),
+        link_fatura: emptyToNull(req.link_fatura),
+        data_criacao_requisicao: normalizeDateInput(req.data_criacao_requisicao),
+
+        etapa: emptyToNull(proc.etapa),
+        sub_etapa: emptyToNull(proc.sub_etapa),
+        relevancia: !!proc.relevancia,
+        data_alerta: normalizeDateInput(proc.data_alerta),
+        ultima_atualizacao: normalizeDateInput(proc.ultima_atualizacao),
+
+        deferimento: (() => {
+          const ds = normalizeDateInput(deferimento?.data_Procedência);
+          const dd = normalizeDateInput(deferimento?.data_Crédito_dobro);
+          const cs =
+            deferimento?.Crédito_simples === '' || deferimento?.Crédito_simples == null
+              ? null
+              : Number(deferimento.Crédito_simples);
+          const cd =
+            deferimento?.Crédito_dobro === '' || deferimento?.Crédito_dobro == null
+              ? null
+              : Number(deferimento.Crédito_dobro);
+          const has = (ds && ds !== '') || (dd && dd !== '') || (cs !== null && cs !== 0) || (cd !== null && cd !== 0);
+          return has
+            ? JSON.stringify({
+                data_procedencia: ds,
+                credito_simples: cs,
+                credito_dobro: cd,
+                data_credito_dobro: dd,
+              })
+            : undefined;
+        })(),
+
+        fluxo_ressarcimento: JSON.stringify({
+          itens: (fluxo || []).map((it) => ({
+            ...it,
+            data_devolucao: normalizeDateInput(it.data_devolucao) || '',
+            data_envio_financeiro: normalizeDateInput(it.data_envio_financeiro) || '',
+          })),
+        }),
+        faturamento: JSON.stringify({
+          itens: (fat || []).map((it) => ({
+            ...it,
+            data_emissao: normalizeDateInput(it.data_emissao) || '',
+            data_vencimento: normalizeDateInput(it.data_vencimento) || '',
+            data_pagamento: normalizeDateInput(it.data_pagamento) || '',
+          })),
+        }),
+        historico: (hist || [])
+          .filter((x) => x.data) // mantém registros com ou sem comentário
+          .map((x) => ({
+            id_historico: x.id_historico,
+            data: normalizeDateInput(x.data),
+            comentario: x.comentario,
+            etapa_anterior: emptyToNull(x.etapa_anterior),
+            etapa_nova: emptyToNull(x.etapa_nova),
+            sub_etapa: emptyToNull(x.sub_etapa),
+            status_anterior: emptyToNull(x.status_anterior),
+            status_novo: emptyToNull(x.status_novo),
+            relevancia_anterior: normalizeBoolOrNull(x.relevancia_anterior),
+            relevancia_nova: normalizeBoolOrNull(x.relevancia_nova),
+            tipo_movimentacao: emptyToNull(x.tipo_movimentacao),
+            justificativa_atraso: emptyToNull(x.justificativa_atraso),
+          })),
+        historico_delete_ids: histDeletes,
+      };
+
+      const res = await saveProcessoFull(payload);
+      if (res?.ok) {
+        const pid = Number(criarNovo ? res.processo_id : processoId);
+
+        // Atualiza status da requisição se houver seleção nos botões
+        if (selectedStatus && pid) {
+          try {
+            const fd = new FormData();
+            fd.append('status', selectedStatus);
+            fd.append('comentario', 'Atualizado via Admin Editor');
+            await atualizarRequisicaoCompleta(pid, fd);
+          } catch {
+            /* mantém o save mesmo se status falhar */
+          }
+        }
+
+        const sucesso = 'Salvo com sucesso (processo ' + res.processo_id + ')';
+        setMsg(sucesso);
+        setToast({ open: true, type: 'success', text: sucesso });
+        if (criarNovo) setProcessoId(String(res.processo_id));
+      } else {
+        setMsg('Falha ao salvar');
+        setToast({ open: true, type: 'error', text: 'Falha ao salvar' });
+      }
+    } catch (e) {
+      const err = e?.response?.data?.error || e?.message || 'Erro ao salvar';
+      setMsg(err);
+      setToast({ open: true, type: 'error', text: err });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Se marcar Aprovado e houver dados de deferimento, direciona Deferidos automaticamente
+  useEffect(() => {
+    try {
+      if (selectedStatus === 'Aprovado') {
+        const hasDef = Object.values(deferimento || {}).some(
+          (v) => v !== '' && v !== null && v !== undefined,
+        );
+        if (hasDef) {
+          setSelectedColuna('Deferidos');
+          setProc((s) => ({ ...s, etapa: 'Pendente', sub_etapa: '' }));
+        }
+      }
+    } catch {
+      /* silencioso */
+    }
+  }, [selectedStatus, deferimento]);
+
+  if (!isAdmin) return <div className="p-8 text-center">Acesso restrito ao administrador.</div>;
+
+  return (
+    <div className="p-4 w-full bg-background text-foreground min-h-screen">
+      <Toolbar />
+
+      {planilhaOpen ? (
+        <AdminPlanilha />
+      ) : (
+        <>
+          <div
+            className="rounded-xl shadow-elevated p-4 mb-4 flex items-center justify-between gap-3 border-2"
+            style={{
+              background: 'var(--header-bg)',
+              borderColor: 'var(--header-border)',
+              color: 'var(--header-fg)',
+            }}
+          >
+            <h1 className="text-xl font-extrabold tracking-tight">Editor de Processo (Admin)</h1>
+            <div className="flex items-center gap-2">
+              <button className="px-4 py-2 bg-green-600 text-white rounded" onClick={save} disabled={saving}>
+                {saving ? 'Salvando...' : 'Salvar'}
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 border rounded"
+                onClick={() => setBulkOpen(true)}
+                disabled={saving}
+              >
+                Bulk por UC
+              </button>
+              <button type="button" className="px-4 py-2 border rounded" onClick={clearAll} disabled={saving}>
+                Limpar
+              </button>
+            </div>
+          </div>
+
+          {/* Destino: Status da requisição */}
+          <section
+            className="mb-4 p-3 border rounded glass-card gradient-card shadow-medium"
+            style={{ background: 'var(--panel-processos)', borderColor: 'var(--border)' }}
+          >
+            <h2 className="font-semibold mb-2">Destino (Status)</h2>
+            <div className="flex flex-wrap gap-2">
+              {['Pendente', 'Em Análise', 'Aprovado', 'Rejeitado'].map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setSelectedStatus(st)}
+                  className={`px-3 py-1 rounded border ${
+                    selectedStatus === st ? 'bg-[var(--accent)] text-[var(--fg)]' : 'border-[var(--panel-border)]'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* Destino: Coluna do processo (Kanban) */}
+          <section
+            className="mb-6 p-3 border rounded glass-card gradient-card shadow-medium"
+            style={{ background: 'var(--panel-processos)', borderColor: 'var(--border)' }}
+          >
+            <h2 className="font-semibold mb-2">Coluna do Processo</h2>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {['Ativos', 'Deferidos', 'Fluxo de Ressarcimento', 'Faturamento', 'Concluídos', 'Indeferidos'].map(
+                (c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => {
+                      setSelectedColuna(c);
+                      const etapa = colToEtapa[c];
+                      if (etapa) setProc((s) => ({ ...s, etapa, sub_etapa: '' }));
+                    }}
+                    className={`px-3 py-1 rounded border ${
+                      selectedColuna === c ? 'bg-[var(--accent)] text-[var(--fg)]' : 'border-[var(--panel-border)]'
+                    }`}
+                  >
+                    {c.toUpperCase()}
+                  </button>
+                ),
+              )}
+            </div>
+            <p className="text-xs opacity-70">
+              Ao escolher a coluna, a Etapa do processo será preenchida automaticamente (você pode ajustar abaixo).
+            </p>
+          </section>
+
+          {msg && (
+            <div
+              className="mb-4 p-3 border rounded text-sm gradient-card shadow-soft"
+              style={{ background: 'var(--panel-processos)', color: 'var(--fg)', borderColor: 'var(--border)' }}
+            >
+              {msg}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end mb-6">
+            <div>
+              <label className="block text-sm mb-1">ID do Processo</label>
+              <input
+                className="w-full px-3 py-2 border rounded admin-input"
+                value={processoId}
+                onChange={(e) => setProcessoId(e.target.value)}
+                placeholder="ex.: 123"
+                disabled={criarNovo}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <input id="novo" type="checkbox" checked={criarNovo} onChange={(e) => setcriarNovo(e.target.checked)} />
+              <label htmlFor="novo">Criar novo processo</label>
+            </div>
+            <button
+              className="px-3 py-2 bg-blue-600 text-white rounded"
+              onClick={loadById}
+              disabled={
+                criarNovo ||
+                (!String(processoId || '').trim() && !String((ucBusca || req?.uc || '')).trim())
+              }
+            >
+              Carregar
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end mb-6">
+            <div>
+              <label className="block text-sm mb-1">UC</label>
+              <input
+                className="w-full px-3 py-2 border rounded admin-input"
+                value={ucBusca}
+                onChange={(e) => setUcBusca(e.target.value)}
+                placeholder="ex.: 1234567"
+              />
+            </div>
+          </div>
+
+          <section className="mb-6 p-4 border rounded">
+            <h2 className="font-semibold mb-3">Requisição</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {renderInput('UC', req.uc, (v) => setReq((s) => ({ ...s, uc: v })))}
+              {renderInput('Cliente', req.cliente, (v) => setReq((s) => ({ ...s, cliente: v })))}
+              {renderInput('Concessionária', req.concessionaria, (v) =>
+                setReq((s) => ({ ...s, concessionaria: v })),
+              )}
+              {renderInput('CNPJ', req.cnpj, (v) => setReq((s) => ({ ...s, cnpj: v })))}
+              {renderInput('Razão Social Fatura', req.razao_social_fatura, (v) =>
+                setReq((s) => ({ ...s, razao_social_fatura: v })),
+              )}
+              {renderInput('Endereço Completo', req.endereco_completo, (v) =>
+                setReq((s) => ({ ...s, endereco_completo: v })),
+              )}
+              {renderInput('Ressarcimento Estimado', req.ressarcimento_estimado, (v) =>
+                setReq((s) => ({ ...s, ressarcimento_estimado: v })),
+              )}
+              {renderInput('Link Fatura', req.link_fatura, (v) =>
+                setReq((s) => ({ ...s, link_fatura: v })),
+              )}
+              {renderInput(
+                'Data Criação (dd/mm/aaaa HH:mm:ss)',
+                req.data_criacao_requisicao,
+                (v) => setReq((s) => ({ ...s, data_criacao_requisicao: v })),
+              )}
+            </div>
+          </section>
+
+          <section className="mb-6 p-4 border rounded">
+            <h2 className="font-semibold mb-3">Processo</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm mb-1">Etapa</label>
+                <input
+                  list="dl-etapas"
+                  className="w-full px-3 py-2 border rounded admin-input"
+                  value={proc.etapa || ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setProc((s) => ({ ...s, etapa: v, sub_etapa: '' }));
+                    setTimeout(() => {
+                      try {
+                        subProcRef.current?.focus();
+                      } catch {}
+                    }, 0);
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Sub-etapa</label>
+                <input
+                  ref={subProcRef}
+                  list="dl-sub-proc"
+                  className="w-full px-3 py-2 border rounded admin-input"
+                  value={proc.sub_etapa || ''}
+                  onChange={(e) => setProc((s) => ({ ...s, sub_etapa: e.target.value }))}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="rel"
+                  type="checkbox"
+                  checked={!!proc.relevancia}
+                  onChange={(e) => setProc((s) => ({ ...s, relevancia: e.target.checked }))}
+                />
+                <label htmlFor="rel">Relevância</label>
+              </div>
+              {renderInput('Data Alerta (dd/mm/aaaa)', proc.data_alerta, (v) =>
+                setProc((s) => ({ ...s, data_alerta: v })),
+              )}
+              {renderInput('Última Atualização (dd/mm/aaaa HH:mm:ss)', proc.ultima_atualizacao, (v) =>
+                setProc((s) => ({ ...s, ultima_atualizacao: v })),
+              )}
+            </div>
+          </section>
+
+          <section className="mb-6 p-4 border rounded">
+            <h2 className="font-semibold mb-3">Deferidos</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {renderInput(
+                'Data Procedência (dd/mm/aaaa)',
+                deferimento.data_Procedência,
+                (v) => setDeferimento((s) => ({ ...s, data_Procedência: v })),
+              )}
+              {renderInput(
+                'Crédito Simples',
+                deferimento.Crédito_simples,
+                (v) => setDeferimento((s) => ({ ...s, Crédito_simples: v })),
+              )}
+              {renderInput(
+                'Crédito Dobro',
+                deferimento.Crédito_dobro,
+                (v) => setDeferimento((s) => ({ ...s, Crédito_dobro: v })),
+              )}
+              {renderInput(
+                'Data Crédito Dobro (dd/mm/aaaa HH:mm:ss)',
+                deferimento.data_Crédito_dobro,
+                (v) => setDeferimento((s) => ({ ...s, data_Crédito_dobro: v })),
+              )}
+            </div>
+          </section>
+
+          <section className="mb-6 p-4 border rounded">
+            <h2 className="font-semibold mb-3">Fluxo de Ressarcimento</h2>
+            <button className="mb-2 px-2 py-1 bg-slate-600 text-white rounded" onClick={addFluxo}>
+              Adicionar item
+            </button>
+            {fluxo.map((it, idx) => (
+              <div key={idx} className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-2">
+                <select
+                  value={it.forma_devolucao}
+                  onChange={(e) => updateAt(setFluxo, idx, { ...it, forma_devolucao: e.target.value })}
+                  className="px-2 py-1 border rounded admin-input"
+                >
+                  <option>Fatura</option>
+                  <option>GD</option>
+                  <option>Deposito</option>
+                </select>
+                <input
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.valor}
+                  onChange={(e) => updateAt(setFluxo, idx, { ...it, valor: e.target.value })}
+                  placeholder="Valor"
+                />
+                <input
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.data_devolucao || ''}
+                  onChange={(e) =>
+                    updateAt(setFluxo, idx, { ...it, data_devolucao: e.target.value })
+                  }
+                  placeholder="Data Devolução dd/mm/aaaa"
+                />
+                <input
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.data_envio_financeiro || ''}
+                  onChange={(e) =>
+                    updateAt(setFluxo, idx, { ...it, data_envio_financeiro: e.target.value })
+                  }
+                  placeholder="Data Envio Financeiro dd/mm/aaaa"
+                />
+                <button className="px-2 py-1 border rounded" onClick={() => removeAt(setFluxo, idx)}>
+                  Remover
+                </button>
+              </div>
+            ))}
+          </section>
+
+          <section className="mb-6 p-4 border rounded">
+            <h2 className="font-semibold mb-3">Faturamento</h2>
+            <button className="mb-2 px-2 py-1 bg-slate-600 text-white rounded" onClick={addFat}>
+              Adicionar item
+            </button>
+            {fat.map((it, idx) => (
+              <div key={idx} className="grid grid-cols-1 md:grid-cols-6 gap-2 mb-2">
+                <input
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.numero_nf}
+                  onChange={(e) => updateAt(setFat, idx, { ...it, numero_nf: e.target.value })}
+                  placeholder="NF"
+                />
+                <input
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.data_emissao || ''}
+                  onChange={(e) => updateAt(setFat, idx, { ...it, data_emissao: e.target.value })}
+                  placeholder="Emissão dd/mm/aaaa"
+                />
+                <input
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.data_vencimento || ''}
+                  onChange={(e) => updateAt(setFat, idx, { ...it, data_vencimento: e.target.value })}
+                  placeholder="Venc. dd/mm/aaaa"
+                />
+                <input
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.data_pagamento || ''}
+                  onChange={(e) => updateAt(setFat, idx, { ...it, data_pagamento: e.target.value })}
+                  placeholder="Pag. dd/mm/aaaa"
+                />
+                <input
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.valor}
+                  onChange={(e) => updateAt(setFat, idx, { ...it, valor: e.target.value })}
+                  placeholder="Valor"
+                />
+                <button className="px-2 py-1 border rounded" onClick={() => removeAt(setFat, idx)}>
+                  Remover
+                </button>
+              </div>
+            ))}
+          </section>
+
+          <section className="mb-6 p-4 border rounded">
+            <h2 className="font-semibold mb-3">Histórico (manual)</h2>
+            <button className="mb-2 px-2 py-1 bg-slate-600 text-white rounded" onClick={addHist}>
+              Adicionar linha
+            </button>
+            {hist.map((it, idx) => (
+              <div key={idx} className="grid grid-cols-1 md:grid-cols-6 gap-2 mb-2">
+                <input
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.data || ''}
+                  onChange={(e) => updateAt(setHist, idx, { ...it, data: e.target.value })}
+                  placeholder="dd/mm/aaaa HH:mm:ss"
+                />
+                <input
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.comentario || ''}
+                  onChange={(e) => updateAt(setHist, idx, { ...it, comentario: e.target.value })}
+                  placeholder="comentario"
+                />
+                <input
+                  list="dl-etapas"
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.etapa_anterior || ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    updateAt(setHist, idx, { ...it, etapa_anterior: v, sub_etapa: '' });
+                    setTimeout(() => {
+                      try {
+                        subHistRefs.current[idx]?.focus();
+                      } catch {}
+                    }, 0);
+                  }}
+                  placeholder="Etapa anterior"
+                />
+                <input
+                  list="dl-etapas"
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.etapa_nova || ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    updateAt(setHist, idx, { ...it, etapa_nova: v, sub_etapa: '' });
+                    setTimeout(() => {
+                      try {
+                        subHistRefs.current[idx]?.focus();
+                      } catch {}
+                    }, 0);
+                  }}
+                  placeholder="Etapa nova"
+                />
+                <input
+                  ref={(el) => (subHistRefs.current[idx] = el)}
+                  list={`dl-sub-h-${idx}`}
+                  className="px-2 py-1 border rounded admin-input"
+                  value={it.sub_etapa || ''}
+                  onChange={(e) => updateAt(setHist, idx, { ...it, sub_etapa: e.target.value })}
+                  placeholder="Sub-etapa"
+                />
+                <div className="flex items-center gap-2">
+                  <label className="text-xs">Rel. ant.</label>
+                  <input
+                    type="checkbox"
+                    checked={!!it.relevancia_anterior}
+                    onChange={(e) => updateAt(setHist, idx, { ...it, relevancia_anterior: e.target.checked })}
+                  />
+                  <label className="text-xs">Rel. nova</label>
+                  <input
+                    type="checkbox"
+                    checked={!!it.relevancia_nova}
+                    onChange={(e) => updateAt(setHist, idx, { ...it, relevancia_nova: e.target.checked })}
+                  />
+                  <button
+                    className="ml-2 px-2 py-1 border rounded"
+                    onClick={() => removeHist(setHist, idx, it, setHistDeletes)}
+                  >
+                    Remover
+                  </button>
+                </div>
+              </div>
+            ))}
+          </section>
+
+          {/* Datalists */}
+          <datalist id="dl-etapas">
+            {etapasOpts.map((n, i) => (
+              <option key={i} value={n} />
+            ))}
+          </datalist>
+          <datalist id="dl-sub-proc">
+            {filteredSubFor(proc.etapa).map((n, i) => (
+              <option key={i} value={n} />
+            ))}
+          </datalist>
+          {hist.map((it, idx) => (
+            <datalist key={idx} id={`dl-sub-h-${idx}`}>
+              {filteredSubFor(it.etapa_nova || it.etapa_anterior).map((n, i) => (
+                <option key={i} value={n} />
+              ))}
+            </datalist>
+          ))}
+
+          {toast.open && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+              <div className="w-full max-w-md bg-[var(--panel)] text-[var(--fg)] border border-[var(--panel-border)] rounded-lg shadow-xl p-4">
+                <h3 className="text-lg font-semibold mb-2">
+                  {toast.type === 'error' ? 'Aviso' : toast.type === 'success' ? 'Sucesso' : 'Mensagem'}
+                </h3>
+                <p className="mb-4 text-sm">{toast.text}</p>
+                <div className="text-right">
+                  <button
+                    className="px-4 py-2 border rounded"
+                    onClick={() => setToast((t) => ({ ...t, open: false }))}
+                  >
+                    Ok
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Modal Bulk por UC */}
+      {bulkOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-4xl bg-[var(--panel)] text-[var(--fg)] border border-[var(--panel-border)] rounded-lg shadow-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold">Bulk por UC</h2>
+              <button onClick={() => setBulkOpen(false)} className="px-2 py-1 border rounded">
+                Fechar
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm mb-1">UCs (uma por linha ou separadas por vírgula)</label>
+                <textarea
+                  className="w-full h-32 p-2 border rounded admin-input"
+                  value={bulkInput}
+                  onChange={(e) => setBulkInput(e.target.value)}
+                  placeholder="Ex.: 14105119, 13105155, 14643001"
+                />
+                <div className="mt-2 flex gap-2">
+                  <button
+                    className="px-3 py-2 bg-blue-600 text-white rounded"
+                    onClick={async () => {
+                      try {
+                        setBulkLoading(true);
+                        const raw = String(bulkInput || '');
+                        const parts = raw.split(/[\s,;\n\r]+/).map((s) => s.trim()).filter(Boolean);
+                        const uniq = Array.from(new Set(parts));
+                        if (uniq.length === 0) {
+                          setBulkResolvido([]);
+                          setBulkLoading(false);
+                          return;
+                        }
+                        const data = await getProcessosKanbanFast();
+                        const colunas = data?.colunas || {};
+                        const resolver = (uc) => {
+                          const ids = [];
+                          for (const arr of Object.values(colunas)) {
+                            (arr || []).forEach((it) => {
+                              const u = String(it?.uc || '').trim();
+                              if (u && u.toLowerCase() === String(uc).toLowerCase())
+                                ids.push(Number(it.id));
+                            });
+                          }
+                          if (ids.length === 0)
+                            return { uc, ids: [], selectedId: null, status: 'miss', msg: 'UC não encontrada' };
+                          if (ids.length === 1) return { uc, ids, selectedId: ids[0], status: 'ok' };
+                          return { uc, ids, selectedId: null, status: 'dup', msg: 'UC duplicada: selecione o ID' };
+                        };
+                        const resolved = uniq.map(resolver);
+                        setBulkResolvido(resolved);
+                        const allOk = resolved.every((r) => r.status === 'ok');
+                        if (allOk)
+                          setToast({
+                            open: true,
+                            type: 'success',
+                            text: 'Todas as UCs foram encontradas e estão prontas.',
+                          });
+                      } catch (e) {
+                        setToast({
+                          open: true,
+                          type: 'error',
+                          text: e?.message || 'Falha ao resolver UCs',
+                        });
+                      } finally {
+                        setBulkLoading(false);
+                      }
+                    }}
+                    disabled={bulkLoading}
+                  >
+                    {bulkLoading ? 'Buscando...' : 'Buscar'}
+                  </button>
+                  <button
+                    className="px-3 py-2 border rounded"
+                    onClick={() => {
+                      setBulkResolvido([]);
+                      setBulkCSimples('');
+                      setBulkDSimples('');
+                      setBulkCDobro('');
+                      setBulkDDobro('');
+                    }}
+                  >
+                    Limpar
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1">Etapa destino</label>
+                <select
+                  className="w-full p-2 border rounded admin-input"
+                  value={bulkEtapa}
+                  onChange={(e) => setBulkEtapa(e.target.value)}
+                >
+                  <option value="">Selecione...</option>
+                  {etapasOpts.map((n, i) => (
+                    <option key={i} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
+                  <div>
+                    <label className="block text-xs mb-1">Crédito Simples (número ou CSV)</label>
+                    <input
+                      className="w-full p-2 border rounded admin-input"
+                      value={bulkCSimples}
+                      onChange={(e) => setBulkCSimples(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs mb-1">Data Simples (dd/mm/aaaa ou CSV)</label>
+                    <input
+                      className="w-full p-2 border rounded admin-input"
+                      value={bulkDSimples}
+                      onChange={(e) => setBulkDSimples(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs mb-1">Crédito Dobro (número ou CSV)</label>
+                    <input
+                      className="w-full p-2 border rounded admin-input"
+                      value={bulkCDobro}
+                      onChange={(e) => setBulkCDobro(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs mb-1">Data Dobro (dd/mm/aaaa ou CSV)</label>
+                    <input
+                      className="w-full p-2 border rounded admin-input"
+                      value={bulkDDobro}
+                      onChange={(e) => setBulkDDobro(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Resultado de resolução */}
+            <div className="mt-4">
+              {bulkResolvido.length > 0 && (
+                <div className="max-h-64 overflow-auto border rounded p-2">
+                  {bulkResolvido.map((r, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center gap-2 py-1 border-b border-[var(--panel-border)]/40 last:border-0"
+                    >
+                      <div className="w-36 text-sm">{r.uc}</div>
+                      <div className="flex-1 text-sm">
+                        {r.status === 'ok' && <span className="text-green-600">ID: {r.selectedId}</span>}
+                        {r.status === 'miss' && <span className="text-red-600">{r.msg}</span>}
+                        {r.status === 'dup' && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-amber-600">{r.msg}</span>
+                            <select
+                              className="p-1 border rounded admin-input"
+                              value={r.selectedId || ''}
+                              onChange={(e) => {
+                                const v = e.target.value ? Number(e.target.value) : null;
+                                setBulkResolvido((prev) =>
+                                  prev.map((x, i) => (i === idx ? { ...x, selectedId: v, status: v ? 'ok' : 'dup' } : x)),
+                                );
+                              }}
+                            >
+                              <option value="">Selecione...</option>
+                              {r.ids.map((id) => (
+                                <option key={id} value={id}>
+                                  {id}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Aplicar */}
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button className="px-3 py-2 border rounded" onClick={() => setBulkOpen(false)} disabled={bulkApplying}>
+                Cancelar
+              </button>
+              <button
+                className="px-3 py-2 bg-green-600 text-white rounded"
+                disabled={bulkApplying || bulkResolvido.length === 0}
+                onClick={async () => {
+                  try {
+                    const nums = (s) =>
+                      s.includes(',')
+                        ? s
+                            .split(',')
+                            .map((v) => v.trim())
+                            .filter(Boolean)
+                        : s.trim()
+                        ? [s.trim()]
+                        : [];
+
+                    const arrCS = nums(bulkCSimples);
+                    const arrDS = nums(bulkDSimples);
+                    const arrCD = nums(bulkCDobro);
+                    const arrDD = nums(bulkDDobro);
+
+                    const validos = bulkResolvido.filter((r) => r.status === 'ok' && r.selectedId);
+                    if (validos.length === 0) {
+                      setToast({ open: true, type: 'error', text: 'Nenhuma UC resolvida para aplicar.' });
+                      return;
+                    }
+
+                    setBulkApplying(true);
+                    let ok = 0,
+                      fail = 0;
+                    const errors = [];
+
+                    for (let i = 0; i < validos.length; i++) {
+                      const r = validos[i];
+                      const payload = {
+                        processo_id: r.selectedId,
+                        etapa: String(bulkEtapa || '').trim() || 'Improcedente',
+                        sub_etapa: '',
+                        relevancia: false,
+                      };
+
+                      // Deferimento opcional por índice/único
+                      const cs = arrCS[i] ?? arrCS[0];
+                      const ds = arrDS[i] ?? arrDS[0];
+                      const cd = arrCD[i] ?? arrCD[0];
+                      const dd = arrDD[i] ?? arrDD[0];
+                      const hasDef = (cs && cs !== '') || (ds && ds !== '') || (cd && cd !== '') || (dd && dd !== '');
+
+                      if (hasDef) {
+                        const defObj = {};
+                        if (ds) defObj['data_procedencia'] = ds;
+                        if (cs) defObj['credito_simples'] = isNaN(Number(cs)) ? null : Number(cs);
+                        if (cd) defObj['credito_dobro'] = isNaN(Number(cd)) ? null : Number(cd);
+                        if (dd) defObj['data_credito_dobro'] = dd;
+                        payload['deferimento'] = defObj;
+                      }
+
+                      try {
+                        const res = await saveProcessoFull(payload);
+                        if (res?.ok) ok++;
+                        else {
+                          fail++;
+                          errors.push(`${r.uc} (ID ${r.selectedId})`);
+                        }
+                      } catch {
+                        fail++;
+                        errors.push(`${r.uc} (ID ${r.selectedId})`);
+                      }
+                    }
+
+                    const msg =
+                      fail === 0
+                        ? `Aplicado com sucesso em ${ok} UCs.`
+                        : `Sucesso: ${ok}. Falhas: ${fail} → ${errors.join(', ')}`;
+                    setToast({ open: true, type: fail ? 'error' : 'success', text: msg });
+                  } finally {
+                    setBulkApplying(false);
+                  }
+                }}
+              >
+                {bulkApplying ? 'Aplicando...' : 'Aplicar a todos'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function renderInput(label, value, onChange) {
+  return (
+    <div>
+      <label className="block text-sm mb-1">{label}</label>
+      <input
+        className="w-full px-3 py-2 border rounded admin-input"
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </div>
+  );
+}
+
+function emptyToNull(v) {
+  return v === '' ? null : v;
+}
+function normalizeBoolOrNull(v) {
+  if (v === undefined || v === null) return null;
+  return !!v;
+}
+function updateAt(setter, idx, obj) {
+  setter((prev) => prev.map((x, i) => (i === idx ? obj : x)));
+}
+function removeAt(setter, idx) {
+  setter((prev) => prev.filter((_, i) => i !== idx));
+}
+function removeHist(setter, idx, it, setDeletes) {
+  setter((prev) => prev.filter((_, i) => i !== idx));
+  if (it && it.id_historico) setDeletes((prev) => (prev.includes(it.id_historico) ? prev : [...prev, it.id_historico]));
+}
+function parseBoolLoose(v) {
+  if (v === undefined || v === null) return null;
+  const s = String(v).toLowerCase();
+  if (['1', 'true', 't', 'sim', 'yes', 'y'].includes(s)) return true;
+  if (['0', 'false', 'f', 'nao', 'não', 'no', 'n'].includes(s)) return false;
+  return null;
+}
+

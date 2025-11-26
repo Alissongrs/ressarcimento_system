@@ -1,0 +1,52 @@
+{
+  "name": "ressarcimento-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "prebuild": "echo skipping lint during build",
+    "lint": "eslint . --max-warnings=0",
+    "preview": "vite preview",
+    "clean:vite": "node -e \"const fs=require('fs'),p=require('path');['node_modules/.vite','node_modules/.vite_theme_fix','dist'].forEach(d=>{try{fs.rmSync(p.join(process.cwd(),d),{recursive:true,force:true});console.log('removed',d)}catch(e){}})\"",
+    "doctor:react": "node -e \"try{console.log('react:',require('react/package.json').version,'react-dom:',require('react-dom/package.json').version)}catch(e){console.error(e)}\""
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@radix-ui/react-label": "^2.1.7",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@radix-ui/react-switch": "^1.2.6",
+    "axios": "^1.11.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "jwt-decode": "^4.0.0",
+    "lucide-react": "^0.544.0",
+    "pdfjs-dist": "^5.4.394",
+    "prop-types": "^15.8.1",
+    "react": "^18.2.0",
+    "react-datepicker": "^8.7.0",
+    "react-day-picker": "^9.11.0",
+    "react-dom": "^18.2.0",
+    "react-modal": "^3.16.3",
+    "react-router-dom": "^7.8.2",
+    "react-tooltip": "^5.29.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.33.0",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.33.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.3.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "vite": "^7.1.2"
+  }
+}

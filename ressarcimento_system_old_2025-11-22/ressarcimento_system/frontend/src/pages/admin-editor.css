@@ -1,0 +1,13 @@
+/* Admin Editor inputs follow theme colors */
+.admin-input {
+  background-color: var(--panel-processos);
+  color: var(--fg);
+  border-color: var(--border);
+}
+.admin-input::placeholder {
+  color: color-mix(in srgb, var(--fg) 60%, transparent);
+}
+.admin-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 20%, transparent);
+}

@@ -1,0 +1,36 @@
+# OS/Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.venv/
+*.swp
+
+# Archives
+*.zip
+
+# Env/Secrets
+.env
+*.env
+!*.env.example
+backend/.env
+backend/.env.local
+
+# Backend artifacts/logs
+backend/ressarcimento-backend
+backend/ressarcimento-backend.exe
+backend/server
+backend/server.exe
+backend/server.log
+backend/.sql_cache/
+backend/uploads/
+
+# Frontend build/deps
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.vite-temp/
+frontend/.vite_theme_fix/
+
+# Logs
+*.log
+
