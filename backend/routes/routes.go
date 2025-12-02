@@ -4,6 +4,7 @@ package routes
 import (
 	"context"
 	"database/sql"
+	"net/http"
 	"os"
 	"strings"
 
@@ -73,8 +74,17 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	}
 	r.Use(cors.New(cfg))
 
+	// Liberar OPTIONS (preflight) antes de autenticaÇõÇœo para evitar 403 em CORS
+	r.Use(func(c *gin.Context) {
+		if c.Request.Method == http.MethodOptions {
+			c.Status(http.StatusOK)
+			c.Abort()
+			return
+		}
+	})
+
 	// Arquivos estáticos
-    r.Static("/uploads", "./uploads")
+	r.Static("/uploads", "./uploads")
 
 	// ===== SSE públicas (aliases DEV) =====
 	// Aceitam ?token= porque EventSource não envia Authorization
@@ -169,15 +179,15 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			// UC: opções (unidade/empresa/concessionária)
 			authRequired.GET("/uc/:numero/opcoes", handlers.GetUCOpcoesByNumero)
 
-				// Resumos de processo (persistidos)
-				authRequired.GET("/processos/:id/summary", handlers.GetProcessoSummary)
-				authRequired.POST("/processos/:id/summary/refresh", handlers.RefreshProcessoSummary)
-				// Monitoramento simples (status) – sob auth; pode ser filtrado no front para admin
-				authRequired.GET("/resumos/status", handlers.GetResumosStatus)
-				// Lista de pendentes (preview)
-				authRequired.GET("/resumos/pending", handlers.GetResumosPending)
-				// Enfileirar em massa (ids, mode=changed|all, limit)
-				authRequired.POST("/resumos/enqueue", handlers.EnqueueResumos)
+			// Resumos de processo (persistidos)
+			authRequired.GET("/processos/:id/summary", handlers.GetProcessoSummary)
+			authRequired.POST("/processos/:id/summary/refresh", handlers.RefreshProcessoSummary)
+			// Monitoramento simples (status) – sob auth; pode ser filtrado no front para admin
+			authRequired.GET("/resumos/status", handlers.GetResumosStatus)
+			// Lista de pendentes (preview)
+			authRequired.GET("/resumos/pending", handlers.GetResumosPending)
+			// Enfileirar em massa (ids, mode=changed|all, limit)
+			authRequired.POST("/resumos/enqueue", handlers.EnqueueResumos)
 
 			// Requisições
 			authRequired.POST("/requisicoes", handlers.CreateRequisicaoPersist)
@@ -199,6 +209,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			// Irregularidades
 			authRequired.GET("/tipos-irregularidade", handlers.GetTiposIrregularidade)
 			authRequired.GET("/tipos-irregularidade/:tipoID/subtipos", handlers.GetSubtiposIrregularidade)
+			// Dashboard de deferidos
 		}
 
 		// ------------------------- Gestor -------------------------
@@ -207,8 +218,8 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 		{
 			// Requisições (triagem)
 			gestorRequired.GET("/requisicoes", handlers.GetAllRequisicoes)
-            gestorRequired.GET("/requisicoes/:id", handlers.GetRequisicaoByID)
-            gestorRequired.GET("/requisicoes/:id/faturas", handlers.GetFaturasSelecionadasByRequisicaoID)
+			gestorRequired.GET("/requisicoes/:id", handlers.GetRequisicaoByID)
+			gestorRequired.GET("/requisicoes/:id/faturas", handlers.GetFaturasSelecionadasByRequisicaoID)
 			gestorRequired.POST("/requisicoes/:id/update", handlers.UpdateRequisicaoCompleta)
 			gestorRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
 			gestorRequired.GET("/requisicoes/:id/anexos", handlers.GetAnexosByRequisicaoID)
@@ -217,6 +228,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.GET("/processos/kanban", handlers.GetProcessosKanban) // legado
 			gestorRequired.GET("/processos/kanban-fast", procHandler.KanbanFast) // fast
 			gestorRequired.GET("/processos/:id/historico", handlers.GetHistoricoMovimentacoes)
+			gestorRequired.GET("/processos/:id/deferimento", handlers.GetDeferimentoByProcesso)
 			gestorRequired.POST("/processos/:id/movimentar", handlers.MovimentarProcesso)
 			gestorRequired.POST("/processos/:id/deferimento", handlers.SalvarDeferimentoSimples)
 			gestorRequired.POST("/processos/:id/comentar", handlers.ComentarProcesso)
@@ -225,6 +237,8 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.POST("/processos/:id/alertas", handlers.CreateAlertaManual)
 			gestorRequired.POST("/processos/:id/suspender", handlers.SuspenderProcesso)
 			gestorRequired.POST("/processos/:id/retomar", handlers.RetomarProcesso)
+			gestorRequired.GET("/processos/prazos", handlers.GetProcessosComPrazo)
+			gestorRequired.GET("/processos/suspensos", handlers.GetProcessosSuspensos)
 			gestorRequired.DELETE("/processos/:id", handlers.ExcluirProcessoPermanentemente)
 
 			// Fluxo de Ressarcimento
@@ -248,27 +262,28 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.GET("/filtros/concessionarias", handlers.GetConcessionariasParaFiltro)
 			gestorRequired.GET("/filtros/tensao", handlers.GetTensaoParaFiltro)
 
-            // Admin - Planilha (lista e operações em massa)
-            gestorRequired.GET("/admin/planilha", handlers.AdminPlanilhaList)
-            gestorRequired.POST("/admin/planilha/bulk-mover", handlers.AdminPlanilhaBulkMover)
-            gestorRequired.POST("/admin/planilha/bulk-comentario-replace", handlers.AdminPlanilhaBulkComentarioReplace)
-            gestorRequired.DELETE("/admin/historico/:id", handlers.AdminDeleteHistorico)
+			// Admin - Planilha (lista e operações em massa)
+			gestorRequired.GET("/admin/planilha", handlers.AdminPlanilhaList)
+			gestorRequired.POST("/admin/planilha/bulk-mover", handlers.AdminPlanilhaBulkMover)
+			gestorRequired.POST("/admin/planilha/bulk-comentario-replace", handlers.AdminPlanilhaBulkComentarioReplace)
+			gestorRequired.DELETE("/admin/historico/:id", handlers.AdminDeleteHistorico)
 
-            // Admin - Prazos (configurações de prazos por kanban/etapa)
-            gestorRequired.GET("/admin/prazos", handlers.GetPrazosConfig)
-            gestorRequired.POST("/admin/prazos", handlers.SavePrazosConfig)
+			// Admin - Prazos (configurações de prazos por kanban/etapa)
+			gestorRequired.GET("/admin/prazos", handlers.GetPrazosConfig)
+			gestorRequired.POST("/admin/prazos", handlers.SavePrazosConfig)
 
-            // Admin - Alarmes (regras de alerta por etapa/coluna)
-            gestorRequired.GET("/admin/alarmes", handlers.GetAlarmes)
-            gestorRequired.POST("/admin/alarmes", handlers.SaveAlarme)
-            gestorRequired.DELETE("/admin/alarmes/:id", handlers.DeleteAlarme)
+			// Admin - Alarmes (regras de alerta por etapa/coluna)
+			gestorRequired.GET("/admin/alarmes", handlers.GetAlarmes)
+			gestorRequired.POST("/admin/alarmes", handlers.SaveAlarme)
+			gestorRequired.DELETE("/admin/alarmes/:id", handlers.DeleteAlarme)
 
-            // Admin - Editor completo (processo + módulos)
-            gestorRequired.POST("/admin/editor/processo", handlers.AdminEditProcesso)
-            gestorRequired.GET("/admin/editor/next-id", handlers.AdminNextProcessID)
+			// Admin - Editor completo (processo + módulos)
+			gestorRequired.POST("/admin/editor/processo", handlers.AdminEditProcesso)
+			gestorRequired.GET("/admin/editor/next-id", handlers.AdminNextProcessID)
 
 			// Dashboard
 			gestorRequired.GET("/dashboard/stats", dashHandler.Stats)
+			authRequired.GET("/dashboard/deferidos", handlers.GetDashboardDeferidos)
 			gestorRequired.GET("/dashboard/movimentacoes", dashHandler.MovimentacoesPeriodo)
 			gestorRequired.GET("/dashboard/changes-24h", dashHandler.MovimentacoesUltimas24h)
 
@@ -353,15 +368,16 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 		gestorRequired.Use(middleware.AuthMiddleware(), middleware.GestorMiddleware())
 		{
 			gestorRequired.GET("/requisicoes", handlers.GetAllRequisicoes)
-            gestorRequired.GET("/requisicoes/:id", handlers.GetRequisicaoByID)
-            gestorRequired.GET("/requisicoes/:id/faturas", handlers.GetFaturasSelecionadasByRequisicaoID)
-            gestorRequired.POST("/requisicoes/:id/update", handlers.UpdateRequisicaoCompleta)
-            gestorRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
-            gestorRequired.GET("/requisicoes/:id/anexos", handlers.GetAnexosByRequisicaoID)
+			gestorRequired.GET("/requisicoes/:id", handlers.GetRequisicaoByID)
+			gestorRequired.GET("/requisicoes/:id/faturas", handlers.GetFaturasSelecionadasByRequisicaoID)
+			gestorRequired.POST("/requisicoes/:id/update", handlers.UpdateRequisicaoCompleta)
+			gestorRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
+			gestorRequired.GET("/requisicoes/:id/anexos", handlers.GetAnexosByRequisicaoID)
 
 			gestorRequired.GET("/processos/kanban", handlers.GetProcessosKanban)
 			gestorRequired.GET("/processos/kanban-fast", procHandler.KanbanFast)
 			gestorRequired.GET("/processos/:id/historico", handlers.GetHistoricoMovimentacoes)
+			gestorRequired.GET("/processos/:id/deferimento", handlers.GetDeferimentoByProcesso)
 			gestorRequired.POST("/processos/:id/movimentar", handlers.MovimentarProcesso)
 			gestorRequired.POST("/processos/:id/comentar", handlers.ComentarProcesso)
 			gestorRequired.POST("/processos/:id/descartar", handlers.DescartarProcesso)
@@ -369,6 +385,8 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.POST("/processos/:id/alertas", handlers.CreateAlertaManual)
 			gestorRequired.POST("/processos/:id/suspender", handlers.SuspenderProcesso)
 			gestorRequired.POST("/processos/:id/retomar", handlers.RetomarProcesso)
+			gestorRequired.GET("/processos/prazos", handlers.GetProcessosComPrazo)
+			gestorRequired.GET("/processos/suspensos", handlers.GetProcessosSuspensos)
 			gestorRequired.DELETE("/processos/:id", handlers.ExcluirProcessoPermanentemente)
 
 			gestorRequired.POST("/fluxo-ressarcimento/:id", handlers.SalvarFluxoRessarcimento)
@@ -397,6 +415,9 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.PUT("/processos/:id/tags", handlers.UpdateProcessoTags)
 		}
 	}
+
+	// Raiz simples para liveness checks e para evitar 404 em "/"
+	r.GET("/", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 
 	return r
 }

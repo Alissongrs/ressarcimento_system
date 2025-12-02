@@ -417,6 +417,40 @@ export default function DetalhesRequisicao() {
     }
   };
 
+  const showStatusError = (error, fallback) => {
+    const message =
+      error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      error?.message ||
+      fallback ||
+      'Não foi possível atualizar o status.';
+    alert(message);
+  };
+
+  const handleStatusChange = useCallback(
+    async (statusValue, successMessage) => {
+      if (isLocked) return;
+      const fd = new FormData();
+      fd.append('status', statusValue);
+      if (tipoId) fd.append('id_tipo_irregularidade', String(tipoId));
+      if (subtipoId) fd.append('id_subtipo_irregularidade', String(subtipoId));
+
+      try {
+        await atualizarRequisicaoCompleta(id, fd);
+        await carregarHistorico();
+        try {
+          const det = await getRequisicaoById(id);
+          const first = Array.isArray(det) ? det[0] : det;
+          setStatusReq(String(first?.status || ''));
+        } catch {}
+        alert(successMessage);
+      } catch (error) {
+        showStatusError(error, 'Não foi possível atualizar o status.');
+      }
+    },
+    [carregarHistorico, id, isLocked, tipoId, subtipoId],
+  );
+
   return (
     <div className="max-w-6xl mx-auto p-6 text-[var(--fg)]">
       <div className="mb-6 flex items-center justify-between">
@@ -666,18 +700,9 @@ export default function DetalhesRequisicao() {
           <div className="flex gap-2 mb-6">
             <button
               disabled={isLocked}
-              onClick={async () => {
-                const fd = new FormData();
-                fd.append('status', 'Em Análise');
-                await atualizarRequisicaoCompleta(id, fd);
-                await carregarHistorico();
-                try {
-                  const det = await getRequisicaoById(id);
-                  const first = Array.isArray(det) ? det[0] : det;
-                  setStatusReq(String(first?.status || ''));
-                } catch {}
-                alert('Movido para Em Análise');
-              }}
+              onClick={() =>
+                handleStatusChange('Em Análise', 'Movido para Em Análise')
+              }
               className="px-3 py-2 bg-[var(--accent)] rounded hover:opacity-90 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Em Análise
@@ -685,18 +710,7 @@ export default function DetalhesRequisicao() {
 
             <button
               disabled={isLocked}
-              onClick={async () => {
-                const fd = new FormData();
-                fd.append('status', 'Aprovado');
-                await atualizarRequisicaoCompleta(id, fd);
-                await carregarHistorico();
-                try {
-                  const det = await getRequisicaoById(id);
-                  const first = Array.isArray(det) ? det[0] : det;
-                  setStatusReq(String(first?.status || ''));
-                } catch {}
-                alert('Aprovado');
-              }}
+              onClick={() => handleStatusChange('Aprovado', 'Aprovado')}
               className="px-3 py-2 bg-[var(--success)] rounded hover:opacity-90 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Aprovar
@@ -704,18 +718,7 @@ export default function DetalhesRequisicao() {
 
             <button
               disabled={isLocked}
-              onClick={async () => {
-                const fd = new FormData();
-                fd.append('status', 'Rejeitado');
-                await atualizarRequisicaoCompleta(id, fd);
-                await carregarHistorico();
-                try {
-                  const det = await getRequisicaoById(id);
-                  const first = Array.isArray(det) ? det[0] : det;
-                  setStatusReq(String(first?.status || ''));
-                } catch {}
-                alert('Rejeitado');
-              }}
+              onClick={() => handleStatusChange('Rejeitado', 'Rejeitado')}
               className="px-3 py-2 bg-[var(--danger)] rounded hover:opacity-90 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Rejeitar
@@ -915,4 +918,3 @@ function RequisicaoAnexos({ requisicaoId }) {
     </div>
   );
 }
-

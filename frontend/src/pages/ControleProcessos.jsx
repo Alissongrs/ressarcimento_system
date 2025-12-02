@@ -8,6 +8,7 @@ import React, {
   useDeferredValue,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 import {
@@ -32,12 +33,15 @@ import {
   RefreshCcw,
   ChevronDown,
   KanbanSquare as FolderKanban,
+  PauseCircle,
 } from 'lucide-react';
 
 import {
   getProcessosKanban,
   movimentarProcesso,
   atualizarRequisicaoCompleta,
+  suspenderProcesso,
+  retomarProcesso,
   getAllTags,
   updateProcessoTags,
   createTag,
@@ -50,7 +54,7 @@ import { getPrazos } from '../services/prazosService';
 import { getAlarmes } from '../services/alarmesService';
 
 import ProcessoCard from '@components/ProcessoCard.jsx';
-import { SkeletonLine, SkeletonBlock } from '../components/Skeleton.jsx';
+import { SkeletonLine } from '../components/Skeleton.jsx';
 
 /* ===================== HELPERS ===================== */
 const extrair = (v) => {
@@ -58,7 +62,11 @@ const extrair = (v) => {
   if (typeof v === 'string') return v;
   if (typeof v === 'object' && 'String' in v) return v.Valid ? (v.String ?? '') : '';
   if (typeof v === 'object' && 'Value' in v) return v.Value || '';
-  try { return String(v); } catch { return ''; }
+  try {
+    return String(v);
+  } catch {
+    return '';
+  }
 };
 
 // tenta transformar "R$ 1.234,56", "1234.56", "1.234,56" em número
@@ -92,7 +100,9 @@ const ModalGerenciarTags = ({ processo, allTags, onClose, onSave, onTagCreated }
 
   const handleToggleTag = (tagId) => {
     if (!tagId) return;
-    setSelectedTags((prev) => (prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]));
+    setSelectedTags((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
+    );
   };
 
   const handleCreateTag = async () => {
@@ -103,7 +113,9 @@ const ModalGerenciarTags = ({ processo, allTags, onClose, onSave, onTagCreated }
     try {
       const novaTag = await createTag(newTagName, newTagColor);
       onTagCreated(novaTag);
-      if (!selectedTags.includes(novaTag.id)) setSelectedTags((prev) => [...prev, novaTag.id]);
+      if (!selectedTags.includes(novaTag.id)) {
+        setSelectedTags((prev) => [...prev, novaTag.id]);
+      }
       setNewTagName('');
     } catch (error) {
       alert(error?.response?.data?.error || 'Erro ao criar a tag.');
@@ -134,7 +146,10 @@ const ModalGerenciarTags = ({ processo, allTags, onClose, onSave, onTagCreated }
               className="w-10 h-10 p-1 border-0 rounded cursor-pointer bg-[var(--panel-processos)]"
               title="Escolha uma cor"
             />
-            <button onClick={handleCreateTag} className="px-4 py-2 bg-success text-[var(--fg)] font-bold rounded hover:opacity-90">
+            <button
+              onClick={handleCreateTag}
+              className="px-4 py-2 bg-success text-[var(--fg)] font-bold rounded hover:opacity-90"
+            >
               Criar
             </button>
           </div>
@@ -148,7 +163,9 @@ const ModalGerenciarTags = ({ processo, allTags, onClose, onSave, onTagCreated }
               <button
                 key={tag.id}
                 onClick={() => handleToggleTag(tag.id)}
-                className={`text-sm font-bold px-3 py-2 rounded-full border-2 transition-all ${isSelected ? 'border-blue-500 scale-105' : 'border-transparent opacity-70'}`}
+                className={`text-sm font-bold px-3 py-2 rounded-full border-2 transition-all ${
+                  isSelected ? 'border-blue-500 scale-105' : 'border-transparent opacity-70'
+                }`}
                 style={{ backgroundColor: tag.cor, color: '#FFFFFF' }}
               >
                 {tag.nome}
@@ -158,8 +175,18 @@ const ModalGerenciarTags = ({ processo, allTags, onClose, onSave, onTagCreated }
         </div>
 
         <div className="flex justify-end space-x-4 mt-6">
-          <button onClick={onClose} className="px-4 py-2 panel-bg-60 rounded border panel-border hover:opacity-90">Cancelar</button>
-          <button onClick={handleSave} className="px-4 py-2 bg-[var(--accent)] text-[var(--fg)] font-bold rounded hover:opacity-90">Salvar Tags</button>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 panel-bg-60 rounded border panel-border hover:opacity-90"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-4 py-2 bg-[var(--accent)] text-[var(--fg)] font-bold rounded hover:opacity-90"
+          >
+            Salvar Tags
+          </button>
         </div>
       </div>
     </div>
@@ -176,9 +203,13 @@ const ModalDeferimento = ({ processo, onClose, onSave }) => {
   const [aplicarDobro, setAplicarDobro] = useState(false);
 
   const handleChange = (e) => {
-    const { name, value, type } = e.target;
-    setDadosDeferimento((prev) => ({ ...prev, [name]: type === 'number' ? (parseFloat(value) || 0) : value }));
-  };
+  const { name, value, type } = e.target;
+  setDadosDeferimento((prev) => ({
+    ...prev,
+    [name]: type === 'number' ? parseFloat(value) || 0 : value,
+  }));
+};
+
 
   const handleSave = () => {
     if (!comentario.trim()) {
@@ -190,7 +221,7 @@ const ModalDeferimento = ({ processo, onClose, onSave }) => {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
-      <div className="bg-[var(--panel-processos)] border panel-border text-[var(--fg)] p-6 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-[var(--panel-processos)] border panel-border text-[var(--fg)] p-6 rounded-lg shadow-xl w/full max-w-2xl max-h-[90vh] overflow-y-auto">
         <h2 className="text-2xl font-bold mb-4">Mover Processo #{processo.id} para Deferidos</h2>
 
         <div className="mb-6">
@@ -246,14 +277,26 @@ const ModalDeferimento = ({ processo, onClose, onSave }) => {
                 onChange={(e) => setAplicarDobro(e.target.checked)}
                 className="h-4 w-4 rounded"
               />
-              <label htmlFor="aplicarDobro" className="ml-2 font-semibold text-sm">Aplicar Crédito em Dobro</label>
+              <label htmlFor="aplicarDobro" className="ml-2 font-semibold text-sm">
+                Aplicar Crédito em Dobro
+              </label>
             </div>
           </div>
         </div>
 
         <div className="flex justify-end space-x-4 mt-6">
-          <button onClick={onClose} className="px-4 py-2 panel-bg-60 rounded border panel-border hover:opacity-90">Cancelar</button>
-          <button onClick={handleSave} className="px-4 py-2 bg-[var(--accent)] text-[var(--fg)] font-bold rounded hover:opacity-90">Salvar e Mover</button>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 panel-bg-60 rounded border panel-border hover:opacity-90"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-4 py-2 bg-[var(--accent)] text-[var(--fg)] font-bold rounded hover:opacity-90"
+          >
+            Salvar e Mover
+          </button>
         </div>
       </div>
     </div>
@@ -267,18 +310,25 @@ const KanbanColumnHeader = ({ title, count, icon: Icon }) => (
       {Icon && <Icon className="opacity-70" size={18} />}
       <h3 className="font-bold text-[var(--fg)] text-sm uppercase tracking-wider">{title}</h3>
     </div>
-    <span className="mt-1 text-xs font-mono panel-bg-50 text-[var(--fg)] rounded-full px-2 py-0.5">{count}</span>
+    <span className="mt-1 text-xs font-mono panel-bg-50 text-[var(--fg)] rounded-full px-2 py-0.5">
+      {count}
+    </span>
   </div>
 );
 
 const ProcessoCardFantasma = ({ processo }) => (
-  <div className="bg-[#282E33] p-3 rounded-lg border border-gray-500 shadow-2xl" style={{ transform: 'rotate(3deg)' }}>
+  <div
+    className="bg-[#282E33] p-3 rounded-lg border border-gray-500 shadow-2xl"
+    style={{ transform: 'rotate(3deg)' }}
+  >
     <p className="text-xs opacity-70">ID: {processo.id}</p>
-    <p className="font-bold text-sm text-[var(--fg)] truncate">{extrair(processo.unidade_consumidora) || 'UC não definida'}</p>
+    <p className="font-bold text-sm text-[var(--fg)] truncate">
+      {extrair(processo.unidade_consumidora) || 'UC não definida'}
+    </p>
   </div>
 );
 
-// Lazy render do card p/ não montar tudo de uma vez
+// Lazy render do card (não está sendo usado, mas deixei caso queira usar depois)
 const LazyCard = ({ children }) => {
   const [visible, setVisible] = useState(false);
   const ref = useRef(null);
@@ -303,7 +353,9 @@ const LazyCard = ({ children }) => {
 
   return (
     <div ref={ref}>
-      {visible ? children : (
+      {visible ? (
+        children
+      ) : (
         <div className="h-[140px] panel-bg-50 rounded-lg border panel-border animate-pulse" />
       )}
     </div>
@@ -335,8 +387,15 @@ const DroppableColuna = ({ id, children }) => {
   );
 };
 
-// Virtualized list (hoisted function so it can be used above its definition point)
-function VirtualList({ className = '', items = [], itemHeight = 160, buffer = 5, renderItem, onRangeChange }) {
+// Virtualized list
+function VirtualList({
+  className = '',
+  items = [],
+  itemHeight = 160,
+  buffer = 5,
+  renderItem,
+  onRangeChange,
+}) {
   const ref = React.useRef(null);
   const [state, setState] = React.useState({ start: 0, end: 0, viewport: 600 });
 
@@ -346,20 +405,29 @@ function VirtualList({ className = '', items = [], itemHeight = 160, buffer = 5,
     if (!el) return;
     const viewport = el.clientHeight || 600;
     const scrollTop = el.scrollTop || 0;
-    let start = Math.floor(scrollTop / itemHeight) - buffer; if (start < 0) start = 0;
-    let end = Math.ceil((scrollTop + viewport) / itemHeight) + buffer; if (end > total - 1) end = total - 1;
+    let start = Math.floor(scrollTop / itemHeight) - buffer;
+    if (start < 0) start = 0;
+    let end = Math.ceil((scrollTop + viewport) / itemHeight) + buffer;
+    if (end > total - 1) end = total - 1;
     setState({ start, end, viewport });
     if (typeof onRangeChange === 'function') onRangeChange(start, end);
   }, [items.length, itemHeight, buffer, onRangeChange]);
 
-  React.useEffect(() => { calc(); }, [items.length, calc]);
   React.useEffect(() => {
-    const el = ref.current; if (!el) return;
+    calc();
+  }, [items.length, calc]);
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
     const onScroll = () => calc();
     el.addEventListener('scroll', onScroll);
     const onResize = () => calc();
     window.addEventListener('resize', onResize);
-    return () => { el.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize); };
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onResize);
+    };
   }, [calc]);
 
   const { start, end } = state;
@@ -380,7 +448,17 @@ function VirtualList({ className = '', items = [], itemHeight = 160, buffer = 5,
   );
 }
 
-const KanbanColumn = ({ id, title, processos, icon, onCardClick, isDropDisabled, isAdmin, ensureMeta, metaMap }) => {
+const KanbanColumn = ({
+  id,
+  title,
+  processos,
+  icon,
+  onCardClick,
+  isDropDisabled,
+  isAdmin,
+  ensureMeta,
+  metaMap,
+}) => {
   const INITIAL_LIMIT = 15;
   const LOAD_STEP = 15;
   const [limit, setLimit] = useState(INITIAL_LIMIT);
@@ -389,37 +467,48 @@ const KanbanColumn = ({ id, title, processos, icon, onCardClick, isDropDisabled,
     setLimit(INITIAL_LIMIT);
   }, [processos]);
 
-  const visiveis = processos.slice(0, limit);
-  const hasMore = processos.length > limit;
+  const lista = Array.isArray(processos) ? processos : [];
+  const visiveis = lista.slice(0, limit);
+  const hasMore = lista.length > limit;
 
-  
   return (
     <div
-      className={`rounded-xl p-2 flex-shrink-0 flex flex-col transition-opacity panel-bg-50 border panel-border ${isDropDisabled ? 'opacity-50' : ''}`}
+      className={`rounded-xl p-2 flex-shrink-0 flex flex-col transition-opacity panel-bg-50 border panel-border ${
+        isDropDisabled ? 'opacity-50' : ''
+      }`}
       style={{ width: '570px' }}
     >
-      <KanbanColumnHeader title={title} count={processos.length} icon={icon} />
-      <SortableContext items={visiveis.map(p => p.id)}>
+      <KanbanColumnHeader title={title} count={lista.length} icon={icon} />
+      <SortableContext items={visiveis.map((p) => p.id)}>
         <DroppableColuna id={id}>
           <VirtualList
-              className="min-h-[400px] p-1 overflow-y-auto flex-grow mt-2 panel-bg-80 backdrop-blur-sm rounded-lg border panel-border w-[560px] mx-auto"
-              items={visiveis}
-              itemHeight={240}
-              buffer={6}
-              onRangeChange={(start, end) => {
-                try {
-                  const ids = visiveis.slice(start, Math.min(end + 1, visiveis.length)).map(p => p.id).filter(Boolean);
-                  ensureMeta && ensureMeta(ids);
-                } catch {}
-              }}
-              renderItem={(proc) => (
-                <DraggableProcesso id={proc.id} disabled={!isAdmin}>
-                  <div className="w-[560px]">
-                    <ProcessoCard processo={proc} meta={metaMap && metaMap[String(proc.id)]} onClick={onCardClick} />
-                  </div>
-                </DraggableProcesso>
-              )}
-            />
+            className="min-h-[400px] p-1 overflow-y-auto flex-grow mt-2 panel-bg-80 backdrop-blur-sm rounded-lg border panel-border w-[560px] mx-auto"
+            items={visiveis}
+            itemHeight={240}
+            buffer={6}
+            onRangeChange={(start, end) => {
+              try {
+                const ids = visiveis
+                  .slice(start, Math.min(end + 1, visiveis.length))
+                  .map((p) => p.id)
+                  .filter(Boolean);
+                ensureMeta && ensureMeta(ids);
+              } catch {
+                /* silent */
+              }
+            }}
+            renderItem={(proc) => (
+              <DraggableProcesso id={proc.id} disabled={!isAdmin}>
+                <div className="w-[560px]">
+                  <ProcessoCard
+                    processo={proc}
+                    meta={metaMap && metaMap[String(proc.id)]}
+                    onClick={onCardClick}
+                  />
+                </div>
+              </DraggableProcesso>
+            )}
+          />
           {hasMore && (
             <div className="flex gap-2 mt-2">
               <button
@@ -427,9 +516,11 @@ const KanbanColumn = ({ id, title, processos, icon, onCardClick, isDropDisabled,
                   const prev = limit;
                   const next = limit + LOAD_STEP;
                   try {
-                    const newIds = processos.slice(prev, next).map(p => p.id).filter(Boolean);
+                    const newIds = lista.slice(prev, next).map((p) => p.id).filter(Boolean);
                     ensureMeta && ensureMeta(newIds);
-                  } catch {}
+                  } catch {
+                    /* silent */
+                  }
                   setLimit(next);
                 }}
                 className="flex-1 py-2 text-sm text-[var(--accent)] panel-bg-60 hover:opacity-90 rounded-lg border panel-border flex items-center justify-center gap-1"
@@ -437,7 +528,7 @@ const KanbanColumn = ({ id, title, processos, icon, onCardClick, isDropDisabled,
                 Carregar mais <ChevronDown size={14} />
               </button>
               <button
-                onClick={() => setLimit(processos.length)}
+                onClick={() => setLimit(lista.length)}
                 className="flex-1 py-2 text-sm text-[var(--fg)] panel-bg-60 hover:opacity-90 rounded-lg border panel-border"
                 title="Mostrar todos os cards desta coluna"
               >
@@ -468,26 +559,37 @@ const ControleProcessos = () => {
   const [activeProcesso, setActiveProcesso] = useState(null);
   // Layout fixo: cards 560x240 (sem grid alternativo)
 
-  const ensureMetaBatch = React.useCallback(async (ids) => {
-    try {
-      const missing = (ids || []).map(x => String(x)).filter(x => !(x in metaMap));
-      if (missing.length === 0) return;
-      const metas = await getProcessosCardsMeta(missing);
-      if (Array.isArray(metas) && metas.length) {
-        setMetaMap((prev) => {
-          const next = { ...prev };
-          for (const m of metas) { if (m && m.id != null) next[String(m.id)] = m; }
-          return next;
-        });
+  const ensureMetaBatch = React.useCallback(
+    async (ids) => {
+      try {
+        const missing = (ids || [])
+          .map((x) => String(x))
+          .filter((x) => !(x in metaMap));
+        if (missing.length === 0) return;
+        const metas = await getProcessosCardsMeta(missing);
+        if (Array.isArray(metas) && metas.length) {
+          setMetaMap((prev) => {
+            const next = { ...prev };
+            for (const m of metas) {
+              if (m && m.id != null) next[String(m.id)] = m;
+            }
+            return next;
+          });
+        }
+      } catch {
+        /* silent */
       }
-    } catch {}
-  }, [metaMap]);
+    },
+    [metaMap]
+  );
 
   // Filtros básicos
   const [filtroCliente, setFiltroCliente] = useState('');
   const [filtroRelevancia, setFiltroRelevancia] = useState('todos');
   const [searchTerm, setSearchTerm] = useState('');
-  useEffect(() => { setHistorySearch(searchTerm); }, [searchTerm]);
+  useEffect(() => {
+    setHistorySearch(searchTerm);
+  }, [searchTerm]);
 
   // Avançados
   const [showFilters, setShowFilters] = useState(false);
@@ -504,6 +606,7 @@ const ControleProcessos = () => {
   const [sortDir, setSortDir] = useState('desc'); // asc | desc
   const [filtroConcessionaria, setFiltroConcessionaria] = useState('');
   const [filtroSuspenso, setFiltroSuspenso] = useState(false);
+  const [showSuspensos, setShowSuspensos] = useState(false);
 
   // Defer input (evita lag digitando)
   const deferredSearch = useDeferredValue(searchTerm);
@@ -527,7 +630,10 @@ const ControleProcessos = () => {
   const [moveStatus, setMoveStatus] = useState('');
   const [moveColuna, setMoveColuna] = useState('');
   const [toast, setToast] = useState('');
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 3000);
+  };
 
   // Etapas/Subetapas para escolha do destino
   const [etapas, setEtapas] = useState([]);
@@ -539,33 +645,62 @@ const ControleProcessos = () => {
       try {
         setEtapas(await getEtapas());
         setEtapaSubMap(await getEtapaSubMap());
-      } catch {}
+      } catch {
+        /* silent */
+      }
     })();
   }, []);
 
   const { user } = useAuth();
   const isAdmin = String(user?.tipo_conta || '').toLowerCase() === 'admin';
 
+  const fmtData = (val) => {
+    if (!val) return '';
+    const d = val instanceof Date ? val : new Date(val);
+    if (Number.isNaN(d.getTime())) return String(val);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(
+      d.getHours()
+    )}:${pad(d.getMinutes())}`;
+  };
+
   // Atenção: a última coluna é "Indeferidos" (plural) para bater com o backend
-  const { ordemColunas, mapaColunasParaEtapas, mapaIconesColunas } = useMemo(() => ({
-    ordemColunas: ['Ativos', 'Deferidos', 'Fluxo de Ressarcimento', 'Faturamento', 'Concluídos', 'Indeferidos'],
-    mapaColunasParaEtapas: {
-      Ativos: 'Andamento',
-      Deferidos: 'Pendente',
-      'Fluxo de Ressarcimento': 'Validação',
-      Faturamento: 'Ressarcimento',
-      'Concluídos': 'Concluído',
-      Indeferidos: 'Indeferido',
-    },
-    mapaIconesColunas: {
-      Ativos: Activity,
-      Deferidos: ThumbsUp,
-      'Fluxo de Ressarcimento': DollarSign,
-      Faturamento: DollarSign,
-      'Concluídos': CheckCircle,
-      Indeferidos: ThumbsDown,
-    }
-  }), []);
+  const { ordemColunas, mapaColunasParaEtapas, mapaIconesColunas } = useMemo(
+    () => ({
+      ordemColunas: [
+        'Ativos',
+        'Deferidos',
+        'Fluxo de Ressarcimento',
+        'Faturamento',
+        'Concluídos',
+        'Indeferidos',
+        'Suspensos',
+      ],
+      mapaColunasParaEtapas: {
+        Ativos: 'Andamento',
+        Deferidos: 'Pendente',
+        'Fluxo de Ressarcimento': 'Validação',
+        Faturamento: 'Ressarcimento',
+        Concluídos: 'Concluídos',
+        Indeferidos: 'Indeferido',
+        Suspensos: 'Suspenso',
+      },
+      mapaIconesColunas: {
+        Ativos: Activity,
+        Deferidos: ThumbsUp,
+        'Fluxo de Ressarcimento': DollarSign,
+        Faturamento: DollarSign,
+        Concluídos: CheckCircle,
+        Indeferidos: ThumbsDown,
+        Suspensos: PauseCircle,
+      },
+    }),
+    []
+  );
+  const ordemColunasVisiveis = useMemo(
+    () => ordemColunas.filter((col) => col !== 'Suspensos'),
+    [ordemColunas],
+  );
 
   // Carregar base
   const carregarDados = useCallback(async () => {
@@ -577,7 +712,7 @@ const ControleProcessos = () => {
         getProcessosKanban(),
         getAllTags(),
         getPrazos().catch(() => ({ kanban: [], etapas: [] })),
-        getAlarmes().catch(() => ([])),
+        getAlarmes().catch(() => []),
       ]);
 
       const baseColunas = {};
@@ -585,31 +720,42 @@ const ControleProcessos = () => {
 
       // Normaliza chaves do backend para o conjunto esperado no front
       const normalizeKey = (k) => {
-        const s = String(k || "").trim();
+        const s = String(k || '').trim();
         if (!s) return s;
-        if (s === "Indeferido") return "Indeferidos";
-        if (s === "Concluído" || s === "Concluídos") return "Concluídos";
+        if (s === 'Indeferido') return 'Indeferidos';
+        // qualquer variação "Conclu..." vira "Concluídos"
+        if (s.toLowerCase().startsWith('conclu')) return 'Concluídos';
         return s;
       };
 
-      const allKeys = Array.from(new Set([
-        ...ordemColunas,
-        ...Object.keys(payload).map(normalizeKey),
-      ]));
+      const allKeys = Array.from(
+        new Set([...ordemColunas, ...Object.keys(payload).map(normalizeKey)])
+      );
 
       allKeys.forEach((col) => {
-        const raw = payload[col] || payload[Object.keys(payload).find(k => normalizeKey(k) === col)] || [];
+        const raw =
+          payload[col] ||
+          payload[Object.keys(payload).find((k) => normalizeKey(k) === col)] ||
+          [];
         const lista = raw || [];
         baseColunas[col] = lista.map((p) => {
           const __ultimaDataRaw = p.data_ultima_movimentacao || p.ultima_atualizacao || null;
           const __ultimaData = __ultimaDataRaw ? new Date(__ultimaDataRaw) : null;
-          const __valor = typeof p.valor_estimado === 'number' ? p.valor_estimado : (p.valor_estimado?.Float64 ?? null);
+          const __valor =
+            typeof p.valor_estimado === 'number'
+              ? p.valor_estimado
+              : toNumberOrNull(p.valor_estimado?.Float64 ?? p.valor_estimado ?? null);
           return {
             ...p,
             __ultimaData,
             __subetapa: extrair(p.sub_etapa) || '',
             __cliente: extrair(p.cliente) || extrair(p.nome_cliente) || '',
-            __uc: extrair(p.uc) || extrair(p.unidade_consumidora) || extrair(p.unidade) || extrair(p.UC) || '',
+            __uc:
+              extrair(p.uc) ||
+              extrair(p.unidade_consumidora) ||
+              extrair(p.unidade) ||
+              extrair(p.UC) ||
+              '',
             __concessionaria: extrair(p.concessionaria) || extrair(p.concessionaria_sigla) || '',
             __valor,
             __id: p.id,
@@ -635,14 +781,20 @@ const ControleProcessos = () => {
         }
         const metas = await getProcessosCardsMeta(ids);
         const map = {};
-        for (const m of metas) { if (m && m.id != null) map[String(m.id)] = m; }
+        for (const m of metas || []) {
+          if (m && m.id != null) map[String(m.id)] = m;
+        }
         setMetaMap(map);
-      } catch {}
+      } catch {
+        /* silent */
+      }
 
       setAllTags(tagsData || []);
     } catch (err) {
       console.error('Erro ao carregar dados da página', err);
-      setError('Não foi possível carregar os dados do quadro. Verifique o console para mais detalhes.');
+      setError(
+        'Não foi possível carregar os dados do quadro. Verifique o console para mais detalhes.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -656,8 +808,10 @@ const ControleProcessos = () => {
   const opcoesEtapa = useMemo(() => {
     if (!colunas) return [];
     const set = new Set();
-    Object.values(colunas).forEach(arr => {
-      arr.forEach(p => { if (p.__etapa) set.add(p.__etapa); });
+    Object.values(colunas).forEach((arr) => {
+      arr.forEach((p) => {
+        if (p.__etapa) set.add(p.__etapa);
+      });
     });
     return Array.from(set).sort();
   }, [colunas]);
@@ -665,7 +819,11 @@ const ControleProcessos = () => {
   // Busca completa em histórico: varre todos os processos carregados no quadro e marca IDs com match
   useEffect(() => {
     const q = String(deferredSearch || '').trim();
-    if (!q) { setHistoryMatches(new Set()); setHistoryLoading(false); return; }
+    if (!q) {
+      setHistoryMatches(new Set());
+      setHistoryLoading(false);
+      return;
+    }
     let canceled = false;
     (async () => {
       try {
@@ -684,7 +842,9 @@ const ControleProcessos = () => {
         if (!canceled) setHistoryLoading(false);
       }
     })();
-    return () => { canceled = true; };
+    return () => {
+      canceled = true;
+    };
   }, [deferredSearch]);
 
   // Normalização simples para busca (case/acentos)
@@ -694,7 +854,9 @@ const ControleProcessos = () => {
         .toLowerCase()
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '');
-    } catch { return String(v || '').toLowerCase(); }
+    } catch {
+      return String(v || '').toLowerCase();
+    }
   };
 
   // Filtros + Ordenação
@@ -725,7 +887,9 @@ const ControleProcessos = () => {
           proc.etapa,
           proc.sub_etapa,
           idStr,
-        ].map(norm).join(' ● ');
+        ]
+          .map(norm)
+          .join(' ● ');
         searchOk = hay.includes(q);
         if (!searchOk) {
           const mid = String(proc?.id ?? proc?.__id ?? '');
@@ -750,9 +914,14 @@ const ControleProcessos = () => {
         (filtroRelevancia === 'relevante' && proc.__relevancia) ||
         (filtroRelevancia === 'no_relevante' && !proc.__relevancia);
 
-      const etapaOk = !filtroEtapa || norm(proc.__etapa || proc.etapa).includes(norm(filtroEtapa));
-      const subOk = !debouncedSub || norm(proc.__subetapa || proc.sub_etapa).includes(norm(debouncedSub));
-      const concOk = !filtroConcessionaria || norm(proc.__concessionaria || '').includes(norm(filtroConcessionaria));
+      const etapaOk =
+        !filtroEtapa || norm(proc.__etapa || proc.etapa).includes(norm(filtroEtapa));
+      const subOk =
+        !debouncedSub ||
+        norm(proc.__subetapa || proc.sub_etapa).includes(norm(debouncedSub));
+      const concOk =
+        !filtroConcessionaria ||
+        norm(proc.__concessionaria || '').includes(norm(filtroConcessionaria));
       const suspOk = !filtroSuspenso || !!proc.__suspenso;
 
       const dataOk = (() => {
@@ -773,7 +942,19 @@ const ControleProcessos = () => {
         return true;
       })();
 
-      return searchOk && clienteOk && ucOk && idOk && relOk && etapaOk && subOk && concOk && suspOk && dataOk && valorOk;
+      return (
+        searchOk &&
+        clienteOk &&
+        ucOk &&
+        idOk &&
+        relOk &&
+        etapaOk &&
+        subOk &&
+        concOk &&
+        suspOk &&
+        dataOk &&
+        valorOk
+      );
     };
 
     const cmp = (a, b) => {
@@ -783,8 +964,8 @@ const ControleProcessos = () => {
         return sortDir === 'asc' ? da - db : db - da;
       }
       if (sortField === 'valor') {
-        const va = (a.__valor ?? -Infinity);
-        const vb = (b.__valor ?? -Infinity);
+        const va = a.__valor ?? -Infinity;
+        const vb = b.__valor ?? -Infinity;
         return sortDir === 'asc' ? va - vb : vb - va;
       }
       const ia = Number(a.__id) || 0;
@@ -802,24 +983,57 @@ const ControleProcessos = () => {
     return novasColunas;
   }, [
     colunas,
-    deferredSearch, debouncedCliente, debouncedUC, debouncedId, filtroRelevancia,
-    filtroEtapa, debouncedSub, filtroDataIni, filtroDataFim,
-    debouncedValorMin, debouncedValorMax, sortField, sortDir, filtroConcessionaria, filtroSuspenso,
-    metaMap, historyMatches, filtroSuspenso
+    deferredSearch,
+    debouncedCliente,
+    debouncedUC,
+    debouncedId,
+    filtroRelevancia,
+    filtroEtapa,
+    debouncedSub,
+    filtroDataIni,
+    filtroDataFim,
+    debouncedValorMin,
+    debouncedValorMax,
+    sortField,
+    sortDir,
+    filtroConcessionaria,
+    filtroSuspenso,
+    metaMap,
+    historyMatches,
   ]);
 
-  const findContainer = useCallback((id) => {
-    if (!colunas) return null;
-    if (id in colunas) return id;
-    return Object.keys(colunas).find(key => colunas[key].some(p => p.id === id));
+  const suspensosLista = useMemo(() => {
+    if (!colunas) return [];
+    const arr = [];
+    Object.entries(colunas).forEach(([col, itens]) => {
+      (itens || []).forEach((p) => {
+        if (p && (p.__suspenso || p.suspenso)) {
+          arr.push({ ...p, __coluna: col });
+        }
+      });
+    });
+    return arr.sort((a, b) => {
+      const da = a.__ultimaData ? a.__ultimaData.getTime() : 0;
+      const db = b.__ultimaData ? b.__ultimaData.getTime() : 0;
+      return db - da;
+    });
   }, [colunas]);
+
+  const findContainer = useCallback(
+    (id) => {
+      if (!colunas) return null;
+      if (id in colunas) return id;
+      return Object.keys(colunas).find((key) => colunas[key].some((p) => p.id === id));
+    },
+    [colunas]
+  );
 
   const handleDragStart = (event) => {
     if (!isAdmin) return;
     const { active } = event;
     const container = findContainer(active.id);
     if (!container || !colunas) return;
-    const processo = colunas[container].find(p => p.id === active.id);
+    const processo = colunas[container].find((p) => p.id === active.id);
     setActiveProcesso(processo);
   };
 
@@ -835,31 +1049,35 @@ const ControleProcessos = () => {
     const indexDestino = ordemColunas.indexOf(colunaDestino);
 
     if (!isAdmin && indexDestino < indexOrigem) {
-      alert('Não é permitido mover um card para uma coluna anterior.');
+      alert("N?o ? permitido mover um card para uma coluna anterior.");
       return;
     }
-    const processoMovido = colunas[colunaOrigem].find(p => p.id === active.id);
+    const processoMovido = colunas?.[colunaOrigem]?.find((p) => p.id === active.id);
     if (!processoMovido) return;
 
     const novaEtapa = mapaColunasParaEtapas[colunaDestino];
-    if (!novaEtapa) {
-      alert(`Movimentação para "${colunaDestino}" não é permitida.`);
+    if (!novaEtapa && colunaDestino !== 'Suspensos') {
+      alert(`Movimenta??o para "${colunaDestino}" n?o ? permitida.`);
       return;
     }
 
-    if (colunaDestino === 'Deferidos') {
-      setMovimentacaoPendente({ processo: processoMovido, novaEtapa });
-      setIsModalDeferimentoAberto(true);
-      return;
+    try {
+      if (colunaDestino === 'Suspensos') {
+        await suspenderProcesso(processoMovido.id, 'Suspenso via kanban');
+      } else {
+        if (colunaOrigem === 'Suspensos') {
+          await retomarProcesso(processoMovido.id, 'Retomado via kanban');
+        }
+        const fd = new FormData();
+        fd.append('etapa_atual', novaEtapa);
+        const subEtapaAtual = extrair(processoMovido.sub_etapa);
+        if (subEtapaAtual) fd.append('sub_etapa', subEtapaAtual);
+        await movimentarProcesso(processoMovido.id, fd);
+      }
+      carregarDados();
+    } catch (err) {
+      alert('Erro ao mover o processo.');
     }
-
-    // Abrir modal de movimento com escolha de etapa/subetapa e canais
-    setPendingMove({ id: processoMovido.id, destino: colunaDestino, etapa: novaEtapa });
-    setDestinoEtapa(novaEtapa || '');
-    setDestinoSub('');
-    setMoveComment('');
-    setMoveChannels('');
-    setMoveOpen(true);
   };
 
   const handleSalvarDeferimento = async (comentario, dadosDeferimento) => {
@@ -871,8 +1089,10 @@ const ControleProcessos = () => {
     formData.append('comentario', comentario);
 
     // Canais de comunicação (opcional)
-    const canaisStr = prompt(`Informe canais de comunicação (whatsapp, ligacao, email, sms) separados por vírgula:
-Deixe em branco para não registrar.`);
+    const canaisStr = prompt(
+      `Informe canais de comunicação (whatsapp, ligacao, email, sms) separados por vírgula:
+Deixe em branco para não registrar.`
+    );
     if (canaisStr && canaisStr.trim() !== '') {
       const canais = canaisStr
         .split(',')
@@ -904,10 +1124,10 @@ Deixe em branco para não registrar.`);
     }
   };
 
-  const handleTagCreated = (novaTag) => setAllTags(prev => [...prev, novaTag]);
+  const handleTagCreated = (novaTag) => setAllTags((prev) => [...prev, novaTag]);
 
   const handleCardClick = (processo) => {
-    const pid = (processo.id || processo.processo_id || processo.requisicao_id);
+    const pid = processo.id || processo.processo_id || processo.requisicao_id;
     if (!pid) return alert('ID do processo não encontrado.');
     navigate(`/processos/${pid}`);
   };
@@ -940,17 +1160,28 @@ Deixe em branco para não registrar.`);
     return (
       <div className="p-4 md:p-6">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {['Ativos','Deferidos','Fluxo de Ressarcimento','Faturamento','Concluídos','Indeferidos'].slice(0,6).map((col, i) => (
+          {[
+            'Ativos',
+            'Deferidos',
+            'Fluxo de Ressarcimento',
+            'Faturamento',
+            'Concluídos',
+            'Indeferidos',
+          ].map((col, i) => (
             <div key={i} className="rounded-lg border panel-border panel-bg-60 p-3">
               <div className="mb-3 flex items-center gap-2">
                 <SkeletonLine width="40%" />
               </div>
               <div className="space-y-2">
-                {[0,1,2].map((j)=> (
+                {[0, 1, 2].map((j) => (
                   <div key={j} className="glass-card rounded-lg border p-3">
                     <SkeletonLine width="60%" />
-                    <div className="mt-2"><SkeletonLine width="40%" /></div>
-                    <div className="mt-2"><SkeletonLine width="80%" /></div>
+                    <div className="mt-2">
+                      <SkeletonLine width="40%" />
+                    </div>
+                    <div className="mt-2">
+                      <SkeletonLine width="80%" />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -965,21 +1196,33 @@ Deixe em branco para não registrar.`);
     return (
       <div className="p-8 text-center text-red-400">
         <p>{error}</p>
-        <button onClick={carregarDados} className="mt-4 px-4 py-2 bg-[var(--accent)] text-[var(--fg)] rounded hover:opacity-90">
+        <button
+          onClick={carregarDados}
+          className="mt-4 px-4 py-2 bg-[var(--accent)] text-[var(--fg)] rounded hover:opacity-90"
+        >
           Tentar Novamente
         </button>
       </div>
     );
   }
 
-  const activeColumnIndex = activeProcesso ? ordemColunas.indexOf(findContainer(activeProcesso.id)) : -1;
+  const activeColumnIndex = activeProcesso
+    ? ordemColunas.indexOf(findContainer(activeProcesso.id))
+    : -1;
 
   return (
     <>
       <div className="processos-azul w-full max-w-full mx-auto px-3 sm:px-4 lg:px-6 xl:px-8 py-6 lg:py-10 min-h-screen">
         <div
           className="mb-4 lg:mb-6 mt-2 rounded-xl shadow-elevated p-4 border-2 sticky top-0 z-40"
-          style={{ position: 'sticky', top: 0, zIndex: 40, background: 'var(--header-bg)', borderColor: 'var(--header-border)', color: 'var(--header-fg)' }}
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 40,
+            background: 'var(--header-bg)',
+            borderColor: 'var(--header-border)',
+            color: 'var(--header-fg)',
+          }}
         >
           <h1 className="text-2xl lg:text-3xl font-extrabold flex items-center justify-center gap-3 text-center">
             <FolderKanban size={26} className="hidden sm:block" />
@@ -1011,10 +1254,18 @@ Deixe em branco para não registrar.`);
               <RefreshCcw size={16} />
               Limpar Tudo
             </button>
+            <button
+              onClick={() => setShowSuspensos(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border panel-border panel-bg-60 hover:opacity-90 text-[var(--header-fg)] transition-smooth"
+              title="Ver processos suspensos"
+            >
+              <PauseCircle size={16} />
+              Suspensos ({suspensosLista.length})
+            </button>
           </div>
 
           {showSearch && (
-            <div className="mt-3 flex flex-col items-center justify-center gap-2">
+            <div className="mt-3 flex col items-center justify-center gap-2">
               <input
                 type="text"
                 placeholder="Pesquisar (Cliente, UC, ID, status, etapa, sub-etapa, concessionária, histórico)"
@@ -1031,7 +1282,10 @@ Deixe em branco para não registrar.`);
                   )}
                   <button
                     type="button"
-                    onClick={() => { setSearchTerm(''); setHistoryMatches(new Set()); }}
+                    onClick={() => {
+                      setSearchTerm('');
+                      setHistoryMatches(new Set());
+                    }}
                     className="px-2 py-0.5 rounded border panel-border panel-bg-60 hover:opacity-90"
                     title="Limpar busca"
                   >
@@ -1057,7 +1311,10 @@ Deixe em branco para não registrar.`);
                         <span>Encontrados: {historyMatches.size}</span>
                         <button
                           type="button"
-                          onClick={() => { setHistorySearch(''); setHistoryMatches(new Set()); }}
+                          onClick={() => {
+                            setHistorySearch('');
+                            setHistoryMatches(new Set());
+                          }}
                           className="px-2 py-0.5 rounded border panel-border panel-bg-60 hover:opacity-90"
                           title="Limpar busca de históricos"
                         >
@@ -1079,29 +1336,88 @@ Deixe em branco para não registrar.`);
               <h2 className="text-lg font-semibold mb-2">Mover processo</h2>
               <p className="text-sm opacity-80 mb-3">Defina o destino e confirme:</p>
               <div className="text-sm mb-3">
-                <div><strong>ID:</strong> #{pendingMove.id}</div>
-                <div><strong>Coluna destino:</strong> {pendingMove.destino}</div>
+                <div>
+                  <strong>ID:</strong> #{pendingMove.id}
+                </div>
+                <div>
+                  <strong>Coluna destino:</strong> {pendingMove.destino}
+                </div>
               </div>
 
               <div className="mb-3">
                 <label className="block text-sm font-medium mb-1">Status da Requisição</label>
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => setMoveStatus('Pendente')} className={`px-2 py-1 rounded border ${moveStatus==='Pendente'?'bg-[var(--accent)] text-[var(--fg)]':'border-[var(--panel-border)]'}`}>Pendente</button>
-                  <button type="button" onClick={() => setMoveStatus('Em Análise')} className={`px-2 py-1 rounded border ${moveStatus==='Em Análise'?'bg-[var(--accent)] text-[var(--fg)]':'border-[var(--panel-border)]'}`}>Em Análise</button>
-                  <button type="button" onClick={() => setMoveStatus('Aprovado')} className={`px-2 py-1 rounded border ${moveStatus==='Aprovado'?'bg-[var(--accent)] text-[var(--fg)]':'border-[var(--panel-border)]'}`}>Aprovado</button>
-                  <button type="button" onClick={() => setMoveStatus('Rejeitado')} className={`px-2 py-1 rounded border ${moveStatus==='Rejeitado'?'bg-[var(--accent)] text-[var(--fg)]':'border-[var(--panel-border)]'}`}>Rejeitado</button>
+                  <button
+                    type="button"
+                    onClick={() => setMoveStatus('Pendente')}
+                    className={`px-2 py-1 rounded border ${
+                      moveStatus === 'Pendente'
+                        ? 'bg-[var(--accent)] text-[var(--fg)]'
+                        : 'border-[var(--panel-border)]'
+                    }`}
+                  >
+                    Pendente
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMoveStatus('Em Análise')}
+                    className={`px-2 py-1 rounded border ${
+                      moveStatus === 'Em Análise'
+                        ? 'bg-[var(--accent)] text-[var(--fg)]'
+                        : 'border-[var(--panel-border)]'
+                    }`}
+                  >
+                    Em Análise
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMoveStatus('Aprovado')}
+                    className={`px-2 py-1 rounded border ${
+                      moveStatus === 'Aprovado'
+                        ? 'bg-[var(--accent)] text-[var(--fg)]'
+                        : 'border-[var(--panel-border)]'
+                    }`}
+                  >
+                    Aprovado
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMoveStatus('Rejeitado')}
+                    className={`px-2 py-1 rounded border ${
+                      moveStatus === 'Rejeitado'
+                        ? 'bg-[var(--accent)] text-[var(--fg)]'
+                        : 'border-[var(--panel-border)]'
+                    }`}
+                  >
+                    Rejeitado
+                  </button>
                 </div>
               </div>
 
               <div className="mb-3">
                 <label className="block text-sm font-medium mb-1">Coluna do processo</label>
                 <div className="flex flex-wrap gap-2">
-                  {['Ativos','Deferidos','Fluxo de Ressarcimento','Faturamento','Concluídos','Indeferidos'].map((c) => (
+                  {[
+                    'Ativos',
+                    'Deferidos',
+                    'Fluxo de Ressarcimento',
+                    'Faturamento',
+                    'Concluídos',
+                    'Indeferidos',
+                  ].map((c) => (
                     <button
                       key={c}
                       type="button"
-                      onClick={() => { setMoveColuna(c); const e = mapaColunasParaEtapas[c]; if (e) setDestinoEtapa(e); }}
-                      className={`px-2 py-1 rounded border ${moveColuna===c?'bg-[var(--accent)] text-[var(--fg)]':'border-[var(--panel-border)]'}`}
+                      onClick={() => {
+                        setMoveColuna(c);
+                        const e = mapaColunasParaEtapas[c];
+                        if (e) setDestinoEtapa(e);
+                      }}
+                      className={`px-2 py-1 rounded border ${
+                        moveColuna === c
+                          ? 'bg-[var(--accent)] text-[var(--fg)]'
+                          : 'border-[var(--panel-border)]'
+                      }`}
                     >
                       {c.toUpperCase()}
                     </button>
@@ -1113,11 +1429,18 @@ Deixe em branco para não registrar.`);
                 <label className="block text-sm font-medium mb-1">Etapa</label>
                 <select
                   value={destinoEtapa}
-                  onChange={(e) => { setDestinoEtapa(e.target.value); setDestinoSub(''); }}
+                  onChange={(e) => {
+                    setDestinoEtapa(e.target.value);
+                    setDestinoSub('');
+                  }}
                   className="w-full p-2 rounded-md border border-[var(--panel-border)] bg-transparent mb-2"
                 >
                   <option value="">(usar padrão da coluna)</option>
-                  {etapas.map((n) => (<option key={n} value={n}>{n}</option>))}
+                  {etapas.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
                 </select>
 
                 <label className="block text-sm font-medium mb-1">Sub-etapa</label>
@@ -1127,14 +1450,18 @@ Deixe em branco para não registrar.`);
                   className="w-full p-2 rounded-md border border-[var(--panel-border)] bg-transparent"
                 >
                   <option value="">(opcional)</option>
-                  {((etapaSubMap?.[destinoEtapa || pendingMove.etapa || ''] || [])).map((s, i) => (
-                    <option key={i} value={s}>{s}</option>
+                  {(etapaSubMap?.[destinoEtapa || pendingMove.etapa || ''] || []).map((s, i) => (
+                    <option key={i} value={s}>
+                      {s}
+                    </option>
                   ))}
                 </select>
               </div>
 
               <div className="mb-3">
-                <label className="block text-sm font-medium mb-1">Canais de comunicação (opcional)</label>
+                <label className="block text-sm font-medium mb-1">
+                  Canais de comunicação (opcional)
+                </label>
                 <input
                   type="text"
                   value={moveChannels}
@@ -1154,11 +1481,19 @@ Deixe em branco para não registrar.`);
               />
 
               <div className="mt-4 flex gap-2 justify-end">
-                <button onClick={() => setMoveOpen(false)} className="px-3 py-2 rounded-md border border-[var(--panel-border)] hover:bg-[var(--panel-border)]/20">Cancelar</button>
+                <button
+                  onClick={() => setMoveOpen(false)}
+                  className="px-3 py-2 rounded-md border border-[var(--panel-border)] hover:bg-[var(--panel-border)]/20"
+                >
+                  Cancelar
+                </button>
                 <button
                   onClick={async () => {
                     const etapaFinal = destinoEtapa || pendingMove.etapa || '';
-                    if (!etapaFinal) { alert('Selecione uma etapa ou deixe o padrão da coluna.'); return; }
+                    if (!etapaFinal) {
+                      alert('Selecione uma etapa ou deixe o padrão da coluna.');
+                      return;
+                    }
                     const fd = new FormData();
                     fd.append('etapa_atual', etapaFinal);
                     if (destinoSub) fd.append('sub_etapa', destinoSub);
@@ -1166,15 +1501,17 @@ Deixe em branco para não registrar.`);
                     if (moveChannels && moveChannels.trim() !== '') {
                       const canais = moveChannels
                         .split(',')
-                        .map(s => s.trim().toLowerCase())
-                        .filter(s => ['whatsapp','ligacao','email','sms'].includes(s));
+                        .map((s) => s.trim().toLowerCase())
+                        .filter((s) => ['whatsapp', 'ligacao', 'email', 'sms'].includes(s));
                       if (canais.length > 0) fd.append('canais', JSON.stringify(canais));
                     }
                     try {
                       await movimentarProcesso(pendingMove.id, fd);
                       setMoveOpen(false);
                       setPendingMove({ id: null, destino: '', etapa: '' });
-                      setMoveComment(''); setMoveChannels(''); setDestinoSub('');
+                      setMoveComment('');
+                      setMoveChannels('');
+                      setDestinoSub('');
                       carregarDados();
                     } catch (err) {
                       alert('Erro ao salvar a movimentação.');
@@ -1194,7 +1531,9 @@ Deixe em branco para não registrar.`);
           <div className="mb-6 p-3 lg:p-4 bg-[var(--panel-processos)]/40 border panel-border rounded-xl">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
-                <label className="block text-xs opacity-70 mb-1">Data da última movimentação (início)</label>
+                <label className="block text-xs opacity-70 mb-1">
+                  Data da última movimentação (início)
+                </label>
                 <input
                   type="date"
                   value={filtroDataIni}
@@ -1204,7 +1543,9 @@ Deixe em branco para não registrar.`);
               </div>
 
               <div>
-                <label className="block text-xs opacity-70 mb-1">Data da última movimentação (fim)</label>
+                <label className="block text-xs opacity-70 mb-1">
+                  Data da última movimentação (fim)
+                </label>
                 <input
                   type="date"
                   value={filtroDataFim}
@@ -1222,7 +1563,9 @@ Deixe em branco para não registrar.`);
                 >
                   <option value="">Todas</option>
                   {opcoesEtapa.map((e) => (
-                    <option key={e} value={e}>{e}</option>
+                    <option key={e} value={e}>
+                      {e}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -1237,7 +1580,9 @@ Deixe em branco para não registrar.`);
                 >
                   <option value="">{filtroEtapa ? 'Todas' : 'Selecione uma etapa'}</option>
                   {(etapaSubMap?.[filtroEtapa] || []).map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -1254,8 +1599,15 @@ Deixe em branco para não registrar.`);
               </div>
 
               <div className="flex items-center gap-2 mt-6">
-                <input id="flt-susp" type="checkbox" checked={filtroSuspenso} onChange={(e)=>setFiltroSuspenso(e.target.checked)} />
-                <label htmlFor="flt-susp" className="text-xs opacity-70">Somente suspensos</label>
+                <input
+                  id="flt-susp"
+                  type="checkbox"
+                  checked={filtroSuspenso}
+                  onChange={(e) => setFiltroSuspenso(e.target.checked)}
+                />
+                <label htmlFor="flt-susp" className="text-xs opacity-70">
+                  Somente suspensos
+                </label>
               </div>
 
               <div>
@@ -1361,21 +1713,23 @@ Deixe em branco para não registrar.`);
           onDragEnd={handleDragEnd}
         >
           <div className="kanban-board flex gap-3 lg:gap-4 overflow-x-auto pb-3 lg:pb-4">
-            {colunasFiltradas && ordemColunas.map((columnId, index) => (
-              <KanbanColumn
-                ensureMeta={ensureMetaBatch}
-                metaMap={metaMap}
-                key={columnId}
-                id={columnId}
-                title={columnId}
-                processos={colunasFiltradas[columnId]}
-                icon={mapaIconesColunas[columnId]}
-                onCardClick={handleCardClick}
-                isDropDisabled={isAdmin ? false : (activeProcesso ? index < activeColumnIndex : false)}
-                isAdmin={isAdmin}
-               
-              />
-            ))}
+            {colunasFiltradas &&
+              ordemColunasVisiveis.map((columnId, index) => (
+                <KanbanColumn
+                  ensureMeta={ensureMetaBatch}
+                  metaMap={metaMap}
+                  key={columnId}
+                  id={columnId}
+                  title={columnId}
+                  processos={colunasFiltradas[columnId] || []}
+                  icon={mapaIconesColunas[columnId]}
+                  onCardClick={handleCardClick}
+                  isDropDisabled={
+                    isAdmin ? false : activeProcesso ? index < activeColumnIndex : false
+                  }
+                  isAdmin={isAdmin}
+                />
+              ))}
           </div>
 
           <DragOverlay>
@@ -1386,6 +1740,84 @@ Deixe em branco para não registrar.`);
             ) : null}
           </DragOverlay>
         </DndContext>
+
+        {showSuspensos &&
+          createPortal(
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center px-4">
+              <div className="bg-[var(--panel)] border border-[var(--panel-border)] rounded-xl shadow-2xl w-full max-w-5xl max-h-[88vh] overflow-hidden animate-fade-in-fast">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--panel-border)]">
+                  <div className="flex items-center gap-2">
+                    <PauseCircle size={18} />
+                    <span className="font-semibold text-sm">Processos suspensos</span>
+                    <span className="text-xs opacity-70">({suspensosLista.length})</span>
+                  </div>
+                  <button
+                    className="px-3 py-1 text-sm rounded border border-[var(--panel-border)] hover:bg-[var(--panel-border)]/20"
+                    onClick={() => setShowSuspensos(false)}
+                  >
+                    Fechar
+                  </button>
+                </div>
+                <div className="p-4 overflow-auto max-h-[78vh] space-y-2">
+                  {suspensosLista.length === 0 && (
+                    <div className="text-sm opacity-70">Nenhum processo suspenso.</div>
+                  )}
+                  {suspensosLista.map((p) => (
+                    <div
+                      key={`susp-${p.id}`}
+                      className="border border-amber-300 rounded-lg p-3 bg-amber-50 text-amber-900 flex flex-wrap items-center gap-2 justify-between"
+                    >
+                      <div className="flex flex-col gap-1">
+                        <div className="text-sm font-bold">
+                          #{p.id} • UC {p.__uc || extrair(p.uc) || '—'}
+                        </div>
+                        <div className="text-xs opacity-80">
+                          Coluna: {p.__coluna || '—'} • Sub-etapa: {p.__subetapa || extrair(p.sub_etapa) || '—'}
+                        </div>
+                        <div className="text-xs opacity-80">
+                          Última mov.:{' '}
+                          {fmtData(
+                            p.__ultimaData ||
+                              p.ultima_atualizacao ||
+                              p.data_ultima_movimentacao
+                          ) || '—'}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="px-3 py-1 text-sm rounded border border-[var(--panel-border)] hover:bg-[var(--panel-border)]/20"
+                          onClick={() => {
+                            setShowSuspensos(false);
+                            handleCardClick(p);
+                          }}
+                        >
+                          Abrir
+                        </button>
+                        <button
+                          className="px-3 py-1 text-sm rounded border border-[var(--panel-border)] hover:bg-[var(--panel-border)]/20 bg-white text-amber-900"
+                          onClick={async () => {
+                            try {
+                              await retomarProcesso(p.id, 'Restaurado via suspensos');
+                              setToast({ open: true, type: 'success', text: 'Processo restaurado.' });
+                              carregarDados();
+                            } catch {
+                              setToast({ open: true, type: 'error', text: 'Falha ao restaurar o processo.' });
+                            }
+                          }}
+                        >
+                          Restaurar
+                        </button>
+                        <span className="text-[10px] uppercase bg-amber-600 text-white px-2 py-0.5 rounded">
+                          Suspenso
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
 
         {processoParaEditarTags && (
           <ModalGerenciarTags
@@ -1421,17 +1853,3 @@ Deixe em branco para não registrar.`);
 };
 
 export default ControleProcessos;
-
-
-
-
-
-
-
-
-
-
-
-
-
-

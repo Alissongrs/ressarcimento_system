@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { criarRequisicao, buscarUC, buscarFaturasPorUnidadeMeses } from '../services/requisicaoService';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Search, HelpCircle, X, FileText, Loader2 } from 'lucide-react';
@@ -9,7 +9,7 @@ const MESES_PT_BR = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ];
 
-const RequisicaoForm = () => {
+const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, onClose } = {}) => {
   const toStr = (v) => {
     if (v == null) return '';
     if (typeof v === 'object') {
@@ -20,7 +20,6 @@ const RequisicaoForm = () => {
   };
   const { user } = useAuth();
   const [formData, setFormData] = useState({
-    prioridade: 'Baixa',
     uc: '',
     id_uc: '',
     id_empresa: '',
@@ -32,6 +31,8 @@ const RequisicaoForm = () => {
     ressarcimentoEstimado: '',
     descricaoIrregularidade: '',
     linkFatura: '',
+    problemaIdentificado: '',
+    gostariaAnexarFatura: false,
   });
 
   const [periodos, setPeriodos] = useState([{ mes: '', ano: '' }]);
@@ -40,8 +41,19 @@ const RequisicaoForm = () => {
   const [isUcEncontrada, setIsUcEncontrada] = useState(false);
   const [isLoadingUc, setIsLoadingUc] = useState(false);
   const [ucError, setUcError] = useState('');
+  const [manualMode, setManualMode] = useState(false);
+  const [manualPromptVisible, setManualPromptVisible] = useState(false);
+  useEffect(() => {
+    if (initialUc) setFormData((prev) => ({ ...prev, uc: initialUc }));
+  }, [initialUc]);
+  useEffect(() => {
+    if (manualModeProp) {
+      setManualMode(true);
+      setManualPromptVisible(false);
+    }
+  }, [manualModeProp]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const isFieldDisabled = isUcEncontrada;
+  const isFieldDisabled = isUcEncontrada && !manualMode;
   const [ucLinksDetalhes, setUcLinksDetalhes] = useState([]);
   const [toast, setToast] = useState({ open: false, type: 'info', text: '' });
 
@@ -83,6 +95,10 @@ const RequisicaoForm = () => {
       setFormData((prev) => ({ ...prev, ressarcimentoEstimado: raw }));
       return;
     }
+    if (name === 'gostariaAnexarFatura') {
+      setFormData((prev) => ({ ...prev, [name]: e.target.checked }));
+      return;
+    }
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
@@ -119,22 +135,25 @@ const RequisicaoForm = () => {
       setUcError('Por favor, digite o número da UC.');
       return;
     }
+    setManualPromptVisible(false);
     setIsLoadingUc(true);
     setUcError('');
     try {
       const dados = await buscarUC(formData.uc, []);
-      setFormData((prev) => ({
-        ...prev,
-        id_uc: String(dados?.id_uc || prev.id_uc || ''),
-        id_empresa: String(dados?.id_empresa || prev.id_empresa || ''),
-        id_concessionaria: String(dados?.id_concessionaria || prev.id_concessionaria || ''),
-        cliente: toStr(dados.cliente) || toStr(dados.nome_cliente) || '',
-        razaoSocialFatura: toStr(dados.razao_social_fatura) || '',
-        concessionaria: toStr(dados.concessionaria) || '',
-        cnpj: formatCNPJ(toStr(dados.cnpj) || ''),
-        enderecoCompleto: toStr(dados.endereco_completo) || '',
-        linkFatura: prev.linkFatura,
-      }));
+    setFormData((prev) => ({
+      ...prev,
+      id_uc: String(dados?.id_uc || prev.id_uc || ''),
+      id_empresa: String(dados?.id_empresa || prev.id_empresa || ''),
+      id_concessionaria: String(dados?.id_concessionaria || prev.id_concessionaria || ''),
+      cliente: toStr(dados.cliente) || toStr(dados.nome_cliente) || '',
+      razaoSocialFatura: toStr(dados.razao_social_fatura) || '',
+      concessionaria: toStr(dados.concessionaria) || '',
+      cnpj: formatCNPJ(toStr(dados.cnpj) || ''),
+      enderecoCompleto: toStr(dados.endereco_completo) || '',
+      linkFatura: prev.linkFatura,
+    }));
+    setManualMode(false);
+    setManualPromptVisible(false);
       setUcLinksDetalhes([]);
       setIsUcEncontrada(true);
     } catch (error) {
@@ -149,6 +168,7 @@ const RequisicaoForm = () => {
         enderecoCompleto: '',
         linkFatura: '',
       }));
+      setManualPromptVisible(true);
     } finally {
       setIsLoadingUc(false);
     }
@@ -224,18 +244,33 @@ const RequisicaoForm = () => {
       await criarRequisicao(data);
       showToast('success', 'Requisição enviada com sucesso!');
       setFormData({
-        prioridade: 'Baixa', uc: '', cliente: '', razaoSocialFatura: '',
-        concessionaria: '', cnpj: '', enderecoCompleto: '',
-        ressarcimentoEstimado: '', descricaoIrregularidade: '', linkFatura: '',
+        uc: '',
+        uc: '',
+        id_uc: '',
+        id_empresa: '',
+        id_concessionaria: '',
+        cliente: '',
+        razaoSocialFatura: '',
+        concessionaria: '',
+        cnpj: '',
+        enderecoCompleto: '',
+        ressarcimentoEstimado: '',
+        descricaoIrregularidade: '',
+        linkFatura: '',
+        problemaIdentificado: '',
+        gostariaAnexarFatura: false,
       });
       setPeriodos([{ mes: '', ano: '' }]);
       setAnexos([]);
       setIsUcEncontrada(false);
+      setManualMode(false);
+      setManualPromptVisible(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (error) {
       showToast('error', 'Falha ao enviar. Verifique os dados e tente novamente.');
     } finally {
       setIsSubmitting(false);
+    if (onClose) onClose();
     }
   };
 
@@ -246,31 +281,39 @@ const RequisicaoForm = () => {
           <h1 className="text-2xl font-bold">Nova Requisição</h1>
         </div>
         <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="md:col-span-2">
-            <label className="block font-semibold text-[var(--fg)] mb-1 flex items-center gap-1">UC * <HelpCircle size={14} className="opacity-70"/></label>
+        <div className="grid grid-cols-1 gap-4">
+          <div>
+          <label className="flex font-semibold text-[var(--fg)] mb-1 items-center gap-1">UC * <HelpCircle size={14} className="opacity-70"/></label>
             <div className="flex gap-2">
               <input type="text" inputMode="numeric" name="uc" value={formData.uc} onChange={handleChange} className={`flex-1 p-2 border border-[var(--border)] rounded text-[var(--fg)] glass-card bg-[var(--panel)]`} required placeholder="Ex.: 48341497" />
               <button type="button" onClick={handleBuscarUc} disabled={isLoadingUc} className="px-3 py-2 bg-[var(--accent)] text-[var(--fg)] rounded hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2">
                 {isLoadingUc ? (<><Loader2 className="animate-spin" size={16}/> Buscando</>) : (<><Search size={16}/> Buscar</>)}
               </button>
             </div>
-            {ucError && <p className="text-xs text-red-400 mt-1">{ucError}</p>}
-          </div>
-          <div>
-            <label className="block font-semibold text-[var(--fg)] mb-1">Prioridade *</label>
-            <select name="prioridade" value={formData.prioridade} onChange={handleChange} className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]">
-              <option>Baixa</option>
-              <option>Média</option>
-              <option>Alta</option>
-            </select>
+            {ucError && (
+              <div className="text-xs text-red-400 mt-1">
+                <p>{ucError}</p>
+                {!manualMode && manualPromptVisible && (
+                  <button
+                    type="button"
+                    className="text-xs underline text-amber-500"
+                    onClick={() => {
+                      setManualMode(true);
+                      setManualPromptVisible(false);
+                    }}
+                  >
+                    Sim, quero inserir manualmente
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block font-semibold text-[var(--fg)] mb-1">Cliente</label>
-            <input type="text" name="cliente" value={formData.cliente} onChange={handleChange} className={`w-full p-2 border border-[var(--border)] rounded text-[var(--fg)] glass-card bg-[var(--panel)]`} readOnly={isFieldDisabled} />
+          <input type="text" name="cliente" value={formData.cliente} onChange={handleChange} className={`w-full p-2 border border-[var(--border)] rounded text-[var(--fg)] glass-card bg-[var(--panel)]`} readOnly={isFieldDisabled} required={manualMode} />
           </div>
           <div>
             <label className="block font-semibold text-[var(--fg)] mb-1">Razão Social (Fatura)</label>
@@ -322,6 +365,33 @@ const RequisicaoForm = () => {
           <label className="block font-semibold text-[var(--fg)] mb-1">Descrição da Irregularidade *</label>
           <textarea name="descricaoIrregularidade" value={formData.descricaoIrregularidade} onChange={handleChange} className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]" rows="4" required />
         </div>
+        {manualMode && (
+          <div className="p-4 border border-dashed border-amber-400 bg-[var(--panel)] text-[var(--fg)] rounded text-sm space-y-3">
+            <div>
+              <strong>Inserção manual:</strong> preencha os campos acima e informe adicionalmente o problema identificado e se deseja anexar uma fatura.
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Problema identificado *</label>
+              <textarea
+                name="problemaIdentificado"
+                value={formData.problemaIdentificado}
+                onChange={handleChange}
+                className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]"
+                rows="3"
+                required={manualMode}
+              />
+            </div>
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                name="gostariaAnexarFatura"
+                checked={formData.gostariaAnexarFatura}
+                onChange={handleChange}
+              />
+              Gostaria de anexar fatura manualmente
+            </label>
+          </div>
+        )}
         <div>
           <label className="block font-semibold text-[var(--fg)] mb-1">Anexos *</label>
           <input ref={fileInputRef} type="file" name="anexos" onChange={handleFileChange} className="w-full text-sm text-gray-200 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200" multiple required />

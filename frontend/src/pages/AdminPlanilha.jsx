@@ -1,275 +1,272 @@
-﻿// src/pages/AdminPlanilha.jsx
-import React, { useEffect, useMemo, useState } from 'react';
-import {
-  listPlanilha,
-  bulkMover,
-  bulkComentarioReplace,
-  deleteHistorico,
-} from '../services/adminPlanilhaService';
-import { Download, RefreshCcw, Filter } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Filter, Search, RefreshCcw } from 'lucide-react';
+import { listPlanilha, bulkMover } from '../services/adminPlanilhaService';
 import { saveProcessoFull } from '../services/adminEditorService';
 import Toast from '../components/Toast.jsx';
 
+const kanbanColumns = [
+  'Ativos',
+  'Deferidos',
+  'Fluxo de Ressarcimento',
+  'Faturamento',
+  'Concluídos',
+  'Indeferidos',
+  'Suspensos',
+];
+
+const etapaToColuna = (etapaNome) => {
+  const e = String(etapaNome || '').trim().toLowerCase();
+  if (!e) return 'Ativos';
+  if (/(deferid|pendente|concil|contest)/.test(e)) return 'Deferidos';
+  if (/(fluxo.*ressarc|validacao|valida|financeiro)/.test(e)) return 'Fluxo de Ressarcimento';
+  if (/fatur/.test(e)) return 'Faturamento';
+  if (/(conclu)/.test(e)) return 'Concluídos';
+  if (/(indefer)/.test(e)) return 'Indeferidos';
+  if (/(suspenso)/.test(e)) return 'Suspensos';
+  return 'Ativos';
+};
+
+const toNumberValue = (value) => {
+  if (value === '' || value == null) return '';
+  const normalized = String(value).trim().replace(/\./g, '').replace(',', '.');
+  const num = Number(normalized);
+  return Number.isNaN(num) ? '' : num;
+};
+
+const detailValue = (details, pid, field, fallback) =>
+  details[pid]?.[field] ?? fallback ?? '';
+
 export default function AdminPlanilha() {
   const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [q, setQ] = useState('');
-  const [kanbanFilter, setKanbanFilter] = useState('');
-  const [applyEtapa, setApplyEtapa] = useState('');
-  const [applySub, setApplySub] = useState('');
-  const [applyComentario, setApplyComentario] = useState('');
-  const [applyingAll, setApplyingAll] = useState(false);
-  const [etapa, setEtapa] = useState('');
-  const [sub, setSub] = useState('');
-  const [limit] = useState(100);
-  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [loadingAll, setLoadingAll] = useState(false);
-  const [sel, setSel] = useState({});
-  const [moving, setMoving] = useState(false);
-  const [toast, setToast] = useState({ open: false, type: 'info', text: '' });
-
-  // Replace comentário
-  const [repFrom, setRepFrom] = useState('');
-  const [repTo, setRepTo] = useState('');
-
-  // Filtro por período
+  const offsetRef = useRef(0);
+  const [q, setQ] = useState('');
+  const [etapa, setEtapa] = useState('');
+  const [sub, setSub] = useState('');
   const [ini, setIni] = useState('');
   const [fim, setFim] = useState('');
+  const [kanbanFilter, setKanbanFilter] = useState('');
+  const [showHistoryAll, setShowHistoryAll] = useState(false);
+  const [toast, setToast] = useState({ open: false, type: 'info', text: '' });
+  const [mvByPid, setMvByPid] = useState({});
+  const [detailsByPid, setDetailsByPid] = useState({});
+  const [bulkEtapa, setBulkEtapa] = useState('');
+  const [bulkSub, setBulkSub] = useState('');
+  const [bulkComentario, setBulkComentario] = useState('');
+  const limit = 100;
 
-  // Edição por processo: deferimento (crédito simples/dobro e datas)
-  const [deferByPid, setDeferByPid] = useState({}); // { [pid]: { cs, ds, cd, dd } }
+  const load = useCallback(
+    async (reset = false) => {
+      setLoading(true);
+      try {
+        const payload = {
+          q: q || undefined,
+          etapa: etapa || undefined,
+          sub: sub || undefined,
+          ini: ini || undefined,
+          fim: fim || undefined,
+          coluna: kanbanFilter || undefined,
+          limit,
+          offset: reset ? 0 : offsetRef.current,
+        };
+        const data = await listPlanilha(payload);
+        if (reset) {
+          setRows(data);
+          offsetRef.current = data.length;
+        } else {
+          setRows((prev) => [...prev, ...data]);
+          offsetRef.current += data.length;
+        }
+        setHasMore(data.length === limit);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [q, etapa, sub, ini, fim, kanbanFilter],
+  );
 
-  // Draft “adicionar histórico”
-  const [draftByPid, setDraftByPid] = useState({}); // { [pid]: { etapa:'', sub:'', comentario:'' } }
-  // Mover por processo (draft)
-  const [mvByPid, setMvByPid] = useState({}); // { [pid]: { etapa:'', sub:'', comentario:'' } }
-
-  const keyOf = (r) =>
-    `${r.processo_id || r.ProcessoID || r.processoId || r.id}-${
-      r.id_historico || r.IDHistorico || r.historico_id || ''
-    }`;
-  const pidOf = (r) =>
-    Number(r.processo_id ?? r.ProcessoID ?? r.processoId ?? r.id ?? 0) || 0;
-  const hidOf = (r) =>
-    Number(r.id_historico ?? r.IDHistorico ?? r.historico_id ?? 0) || 0;
-
-  async function load(reset = false) {
-    setLoading(true);
-    try {
-      const p = {
-        q: q || undefined,
-        etapa: etapa || undefined,
-        sub: sub || undefined,
-        ini: ini || undefined,
-        fim: fim || undefined,
-        limit,
-        offset: reset ? 0 : offset,
-      };
-      const data = await listPlanilha(p);
-      setRows((prev) => (reset ? data : [...prev, ...(data || [])]));
-      setHasMore((data || []).length === limit);
-      if (reset) setOffset(limit);
-      else setOffset((v) => v + limit);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadAll() {
+  const loadAll = useCallback(async () => {
     if (loadingAll) return;
     setLoadingAll(true);
     setLoading(true);
     try {
       const chunk = 1000;
       let off = 0;
-      let all = [];
+      let acc = [];
       const base = {
         q: q || undefined,
         etapa: etapa || undefined,
         sub: sub || undefined,
         ini: ini || undefined,
         fim: fim || undefined,
+        coluna: kanbanFilter || undefined,
       };
-      for (;;) {
+      while (true) {
         const part = await listPlanilha({ ...base, limit: chunk, offset: off });
-        const arr = Array.isArray(part) ? part : [];
-        all = all.concat(arr);
-        if (arr.length < chunk) break;
+        if (!Array.isArray(part)) break;
+        acc = [...acc, ...part];
+        if (part.length < chunk) break;
         off += chunk;
       }
-      setRows(all);
-      setOffset(all.length);
+      setRows(acc);
+      offsetRef.current = acc.length;
       setHasMore(false);
     } finally {
       setLoading(false);
       setLoadingAll(false);
     }
-  }
+  }, [q, etapa, sub, ini, fim, kanbanFilter, loadingAll]);
 
   useEffect(() => {
     load(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [load]);
 
-  const selectedPIDs = useMemo(() => {
-    const ids = new Set();
-    rows.forEach((r) => {
-      const k = keyOf(r);
-      if (sel[k]) ids.add(pidOf(r));
-    });
-    return Array.from(ids);
-  }, [sel, rows]);
-
-  const selectedHIDs = useMemo(() => {
-    const ids = new Set();
-    rows.forEach((r) => {
-      const k = keyOf(r);
-      if (sel[k]) {
-        const h = hidOf(r);
-        if (h) ids.add(h);
-      }
-    });
-    return Array.from(ids);
-  }, [sel, rows]);
-
-  // Agrupar por processo para exibir cabeçalho + histórico
   const groups = useMemo(() => {
     const map = new Map();
     (rows || []).forEach((r) => {
-      const pid = pidOf(r);
+      const pid = Number(r.processo_id ?? r.ProcessoID ?? r.processoId ?? r.id ?? 0) || 0;
       if (!map.has(pid)) map.set(pid, { header: r, hist: [] });
       map.get(pid).hist.push(r);
     });
     return Array.from(map.entries());
   }, [rows]);
 
-  // Mapeia etapa para coluna do Kanban (rótulos principais)
-  const etapaToColuna = (etapaNome) => {
-    const e = String(etapaNome || '').trim().toLowerCase();
-    if (!e) return 'Ativos';
-    if (/(deferid|pendente|concil|contest)/.test(e)) return 'Deferidos';
-    if (/(fluxo.*ressarc|validacao|valida|enviado ao financeiro|envio ao financeiro)/.test(e)) return 'Fluxo de Ressarcimento';
-    if (/fatur/.test(e)) return 'Faturamento';
-    if (/(conclu)/.test(e)) return 'Concluídos';
-    if (/(indefer)/.test(e)) return 'Indeferidos';
-    return 'Ativos';
+  const tableRows = useMemo(() => {
+    return groups.map(([pid, g]) => ({
+      pid,
+      header: g.header,
+      history: g.hist,
+      kanban: etapaToColuna(g.header.etapa || g.header.Etapa),
+    }));
+  }, [groups]);
+
+  const filteredRows = useMemo(() => {
+    if (!kanbanFilter) return tableRows;
+    return tableRows.filter((row) => row.kanban === kanbanFilter);
+  }, [tableRows, kanbanFilter]);
+
+  const candidatePIDs = useMemo(() => filteredRows.map((row) => row.pid), [filteredRows]);
+
+  const handleSaveProcesso = async (pid, header) => {
+    const detail = detailsByPid[pid] || {};
+    const cs = detail.cs ?? header.credito_simples ?? '';
+    const ds = detail.ds ?? header.data_simples ?? '';
+    const cd = detail.cd ?? header.credito_dobro ?? '';
+    const dd = detail.dd ?? header.data_dobro ?? '';
+    const fluxo = {
+      forma_devolucao: detail.forma || header.forma_devolucao || '',
+      valor: toNumberValue(detail.valor_fluxo ?? header.valor_fluxo ?? ''),
+      data_devolucao: detail.data_fluxo || header.data_fluxo || '',
+    };
+    const faturamento = {
+      numero_nf: detail.numero_nf || header.numero_nf || '',
+      data_emissao: detail.data_emissao || header.data_emissao || '',
+      data_vencimento: detail.data_vencimento || header.data_vencimento || '',
+      data_pagamento: detail.data_pagamento || header.data_pagamento || '',
+      valor: toNumberValue(detail.valor_nf ?? header.valor_nf ?? ''),
+    };
+    const payload = { processo_id: pid };
+    const deferimentoHas =
+      (ds && ds !== '') ||
+      (dd && dd !== '') ||
+      (cs !== '' && Number(cs) !== 0) ||
+      (cd !== '' && Number(cd) !== 0);
+    if (deferimentoHas) {
+      payload.deferimento = JSON.stringify({
+        data_procedencia: ds || '',
+        credito_simples: cs === '' ? undefined : Number(cs),
+        credito_dobro: cd === '' ? undefined : Number(cd),
+        data_credito_dobro: dd || '',
+      });
+    }
+    payload.fluxo_ressarcimento = JSON.stringify({
+      itens: [
+        {
+          forma_devolucao: fluxo.forma_devolucao,
+          valor: fluxo.valor,
+          data_devolucao: fluxo.data_devolucao,
+        },
+      ],
+    });
+    payload.faturamento = JSON.stringify({
+      itens: [
+        {
+          numero_nf: faturamento.numero_nf,
+          data_emissao: faturamento.data_emissao,
+          data_vencimento: faturamento.data_vencimento,
+          data_pagamento: faturamento.data_pagamento,
+          valor: faturamento.valor,
+        },
+      ],
+    });
+    try {
+      await saveProcessoFull(payload);
+      setToast({ open: true, type: 'success', text: `Dados salvos para ${pid}.` });
+      await load(true);
+    } catch (err) {
+      setToast({ open: true, type: 'error', text: err?.message || 'Falha ao salvar processo.' });
+    }
   };
 
-  // PIDs que estão na visão atual (após busca/filtros) e batem o filtro de Kanban
-  const candidatePIDs = useMemo(() => {
+  const handleMoveProcesso = async (pid) => {
+    const dados = mvByPid[pid] || {};
+    const etapaDestino = (dados.etapa || '').trim();
+    if (!etapaDestino) return;
+    setLoading(true);
     try {
-      const ids = [];
-      for (const [pid, g] of groups) {
-        const col = etapaToColuna(g?.header?.etapa || g?.header?.Etapa || '');
-        if (kanbanFilter && col !== kanbanFilter) continue;
-        ids.push(pid);
-      }
-      return ids;
-    } catch {
-      return [];
+      await bulkMover({
+        processo_ids: [pid],
+        etapa: etapaDestino,
+        sub_etapa: (dados.sub || '').trim(),
+        comentario: (dados.comentario || '').trim(),
+      });
+      setToast({ open: true, type: 'success', text: `Processo ${pid} movido.` });
+      setMvByPid((prev) => ({ ...prev, [pid]: { etapa: '', sub: '', comentario: '' } }));
+      await load(true);
+    } catch (err) {
+      setToast({ open: true, type: 'error', text: err?.message || 'Erro ao mover processo.' });
+    } finally {
+      setLoading(false);
     }
-  }, [groups, kanbanFilter]);
-
-  const doExport = () => {
-    const headers = [
-      'Sel',
-      'Processo',
-      'UC',
-      'CNPJ',
-      'Concessionaria',
-      'Cliente',
-      'Credito Simples',
-      'Data Simples',
-      'Credito Dobro',
-      'Data Dobro',
-      'Forma Devolucao',
-      'Valor Fluxo',
-      'Data Fluxo',
-      'NF',
-      'Emissao',
-      'Vencimento',
-      'Pagamento',
-      'Valor NF',
-      'HistID',
-      'Hist Data',
-      'Comentario',
-      'Etapa',
-      'Sub-Etapa',
-      'Tipo',
-    ];
-    const sep = ';';
-    const esc = (v) => {
-      const s = v == null ? '' : String(v);
-      return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const lines = [headers.join(sep)];
-    rows.forEach((r) => {
-      const k = keyOf(r);
-      lines.push(
-        [
-          sel[k] ? 'x' : '',
-          pidOf(r),
-          r.uc || '',
-          r.cnpj || '',
-          r.concessionaria || '',
-          r.cliente || '',
-          r.credito_simples ?? '',
-          r.data_simples || '',
-          r.credito_dobro ?? '',
-          r.data_dobro || '',
-          r.forma_devolucao || '',
-          r.valor_fluxo ?? '',
-          r.data_fluxo || '',
-          r.numero_nf || '',
-          r.data_emissao || '',
-          r.data_vencimento || '',
-          r.data_pagamento || '',
-          r.valor_nf ?? '',
-          hidOf(r),
-          r.hist_data || '',
-          r.hist_comentario || '',
-          r.etapa || '',
-          r.sub_etapa || '',
-          r.tipo_movimentacao || '',
-        ]
-          .map(esc)
-          .join(sep),
-      );
-    });
-    const blob = new Blob([lines.join('\n')], {
-      type: 'text/csv;charset=utf-8',
-    });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'planilha_processos.csv';
-    a.click();
-    URL.revokeObjectURL(a.href);
   };
 
   return (
-    <div className="p-4 border rounded panel-bg-60 panel-border">
-      {/* Filtros */}
-      <div className="mb-3 flex flex-wrap gap-2 items-center">
-        <div className="flex items-center gap-1">
+    <div className="p-4 border rounded panel-bg-60 panel-border space-y-4">
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <div className="flex items-center gap-2">
+          <Search size={16} />
           <input
+            placeholder="Busca (cliente, UC, comentário)"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Busca (cliente, UC, comentário)"
-            className="input-themed"
+            className="input-themed w-full"
           />
-          <input
-            value={etapa}
-            onChange={(e) => setEtapa(e.target.value)}
-            placeholder="Etapa"
-            className="input-themed"
-          />
-          <input
-            value={sub}
-            onChange={(e) => setSub(e.target.value)}
-            placeholder="Sub-etapa"
-            className="input-themed"
-          />
+        </div>
+        <input
+          placeholder="Etapa"
+          value={etapa}
+          onChange={(e) => setEtapa(e.target.value)}
+          className="input-themed"
+        />
+        <input
+          placeholder="Sub-etapa"
+          value={sub}
+          onChange={(e) => setSub(e.target.value)}
+          className="input-themed"
+        />
+        <select
+          value={kanbanFilter}
+          onChange={(e) => setKanbanFilter(e.target.value)}
+          className="input-themed"
+        >
+          <option value="">Coluna (todas)</option>
+          {kanbanColumns.map((col) => (
+            <option key={col}>{col}</option>
+          ))}
+        </select>
+        <div className="flex items-center gap-2">
           <input
             type="date"
             value={ini}
@@ -282,725 +279,382 @@ export default function AdminPlanilha() {
             onChange={(e) => setFim(e.target.value)}
             className="input-themed"
           />
+        </div>
+        <div className="flex items-center gap-2">
           <button
             className="btn-themed inline-flex items-center gap-1"
             onClick={() => load(true)}
-            title="Filtrar"
+            disabled={loading}
           >
             <Filter size={16} />
             Filtrar
           </button>
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            className="btn-outline"
-            onClick={() => {
-              const next = {};
-              rows.forEach((r) => {
-                next[keyOf(r)] = true;
-              });
-              setSel(next);
-            }}
-          >
-            Selecionar todos filtrados
-          </button>
-          <button className="btn-outline" onClick={() => setSel({})}>
-            Limpar seleção
-          </button>
           <button
             className="btn-outline inline-flex items-center gap-1"
-            onClick={doExport}
-          >
-            <Download size={16} />
-            Exportar
-          </button>
-          <button
-            className="btn-themed inline-flex items-center gap-1"
-            onClick={() => {
-              setSel({});
-              setOffset(0);
-              load(true);
-            }}
-            title="Recarregar"
+            onClick={loadAll}
+            disabled={loadingAll}
           >
             <RefreshCcw size={16} />
-            Recarregar
+            Carregar todos
           </button>
         </div>
       </div>
 
-      {/* Aplicar etapa/subetapa em massa nos resultados */}
-      <div className="mt-3 p-3 border rounded panel-bg-60 panel-border">
-        <div className="font-semibold mb-2">Aplicar em massa (resultados atuais)</div>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
-          <div className="md:col-span-2">
-            <label className="block text-xs mb-1">Etapa destino</label>
-            <input
-              className="input-themed w-full"
-              value={applyEtapa}
-              onChange={(e) => setApplyEtapa(e.target.value)}
-              placeholder="Ex.: Ativos / Deferidos / Faturamento"
-            />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-xs mb-1">Sub-etapa destino</label>
-            <input
-              className="input-themed w-full"
-              value={applySub}
-              onChange={(e) => setApplySub(e.target.value)}
-              placeholder="Sub-etapa (opcional)"
-            />
-          </div>
-          <div>
-            <label className="block text-xs mb-1">Filtrar por Kanban</label>
-            <select
-              className="input-themed w-full"
-              value={kanbanFilter}
-              onChange={(e) => setKanbanFilter(e.target.value)}
-            >
-              <option value="">Todos</option>
-              <option>Ativos</option>
-              <option>Deferidos</option>
-              <option>Fluxo de Ressarcimento</option>
-              <option>Faturamento</option>
-              <option>Concluídos</option>
-              <option>Indeferidos</option>
-            </select>
-          </div>
+      <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-4 items-end">
+        <div>
+          <label className="text-xs uppercase tracking-wide">Etapa destino</label>
+          <input
+            className="input-themed w-full"
+            value={bulkEtapa}
+            onChange={(e) => setBulkEtapa(e.target.value)}
+            placeholder="Ex.: Concluídos"
+          />
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end mt-2">
-          <div className="md:col-span-4">
-            <label className="block text-xs mb-1">Comentário (opcional)</label>
-            <input
-              className="input-themed w-full"
-              value={applyComentario}
-              onChange={(e) => setApplyComentario(e.target.value)}
-              placeholder="Comentário a registrar no histórico (opcional)"
-            />
-          </div>
-          <div className="text-right md:text-left">
-            <button
-              className="btn-themed"
-              disabled={applyingAll || !applyEtapa.trim() || candidatePIDs.length === 0}
-              onClick={async () => {
-                if (!applyEtapa.trim()) return;
-                setApplyingAll(true);
-                try {
-                  await bulkMover({
-                    processo_ids: candidatePIDs,
-                    etapa: applyEtapa.trim(),
-                    sub_etapa: applySub.trim() || '',
-                    comentario: applyComentario.trim() || '',
-                  });
-                  setToast({ open: true, type: 'success', text: `Aplicado em ${candidatePIDs.length} processo(s).` });
-                  await load(true);
-                } catch (e) {
-                  setToast({ open: true, type: 'error', text: e?.message || 'Falha ao aplicar em massa' });
-                } finally {
-                  setApplyingAll(false);
-                }
-              }}
-            >
-              {applyingAll ? 'Aplicando...' : `Aplicar nos resultados (${candidatePIDs.length})`}
-            </button>
-          </div>
+        <div>
+          <label className="text-xs uppercase tracking-wide">Sub-etapa</label>
+          <input
+            className="input-themed w-full"
+            value={bulkSub}
+            onChange={(e) => setBulkSub(e.target.value)}
+            placeholder="Ex.: Arquivado"
+          />
         </div>
-        <div className="mt-1 text-xs opacity-70">
-          Observação: aplica nos processos carregados (use "Carregar todos" para incluir mais) e, se definido, somente nos da coluna Kanban selecionada.
+        <div className="md:col-span-2 lg:col-span-2">
+          <label className="text-xs uppercase tracking-wide">Comentário (opcional)</label>
+          <input
+            className="input-themed w-full"
+            value={bulkComentario}
+            onChange={(e) => setBulkComentario(e.target.value)}
+            placeholder="Comentário padrão para o novo histórico"
+          />
         </div>
-      </div>
-
-      {/* Replace comentário (bulk) */}
-      {(repFrom || repTo) && (
-        <div className="mb-3 p-3 border rounded panel-bg-60 panel-border">
-          <div className="font-semibold mb-2">Substituir comentário (bulk)</div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
-            <input
-              value={repFrom}
-              onChange={(e) => setRepFrom(e.target.value)}
-              className="input-themed"
-              placeholder="Procurar"
-            />
-            <input
-              value={repTo}
-              onChange={(e) => setRepTo(e.target.value)}
-              className="input-themed"
-              placeholder="Substituir por"
-            />
-            <button
-              disabled={!selectedHIDs.length}
-              className="btn-themed"
-              onClick={async () => {
-                await bulkComentarioReplace({
-                  historico_ids: selectedHIDs,
-                  from: repFrom || '',
-                  to: repTo || '',
-                });
-                setRepFrom('');
-                setRepTo('');
-                await load(true);
-              }}
-            >
-              Aplicar em selecionados ({selectedHIDs.length})
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* REMOVIDO: seção de Movimentar (Kanban) em massa */}
-
-      {/* Tabela */}
-      <div className="space-y-3 max-w-full mt-3">
-        {groups.map(([pid, g]) => {
-          const header = g.header;
-          const rowKeys = g.hist.map((r) => keyOf(r));
-          const groupChecked =
-            rowKeys.length > 0 && rowKeys.every((k) => !!sel[k]);
-
-          return (
-            <div key={pid} className="border rounded">
-              <div className="px-3 py-2 border-b panel-border bg-[var(--panel)] sticky top-0 z-10">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={groupChecked}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setSel((s) => {
-                        const next = { ...s };
-                        rowKeys.forEach((k) => (next[k] = checked));
-                        return next;
-                      });
-                    }}
-                  />
-                  <div className="font-semibold">Processo {pid}</div>
-                  <div className="text-xs opacity-70">
-                    UC {header.uc} | {header.cliente} |{' '}
-                    {header.concessionaria}
-                  </div>
-                </div>
-
-                {/* Barra de ações por processo */}
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span className="text-xs opacity-70">Mover para:</span>
-
-                  <input
-                    value={mvByPid[pid]?.etapa || ''}
-                    onChange={(e) =>
-                      setMvByPid((s) => ({
-                        ...s,
-                        [pid]: { ...(s[pid] || {}), etapa: e.target.value },
-                      }))
-                    }
-                    placeholder="Etapa"
-                    className="input-themed"
-                  />
-                  <input
-                    value={mvByPid[pid]?.sub || ''}
-                    onChange={(e) =>
-                      setMvByPid((s) => ({
-                        ...s,
-                        [pid]: { ...(s[pid] || {}), sub: e.target.value },
-                      }))
-                    }
-                    placeholder="Sub-etapa"
-                    className="input-themed"
-                  />
-                  <input
-                    value={mvByPid[pid]?.comentario || ''}
-                    onChange={(e) =>
-                      setMvByPid((s) => ({
-                        ...s,
-                        [pid]: {
-                          ...(s[pid] || {}),
-                          comentario: e.target.value,
-                        },
-                      }))
-                    }
-                    placeholder="Comentário (opcional)"
-                    className="input-themed flex-1"
-                  />
-
-                  <button
-                    className="btn-blue"
-                    style={{
-                      background: '#2563eb',
-                      color: '#fff',
-                      borderColor: '#2563eb',
-                    }}
-                    onClick={async () => {
-                      const d = mvByPid[pid] || {};
-                      const etap = (d.etapa || '').trim();
-                      if (!etap) return;
-
-                      setMoving(true);
-                      try {
-                        await bulkMover({
-                          processo_ids: [pid],
-                          etapa: etap,
-                          sub_etapa: (d.sub || '').trim(),
-                          comentario: (d.comentario || '').trim(),
-                        });
-                        setMvByPid((s) => ({
-                          ...s,
-                          [pid]: { etapa: '', sub: '', comentario: '' },
-                        }));
-                        await load(true);
-                      } finally {
-                        setMoving(false);
-                      }
-                    }}
-                  >
-                    Mover
-                  </button>
-
-                  <button
-                    className="btn-green"
-                    style={{
-                      background: 'var(--success)',
-                      color: '#fff',
-                      borderColor: 'var(--success)',
-                    }}
-                    title="Salvar alterações deste processo (histórico ou movimento)"
-                    onClick={async () => {
-                      // Salva histórico redigido
-                      const dHist = draftByPid[pid] || {};
-                      const etapH = (dHist.etapa || '').trim();
-                      const comH = (dHist.comentario || '').trim();
-
-                      if (etapH || comH) {
-                        await saveProcessoFull({
-                          processo_id: pid,
-                          historico: [
-                            {
-                              data: new Date()
-                                .toISOString()
-                                .slice(0, 19)
-                                .replace('T', ' '),
-                              comentario: comH,
-                              etapa_nova: etapH || undefined,
-                              sub_etapa: (dHist.sub || '') || undefined,
-                            },
-                          ],
-                        });
-                        setDraftByPid((s) => ({
-                          ...s,
-                          [pid]: { etapa: '', sub: '', comentario: '' },
-                        }));
-                      }
-
-                      // Se houver draft de mover, aplica
-                      const dMove = mvByPid[pid] || {};
-                      const etapM = (dMove.etapa || '').trim();
-                      if (etapM) {
-                        await bulkMover({
-                          processo_ids: [pid],
-                          etapa: etapM,
-                          sub_etapa: (dMove.sub || '').trim(),
-                          comentario: (dMove.comentario || '').trim(),
-                        });
-                        setMvByPid((s) => ({
-                          ...s,
-                          [pid]: { etapa: '', sub: '', comentario: '' },
-                        }));
-                      }
-
-                      await load(true);
-                    }}
-                  >
-                    Salvar processo
-                  </button>
-                </div>
-              </div>
-
-              <div className="overflow-auto">
-                <table className="min-w-[900px] md:min-w-[1000px] w-full text-sm">
-                  <thead>
-                    <tr>
-                      {[
-                        'Sel',
-                        'HistID',
-                        'Data',
-                        'Comentário',
-                        'Etapa',
-                        'Sub-Etapa',
-                        'Tipo',
-                        'Ações',
-                      ].map((h) => (
-                        <th
-                          key={h}
-                          className="px-2 py-2 border-b text-left"
-                        >
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {g.hist.map((r) => {
-                      const k = keyOf(r);
-                      return (
-                        <tr key={k} className="hover:bg-[var(--border)]/20">
-                          <td className="px-2 py-1 border-b">
-                            <input
-                              type="checkbox"
-                              checked={!!sel[k]}
-                              onChange={(e) =>
-                                setSel((s) => ({
-                                  ...s,
-                                  [k]: e.target.checked,
-                                }))
-                              }
-                            />
-                          </td>
-
-                          <td className="px-2 py-1 border-b">{hidOf(r)}</td>
-                          <td className="px-2 py-1 border-b">
-                            {r.hist_data}
-                          </td>
-
-                          <td className="px-2 py-1 border-b">
-                            <input
-                              defaultValue={r.hist_comentario || ''}
-                              className="input-themed w-full"
-                              onBlur={async (e) => {
-                                const txt = e.target.value;
-                                if (txt !== r.hist_comentario) {
-                                  await bulkComentarioReplace({
-                                    historico_ids: [hidOf(r)],
-                                    from: r.hist_comentario || '',
-                                    to: txt,
-                                  });
-                                  await load(true);
-                                }
-                              }}
-                            />
-                          </td>
-
-                          <td className="px-2 py-1 border-b">
-                            <input
-                              defaultValue={r.etapa || ''}
-                              className="input-themed w-full"
-                              onBlur={async (e) => {
-                                const val = e.target.value;
-                                if (val !== r.etapa) {
-                                  await saveProcessoFull({
-                                    processo_id: pid,
-                                    historico: [
-                                      {
-                                        id_historico: hidOf(r),
-                                        data:
-                                          r.hist_data ||
-                                          new Date()
-                                            .toISOString()
-                                            .slice(0, 19)
-                                            .replace('T', ' '),
-                                        comentario: r.hist_comentario || '',
-                                        etapa_nova: val,
-                                        sub_etapa:
-                                          r.sub_etapa || undefined,
-                                      },
-                                    ],
-                                  });
-                                  await load(true);
-                                }
-                              }}
-                            />
-                          </td>
-
-                          <td className="px-2 py-1 border-b">
-                            <input
-                              defaultValue={r.sub_etapa || ''}
-                              className="input-themed w-full"
-                              onBlur={async (e) => {
-                                const val = e.target.value;
-                                if (val !== r.sub_etapa) {
-                                  await saveProcessoFull({
-                                    processo_id: pid,
-                                    historico: [
-                                      {
-                                        id_historico: hidOf(r),
-                                        data:
-                                          r.hist_data ||
-                                          new Date()
-                                            .toISOString()
-                                            .slice(0, 19)
-                                            .replace('T', ' '),
-                                        comentario: r.hist_comentario || '',
-                                        etapa_nova:
-                                          r.etapa || undefined,
-                                        sub_etapa: val,
-                                      },
-                                    ],
-                                  });
-                                  await load(true);
-                                }
-                              }}
-                            />
-                          </td>
-
-                          <td className="px-2 py-1 border-b">
-                            {r.tipo_movimentacao}
-                          </td>
-
-                          <td className="px-2 py-1 border-b">
-                            {hidOf(r) ? (
-                              <button
-                                className="px-2 py-1 border rounded"
-                                onClick={async () => {
-                                  await deleteHistorico(hidOf(r));
-                                  await load(true);
-                                }}
-                              >
-                                Excluir
-                              </button>
-                            ) : null}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="px-3 py-2 text-xs border-t space-y-2">
-                <div className="opacity-70">
-                  Forma: {header.forma_devolucao || '-'} | Valor: {header.valor_fluxo ?? ''} | Data Fluxo: {header.data_fluxo || '-'}
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 items-start">
-                  <div>
-                    <div className="text-xs opacity-70 mb-1">Crédito Simples</div>
-                    <input
-                      aria-label="Crédito Simples"
-                      type="number"
-                      step="0.01"
-                      className="input-themed w-full"
-                      placeholder="Crédito Simples"
-                      value={
-                        (deferByPid[pid]?.cs ?? (header.credito_simples ?? ''))
-                      }
-                      onChange={(e) =>
-                        setDeferByPid((s) => ({
-                          ...s,
-                          [pid]: {
-                            ...(s[pid] || {}),
-                            cs: e.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <div className="text-xs opacity-70 mb-1">Data Simples</div>
-                    <input
-                      aria-label="Data Simples"
-                      type="date"
-                      className="input-themed w-full"
-                      placeholder="Data Simples"
-                      value={
-                        (deferByPid[pid]?.ds ?? (header.data_simples || ''))
-                      }
-                      onChange={(e) =>
-                        setDeferByPid((s) => ({
-                          ...s,
-                          [pid]: {
-                            ...(s[pid] || {}),
-                            ds: e.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <div className="text-xs opacity-70 mb-1">Crédito Dobro</div>
-                    <input
-                      aria-label="Crédito Dobro"
-                      type="number"
-                      step="0.01"
-                      className="input-themed w-full"
-                      placeholder="Crédito Dobro"
-                      value={
-                        (deferByPid[pid]?.cd ?? (header.credito_dobro ?? ''))
-                      }
-                      onChange={(e) =>
-                        setDeferByPid((s) => ({
-                          ...s,
-                          [pid]: {
-                            ...(s[pid] || {}),
-                            cd: e.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <div className="text-xs opacity-70 mb-1">Data Dobro</div>
-                    <input
-                      aria-label="Data Dobro"
-                      type="date"
-                      className="input-themed w-full"
-                      placeholder="Data Dobro"
-                      value={
-                        (deferByPid[pid]?.dd ?? (header.data_dobro || ''))
-                      }
-                      onChange={(e) =>
-                        setDeferByPid((s) => ({
-                          ...s,
-                          [pid]: {
-                            ...(s[pid] || {}),
-                            dd: e.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="text-right">
-                  <button
-                    className="btn-themed"
-                    onClick={async () => {
-                      const cur = deferByPid[pid] || {};
-                      const cs = cur.cs ?? header.credito_simples ?? '';
-                      const ds = cur.ds ?? header.data_simples ?? '';
-                      const cd = cur.cd ?? header.credito_dobro ?? '';
-                      const dd = cur.dd ?? header.data_dobro ?? '';
-
-                      const payload = {
-                        processo_id: pid,
-                        deferimento: JSON.stringify({
-                          data_procedencia: (ds || '').trim() || undefined,
-                          credito_simples: cs !== '' && !isNaN(Number(cs)) ? Number(cs) : undefined,
-                          credito_dobro: cd !== '' && !isNaN(Number(cd)) ? Number(cd) : undefined,
-                          data_credito_dobro: (dd || '').trim() || undefined,
-                        }),
-                      };
-                      await saveProcessoFull(payload);
-                      await load(true);
-                    }}
-                  >
-                    Salvar deferimento
-                  </button>
-                </div>
-              </div>
-
-              <div className="px-3 py-3 border-t flex items-center gap-2">
-                <span className="text-sm">Adicionar histórico:</span>
-
-                <input
-                  value={draftByPid[pid]?.etapa || ''}
-                  onChange={(e) =>
-                    setDraftByPid((s) => ({
-                      ...s,
-                      [pid]: {
-                        ...(s[pid] || {}),
-                        etapa: e.target.value,
-                      },
-                    }))
-                  }
-                  placeholder="Etapa"
-                  className="input-themed"
-                />
-                <input
-                  value={draftByPid[pid]?.sub || ''}
-                  onChange={(e) =>
-                    setDraftByPid((s) => ({
-                      ...s,
-                      [pid]: { ...(s[pid] || {}), sub: e.target.value },
-                    }))
-                  }
-                  placeholder="Sub-etapa"
-                  className="input-themed"
-                />
-                <input
-                  value={draftByPid[pid]?.comentario || ''}
-                  onChange={(e) =>
-                    setDraftByPid((s) => ({
-                      ...s,
-                      [pid]: {
-                        ...(s[pid] || {}),
-                        comentario: e.target.value,
-                      },
-                    }))
-                  }
-                  placeholder="Comentário"
-                  className="input-themed flex-1"
-                />
-
-                <button
-                  className="btn-themed"
-                  onClick={async () => {
-                    const d = draftByPid[pid] || {};
-                    const etap = (d.etapa || '').trim();
-                    const comentario = (d.comentario || '').trim();
-                    if (!etap && !comentario) return;
-
-                    await saveProcessoFull({
-                      processo_id: pid,
-                      historico: [
-                        {
-                          data: new Date()
-                            .toISOString()
-                            .slice(0, 19)
-                            .replace('T', ' '),
-                          comentario,
-                          etapa_nova: etap || undefined,
-                          sub_etapa: (d.sub || '') || undefined,
-                        },
-                      ],
-                    });
-
-                    setDraftByPid((s) => ({
-                      ...s,
-                      [pid]: { etapa: '', sub: '', comentario: '' },
-                    }));
-                    await load(true);
-                  }}
-                >
-                  Adicionar
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {/* Toast feedback */}
-      <Toast
-        open={toast.open}
-        type={toast.type}
-        message={toast.text}
-        onClose={() => setToast((t) => ({ ...t, open: false }))}
-      />
-
-      {/* Pager */}
-      <div className="py-3 text-center">
-        <div className="flex items-center justify-center gap-2">
-          {hasMore && (
-            <button
-              disabled={loading || loadingAll}
-              className="btn-outline"
-              onClick={() => load(false)}
-            >
-              {loading ? 'Carregando...' : 'Carregar mais'}
-            </button>
-          )}
-
+        <div className="md:col-span-3 flex justify-end">
           <button
-            disabled={loading || loadingAll}
-            className="btn-outline"
-            onClick={loadAll}
+            className="btn-themed"
+            disabled={!bulkEtapa.trim() || !candidatePIDs.length}
+            onClick={async () => {
+              setLoading(true);
+              try {
+                await bulkMover({
+                  processo_ids: candidatePIDs,
+                  etapa: bulkEtapa.trim(),
+                  sub_etapa: bulkSub.trim(),
+                  comentario: bulkComentario.trim(),
+                });
+                setToast({
+                  open: true,
+                  type: 'success',
+                  text: `Aplicado em ${candidatePIDs.length} processo(s)`,
+                });
+                await load(true);
+              } catch (err) {
+                setToast({
+                  open: true,
+                  type: 'error',
+                  text: err?.message || 'Erro ao aplicar em massa',
+                });
+              } finally {
+                setLoading(false);
+              }
+            }}
           >
-            {loadingAll ? 'Carregando todos...' : 'Carregar todos'}
+            Aplicar etapa/subetapa aos resultados ({candidatePIDs.length})
           </button>
-
-          {!hasMore && !loadingAll && (
-            <div className="text-xs opacity-70">
-              Todos os itens carregados.
-            </div>
-          )}
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-3 items-center">
+        <button
+          className="btn-outline text-sm"
+          onClick={() => setShowHistoryAll((prev) => !prev)}
+        >
+          {showHistoryAll ? 'Ocultar históricos' : 'Mostrar históricos'}
+        </button>
+        <span className="text-xs opacity-60">
+          Quando ativo, cada processo mostra seu histórico completo abaixo da linha.
+        </span>
+      </div>
+
+      <div className="text-xs opacity-70">
+        Os filtros acima consultam diretamente o servidor (etapa, subetapa, palavra-chave, período e coluna). Os campos exibidos à direita são carregados via `/admin/planilha` e podem ser alterados in-line.
+      </div>
+
+      <div className="overflow-auto">
+        <table className="min-w-[1200px] w-full text-sm border border-slate-200">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide">
+            <tr>
+              {[
+                'Processo',
+                'UC',
+                'Cliente',
+                'Etapa',
+                'Sub-etapa',
+                'Crédito Simples',
+                'Data Simples',
+                'Crédito Dobro',
+                'Data Dobro',
+                'Fluxo (Forma)',
+                'Fluxo (Valor)',
+                'Fluxo (Data)',
+                'NF',
+                'NF Emissão',
+                'NF Venc.',
+                'NF Pag.',
+                'Valor NF',
+                'Mover Etapa',
+                'Mover Sub',
+                'Coment.',
+                'Ações',
+              ].map((col) => (
+                <th key={col} className="px-2 py-2 border-b">
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRows.map(({ pid, header, history }) => (
+              <React.Fragment key={`row-${pid}`}>
+                <tr className="odd:bg-white even:bg-slate-50">
+                  <td className="px-2 py-2 border-b">{pid}</td>
+                  <td className="px-2 py-2 border-b">{header.uc || header.Uc || '-'}</td>
+                  <td className="px-2 py-2 border-b">{header.cliente || '-'}</td>
+                  <td className="px-2 py-2 border-b">{header.etapa || header.Etapa || '-'}</td>
+                  <td className="px-2 py-2 border-b">{header.sub_etapa || header.SubEtapa || '-'}</td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'cs', header.credito_simples)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), cs: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      type="date"
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'ds', header.data_simples)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), ds: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'cd', header.credito_dobro)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), cd: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      type="date"
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'dd', header.data_dobro)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), dd: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'forma', header.forma_devolucao)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), forma: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'valor_fluxo', header.valor_fluxo)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), valor_fluxo: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      type="date"
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'data_fluxo', header.data_fluxo)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), data_fluxo: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'numero_nf', header.numero_nf)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), numero_nf: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      type="date"
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'data_emissao', header.data_emissao)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), data_emissao: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      type="date"
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'data_vencimento', header.data_vencimento)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), data_vencimento: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      type="date"
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'data_pagamento', header.data_pagamento)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), data_pagamento: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="input-themed text-xs"
+                      value={detailValue(detailsByPid, pid, 'valor_nf', header.valor_nf)}
+                      onChange={(e) =>
+                        setDetailsByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), valor_nf: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      className="input-themed text-xs"
+                      placeholder="Etapa"
+                      value={mvByPid[pid]?.etapa || ''}
+                      onChange={(e) =>
+                        setMvByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), etapa: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      className="input-themed text-xs"
+                      placeholder="Sub"
+                      value={mvByPid[pid]?.sub || ''}
+                      onChange={(e) =>
+                        setMvByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), sub: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <input
+                      className="input-themed text-xs"
+                      placeholder="Comentário"
+                      value={mvByPid[pid]?.comentario || ''}
+                      onChange={(e) =>
+                        setMvByPid((prev) => ({
+                          ...prev,
+                          [pid]: { ...(prev[pid] || {}), comentario: e.target.value },
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-2 border-b">
+                    <div className="flex flex-col gap-1">
+                      <button className="btn-themed text-xs" onClick={() => handleSaveProcesso(pid, header)}>
+                        Salvar
+                      </button>
+                      <button className="btn-outline text-xs" onClick={() => handleMoveProcesso(pid)}>
+                        Mover
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-2 py-2 border-b text-center">{etapaToColuna(header.etapa)}</td>
+                </tr>
+                {showHistoryAll && history.length > 0 && (
+                  <tr className="bg-slate-100">
+                    <td colSpan={21} className="px-3 py-2 border-b text-xs space-y-2">
+                      {history.map((item, idx) => (
+                        <div key={`${pid}-${idx}`} className="flex flex-wrap gap-3">
+                          <span className="font-semibold">{item.hist_data}</span>
+                          <span className="opacity-70">Etapa: {item.etapa || item.Etapa}</span>
+                          <span className="opacity-70">Sub: {item.sub_etapa || item.SubEtapa}</span>
+                          <span className="flex-1">{item.hist_comentario || '-'}</span>
+                        </div>
+                      ))}
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Toast open={toast.open} type={toast.type} message={toast.text} onClose={() => setToast((t) => ({ ...t, open: false }))} />
+
+      <div className="py-4 text-center">
+        {loading && <div className="text-sm opacity-70">Carregando...</div>}
+        {hasMore && !loading && (
+          <button className="btn-outline" onClick={() => load(false)}>
+            Carregar mais ({rows.length} carregados)
+          </button>
+        )}
       </div>
     </div>
   );

@@ -18,6 +18,7 @@ import (
 
 	"ressarcimento-backend/database"
 	"ressarcimento-backend/models"
+	"ressarcimento-backend/repositories"
 	"ressarcimento-backend/services"
 	"ressarcimento-backend/sse"
 
@@ -26,22 +27,6 @@ import (
 
 // helper: allocate *string from value
 func strPtr(s string) *string { return &s }
-
-// fixMojibake corrige ocorrências conhecidas de texto mal-decodificado
-// que podem ter sido persistidas no passado (ex.: 'CriaÃ§Ã£o da requisiÃ§Ã£o').
-func fixMojibake(s string) string {
-	repl := map[string]string{
-		"CriaÃ§Ã£o da requisiÃ§Ã£o": "Criação da requisição",
-		"Cria��o da requisi��o":     "Criação da requisição",
-		"CriaÃo da requisiÃo":       "Criação da requisição",
-	}
-	for k, v := range repl {
-		if strings.Contains(s, k) {
-			s = strings.ReplaceAll(s, k, v)
-		}
-	}
-	return s
-}
 
 /* ======================================================================
    Tipos e utilitários
@@ -134,7 +119,6 @@ func stripAccentsLower(s string) string {
 }
 
 // normalizarForma normaliza strings para comparar/aceitar "Depósito" == "Deposito"
-// (Corrigido: a versão anterior tinha NewReplacer com padrões vazios, que podia causar panic.)
 func normalizarForma(f string) string {
 	return stripAccentsLower(f)
 }
@@ -195,6 +179,10 @@ func (h *ProcessosHandler) KanbanFast(c *gin.Context) {
 
 	resp := make(map[string][]models.ProcessoKanbanDTO, 6)
 	for _, it := range itens {
+		if it.Suspenso != nil && *it.Suspenso {
+			it.ColunaKanban = "Suspensos"
+			it.IdColunaKanban = 99
+		}
 		col := normalizeCol(it.ColunaKanban)
 		resp[col] = append(resp[col], it.ToDTO())
 	}
@@ -223,7 +211,8 @@ func GetProcessosKanban(c *gin.Context) {
             req.endereco_completo,
             IFNULL(CONCAT('[', GROUP_CONCAT(DISTINCT JSON_OBJECT('id', t.id_tag, 'nome', t.nome, 'cor', t.cor)), ']'), '[]') AS tags_json,
             def.credito_simples,
-            def.credito_dobro
+            def.credito_dobro,
+            COALESCE(p.suspenso, CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END) AS suspenso
         FROM
             FT_PROCESSOS p
         JOIN FT_REQUISICOES req ON p.id_processo = req.id_requisicao
@@ -269,7 +258,7 @@ func GetProcessosKanban(c *gin.Context) {
 		if err := rows.Scan(
 			&p.ID, &p.Etapa, &p.SubEtapa, &p.ColunaKanban, &p.UltimaAtualizacao, &p.DataAlerta, &p.Relevancia,
 			&p.NomeCliente, &p.UnidadeConsumidora, &p.Concessionaria, &valorEstimado, &enderecoCompleto, &tagsJSON,
-			&deferimento.CreditoSimples, &deferimento.CreditoDobro,
+			&deferimento.CreditoSimples, &deferimento.CreditoDobro, &p.Suspenso,
 		); err != nil {
 			log.Printf("Erro ao escanear processo: %v", err)
 			continue
@@ -299,6 +288,9 @@ func GetProcessosKanban(c *gin.Context) {
 		}
 
 		nomeColunaKanban := p.ColunaKanban
+		if p.Suspenso {
+			nomeColunaKanban = "Suspensos"
+		}
 		if _, ok := processosAgrupados[nomeColunaKanban]; ok {
 			processosAgrupados[nomeColunaKanban] = append(processosAgrupados[nomeColunaKanban], p)
 			if p.ValorEstimado.Valid {
@@ -1029,16 +1021,6 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 				it.TipoMov = &v
 			}
 
-			// Normalização de texto (corrige caracteres quebrados em comentários)
-			if it.Comentario != nil {
-				fixed := fixMojibake(*it.Comentario)
-				// Correção extra para variante comum de mojibake
-				if strings.Contains(fixed, "CriaÃÃo da requisiÃÃo") {
-					fixed = strings.ReplaceAll(fixed, "CriaÃÃo da requisiÃÃo", "Criação da requisição")
-				}
-				it.Comentario = &fixed
-			}
-
 			// status_composto (sempre Etapa - Subetapa)
 			var sc string
 			if it.EtapaNova != nil {
@@ -1308,7 +1290,7 @@ func ComentarProcesso(c *gin.Context) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar a transação"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar transação"})
 		return
 	}
 
@@ -1734,9 +1716,19 @@ func SuspenderProcesso(c *gin.Context) {
 		processoID).Scan(&etapaAtual, &subAtual)
 
 	// não mexe na sub_etapa; não altera ultima_atualizacao (opcional: pode alterar se desejar)
-	if _, err := tx.Exec(`UPDATE FT_PROCESSOS SET suspenso=1 WHERE id_processo=?`, processoID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao suspender processo"})
-		return
+	var etapaSuspID sql.NullInt64
+	_ = tx.QueryRow(`SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa IN ('Suspenso','Suspensos') LIMIT 1`).Scan(&etapaSuspID)
+
+	if etapaSuspID.Valid {
+		if _, err := tx.Exec(`UPDATE FT_PROCESSOS SET suspenso=1, id_etapa_processo=?, sub_etapa='Suspenso', ultima_atualizacao=NOW() WHERE id_processo=?`, etapaSuspID.Int64, processoID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao suspender processo"})
+			return
+		}
+	} else {
+		if _, err := tx.Exec(`UPDATE FT_PROCESSOS SET suspenso=1 WHERE id_processo=?`, processoID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao suspender processo"})
+			return
+		}
 	}
 
 	_, _ = tx.Exec(`INSERT INTO FT_HISTORICO_MOVIMENTACOES
@@ -1745,8 +1737,8 @@ func SuspenderProcesso(c *gin.Context) {
 		processoID,
 		gestorID,
 		buildStatus(etapaAtual.String, subAtual.String),
-		buildStatus(etapaAtual.String, subAtual.String),
-		etapaAtual.String, etapaAtual.String, subAtual.String,
+		"Suspenso",
+		etapaAtual.String, "Suspenso", "Suspenso",
 		strings.TrimSpace(body.Comentario),
 	)
 
@@ -1787,19 +1779,57 @@ func RetomarProcesso(c *gin.Context) {
 	_ = tx.QueryRow(`SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo=p.id_etapa_processo WHERE p.id_processo=?`,
 		processoID).Scan(&etapaAtual, &subAtual)
 
-	if _, err := tx.Exec(`UPDATE FT_PROCESSOS SET suspenso=0 WHERE id_processo=?`, processoID); err != nil {
+	var prevEtapa, prevSub sql.NullString
+	_ = tx.QueryRow(`
+        SELECT etapa_anterior, sub_etapa
+          FROM FT_HISTORICO_MOVIMENTACOES
+         WHERE id_requisicao = ? AND tipo_movimentacao = 'suspensao'
+         ORDER BY data_movimentacao DESC
+         LIMIT 1`, processoID).Scan(&prevEtapa, &prevSub)
+
+	targetStage := strings.TrimSpace(prevEtapa.String)
+	if targetStage == "" {
+		targetStage = strings.TrimSpace(etapaAtual.String)
+	}
+	targetSub := strings.TrimSpace(prevSub.String)
+
+	setClauses := []string{"suspenso = 0"}
+	args := []interface{}{}
+	if targetStage != "" {
+		var stageID sql.NullInt64
+		_ = tx.QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", targetStage).Scan(&stageID)
+		if stageID.Valid {
+			setClauses = append(setClauses, "id_etapa_processo = ?")
+			args = append(args, stageID.Int64)
+		}
+	}
+	if targetSub != "" {
+		setClauses = append(setClauses, "sub_etapa = ?")
+		args = append(args, targetSub)
+	}
+	args = append(args, processoID)
+	query := fmt.Sprintf("UPDATE FT_PROCESSOS SET %s WHERE id_processo = ?", strings.Join(setClauses, ", "))
+	if _, err := tx.Exec(query, args...); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao retomar processo"})
 		return
 	}
 
+	restoredStage := targetStage
+	if restoredStage == "" {
+		restoredStage = etapaAtual.String
+	}
+	restoredSub := targetSub
+	if restoredSub == "" {
+		restoredSub = subAtual.String
+	}
 	_, _ = tx.Exec(`INSERT INTO FT_HISTORICO_MOVIMENTACOES
         (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
         VALUES (?,?,?,?,?,?,?,?,NOW(),'retomada')`,
 		processoID,
 		gestorID,
 		buildStatus(etapaAtual.String, subAtual.String),
-		buildStatus(etapaAtual.String, subAtual.String),
-		etapaAtual.String, etapaAtual.String, subAtual.String,
+		buildStatus(restoredStage, restoredSub),
+		etapaAtual.String, restoredStage, restoredSub,
 		strings.TrimSpace(body.Comentario),
 	)
 
@@ -1894,6 +1924,30 @@ func MarcarAlertaComoLido(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Alertas marcados como lidos."})
 }
 
+// GET /api/v1/processos/suspensos
+func GetProcessosSuspensos(c *gin.Context) {
+	limit := 100
+	offset := 0
+	if v := strings.TrimSpace(c.DefaultQuery("limit", "100")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+	if v := strings.TrimSpace(c.DefaultQuery("offset", "0")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	repo := repositories.NewProcessosRepo(database.DB_App)
+	items, err := repo.ListarSuspensos(c.Request.Context(), limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar suspensos"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"rows": items, "limit": limit, "offset": offset})
+}
+
 // CreateAlertaManual cria um alerta associado a um processo, para o Usuário logado
 // POST /api/processos/:id/alertas { mensagem: "...", data_alerta?: "YYYY-MM-DD" }
 func CreateAlertaManual(c *gin.Context) {
@@ -1947,6 +2001,41 @@ func CreateAlertaManual(c *gin.Context) {
 	notifyUnread(userID)
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Alerta criado"})
+}
+
+// GET /api/v1/processos/:id/deferimento
+func GetDeferimentoByProcesso(c *gin.Context) {
+	processoID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID invalido"})
+		return
+	}
+
+	var out models.Deferimento
+	err = database.DB_App.QueryRow(`
+        SELECT status_analise, data_procedencia, credito_simples, credito_dobro, data_credito_dobro
+        FROM FT_DEFERIMENTOS
+        WHERE id_processo = ?
+        LIMIT 1
+    `, processoID).Scan(
+		&out.StatusAnalise,
+		&out.DataProcedencia,
+		&out.CreditoSimples,
+		&out.CreditoDobro,
+		&out.DataCreditoDobro,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusOK, gin.H{})
+			return
+		}
+		log.Printf("Erro ao buscar deferimento do processo %d: %v", processoID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar deferimento"})
+		return
+	}
+
+	c.JSON(http.StatusOK, out)
 }
 
 /* ======================================================================

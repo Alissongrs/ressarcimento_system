@@ -379,6 +379,84 @@ const ProcessoDetalhes = () => {
     })();
   }, [id]);
 
+  // Carrega deferimento / fluxo / faturamento do processo
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      const token = localStorage.getItem('userToken') || localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      try {
+        const resDef = await fetch(`/api/v1/processos/${id}/deferimento`, { headers });
+        if (resDef.ok) {
+          const def = await resDef.json();
+          if (def) {
+            const unwrapDate = (v) => {
+              if (!v) return '';
+              if (typeof v === 'string') return v.slice(0, 10);
+              if (typeof v === 'object') {
+                if (v.Valid === false) return '';
+                return (v.Time || v.time || v.value || '').slice(0, 10);
+              }
+              return String(v).slice(0, 10);
+            };
+            const unwrapNumber = (v) => {
+              if (v === undefined || v === null) return '';
+              if (typeof v === 'number') return v;
+              if (typeof v === 'string') return v;
+              if (typeof v === 'object') {
+                if (v.Valid === false) return '';
+                if (typeof v.Float64 === 'number') return v.Float64;
+                if (typeof v.Float64 === 'string') return Number(v.Float64);
+              }
+              return '';
+            };
+            setDataDeferimento(unwrapDate(def.data_procedencia || def.DataProcedencia));
+            setCreditoSimples(unwrapNumber(def.credito_simples ?? def.CreditoSimples));
+            const cd = unwrapNumber(def.credito_dobro ?? def.CreditoDobro);
+            setCreditoDobro(cd);
+            setHabilitarCreditoDobro(cd !== '' && cd !== null);
+            setDataCreditoDobro(unwrapDate(def.data_credito_dobro || def.DataCreditoDobro));
+          }
+        }
+      } catch {}
+
+      try {
+        const resFluxo = await fetch(`/api/v1/fluxo-ressarcimento/${id}`, { headers });
+        if (resFluxo.ok) {
+          const data = await resFluxo.json();
+          const arr = Array.isArray(data?.itens) ? data.itens : Array.isArray(data) ? data : [];
+          setFluxoRessarcimento(
+            arr.map((it, idx) => ({
+              id: it.id || idx + 1,
+              formasDevolucao: it.forma_devolucao ? [it.forma_devolucao] : [],
+              valor: it.valor ?? '',
+              data: asDateInput(it.data_devolucao || it.data_envio_financeiro || it.data),
+            })),
+          );
+        }
+      } catch {}
+
+      try {
+        const resFat = await fetch(`/api/v1/faturamento/${id}`, { headers });
+        if (resFat.ok) {
+          const data = await resFat.json();
+          const arr = Array.isArray(data?.itens) ? data.itens : Array.isArray(data) ? data : [];
+          setFaturamento(
+            arr.map((it, idx) => ({
+              id: it.id || idx + 1,
+              numeroNF: it.numero_nf || it.numero || it.nf || '',
+              dataEmissao: asDateInput(it.data_emissao || ''),
+              dataVencimento: asDateInput(it.data_vencimento || ''),
+              dataPagamento: asDateInput(it.data_pagamento || ''),
+              valor: it.valor ?? '',
+              anexoNF: null,
+            })),
+          );
+        }
+      } catch {}
+    })();
+  }, [id]);
+
   // Fonte primária: Requisição
   useEffect(() => {
     (async () => {

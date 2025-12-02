@@ -1,6 +1,7 @@
-﻿// src/pages/ChatRequisicaoNew.jsx
+// src/pages/ChatRequisicaoNew.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
+import RequisicaoForm from './RequisicaoForm.jsx';
 import {
   buscarUC,
   criarRequisicao,
@@ -35,7 +36,7 @@ function Linkified({ text }) {
   const lines = String(text || '').split('\n');
   const re = /(https?:\/\/[^\s]+)|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})|(\+?\d{0,2}\s?\(?\d{2}\)?\s?\d{4,5}-?\d{4})/g;
   const toWa = (raw) => {
-    const d = String(raw || '').replace(/\D/g, '');
+    const d = String(raw || '').replace(/\s+/g, '').toUpperCase();
     if (!d) return null;
     if (d.startsWith('55')) return `https://wa.me/${d}`;
     return `https://wa.me/55${d}`;
@@ -277,6 +278,9 @@ export default function ChatRequisicaoNew() {
   const [faturas, setFaturas] = useState([]);
   const [pickedIdxs, setPickedIdxs] = useState([]);               // meses (lista) – hoje não usado, mas mantido
   const [pickedInvoiceIdxs, setPickedInvoiceIdxs] = useState([]); // seleção de faturas individuais
+  const [manualPromptActive, setManualPromptActive] = useState(false);
+  const [manualModalOpen, setManualModalOpen] = useState(false);
+  const [manualInitialUc, setManualInitialUc] = useState('');
 
   const fileRef = useRef(null);
   const bootRef = useRef(false);
@@ -581,7 +585,7 @@ export default function ChatRequisicaoNew() {
 
       // STEP 0: usuário digitou a UC
       if (step === 0) {
-        const uc = text.replace(/\D/g, '');
+        const uc = text.replace(/\s+/g, '').toUpperCase();
         if (!uc) { await botSay('Não encontrei nenhum número. Para prosseguir, informe a UC (apenas dígitos).'); return; }
         setForm((s) => ({ ...s, uc }));
         ucDisplayRef.current.unidade = uc;
@@ -634,6 +638,8 @@ export default function ChatRequisicaoNew() {
 
         if (!dados || Object.keys(dados).length === 0) {
           await botSay('UC não encontrada. Verifique o número e tente novamente.');
+          setManualPromptActive(true);
+          setManualInitialUc(uc);
           return;
         }
 
@@ -649,6 +655,8 @@ export default function ChatRequisicaoNew() {
             id_empresa: String(idEmpDirect),
             uc: s.uc || uc,
           }));
+          setManualPromptActive(false);
+          setManualInitialUc('');
           ucResolved.current = {
             id_uc: String(idUcDirect),
             id_empresa: String(idEmpDirect),
@@ -1109,6 +1117,33 @@ export default function ChatRequisicaoNew() {
             </div>
           )}
 
+          {manualPromptActive && (
+            <div className="mt-3 p-3 rounded-md border border-dashed border-amber-500 bg-amber-50 text-sm text-amber-900 space-y-2">
+              <p>UC não encontrada. Deseja tentar novamente ou preencher manualmente?</p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="px-3 py-1 text-xs rounded border border-[var(--panel-border)]"
+                  onClick={() => {
+                    setManualPromptActive(false);
+                  }}
+                >
+                  Tentar novamente
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1 text-xs rounded border bg-[var(--accent)] text-[var(--fg)]"
+                  onClick={() => {
+                    setManualModalOpen(true);
+                    setManualPromptActive(false);
+                    setManualInitialUc(form.uc);
+                  }}
+                >
+                  Preencher manualmente
+                </button>
+              </div>
+            </div>
+          )}
           {step >= 5 && (
             <div className="mt-3 p-3 rounded-md border border-[var(--panel-border)] bg-[var(--panel)] text-sm">
               <div className="mb-2">Caso queira iniciar uma nova requisição, clique abaixo.</div>
@@ -1167,9 +1202,38 @@ export default function ChatRequisicaoNew() {
       <div className="hidden lg:block fixed right-4 top-24 z-[6000] w-80 max-w-[90vw]">
         <ResumoBox />
       </div>
+      {manualModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[7000] flex items-center justify-center px-4">
+          <div className="bg-[var(--bg)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-auto">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border)]">
+              <div className="text-lg font-semibold">Requisição manual</div>
+              <button
+                type="button"
+                className="px-3 py-1 rounded border text-xs"
+                onClick={() => {
+                  setManualModalOpen(false);
+                  setManualPromptActive(false);
+                }}
+              >
+                Fechar
+              </button>
+            </div>
+            <div className="p-4">
+              <RequisicaoForm
+                initialUc={manualInitialUc}
+                manualMode
+                onClose={() => {
+                  setManualModalOpen(false);
+                  setManualPromptActive(false);
+                  setManualInitialUc('');
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
-
 
 

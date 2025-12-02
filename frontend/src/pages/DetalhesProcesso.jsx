@@ -11,6 +11,7 @@ import {
   descartarProcesso,
   excluirProcesso,
   getProcessoById,
+  getDeferimentoByProcesso,
   getAllTags,
   updateProcessoTags,
   createTag,
@@ -541,43 +542,56 @@ const DetalhesProcesso = () => {
       setDataAlerta(processarDataSegura(processoData.data_alerta));
       setRelevancia(!!processoData.relevancia);
 
-      // Deferimento: tentar vindo do processo; fallback na planilha (inclui datas/valores)
+      // Deferimento: tentar vindo do processo; fallback na API específica e planilha
+      const normalizeDef = (def = {}) => ({
+        data_procedencia:
+          (def.data_procedencia && String(def.data_procedencia).slice(0, 10)) ||
+          (def.DataProcedencia?.Time ? def.DataProcedencia.Time.slice(0, 10) : '') ||
+          '',
+        credito_simples:
+          typeof def.credito_simples === 'number'
+            ? def.credito_simples
+            : typeof def.CreditoSimples === 'number'
+            ? def.CreditoSimples
+            : typeof def.credito_simples?.Float64 === 'number'
+            ? def.credito_simples.Float64
+            : typeof def.credito_simples?.Float64 === 'string'
+            ? Number(def.credito_simples.Float64)
+            : 0,
+        credito_dobro:
+          typeof def.credito_dobro === 'number'
+            ? def.credito_dobro
+            : typeof def.CreditoDobro === 'number'
+            ? def.CreditoDobro
+            : typeof def.credito_dobro?.Float64 === 'number'
+            ? def.credito_dobro.Float64
+            : typeof def.credito_dobro?.Float64 === 'string'
+            ? Number(def.credito_dobro.Float64)
+            : 0,
+        data_credito_dobro:
+          (def.data_credito_dobro && String(def.data_credito_dobro).slice(0, 10)) ||
+          (def.DataCreditoDobro?.Time ? def.DataCreditoDobro.Time.slice(0, 10) : '') ||
+          '',
+      });
+
       if (processoData.deferimento) {
-        const def = processoData.deferimento;
-        const norm = {
-          data_procedencia:
-            (def.data_procedencia && String(def.data_procedencia).slice(0, 10)) ||
-            (def.DataProcedencia?.Time ? def.DataProcedencia.Time.slice(0, 10) : '') ||
-            '',
-          credito_simples:
-            typeof def.credito_simples === 'number'
-              ? def.credito_simples
-              : typeof def.CreditoSimples === 'number'
-              ? def.CreditoSimples
-              : 0,
-          credito_dobro:
-            typeof def.credito_dobro === 'number'
-              ? def.credito_dobro
-              : typeof def.CreditoDobro === 'number'
-              ? def.CreditoDobro
-              : 0,
-          data_credito_dobro:
-            (def.data_credito_dobro && String(def.data_credito_dobro).slice(0, 10)) ||
-            (def.DataCreditoDobro?.Time ? def.DataCreditoDobro.Time.slice(0, 10) : '') ||
-            '',
-        };
-        setDadosDeferimento(norm);
+        setDadosDeferimento(normalizeDef(processoData.deferimento));
       } else {
         try {
-          const plan = await listPlanilha({ q: id, limit: 1 });
-          const row = Array.isArray(plan) && plan.length ? plan[0] : null;
-          if (row) {
-            setDadosDeferimento({
-              data_procedencia: row.data_simples || '',
-              credito_simples: row.credito_simples ?? 0,
-              credito_dobro: row.credito_dobro ?? 0,
-              data_credito_dobro: row.data_dobro || '',
-            });
+          const defApi = await getDeferimentoByProcesso(id);
+          if (defApi) {
+            setDadosDeferimento(normalizeDef(defApi));
+          } else {
+            const plan = await listPlanilha({ q: id, limit: 1 });
+            const row = Array.isArray(plan) && plan.length ? plan[0] : null;
+            if (row) {
+              setDadosDeferimento({
+                data_procedencia: row.data_simples || '',
+                credito_simples: row.credito_simples ?? 0,
+                credito_dobro: row.credito_dobro ?? 0,
+                data_credito_dobro: row.data_dobro || '',
+              });
+            }
           }
         } catch {}
       }
@@ -1228,10 +1242,10 @@ const DetalhesProcesso = () => {
                 </div>
 
                 {/* Módulos Condicionais */}
-                {etapa === 'Pendente' && (
+                {true && (
                   <ModuloDeferimento
                     processoId={processo?.id}
-                    dadosIniciais={dadosDeferimento}
+                    dados={dadosDeferimento}
                     onUpdate={setDadosDeferimento}
                   />
                 )}

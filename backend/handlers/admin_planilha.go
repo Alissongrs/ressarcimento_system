@@ -50,6 +50,7 @@ func AdminPlanilhaList(c *gin.Context) {
     sub := strings.TrimSpace(c.Query("sub"))
     ini := strings.TrimSpace(c.Query("ini")) // YYYY-MM-DD
     fim := strings.TrimSpace(c.Query("fim")) // YYYY-MM-DD
+    coluna := strings.TrimSpace(c.Query("coluna"))
     limit := strings.TrimSpace(c.DefaultQuery("limit", "100"))
     offset := strings.TrimSpace(c.DefaultQuery("offset", "0"))
 
@@ -87,6 +88,8 @@ func AdminPlanilhaList(c *gin.Context) {
         LEFT JOIN FT_REQUISICOES r         ON r.id_requisicao = p.id_processo
         LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = p.id_processo
         LEFT JOIN FT_DEFERIMENTOS d        ON d.id_processo     = p.id_processo
+        LEFT JOIN DM_ETAPAS_PROCESSO etapa ON p.id_etapa_processo = etapa.id_etapa_processo
+        LEFT JOIN DM_KANBAN_COLUNAS kanb ON etapa.id_coluna_kanban = kanb.id_coluna
         LEFT JOIN (
           SELECT x.id_processo, x.forma_devolucao, x.valor, x.data_devolucao, x.data_envio_financeiro, x.created_at
             FROM FT_FLUXO_RESSARCIMENTO x
@@ -130,10 +133,14 @@ func AdminPlanilhaList(c *gin.Context) {
         where = append(where, "DATE(h.data_movimentacao) <= ?")
         args = append(args, fim)
     }
+    if coluna != "" {
+        where = append(where, "LOWER(kanb.nome_coluna) = ?")
+        args = append(args, strings.ToLower(coluna))
+    }
     if len(where) > 0 {
         sqlBase += " WHERE " + strings.Join(where, " AND ")
     }
-    sqlBase += " ORDER BY p.id_processo DESC, h.data_movimentacao DESC"
+    sqlBase += " ORDER BY p.id_processo ASC, h.data_movimentacao ASC"
     if limit != "" {
         sqlBase += fmt.Sprintf(" LIMIT %s", limit)
         if offset != "" && offset != "0" {
@@ -194,8 +201,11 @@ func AdminPlanilhaList(c *gin.Context) {
           COALESCE(h.sub_etapa, '')                         AS sub_etapa,
           COALESCE(h.tipo_movimentacao, '')                 AS tipo_movimentacao
         FROM FT_REQUISICOES r
+        LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
         LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = r.id_requisicao
         LEFT JOIN FT_DEFERIMENTOS d ON d.id_processo = r.id_requisicao
+        LEFT JOIN DM_ETAPAS_PROCESSO etapa ON p.id_etapa_processo = etapa.id_etapa_processo
+        LEFT JOIN DM_KANBAN_COLUNAS kanb ON etapa.id_coluna_kanban = kanb.id_coluna
         LEFT JOIN (
           SELECT x.id_processo, x.forma_devolucao, x.valor, x.data_devolucao, x.data_envio_financeiro, x.created_at
             FROM FT_FLUXO_RESSARCIMENTO x
@@ -218,7 +228,7 @@ func AdminPlanilhaList(c *gin.Context) {
         if len(where) > 0 {
             sqlBaseAlt += " WHERE " + strings.Join(where, " AND ")
         }
-        sqlBaseAlt += " ORDER BY r.id_requisicao DESC, h.data_movimentacao DESC"
+        sqlBaseAlt += " ORDER BY r.id_requisicao ASC, h.data_movimentacao ASC"
 
         rows2, err2 := database.DB_App.Query(sqlBaseAlt, args...)
         if err2 == nil {

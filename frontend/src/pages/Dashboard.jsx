@@ -1,759 +1,796 @@
-// src/pages/Dashboard.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { SkeletonLine, SkeletonBlock } from '../components/Skeleton.jsx';
-import { getDashboardStats, getMovimentacoesPeriodo } from '../services/requisicaoService';
 import {
-  biProcessCounts,
-  biStatusCounts,
-  biValueEstimate,
-  biCreditsTotals,
-  biFunnel,
-  biThroughputWeek,
-  biThroughputMonth,
-  biTopConcessionarias,
-  biTopClientes,
-  biAgingBuckets,
-  biSLA,
-  biHeatmapWeek,
-  biWipGestores,
-  biHistValor,
-} from '../services/biService';
-import StatCard from '../components/StatCard';
-import Donut from '../components/charts/Donut';
-import SimpleBar from '../components/charts/SimpleBar';
-import Funnel from '../components/charts/Funnel';
-import Sparkline from '../components/charts/Sparkline';
-import LineChart from '../components/charts/LineChart';
-import BubbleChart from '../components/charts/BubbleChart';
-import ParetoChart from '../components/charts/ParetoChart';
-// Opcional: só renderiza se existir o componente
-let HeatmapWeek;
-try {
-  // se você criou o componente, ele entra; se não, segue sem heatmap
-  // eslint-disable-next-line global-require, import/no-extraneous-dependencies
-  HeatmapWeek = require('../components/charts/HeatmapWeek').default;
-} catch (_) {
-  HeatmapWeek = null;
-}
+  getDashboardDeferidos,
+  getDashboardStats,
+  getProcessosKanbanFast,
+  getPythonClassification,
+  getPythonConcluded,
+  getPythonDashboardOverview,
+  getPythonKanbanProcesses,
+} from '../services/requisicaoService';
 
-const fmtBRL = (n) =>
+const formatCurrency = (n) =>
   (Number(n) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
 
-const toNum = (v, def = 0) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : def;
-};
+const activeStatuses = new Set(['Ainda não compensado', 'Em tratativa sobre o valor', 'Restituído']);
 
 export default function Dashboard() {
-  const [stats, setStats] = useState(null);
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState('');
-
-  const [ini, setIni] = useState('');
-  const [fim, setFim] = useState('');
-  const [incluirSuspensos, setIncluirSuspensos] = useState(false);
-  const [apenasRelevantes, setApenasRelevantes] = useState(false);
-  const [cliente, setCliente] = useState('');
-  const [concessionaria, setConcessionaria] = useState('');
-  const [gestorId, setGestorId] = useState('');
-
-  // --- BI (Python) state ---
-  const [biLoading, setBiLoading] = useState(false);
-  const [biErr, setBiErr] = useState('');
-  const [bi, setBi] = useState({});
-  const [bubbleGroup, setBubbleGroup] = useState('concessionaria');
-  const [paretoGroup, setParetoGroup] = useState('concessionaria');
-  const [insights, setInsights] = useState(null);
-  const [forecastW, setForecastW] = useState(null);
-  const [forecastM, setForecastM] = useState(null);
-  const [biHealth, setBiHealth] = useState(null);
-
-  // Ação manual: Recarregar BI (refetch + ping)
-  const reloadBI = async () => {
-    try {
-      await loadBI();
-      const svc = await import('../services/biService');
-      const pong = await svc.biPing();
-      setBiHealth(pong?.ok === true ? 'ok' : 'fail');
-    } catch (_) {
-      setBiHealth('fail');
-    }
-  };
-  const [movs, setMovs] = useState([]);
-  const [loadingMovs, setLoadingMovs] = useState(false);
-  const [errMovs, setErrMovs] = useState('');
-
-  const load = async () => {
-    try {
-      setLoading(true); setErr('');
-      const data = await getDashboardStats({
-        incluir_suspensos: incluirSuspensos ? 1 : 0,
-        apenas_relevantes: apenasRelevantes ? 1 : 0,
-        ini: ini || undefined,
-        fim: fim || undefined,
-        cliente: cliente || undefined,
-        concessionaria: concessionaria || undefined,
-        gestor_id: gestorId || undefined,
-      });
-      // diagnóstico: veja exatamente o que o backend mandou
-      console.debug('[Dashboard] /dashboard/stats payload =>', data);
-      setStats(data);
-    } catch (e) {
-      console.error('[Dashboard] Falha no getDashboardStats:', e);
-      setErr('Falha ao carregar o dashboard.');
-      setStats(null);
-    } finally { setLoading(false); }
-  };
-
-  useEffect(() => { load(); }, [incluirSuspensos, apenasRelevantes, ini, fim, cliente, concessionaria, gestorId]);
-
-  const buildBiFilters = () => ({
-    incluir_suspensos: incluirSuspensos ? 1 : 0,
-    apenas_relevantes: apenasRelevantes ? 1 : 0,
-    ini: ini || undefined,
-    fim: fim || undefined,
-    cliente: cliente || undefined,
-    concessionaria: concessionaria || undefined,
-    gestor_id: gestorId || undefined,
-  });
-
-  const loadBI = async () => {
-    try {
-      setBiLoading(true); setBiErr('');
-      const f = buildBiFilters();
-      const [pc, sc, ve, cr, fn, tw, tm, tc, tcl, ag, sla, hm, wip, hv, ins, fcw, fcm] = await Promise.all([
-        biProcessCounts(f),
-        biStatusCounts(f),
-        biValueEstimate(f),
-        biCreditsTotals(f),
-        biFunnel(f),
-        biThroughputWeek(f),
-        biThroughputMonth(f),
-        biTopConcessionarias(f),
-        biTopClientes(f),
-        biAgingBuckets(f),
-        biSLA(f),
-        biHeatmapWeek(f),
-        biWipGestores(f),
-        biHistValor(f),
-        (await import('../services/biService')).biInsightsSummary(f),
-        (await import('../services/biService')).biThroughputForecast(f, 'week', 8),
-        (await import('../services/biService')).biThroughputForecast(f, 'month', 6),
-      ]);
-      setBi({ pc, sc, ve, cr, fn, tw, tm, tc, tcl, ag, sla, hm, wip, hv });
-      setInsights(ins); setForecastW(fcw); setForecastM(fcm);
-    } catch (e) {
-      console.error('[Dashboard BI] Falha no loadBI:', e);
-      setBiErr('Falha ao carregar dados do BI Python.');
-    } finally { setBiLoading(false); }
-  };
-
-  useEffect(() => { loadBI(); }, [incluirSuspensos, apenasRelevantes, ini, fim, cliente, concessionaria, gestorId]);
+  const [error, setError] = useState('');
+  const [kanbanColumns, setKanbanColumns] = useState({});
+  const [kanbanLoading, setKanbanLoading] = useState(true);
+  const [kanbanError, setKanbanError] = useState('');
+  const [selectedColumn, setSelectedColumn] = useState('');
+  const [selectedEtapa, setSelectedEtapa] = useState('');
+  const [selectedSubEtapa, setSelectedSubEtapa] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [pythonOverview, setPythonOverview] = useState(null);
+  const [pythonClassification, setPythonClassification] = useState([]);
+  const [pythonProcesses, setPythonProcesses] = useState({});
+  const [pythonConcluded, setPythonConcluded] = useState(null);
+  const [statsData, setStatsData] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState('');
 
   useEffect(() => {
-    let mounted = true;
     (async () => {
       try {
-        const svc = await import('../services/biService');
-        const pong = await svc.biPing();
-        if (mounted) setBiHealth(pong?.ok === true ? 'ok' : 'fail');
-      } catch {
-        if (mounted) setBiHealth('fail');
+        setLoading(true);
+        const res = await getDashboardDeferidos();
+        setData(res);
+      } catch (e) {
+        console.error(e);
+        setError('Não foi possível carregar os dados.');
+      } finally {
+        setLoading(false);
       }
     })();
-    return () => { mounted = false };
   }, []);
 
-  // ---- FALLBACKS/DERIVAÇÕES ----
-  // 1) status_counts (pode vir faltando ou em outro formato)
-  const statusCounts = useMemo(() => {
-    const sc = stats?.status_counts || stats?.status || {};
-    return {
-      pendente:    toNum(sc.pendente ?? sc.PENDENTE ?? sc.Pendente),
-      em_analise:  toNum(sc.em_analise ?? sc.EM_ANALISE ?? sc['Em Análise'] ?? sc.EmAnalise),
-      aprovado:    toNum(sc.aprovado ?? sc.APROVADO ?? sc.Aprovado ?? sc.procedente ?? sc.Procedente),
-      rejeitado:   toNum(sc.rejeitado ?? sc.REJEITADO ?? sc.Rejeitado ?? sc.improcedente ?? sc.Improcedente),
-    };
-  }, [stats]);
+  useEffect(() => {
+    (async () => {
+      try {
+        setKanbanLoading(true);
+        const res = await getProcessosKanbanFast();
+        if (res?.colunas) {
+          setKanbanColumns(res.colunas);
+          if (!selectedColumn) {
+            const first = Object.keys(res.colunas)[0];
+            setSelectedColumn(first || '');
+          }
+        } else {
+          setKanbanColumns({});
+        }
+      } catch (e) {
+        console.error('kanban-fast', e);
+        setKanbanError('Falha ao carregar colunas do Kanban.');
+      } finally {
+        setKanbanLoading(false);
+      }
+    })();
+  }, []);
 
-  // 2) processos_counts:
-  //    Se não vier pronto (ex.: {ativos, deferidos, ...}),
-  //    tento derivar de 'colunas' (retorno comum do kanban-fast) ou equivalentes.
-  const procCounts = useMemo(() => {
-    const pc = stats?.processos_counts;
-    if (pc && Object.keys(pc).length > 0) {
+  useEffect(() => {
+    setSelectedEtapa('');
+    setSelectedSubEtapa('');
+  }, [selectedColumn]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setStatsLoading(true);
+        const res = await getDashboardStats();
+        setStatsData(res);
+      } catch (e) {
+        console.error('dashboard/stats', e);
+        setStatsError('Não foi possível carregar os totais gerais.');
+      } finally {
+        setStatsLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [
+          overview,
+          classification,
+          processes,
+          concluded,
+        ] = await Promise.all([
+          getPythonDashboardOverview(),
+          getPythonClassification(),
+          getPythonKanbanProcesses(),
+          getPythonConcluded(),
+        ]);
+        setPythonOverview(overview);
+        setPythonClassification(classification?.classificacoes || []);
+        setPythonProcesses(processes || {});
+        setPythonConcluded(concluded || null);
+      } catch (e) {
+        console.error('python dashboard', e);
+      }
+    })();
+  }, []);
+
+  const statusActiveCount = useMemo(() => {
+    if (!data?.status_counts) return 0;
+    return Object.entries(data.status_counts).reduce(
+      (acc, [status, value]) => (activeStatuses.has(status) ? acc + Number(value || 0) : acc),
+      0
+    );
+  }, [data]);
+
+  const pieData = useMemo(() => {
+    if (!data?.status_creditos) return [];
+    const total = Object.values(data.status_creditos).reduce((sum, v) => sum + Number(v || 0), 0);
+    if (!total) return [];
+    let cumulative = 0;
+    return Object.entries(data.status_creditos).map(([status, value]) => {
+      const v = Number(value || 0);
+      const start = cumulative / total;
+      cumulative += v;
+      const end = cumulative / total;
+      return { status, value: v, start, end };
+    });
+  }, [data]);
+
+  const barMax = useMemo(() => {
+    if (!data?.barra?.length) return 1;
+    return Math.max(...data.barra.map((item) => Number(item.credito || 0)));
+  }, [data]);
+
+  const safeNum = (input) => {
+    const n = typeof input === 'number' ? input : Number(input);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const pythonApiBase =
+    (import.meta.env.VITE_PYTHON_DASHBOARD_BASE_URL || '').replace(/\/$/, '') ||
+    'http://localhost:5200/api/dashboard';
+  const pythonChartUrl = `${pythonApiBase}/graphs/status?cacheBust=${Date.now()}`;
+  const trendData =
+    statsData?.tendencia30d ?? statsData?.tendencia_30d ?? [];
+  const trendMax = Math.max(
+    1,
+    ...trendData.map((point) => Number(point.total || point.valor || point.total || 0)),
+  );
+  const topConcessionarias =
+    statsData?.top_concessionarias ?? statsData?.topConcessionarias ?? [];
+  const topClientes = statsData?.top_clientes ?? statsData?.topClientes ?? [];
+  const creditTotals = statsData?.creditos || {};
+  const columnDistribution = pythonOverview?.processos_por_coluna || [];
+  const columnTotal =
+    columnDistribution.reduce((sum, item) => sum + Number(item.processos || 0), 0) || 1;
+
+  const columnSummaries = useMemo(() => {
+    return Object.entries(kanbanColumns).map(([column, itens]) => {
+      const count = Array.isArray(itens) ? itens.length : 0;
+      let total = 0;
+      const etapas = new Set();
+      const subetapas = new Set();
+      (Array.isArray(itens) ? itens : []).forEach((item) => {
+        const credito =
+          safeNum(item.credito_simples) + safeNum(item.credito_dobro) + safeNum(item.credito || 0);
+        total += credito;
+        if (item.etapa) etapas.add(item.etapa);
+        if (item.sub_etapa) subetapas.add(item.sub_etapa);
+      });
       return {
-        ativos:              toNum(pc.ativos),
-        deferidos:           toNum(pc.deferidos),
-        fluxo_ressarcimento: toNum(pc.fluxo_ressarcimento ?? pc.fluxo ?? pc['fluxo-ressarcimento']),
-        faturamento:         toNum(pc.faturamento),
-        concluidos:          toNum(pc.concluidos ?? pc.concluídos),
-        indeferidos:         toNum(pc.indeferidos),
+        column,
+        count,
+        total,
+        etapas: Array.from(etapas),
+        subetapas: Array.from(subetapas),
       };
-    }
-    // Deriva de objetos alternativos
-    const col = stats?.colunas || stats?.kanban || stats?.kanban_fast || stats?.processos || {};
-    const len = (obj, key) => {
-      const v = obj?.[key];
-      if (Array.isArray(v)) return v.length;
-      // alguns backends devolvem { total: N }
-      if (v && typeof v === 'object' && 'total' in v) return toNum(v.total);
-      // alguns devolvem só um número
-      return toNum(v, 0);
-    };
-    return {
-      ativos:              len(col, 'ativos') || len(col, 'Ativos'),
-      deferidos:           len(col, 'deferidos') || len(col, 'Deferidos'),
-      fluxo_ressarcimento: len(col, 'fluxo_ressarcimento') || len(col, 'fluxo') || len(col, 'Fluxo de Ressarcimento'),
-      faturamento:         len(col, 'faturamento') || len(col, 'Faturamento'),
-      concluidos:          len(col, 'concluidos') || len(col, 'Concluídos') || len(col, 'concluidos_total'),
-      indeferidos:         len(col, 'indeferidos') || len(col, 'Indeferidos'),
-    };
-  }, [stats]);
+    });
+  }, [kanbanColumns]);
 
-  // 3) donut data a partir do procCounts (sempre numérico)
-  const donutData = useMemo(() => ([
-    { label: 'Ativos',         value: toNum(procCounts.ativos),              color: 'var(--accent)' },
-    { label: 'Deferidos',      value: toNum(procCounts.deferidos),           color: '#10b981' },
-    { label: 'Fluxo',          value: toNum(procCounts.fluxo_ressarcimento), color: '#f59e0b' },
-    { label: 'Faturamento',    value: toNum(procCounts.faturamento),         color: '#06b6d4' },
-    { label: 'Concluídos',     value: toNum(procCounts.concluidos),          color: '#9ca3af' },
-    { label: 'Indeferidos',    value: toNum(procCounts.indeferidos),         color: '#ef4444' },
-  ]), [procCounts]);
+  const approvedColumnCount = useMemo(() => {
+    const target = columnSummaries.find((item) => /aprovado/i.test(item.column));
+    return target?.count ?? 0;
+  }, [columnSummaries]);
 
-  const totalRequisicoes = toNum(stats?.total_requisicoes);
-  const totalProcessos   = toNum(stats?.total_processos);
+  const activeCount = approvedColumnCount || statusActiveCount;
 
-  // Funil por status (fallback para statusCounts)
-  const funil = useMemo(() => {
-    const f = stats?.funil;
-    const rows = Array.isArray(f) && f.length > 0 ? f : [
-      { label: 'Pendente', total: toNum(statusCounts.pendente) },
-      { label: 'Em Análise', total: toNum(statusCounts.em_analise) },
-      { label: 'Aprovado', total: toNum(statusCounts.aprovado) },
-      { label: 'Rejeitado', total: toNum(statusCounts.rejeitado) },
-    ];
-    return rows;
-  }, [stats, statusCounts]);
+  const allProcesses = useMemo(() => {
+    const list = [];
+    Object.entries(kanbanColumns).forEach(([column, itens]) => {
+      if (!Array.isArray(itens)) return;
+      itens.forEach((item) => list.push({ ...item, coluna: column }));
+    });
+    return list;
+  }, [kanbanColumns]);
 
-  // Throughput (semana/mês)
-  const throughput = stats?.throughput_semana || stats?.throughput_mes || [];
+  const filteredProcesses = useMemo(() => {
+    if (!allProcesses.length) return [];
+    const start = startDate ? new Date(startDate) : null;
+    const end = endDate ? new Date(endDate) : null;
+    return allProcesses.filter((item) => {
+      if (selectedColumn && item.coluna !== selectedColumn) return false;
+      if (selectedEtapa && item.etapa !== selectedEtapa) return false;
+      if (selectedSubEtapa && item.sub_etapa !== selectedSubEtapa) return false;
+      if (start || end) {
+        const raw = item.data_ultima_movimentacao || item.ultima_atualizacao;
+        if (!raw) return false;
+        const date = new Date(raw);
+        if (Number.isNaN(date.getTime())) return false;
+        if (start && date < start) return false;
+        if (end && date > end) return false;
+      }
+      return true;
+    });
+  }, [
+    allProcesses,
+    selectedColumn,
+    selectedEtapa,
+    selectedSubEtapa,
+    startDate,
+    endDate,
+  ]);
 
-  // Top concessionárias/clientes
-  const topConcessionarias = stats?.top_concessionarias || [];
-  const topClientes = stats?.top_clientes || [];
-
-  // Aging buckets (geral)
-  const aging = stats?.aging_buckets || [];
-
-  // SLA
-  const slaOk = toNum(stats?.sla?.on_time);
-  const slaLate = toNum(stats?.sla?.late);
-
-  // extrai sparklines de tendência (30d) só com valores
-  const trendVals = (stats?.tendencia_30d || [])
-    .map(d => toNum(d?.total))
-    .filter(n => Number.isFinite(n));
+  const currentColumn = columnSummaries.find((item) => item.column === selectedColumn);
 
   if (loading) {
     return (
-      <div className="p-4 md:p-8 bg-background text-foreground min-h-screen">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          {[0,1,2,3].map(i => (
-            <div key={i} className="glass-card gradient-card shadow-medium p-4 rounded-lg border">
-              <SkeletonLine width="40%" />
-              <div className="mt-3"><SkeletonLine width="60%" height={28} /></div>
-              <div className="mt-3"><SkeletonLine width="80%" height={20} /></div>
-            </div>
-          ))}
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <SkeletonBlock h={280} />
-          <SkeletonBlock h={280} />
-        </div>
+      <div className="flex items-center justify-center h-full text-sm text-[var(--fg)]">
+        Carregando painel...
       </div>
     );
   }
-  if (err || !stats) {
-    return (
-      <div className="p-8 text-center">
-        <p className="text-danger">{err || 'Sem dados'}</p>
-        <button onClick={load} className="mt-4 px-4 py-2 bg-[var(--accent)] rounded hover:opacity-90">
-          Tentar novamente
-        </button>
-      </div>
-    );
+  if (error) {
+    return <div className="text-sm text-red-500 p-4">{error}</div>;
   }
 
   return (
-    <div className="p-4 md:p-8 bg-background text-foreground min-h-screen">
-      <div className="rounded-xl shadow-elevated p-4 mb-6 border-2" style={{ background:'var(--header-bg)', borderColor:'var(--header-border)', color:'var(--header-fg)' }}>
-        <h2 className="text-lg md:text-xl font-extrabold tracking-tight">Dashboard</h2>
-        <p className="opacity-90 text-sm mt-1">Visão geral de processos e requisições</p>
-      </div>
-      {/* Filtros */}
-      <div className="glass-card gradient-card shadow-medium p-4 rounded-lg border mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-end">
-          <div className="flex items-center gap-2">
-            <input id="chk-susp" type="checkbox" checked={incluirSuspensos} onChange={e=>setIncluirSuspensos(e.target.checked)} />
-            <label htmlFor="chk-susp" className="text-sm">Incluir suspensos</label>
-          </div>
-          <div className="flex items-center gap-2">
-            <input id="chk-rel" type="checkbox" checked={apenasRelevantes} onChange={e=>setApenasRelevantes(e.target.checked)} />
-            <label htmlFor="chk-rel" className="text-sm">Apenas relevantes</label>
-          </div>
-          <div>
-            <label className="block text-xs opacity-70">Data inicial</label>
-            <input type="date" value={ini} onChange={e=>setIni(e.target.value)} className="w-full p-2 rounded border border-[var(--border)] bg-transparent" />
-          </div>
-          <div>
-            <label className="block text-xs opacity-70">Data final</label>
-            <input type="date" value={fim} onChange={e=>setFim(e.target.value)} className="w-full p-2 rounded border border-[var(--border)] bg-transparent" />
-          </div>
-          <div>
-            <label className="block text-xs opacity-70">Cliente</label>
-            <input type="text" placeholder="contém..." value={cliente} onChange={e=>setCliente(e.target.value)} className="w-full p-2 rounded border border-[var(--border)] bg-transparent" />
-          </div>
-          <div>
-            <label className="block text-xs opacity-70">Concessionária</label>
-            <input type="text" placeholder="contém..." value={concessionaria} onChange={e=>setConcessionaria(e.target.value)} className="w-full p-2 rounded border border-[var(--border)] bg-transparent" />
-          </div>
-          <div>
-            <label className="block text-xs opacity-70">Gestor (ID)</label>
-            <input type="number" min="0" value={gestorId} onChange={e=>setGestorId(e.target.value)} className="w-full p-2 rounded border border-[var(--border)] bg-transparent" />
-          </div>
-          <div className="flex items-end"><button onClick={load} className="px-3 py-2 rounded bg-[var(--accent)] hover:opacity-90 text-[var(--fg)]">Aplicar</button></div>
+    <div className="p-6 space-y-6">
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm">
+          <p className="text-xs uppercase tracking-[0.4em] text-slate-400 mb-2">Processos ativos</p>
+          <p className="text-3xl font-bold">{activeCount}</p>
+          <p className="text-xs text-slate-500 mt-1">Status selecionados ainda não compensados / em tratativa.</p>
         </div>
-      </div>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Dashboard (BI)</h1>
-        <p className="opacity-60 text-xs">
-          {apenasRelevantes ? 'Filtrando apenas relevantes' : 'Inclui relevantes e não relevantes'}
-          {' · '}
-          {incluirSuspensos ? 'incluindo suspensos' : 'excluindo suspensos'}
-        </p>
-        <p className="opacity-80">Visão estratégica, tática e operacional</p>
-
-        {/* Alerta leve para quando processos_counts não vier do backend */}
-        {!stats.processos_counts && (stats.colunas || stats.kanban || stats.kanban_fast) && (
-          <p className="mt-2 text-xs opacity-70">
-            Observação: derivando as contagens a partir de <code>colunas</code> (kanban-fast) porque <code>processos_counts</code> não veio do backend.
-          </p>
-        )}
-      </div>
-
-      {/* ----- BI (Python) ----- */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-2xl font-bold">BI (Python)</h2>
-          <button onClick={reloadBI} className="px-3 py-2 rounded bg-[var(--accent)] hover:opacity-90 text-[var(--fg)] disabled:opacity-60" disabled={!!biLoading}>
-            {biLoading ? 'Carregando...' : 'Recarregar BI'}
-          </button>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm">
+          <p className="text-xs uppercase tracking-[0.4em] text-slate-400 mb-2">Carteira (previsto)</p>
+          <p className="text-3xl font-bold">{formatCurrency(data?.total_credito)}</p>
+          <p className="text-xs text-slate-500 mt-1">Soma de crédito simples + crédito dobro.</p>
         </div>
-        {biErr && <p className="text-danger text-sm mt-2">{biErr}</p>}
-      </div>
-
-      {/* Health + KPIs: Valor estimado e Créditos */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <StatCard title="BI" value={biHealth==='ok' ? 'Conectado' : 'Offline'} color={biHealth==='ok' ? 'success' : 'danger'} />
-        <StatCard title="Valor Estimado" value={fmtBRL(bi?.ve?.total)} color="accent" />
-        <StatCard title="Crédito Simples" value={fmtBRL(bi?.cr?.simples_total)} color="success" />
-        <StatCard title="Crédito em Dobro" value={fmtBRL(bi?.cr?.dobro_total)} color="warning" />
-      </div>
-
-      {/* Padrões (crescimento e previsão) */}
-      {insights && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <StatCard title="Conversão" value={`${Number(insights.conversion_rate_pct||0).toFixed(1)}%`} color="success" />
-          <StatCard title="Rejeição" value={`${Number(insights.rejection_rate_pct||0).toFixed(1)}%`} color="danger" />
-          <StatCard title="Crescimento (semana)" value={Number(insights.growth_week_slope||0).toFixed(2)} color="accent" />
-          <StatCard title="Crescimento (mês)" value={Number(insights.growth_month_slope||0).toFixed(2)} color="accent" />
-        </div>
-      )}
-      {(forecastW || forecastM) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-          {forecastW && <StatCard title="Prev. próximos (semana)" value={Math.round(forecastW?.forecast?.[0]?.y||0)} subtitle="Próxima semana" color="neutral" />}
-          {forecastM && <StatCard title="Prev. próximos (mês)" value={Math.round(forecastM?.forecast?.[0]?.y||0)} subtitle="Próximo mês" color="neutral" />}
-        </div>
-      )}
-
-      {/* Pipeline (Donut) + Funil */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        <div className="glass-card p-6 rounded-lg border flex items-center gap-6">
-          <Donut data={[
-            { label: 'Ativos', value: Number(bi?.pc?.ativos||0) },
-            { label: 'Deferidos', value: Number(bi?.pc?.deferidos||0) },
-            { label: 'Fluxo', value: Number(bi?.pc?.fluxo||0) },
-            { label: 'Faturamento', value: Number(bi?.pc?.faturamento||0) },
-            { label: 'Concluídos', value: Number(bi?.pc?.concluidos||0) },
-            { label: 'Indeferidos', value: Number(bi?.pc?.indeferidos||0) },
-          ]} centerLabel="Pipeline" />
-        </div>
-        {Array.isArray(bi?.fn) && bi.fn.length>0 && (
-          <Funnel title="Funil por Status" data={bi.fn} />
-        )}
-      </div>
-
-      {/* Top N e Throughput */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {Array.isArray(bi?.tc) && bi.tc.length>0 && (
-          <SimpleBar title="Top Concessionárias (R$)" data={bi.tc} valueFmt={fmtBRL} />
-        )}
-        {Array.isArray(bi?.tcl) && bi.tcl.length>0 && (
-          <SimpleBar title="Top Clientes (R$)" data={bi.tcl} valueFmt={fmtBRL} />
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {Array.isArray(bi?.tw) && bi.tw.length>0 && (
-          <LineChart title="Throughput (semanal)" data={bi.tw} />
-        )}
-        {Array.isArray(bi?.tm) && bi.tm.length>0 && (
-          <LineChart title="Throughput (mensal)" data={bi.tm} />
-        )}
-      </div>
-
-      {/* Aging e SLA */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {bi?.ag && (
-          <SimpleBar title="Aging (dias)" data={[
-            { label: '0-7', total: Number(bi.ag.b0_7||0) },
-            { label: '8-15', total: Number(bi.ag.b8_15||0) },
-            { label: '16-30', total: Number(bi.ag.b16_30||0) },
-            { label: '31+', total: Number(bi.ag.b31mais||0) },
-          ]} />
-        )}
-        {bi?.sla && (
-          <div className="glass-card p-6 rounded-lg border flex items-center gap-6">
-            <Donut data={[
-              { label: 'No prazo', value: Number(bi.sla.on_time||0), color: '#16a34a' },
-              { label: 'Fora do prazo', value: Number(bi.sla.late||0), color: '#ef4444' },
-            ]} centerLabel={`${((Number(bi.sla.on_time||0)/(Number(bi.sla.on_time||0)+Number(bi.sla.late||0)||1))*100).toFixed(0)}%`} />
-          </div>
-        )}
-      </div>
-
-      {/* Heatmap & WIP Gestores */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {HeatmapWeek && Array.isArray(bi?.hm) && bi.hm.length>0 && (
-          <div className="glass-card p-6 rounded-lg border">
-            <h3 className="text-xl font-semibold mb-4">Heatmap (semana×hora)</h3>
-            <HeatmapWeek data={bi.hm} />
-          </div>
-        )}
-        {Array.isArray(bi?.wip) && bi.wip.length>0 && (
-          <SimpleBar title="WIP por Gestor" data={bi.wip} />
-        )}
-      </div>
-
-      {/* Histograma Valor Estimado */}
-      <div className="mb-12">
-        {Array.isArray(bi?.hv) && bi.hv.length>0 && (
-          <SimpleBar title="Histograma de Valor Estimado (faixas)" data={bi.hv} />
-        )}
-      </div>
-
-      {/* Bolhas (agrupamento por valores) */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <h3 className="text-xl font-semibold">Agrupamento por valores (bolhas)</h3>
-          <select value={bubbleGroup} onChange={e=>setBubbleGroup(e.target.value)} className="p-1 rounded bg-transparent border border-[var(--border)]">
-            <option value="concessionaria">Concessionária</option>
-            <option value="cliente">Cliente</option>
-          </select>
-        </div>
-        <BubbleSection group={bubbleGroup} filters={buildBiFilters()} />
-      </div>
-
-      {/* Pareto 80/20 */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <h3 className="text-xl font-semibold">Pareto 80/20</h3>
-          <select value={paretoGroup} onChange={e=>setParetoGroup(e.target.value)} className="p-1 rounded bg-transparent border border-[var(--border)]">
-            <option value="concessionaria">Concessionária</option>
-            <option value="cliente">Cliente</option>
-          </select>
-        </div>
-        <ParetoSection group={paretoGroup} filters={buildBiFilters()} />
-      </div>
-      {/* Funil por Status + Throughput */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {Array.isArray(funil) && funil.length > 0 && (
-          <SimpleBar title="Funil por Status" data={funil} />
-        )}
-        {Array.isArray(throughput) && throughput.length > 0 && (
-          <SimpleBar title="Throughput (itens por período)" data={throughput} />
-        )}
-      </div>
-
-      {/* Top Concessionárias / Top Clientes */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {Array.isArray(topConcessionarias) && topConcessionarias.length > 0 && (
-          <SimpleBar title="Top Concessionárias (R$)" data={topConcessionarias} valueFmt={fmtBRL} />
-        )}
-        {Array.isArray(topClientes) && topClientes.length > 0 && (
-          <SimpleBar title="Top Clientes (R$)" data={topClientes} valueFmt={fmtBRL} />
-        )}
-      </div>
-
-      {/* Aging e SLA */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {Array.isArray(aging) && aging.length > 0 && (
-          <SimpleBar title="Aging por Faixa (dias)" data={aging} />
-        )}
-        {(slaOk + slaLate) > 0 && (
-          <div className="glass-card p-6 rounded-lg border flex items-center gap-6">
-            <div className="flex-1">
-              <h3 className="text-xl font-semibold mb-2">SLA de Movimentação</h3>
-              <p className="text-sm opacity-70 mb-4">% movimentações dentro do prazo definido.</p>
-              <div className="flex items-center gap-6">
-                <Donut data={[
-                  { label: 'No prazo', value: slaOk, color: '#16a34a' },
-                  { label: 'Fora do prazo', value: slaLate, color: '#ef4444' },
-                ]} centerLabel={`${((slaOk/(slaOk+slaLate))*100).toFixed(0)}%`} />
-                <div className="grid grid-cols-1 gap-3">
-                  <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full" style={{background:'#16a34a'}}></span><span className="text-sm">No prazo</span><span className="ml-auto text-sm font-semibold">{slaOk}</span></div>
-                  <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full" style={{background:'#ef4444'}}></span><span className="text-sm">Fora do prazo</span><span className="ml-auto text-sm font-semibold">{slaLate}</span></div>
-                </div>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm">
+          <p className="text-xs uppercase tracking-[0.4em] text-slate-400 mb-2">Concessionárias</p>
+          <div className="grid gap-1 text-xs text-slate-700">
+            {(data?.concessionarias || []).slice(0, 4).map((item, idx) => (
+              <div key={`${item.concessionaria}-${idx}`} className="flex justify-between">
+                <span>{item.concessionaria}</span>
+                <span className="font-semibold">{item.count} proc.</span>
               </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-700">Insights Python</h2>
+          <p className="text-xs text-slate-500">Dados crus servidos pelo serviço FastAPI</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="card">
+            <small>Total de requisições (Python)</small>
+            <div className="stat">{pythonOverview?.total_requisicoes?.toLocaleString() ?? '—'}</div>
+          </div>
+          <div className="card">
+            <small>Total Italiano</small>
+            <div className="stat">{pythonOverview?.processos_por_coluna?.length ?? '—'} colunas</div>
+          </div>
+          <div className="card">
+            <small>Processos concluídos</small>
+            <div className="stat">{pythonConcluded?.total_processos_concluidos ?? '—'}</div>
+          </div>
+          <div className="card">
+            <small>Crédito concluído</small>
+            <div className="stat accent">{formatCurrency((pythonConcluded?.total_credito || 0).toFixed(2))}</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="card space-y-2">
+            <small>Classificações de erro</small>
+            <div className="overflow-auto max-h-32 text-xs">
+              <table className="w-full">
+                <thead className="text-[10px] text-slate-400 uppercase tracking-[0.15em]">
+                  <tr>
+                    <th>Tipo</th>
+                    <th>Subtipo</th>
+                    <th>Total</th>
+                    <th>%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pythonClassification.slice(0, 6).map((item) => (
+                    <tr key={`${item.tipo}-${item.subtipo}`} className="border-b border-[var(--border)] hover:bg-white/5">
+                      <td className="py-2">{item.tipo}</td>
+                      <td>{item.subtipo}</td>
+                      <td>{item.total}</td>
+                      <td>{item.percentual}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
-        )}
-      </div>
-
-      {/* Estratégico */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatCard
-          title="Total de Requisições"
-          value={totalRequisicoes}
-          color="accent"
-          defHint="Volume total de requisições registradas."
-          trend={trendVals}
-        />
-        <StatCard
-          title="Total de Processos"
-          value={totalProcessos}
-          color="success"
-          defHint="Processos ativos no funil (todas as colunas)."
-        />
-        <StatCard
-          title="Valor Estimado"
-          value={fmtBRL(stats?.valor_total_ressarcimento)}
-          color="accent"
-          defHint="Soma de valor_estimado das requisições."
-          trend={trendVals}
-        />
-        <StatCard
-          title="Taxa de Procedência"
-          value={`${totalRequisicoes > 0 ? ((toNum(statusCounts.aprovado) / totalRequisicoes) * 100).toFixed(1) : '0'}%`}
-          subtitle={`${toNum(statusCounts.aprovado)} de ${totalRequisicoes}`}
-          color="success"
-          defHint="Aprovadas/Procedentes dividido por total de requisições."
-        />
-      </div>
-
-      {/* Pipeline por coluna (donut) + Créditos */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        <div className="glass-card p-6 rounded-lg border">
-          <h3 className="text-xl font-semibold mb-2">Pipeline por coluna</h3>
-          <p className="text-sm opacity-70 mb-4">Clique nas métricas para ver a definição</p>
-          <div className="flex items-center gap-6">
-            <Donut data={donutData} centerLabel={`${donutData.reduce((s,d)=>s + toNum(d.value), 0)} proc.`} />
-            <div className="flex-1 grid grid-cols-2 gap-3">
-              {donutData.map((d, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full" style={{ background: d.color }} />
-                  <span className="text-sm">{d.label}</span>
-                  <span className="ml-auto text-sm font-semibold">{toNum(d.value)}</span>
+          <div className="card space-y-2">
+            <small>Histórico de etapas até conclusão</small>
+            <p className="text-sm text-slate-400">
+              Média de {pythonConcluded?.media_movimentacoes_historico?.toFixed(2) ?? '0'} itens
+              ({pythonConcluded?.historico_etapas?.length ?? 0} combinações).
+            </p>
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              {(pythonConcluded?.historico_etapas || []).slice(0, 4).map((row, idx) => (
+                <div key={`${row.etapa_nova}-${row.sub_etapa}-${idx}`} className="border border-[var(--border)] rounded p-2">
+                  <div className="text-xs text-slate-400">{row.etapa_nova}</div>
+                  <strong>{row.sub_etapa || '—'}</strong>
+                  <div className="text-[10px] text-slate-500">{row.ocorrencias} ocorr.</div>
                 </div>
               ))}
             </div>
           </div>
         </div>
+        <div className="chart-frame h-48">
+          <img
+            src={pythonChartUrl}
+            alt="Gráfico de status Python"
+            className="w-full h-full object-contain"
+          />
+        </div>
+      </section>
 
-        <div className="glass-card p-6 rounded-lg border">
-          <h3 className="text-xl font-semibold mb-4">Créditos Procedentes</h3>
-          <div className="grid grid-cols-3 gap-4">
-            <StatCard
-              title="Simples (R$)"
-              value={fmtBRL(stats?.creditos?.simples_total)}
-              color="neutral"
-              defHint="Soma de crédito simples (FT_DEFERIMENTOS)."
-            />
-            <StatCard
-              title="Dobro (R$)"
-              value={fmtBRL(stats?.creditos?.dobro_total)}
-              color="warning"
-              defHint="Soma de crédito em dobro (FT_DEFERIMENTOS)."
-            />
-            <StatCard
-              title="Total Procedente (R$)"
-              value={fmtBRL(stats?.creditos?.total_procedente)}
-              color="success"
-              defHint="Simples + Dobro."
-            />
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-700">Visão BI</h2>
+          <p className="text-xs text-slate-500">Explorando tendências, crédito e rankings.</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="card">
+            <small>Crédito simples total</small>
+            <div className="stat">{formatCurrency(creditTotals.simples_total ?? 0)}</div>
+          </div>
+          <div className="card">
+            <small>Crédito dobro total</small>
+            <div className="stat accent">{formatCurrency(creditTotals.dobro_total ?? 0)}</div>
+          </div>
+          <div className="card">
+            <small>Total carteira (previsto)</small>
+            <div className="stat">{formatCurrency(creditTotals.total_procedente ?? 0)}</div>
+          </div>
+          <div className="card">
+            <small>Processos por coluna</small>
+            <div className="stat">{statsData?.processos_counts?.ativos ?? 0}</div>
+            <p className="text-xs text-slate-400">Apenas ativos + deferidos etc.</p>
           </div>
         </div>
-      </div>
-
-      {/* (Opcional) Heatmap Semana × Hora — só renderiza se stats.heatmap_semana existir */}
-      {HeatmapWeek && Array.isArray(stats?.heatmap_semana) && stats.heatmap_semana.length > 0 && (
-        <div className="glass-card p-6 rounded-lg border mb-8">
-          <h3 className="text-xl font-semibold mb-4">Heatmap de Movimentações (Semana × Hora)</h3>
-          <p className="text-sm opacity-70 mb-4">Concentração de movimentações por dia da semana e hora do dia.</p>
-          <HeatmapWeek data={stats.heatmap_semana} />
+        <div className="card">
+          <div className="flex items-center justify-between">
+            <div>
+              <small>Movimentações 30 dias</small>
+              <h3 className="text-lg font-semibold text-slate-100">Tendência diária</h3>
+            </div>
+            <span className="text-xs text-slate-400">
+              {trendData.length ? trendData[trendData.length - 1].dia : '—'}
+            </span>
+          </div>
+          <div className="flex items-end gap-2 mt-4 h-24">
+            {trendData.map((point, idx) => {
+              const height = Math.max(3, (point.total || point.valor || 0) * 100 / trendMax);
+              return (
+                <div
+                  key={`${point.dia}-${idx}`}
+                  style={{
+                    height: `${height}%`,
+                    width: `${100 / Math.max(trendData.length, 1)}%`,
+                    background: '#38bdf8',
+                    borderRadius: '999px',
+                  }}
+                  title={`${point.dia}: ${point.total ?? point.valor ?? 0}`}
+                ></div>
+              );
+            })}
+          </div>
         </div>
-      )}
-
-      {/* Tático: Tempo médio por etapa + Aging */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        <div className="glass-card p-6 rounded-lg border">
-          <h3 className="text-xl font-semibold mb-4">Tempo médio por etapa (dias)</h3>
-          <div className="space-y-3">
-            {(stats?.tempo_medio_dias_por_etapa || []).map((row, idx) => (
-              <div key={idx} className="flex items-center gap-3">
-                <div className="w-40 text-sm opacity-80 truncate">{row?.etapa || '-'}</div>
-                <div className="flex-1 h-3 rounded-full bg-[var(--border)]/30">
-                  <div
-                    className="h-3 rounded-full bg-[var(--accent)]"
-                    style={{ width: `${Math.min(100, (toNum(row?.dias) || 0) * 10)}%` }}
-                  />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="card">
+            <small>Top Concessionárias (valor)</small>
+            <div className="space-y-2 mt-4 text-sm">
+              {(topConcessionarias || []).map((item, idx) => {
+                const percent =
+                  (Number(item.total || 0) /
+                    Math.max(
+                      topConcessionarias.reduce((acc, cur) => acc + Number(cur.total || 0), 0),
+                      1,
+                    )) *
+                  100;
+                return (
+                  <div key={`${item.label}-${idx}`}>
+                    <div className="flex justify-between">
+                      <span>{item.label}</span>
+                      <span className="text-xs text-slate-400">{formatCurrency(item.total)}</span>
+                    </div>
+                    <div
+                      className="h-1 rounded-full bg-slate-800 mt-1"
+                      style={{ position: 'relative' }}
+                    >
+                      <span
+                        className="absolute inset-0 rounded-full bg-gradient-to-r from-[#22c55e] to-[#0ea5e9]"
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="card">
+            <small>Top Clientes (valor)</small>
+            <div className="space-y-2 mt-4 text-sm">
+              {(topClientes || []).slice(0, 6).map((item, idx) => (
+                <div key={`${item.label}-${idx}`} className="flex justify-between">
+                  <span>{item.label}</span>
+                  <span className="text-xs text-slate-400">{formatCurrency(item.total)}</span>
                 </div>
-                <div className="w-16 text-right text-sm font-semibold">{(toNum(row?.dias) || 0).toFixed(1)}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-700">Distribuição por coluna</h2>
+          <span className="text-xs text-slate-400">{columnDistribution.length} colunas monitoradas</span>
+        </div>
+        <div className="grid gap-3">
+          {columnDistribution.map((col) => {
+            const width = Math.min(100, (Number(col.processos) / columnTotal) * 100);
+            return (
+              <div
+                key={col.coluna}
+                className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 flex flex-col gap-2"
+              >
+                <div className="flex justify-between text-xs text-slate-400">
+                  <span>{col.coluna}</span>
+                  <span>{col.processos.toLocaleString()} processos</span>
+                </div>
+                <div className="h-2 rounded-full bg-slate-800 relative">
+                  <span
+                    className="absolute inset-0 rounded-full bg-gradient-to-r from-[#22c55e] to-[#0ea5e9]"
+                    style={{ width: `${width}%` }}
+                  ></span>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {width.toFixed(1)}% do painel de requisições
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-700">Classificações rápidas</h2>
+          <span className="text-xs text-slate-400">{pythonClassification.length} categorias</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {pythonClassification.slice(0, 4).map((item) => (
+            <div
+              key={`${item.tipo}-${item.subtipo}`}
+              className="card"
+            >
+              <small>{item.tipo}</small>
+              <div className="stat">{item.total}</div>
+              <p className="text-xs text-slate-400">{item.percentual}% do total</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-700">Requisições por status</h2>
+          {statsLoading && <span className="text-xs text-slate-500">Carregando...</span>}
+        </div>
+        {statsError ? (
+          <div className="text-sm text-red-500">{statsError}</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-400 mb-2">Total de requisições</p>
+              <p className="text-2xl font-bold">{statsData?.total_requisicoes ?? '-'}</p>
+            </div>
+            {[
+              { label: 'Nova Requisição', value: statsData?.status_counts?.pendente ?? 0 },
+              { label: 'Em análise', value: statsData?.status_counts?.em_analise ?? 0 },
+              { label: 'Aprovado', value: statsData?.status_counts?.aprovado ?? 0 },
+              { label: 'Rejeitado', value: statsData?.status_counts?.rejeitado ?? 0 },
+            ].map((entry) => (
+              <div key={entry.label} className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-400 mb-2">{entry.label}</p>
+                <p className="text-2xl font-bold">{entry.value}</p>
               </div>
             ))}
           </div>
-        </div>
+        )}
+      </section>
 
-        <div className="glass-card p-6 rounded-lg border">
-          <h3 className="text-xl font-semibold mb-4">Aging (dias sem movimentação)</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard title="0–7"  value={toNum(stats?.aging_por_coluna?.['0_7'])}   color="success" />
-            <StatCard title="8–15" value={toNum(stats?.aging_por_coluna?.['8_15'])}  color="accent"  />
-            <StatCard title="16–30" value={toNum(stats?.aging_por_coluna?.['16_30'])} color="warning" />
-            <StatCard title="31+"  value={toNum(stats?.aging_por_coluna?.['31_mais'])} color="danger" />
-          </div>
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-700">Colunas do Kanban</h2>
+          <p className="text-xs text-slate-500">Clique em uma coluna para ver os processos ativos</p>
         </div>
-      </div>
+        {kanbanLoading ? (
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-6 text-sm text-center text-slate-500">
+            Carregando colunas do Kanban...
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            {columnSummaries.map((item) => (
+              <button
+                key={item.column}
+                type="button"
+                onClick={() => setSelectedColumn(item.column)}
+                className={`text-left rounded-xl border p-4 shadow-sm transition ${
+                  selectedColumn === item.column
+                    ? 'border-[var(--accent)] bg-[var(--panel)]'
+                    : 'border-[var(--border)] bg-[var(--panel)]'
+                }`}
+              >
+                <p className="text-xs uppercase tracking-[0.4em] text-slate-400 mb-2">{item.column}</p>
+                <p className="text-2xl font-bold">{item.count} processos</p>
+                <p className="text-sm text-slate-500">{formatCurrency(item.total)}</p>
+                <p className="text-[11px] text-slate-400 mt-2">
+                  Etapas: {item.etapas.slice(0, 2).join(', ') || '–'}
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
+        {kanbanError && (
+          <div className="text-sm text-red-500 border border-red-200 rounded p-2">{kanbanError}</div>
+        )}
+      </section>
 
-      {/* Operacional: Movimentações por período */}
-      <div className="glass-card p-6 rounded-lg border">
-        <h3 className="text-xl font-semibold mb-4">Movimentações por período</h3>
-        <div className="flex flex-col sm:flex-row gap-3 mb-4 items-end">
-          <div className="flex-1">
-            <label className="block text-sm opacity-70 mb-1">Início</label>
-            <input type="date" value={ini} onChange={(e)=>setIni(e.target.value)} className="w-full px-3 py-2 border panel-border panel-bg-60 text-[var(--fg)] rounded" />
-          </div>
-          <div className="flex-1">
-            <label className="block text-sm opacity-70 mb-1">Fim</label>
-            <input type="date" value={fim} onChange={(e)=>setFim(e.target.value)} className="w-full px-3 py-2 border panel-border panel-bg-60 text-[var(--fg)] rounded" />
-          </div>
-          <button
-            onClick={async ()=>{
-              try {
-                setLoadingMovs(true); setErrMovs('');
-                const data = await getMovimentacoesPeriodo(ini, fim);
-                console.debug('[Dashboard] /dashboard/movimentacoes payload =>', data);
-                setMovs(Array.isArray(data) ? data : []);
-              } catch (e) { 
-                console.error('[Dashboard] Falha no getMovimentacoesPeriodo:', e);
-                setErrMovs('Falha ao carregar movimentações'); 
-              }
-              finally { setLoadingMovs(false); }
-            }}
-            className="px-4 py-2 bg-[var(--accent)] text-[var(--fg)] rounded hover:opacity-90"
-            disabled={!ini || !fim || loadingMovs}
-          >
-            {loadingMovs ? 'Carregando...' : 'Buscar'}
-          </button>
+      <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm space-y-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="flex flex-col text-xs text-slate-500">
+            Coluna
+            <select
+              value={selectedColumn}
+              onChange={(e) => setSelectedColumn(e.target.value)}
+              className="mt-1 rounded border px-2 py-1 text-sm"
+            >
+              <option value="">Todas</option>
+              {columnSummaries.map((item) => (
+                <option key={item.column} value={item.column}>
+                  {item.column}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col text-xs text-slate-500">
+            Etapa
+            <select
+              value={selectedEtapa}
+              onChange={(e) => setSelectedEtapa(e.target.value)}
+              className="mt-1 rounded border px-2 py-1 text-sm"
+            >
+              <option value="">Todas</option>
+              {(currentColumn?.etapas || []).map((etapa) => (
+                <option key={etapa} value={etapa}>
+                  {etapa}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col text-xs text-slate-500">
+            Subetapa
+            <select
+              value={selectedSubEtapa}
+              onChange={(e) => setSelectedSubEtapa(e.target.value)}
+              className="mt-1 rounded border px-2 py-1 text-sm"
+            >
+              <option value="">Todas</option>
+              {(currentColumn?.subetapas || []).map((sub) => (
+                <option key={sub} value={sub}>
+                  {sub}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col text-xs text-slate-500">
+            Data de atualização (início)
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="mt-1 rounded border px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="flex flex-col text-xs text-slate-500">
+            Data de atualização (fim)
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="mt-1 rounded border px-2 py-1 text-sm"
+            />
+          </label>
         </div>
-
-        {errMovs && <p className="text-danger text-sm">{errMovs}</p>}
-        {!errMovs && movs?.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
+        <div className="overflow-auto max-h-[260px] text-xs">
+          <table className="w-full text-left">
+            <thead className="text-slate-500 text-[10px] uppercase tracking-[0.2em] sticky top-0 bg-[var(--panel)]">
+              <tr>
+                <th className="px-2 py-1">ID</th>
+                <th className="px-2 py-1">Cliente</th>
+                <th className="px-2 py-1">Concessionária</th>
+                <th className="px-2 py-1">Etapa</th>
+                <th className="px-2 py-1">Subetapa</th>
+                <th className="px-2 py-1">Crédito</th>
+                <th className="px-2 py-1">Simples</th>
+                <th className="px-2 py-1">Dobro</th>
+                <th className="px-2 py-1">Atualização</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredProcesses.length === 0 ? (
                 <tr>
-                  <th className="px-3 py-2 text-left opacity-70">Data</th>
-                  <th className="px-3 py-2 text-left opacity-70">Processo</th>
-                  <th className="px-3 py-2 text-left opacity-70">Usuário</th>
-                  <th className="px-3 py-2 text-left opacity-70">De / Para</th>
-                  <th className="px-3 py-2 text-left opacity-70">Comentário</th>
+                  <td colSpan={9} className="px-2 py-3 text-center text-slate-500">
+                    Nenhum processo encontrado com os filtros selecionados.
+                  </td>
+                </tr>
+              ) : (
+                filteredProcesses.map((proc) => (
+                  <tr
+                    key={`${proc.id}-${proc.coluna}-${proc.cliente || proc.uc || proc.id}`}
+                    className="border-b border-[var(--border)] last:border-b-0 text-[11px]"
+                  >
+                    <td className="px-2 py-1">{proc.id}</td>
+                    <td className="px-2 py-1">{proc.cliente || proc.uc || '-'}</td>
+                    <td className="px-2 py-1">{proc.concessionaria || '-'}</td>
+                    <td className="px-2 py-1">{proc.etapa || '-'}</td>
+                    <td className="px-2 py-1">{proc.sub_etapa || '-'}</td>
+                    <td className="px-2 py-1">{formatCurrency(safeNum(proc.credito))}</td>
+                    <td className="px-2 py-1">{formatCurrency(safeNum(proc.credito_simples))}</td>
+                    <td className="px-2 py-1">{formatCurrency(safeNum(proc.credito_dobro))}</td>
+                    <td className="px-2 py-1">
+                      {(() => {
+                        const raw = proc.data_ultima_movimentacao || proc.ultima_atualizacao;
+                        if (!raw) return '-';
+                        const d = new Date(raw);
+                        return Number.isNaN(d.getTime())
+                          ? '-'
+                          : d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                      })()}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm space-y-4">
+          <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Tabela consolidada</h2>
+          <div className="overflow-auto max-h-96">
+            <table className="w-full text-xs">
+              <thead className="text-left text-slate-500 sticky top-0 bg-[var(--panel)]">
+                <tr>
+                  <th className="px-2 py-1">Concessionária</th>
+                  <th className="px-2 py-1">Processos</th>
+                  <th className="px-2 py-1">Crédito total</th>
                 </tr>
               </thead>
               <tbody>
-                {movs.map((m, idx) => (
-                  <tr key={idx} className="hover:opacity-90">
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      {m?.data_movimentacao ? new Date(m.data_movimentacao).toLocaleString('pt-BR') : '-'}
-                    </td>
-                    <td className="px-3 py-2">{m?.id_requisicao ?? m?.processo_id ?? '-'}</td>
-                    <td className="px-3 py-2">{m?.usuario_nome ?? m?.nome_usuario ?? '-'}</td>
-                    <td className="px-3 py-2">{[m?.etapa_anterior, m?.etapa_nova].filter(Boolean).join(' ⭢ ')}</td>
-                    <td className="px-3 py-2">{m?.comentario ?? '-'}</td>
+                {(data?.concessionarias || []).map((item, idx) => (
+                  <tr key={`${item.concessionaria}-${idx}`} className="border-b border-[var(--border)] last:border-b-0">
+                    <td className="px-2 py-1">{item.concessionaria}</td>
+                    <td className="px-2 py-1">{item.count}</td>
+                    <td className="px-2 py-1">{formatCurrency(item.credito)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
-        {!errMovs && (!movs || movs.length === 0) && (ini && fim) && (
-          <p className="text-sm opacity-70">Sem movimentações no período.</p>
-        )}
-      </div>
+        </div>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Status (pizza)</h2>
+            <span className="text-[10px] uppercase text-slate-500">Crédito</span>
+          </div>
+          <div className="flex items-center gap-4 mt-4">
+            <div className="relative w-32 h-32">
+              <div
+                className="rounded-full w-full h-full"
+                style={{
+                  background: pieData.length
+                    ? `conic-gradient(${pieData
+                        .map(
+                          (segment, idx) =>
+                            `${['#22c55e', '#38bdf8', '#facc15', '#f97316', '#a855f7'][idx % 5]} ${segment.start *
+                              100}% ${segment.end * 100}%`
+                        )
+                        .join(', ')})`
+                    : '#f3f4f6',
+                }}
+              />
+              <div className="absolute inset-8 rounded-full bg-[var(--panel)] flex items-center justify-center text-xs text-slate-500">
+                {formatCurrency(data?.total_credito)}
+              </div>
+            </div>
+            <div className="text-xs space-y-2 flex-1">
+              {pieData.map((segment) => (
+                <div key={segment.status} className="flex items-center justify-between">
+                  <span>{segment.status}</span>
+                  <span className="font-semibold">{formatCurrency(segment.value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-[2fr,1fr]">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm space-y-3">
+          <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400">Gráfico de barras</h2>
+          <div className="space-y-3">
+            {(data?.barra || []).slice(0, 5).map((item, idx) => {
+              const width = barMax ? (Number(item.credito || 0) / barMax) * 100 : 0;
+              return (
+                <div key={`${item.cliente}-${item.concessionaria}-${idx}`} className="space-y-1">
+                  <div className="flex justify-between text-xs text-slate-500">
+                    <span>{item.cliente || '—'}</span>
+                    <span>{formatCurrency(item.credito)}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                    <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${width}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-sm">
+          <h2 className="text-sm uppercase tracking-[0.3em] text-slate-400 mb-2">Detalhes</h2>
+          <div className="overflow-auto max-h-[320px] text-xs">
+            <table className="w-full text-left">
+              <thead className="text-slate-500 text-[10px] uppercase tracking-[0.2em] sticky top-0 bg-[var(--panel)]">
+                <tr>
+                  <th className="px-2 py-1">Cliente</th>
+                  <th className="px-2 py-1">Crédito</th>
+                  <th className="px-2 py-1">Simples</th>
+                  <th className="px-2 py-1">Dobro</th>
+                  <th className="px-2 py-1">Procedência simples</th>
+                  <th className="px-2 py-1">Procedência dobro</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.detalhes || []).slice(0, 10).map((row, idx) => (
+                  <tr key={`${row.cliente}-${idx}`} className="border-b border-[var(--border)] last:border-b-0">
+                    <td className="px-2 py-1">{row.cliente || '-'}</td>
+                    <td className="px-2 py-1">{formatCurrency(row.credito)}</td>
+                    <td className="px-2 py-1">{formatCurrency(row.credito_simples)}</td>
+                    <td className="px-2 py-1">{formatCurrency(row.credito_dobro)}</td>
+                    <td className="px-2 py-1">{row.data_procedencia_simples || '-'}</td>
+                    <td className="px-2 py-1">{row.data_procedencia_dobro || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </div>
-  );
-}
-
-function BubbleSection({ group, filters }) {
-  const [rows, setRows] = React.useState([]);
-  const [loading, setLoading] = React.useState(false);
-  const [err, setErr] = React.useState('');
-
-  React.useEffect(() => {
-    let mounted = true;
-    async function run() {
-      try {
-        setLoading(true); setErr('');
-        const data = group === 'cliente' ? await (await import('../services/biService')).biBubblesClientes(filters) : await (await import('../services/biService')).biBubblesConcessionarias(filters);
-        if (mounted) setRows(data || []);
-      } catch (e) {
-        if (mounted) setErr('Falha ao carregar bolhas');
-      } finally { if (mounted) setLoading(false); }
-    }
-    run();
-    return () => { mounted = false };
-  }, [group, JSON.stringify(filters)]);
-
-  if (err) return <p className="text-danger text-sm">{err}</p>;
-  return (
-    <BubbleChart title={`Bolhas por ${group}`} data={rows} />
-  );
-}
-
-function ParetoSection({ group, filters }) {
-  const [rows, setRows] = React.useState([]);
-  const [loading, setLoading] = React.useState(false);
-  const [err, setErr] = React.useState('');
-
-  React.useEffect(() => {
-    let mounted = true;
-    async function run() {
-      try {
-        setLoading(true); setErr('');
-        const svc = await import('../services/biService');
-        const data = await svc.biPareto(filters, group);
-        if (mounted) setRows(data || []);
-      } catch (e) {
-        if (mounted) setErr('Falha ao carregar Pareto');
-      } finally { if (mounted) setLoading(false); }
-    }
-    run();
-    return () => { mounted = false };
-  }, [group, JSON.stringify(filters)]);
-
-  if (err) return <p className="text-danger text-sm">{err}</p>;
-  return (
-    <ParetoChart title={`Pareto por ${group}`} data={rows} />
   );
 }

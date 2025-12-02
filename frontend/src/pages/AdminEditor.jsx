@@ -1,6 +1,9 @@
 // src/pages/AdminEditor.jsx
+
 import React, { useEffect, useState, useRef } from 'react';
+
 import { saveProcessoFull, getNextProcessID } from '../services/adminEditorService';
+
 import {
   getRequisicaoById,
   getHistoricoById,
@@ -8,11 +11,16 @@ import {
   getProcessosKanbanFast,
   getFluxoRessarcimento,
   getFaturamento,
+  getDeferimentoByProcesso,
 } from '../services/requisicaoService';
 import { listPlanilha } from '../services/adminPlanilhaService';
+
 import { useAuth } from '../context/AuthContext.jsx';
+
 import { getEtapas, getSubEtapas, getEtapaSubMap } from '../services/filtersService';
+
 import './admin-editor.css';
+
 // Toast substituído por modal centralizado nesta tela
 import AdminPlanilha from './AdminPlanilha.jsx';
 
@@ -42,7 +50,7 @@ export default function AdminEditor() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkInput, setBulkInput] = useState('');
   const [bulkResolvido, setBulkResolvido] = useState([]); // [{ uc, ids:[], selectedId:null|number, status:'ok'|'dup'|'miss', msg?:string }]
-  const [bulkEtapa, setBulkEtapa] = useState('Improcedente');
+  const [bulkEtapa, setBulkEtapa] = useState('Ativos');
   const [bulkCSimples, setBulkCSimples] = useState(''); // número ou lista CSV
   const [bulkDSimples, setBulkDSimples] = useState(''); // data dd/mm/aaaa ou CSV
   const [bulkCDobro, setBulkCDobro] = useState(''); // número ou CSV
@@ -55,13 +63,24 @@ export default function AdminEditor() {
   const [subEtapasOpts, setSubEtapasOpts] = useState([]);
   const [etapaSubMap, setEtapaSubMap] = useState({});
 
+  const kanbanCols = [
+    'Ativos',
+    'Deferidos',
+    'Fluxo de Ressarcimento',
+    'Faturamento',
+    'Concluídos',
+    'Indeferidos',
+    'Suspensos',
+  ];
+
   const colToEtapa = {
     Ativos: 'Andamento',
     Deferidos: 'Pendente',
     'Fluxo de Ressarcimento': 'Enviado ao Financeiro',
     Faturamento: 'Ressarcimento',
-    'Concluídos': 'Concluído',
+    Concluídos: 'Concluído',
     Indeferidos: 'Indeferido',
+    Suspensos: 'Suspenso',
   };
 
   // Helpers de data (exibição BR e normalização para envio)
@@ -208,23 +227,55 @@ export default function AdminEditor() {
         data_alerta: data?.data_alerta ? toBRDateTime(data.data_alerta).slice(0, 10) : '',
         ultima_atualizacao: data?.ultima_atualizacao ? toBRDateTime(data.ultima_atualizacao) : '',
       });
-      // Deferimento direto do processo, se vier no payload principal
-      if (data?.deferimento) {
-        const def = data.deferimento;
-        setDeferimento({
-          data_Procedência: toBRDateTime(def.data_procedencia || def.DataProcedencia || '').slice(0, 10),
-          Crédito_simples: def.credito_simples ?? def.CreditoSimples ?? '',
-          Crédito_dobro: def.credito_dobro ?? def.CreditoDobro ?? '',
-          data_Crédito_dobro: toBRDateTime(def.data_credito_dobro || def.DataCreditoDobro || '').slice(0, 10),
-        });
-      }
 
-      const [h, fluxoSaved, fatSaved, planRows] = await Promise.all([
+      // Deferimento direto do processo, se vier no payload principal
+      const unwrapDate = (v) => {
+        if (!v) return '';
+        if (typeof v === 'string') return v;
+        if (typeof v === 'object') {
+          if (v.Valid === false) return '';
+          return v.Time || v.time || v.value || '';
+        }
+        return String(v);
+      };
+
+      const unwrapNumber = (v) => {
+        if (v === undefined || v === null) return '';
+        if (typeof v === 'number') return v;
+        if (typeof v === 'string') return v;
+        if (typeof v === 'object') {
+          if (v.Valid === false) return '';
+          if (typeof v.Float64 === 'number') return v.Float64;
+          if (typeof v.Float64 === 'string') return Number(v.Float64);
+          if (typeof v.Float32 === 'number') return v.Float32;
+          if (typeof v.Float32 === 'string') return Number(v.Float32);
+        }
+        return '';
+      };
+
+      const normalizeDef = (src = {}) => ({
+        data_procedencia: toBRDateTime(
+          unwrapDate(src.data_procedencia || src.DataProcedencia || src.dataProcedencia || ''),
+        ).slice(0, 10),
+        credito_simples:
+          unwrapNumber(src.credito_simples ?? src.CreditoSimples ?? src.creditoSimples) ?? '',
+        credito_dobro:
+          unwrapNumber(src.credito_dobro ?? src.CreditoDobro ?? src.creditoDobro) ?? '',
+        data_credito_dobro: toBRDateTime(
+          unwrapDate(src.data_credito_dobro || src.DataCreditoDobro || src.dataCreditoDobro || ''),
+        ).slice(0, 10),
+      });
+
+      const defFromProc = data?.deferimento ? normalizeDef(data.deferimento) : null;
+
+      const [h, fluxoSaved, fatSaved, defSaved, planRows] = await Promise.all([
         getHistoricoById(idStr),
         getFluxoRessarcimento(idStr).catch(() => null),
         getFaturamento(idStr).catch(() => null),
+        getDeferimentoByProcesso(idStr).catch(() => null),
         listPlanilha({ q: idStr, limit: 1 }).catch(() => []),
       ]);
+
       setHist(
         (h || []).map((x) => ({
           id_historico: x.id_historico || x.idhistorico || x.id,
@@ -239,16 +290,30 @@ export default function AdminEditor() {
           relevancia_nova: parseBoolLoose(x.relevancia_nova),
         })),
       );
-      const fluxArr = Array.isArray(fluxoSaved?.itens) ? fluxoSaved.itens : Array.isArray(fluxoSaved) ? fluxoSaved : [];
+
+      const fluxArr = Array.isArray(fluxoSaved?.itens)
+        ? fluxoSaved.itens
+        : Array.isArray(fluxoSaved)
+        ? fluxoSaved
+        : [];
+
       setFluxo(
         (fluxArr || []).map((it) => ({
           forma_devolucao: it.forma_devolucao || it.formaDevolucao || 'Fatura',
           valor: it.valor ?? it.valor_fluxo ?? it.valorFluxo ?? 0,
           data_devolucao: toBRDateTime(it.data_devolucao || it.dataDevolucao || '').slice(0, 10),
-          data_envio_financeiro: toBRDateTime(it.data_envio_financeiro || it.dataEnvioFinanceiro || '').slice(0, 10),
+          data_envio_financeiro: toBRDateTime(
+            it.data_envio_financeiro || it.dataEnvioFinanceiro || '',
+          ).slice(0, 10),
         })),
       );
-      const fatArr = Array.isArray(fatSaved?.itens) ? fatSaved.itens : Array.isArray(fatSaved) ? fatSaved : [];
+
+      const fatArr = Array.isArray(fatSaved?.itens)
+        ? fatSaved.itens
+        : Array.isArray(fatSaved)
+        ? fatSaved
+        : [];
+
       setFat(
         (fatArr || []).map((it) => ({
           numero_nf: it.numero_nf || it.numero || it.nf || '',
@@ -256,17 +321,41 @@ export default function AdminEditor() {
           data_vencimento: toBRDateTime(it.data_vencimento || '').slice(0, 10),
           data_pagamento: toBRDateTime(it.data_pagamento || '').slice(0, 10),
           valor: it.valor ?? it.valor_nf ?? it.valorNf ?? 0,
+          anexo_nome: it.anexo_nome || it.anexo || it.nome_anexo || it.nome || '',
         })),
       );
+
       const row = Array.isArray(planRows) && planRows.length ? planRows[0] : null;
-      if (row) {
-        setDeferimento({
-          data_Procedência: row.data_simples ? toBRDateTime(row.data_simples).slice(0, 10) : '',
-          Crédito_simples: row.credito_simples ?? '',
-          Crédito_dobro: row.credito_dobro ?? '',
-          data_Crédito_dobro: row.data_dobro ? toBRDateTime(row.data_dobro).slice(0, 10) : '',
-        });
-      }
+      const defFromPlan = row
+        ? normalizeDef({
+            data_procedencia: row.data_simples,
+            credito_simples: row.credito_simples,
+            credito_dobro: row.credito_dobro,
+            data_credito_dobro: row.data_dobro,
+          })
+        : null;
+
+      // Endpoint específico para deferimento por processo foi desativado.
+      // Caso seja reintroduzido no futuro, basta adicionar aqui algo como:
+      const defFromApi = defSaved ? normalizeDef(defSaved) : null;
+
+      const mergeDef = (...defs) => {
+        const fields = ['data_procedencia', 'credito_simples', 'credito_dobro', 'data_credito_dobro'];
+        const out = {};
+        defs
+          .filter(Boolean)
+          .forEach((d) =>
+            fields.forEach((f) => {
+              if (d[f] !== undefined && d[f] !== null && d[f] !== '' && out[f] === undefined) {
+                out[f] = d[f];
+              }
+            }),
+          );
+        return out;
+      };
+
+      const finalDef = mergeDef(defFromProc, defFromApi, defFromPlan);
+      setDeferimento(finalDef);
     } catch (e) {
       setMsg(e?.response?.data?.error || e?.message || 'Falha ao carregar processo');
     }
@@ -277,11 +366,13 @@ export default function AdminEditor() {
       ...prev,
       { forma_devolucao: 'Fatura', valor: 0, data_devolucao: '', data_envio_financeiro: '' },
     ]);
+
   const addFat = () =>
     setFat((prev) => [
       ...prev,
-      { numero_nf: '', data_emissao: '', data_vencimento: '', data_pagamento: '', valor: 0 },
+      { numero_nf: '', data_emissao: '', data_vencimento: '', data_pagamento: '', valor: 0, anexo_nome: '' },
     ]);
+
   const addHist = () =>
     setHist((prev) => [
       ...prev,
@@ -346,7 +437,8 @@ export default function AdminEditor() {
         cnpj: emptyToNull(req.cnpj),
         endereco_completo: emptyToNull(req.endereco_completo),
         razao_social_fatura: emptyToNull(req.razao_social_fatura),
-        ressarcimento_estimado: req.ressarcimento_estimado === '' ? null : Number(req.ressarcimento_estimado),
+        ressarcimento_estimado:
+        req.ressarcimento_estimado === '' ? null : parseMoneyInput(req.ressarcimento_estimado),
         link_fatura: emptyToNull(req.link_fatura),
         data_criacao_requisicao: normalizeDateInput(req.data_criacao_requisicao),
 
@@ -357,17 +449,18 @@ export default function AdminEditor() {
         ultima_atualizacao: normalizeDateInput(proc.ultima_atualizacao),
 
         deferimento: (() => {
-          const ds = normalizeDateInput(deferimento?.data_Procedência);
-          const dd = normalizeDateInput(deferimento?.data_Crédito_dobro);
+          const ds = normalizeDateInput(deferimento?.data_procedencia);
+          const dd = normalizeDateInput(deferimento?.data_credito_dobro);
           const cs =
-            deferimento?.Crédito_simples === '' || deferimento?.Crédito_simples == null
+            deferimento?.credito_simples === '' || deferimento?.credito_simples == null
               ? null
-              : Number(deferimento.Crédito_simples);
+            : parseMoneyInput(deferimento.credito_simples);
           const cd =
-            deferimento?.Crédito_dobro === '' || deferimento?.Crédito_dobro == null
+            deferimento?.credito_dobro === '' || deferimento?.credito_dobro == null
               ? null
-              : Number(deferimento.Crédito_dobro);
-          const has = (ds && ds !== '') || (dd && dd !== '') || (cs !== null && cs !== 0) || (cd !== null && cd !== 0);
+            : parseMoneyInput(deferimento.credito_dobro);
+          const has =
+            (ds && ds !== '') || (dd && dd !== '') || (cs !== null && cs !== 0) || (cd !== null && cd !== 0);
           return has
             ? JSON.stringify({
                 data_procedencia: ds,
@@ -381,6 +474,7 @@ export default function AdminEditor() {
         fluxo_ressarcimento: JSON.stringify({
           itens: (fluxo || []).map((it) => ({
             ...it,
+            valor: parseMoneyInput(it.valor),
             data_devolucao: normalizeDateInput(it.data_devolucao) || '',
             data_envio_financeiro: normalizeDateInput(it.data_envio_financeiro) || '',
           })),
@@ -388,9 +482,11 @@ export default function AdminEditor() {
         faturamento: JSON.stringify({
           itens: (fat || []).map((it) => ({
             ...it,
+            valor: parseMoneyInput(it.valor),
             data_emissao: normalizeDateInput(it.data_emissao) || '',
             data_vencimento: normalizeDateInput(it.data_vencimento) || '',
             data_pagamento: normalizeDateInput(it.data_pagamento) || '',
+            anexo_nome: it.anexo_nome || '',
           })),
         }),
         historico: (hist || [])
@@ -528,24 +624,22 @@ export default function AdminEditor() {
           >
             <h2 className="font-semibold mb-2">Coluna do Processo</h2>
             <div className="flex flex-wrap gap-2 mb-3">
-              {['Ativos', 'Deferidos', 'Fluxo de Ressarcimento', 'Faturamento', 'Concluídos', 'Indeferidos'].map(
-                (c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => {
-                      setSelectedColuna(c);
-                      const etapa = colToEtapa[c];
-                      if (etapa) setProc((s) => ({ ...s, etapa, sub_etapa: '' }));
-                    }}
-                    className={`px-3 py-1 rounded border ${
-                      selectedColuna === c ? 'bg-[var(--accent)] text-[var(--fg)]' : 'border-[var(--panel-border)]'
-                    }`}
-                  >
-                    {c.toUpperCase()}
-                  </button>
-                ),
-              )}
+              {kanbanCols.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => {
+                    setSelectedColuna(c);
+                    const etapa = colToEtapa[c];
+                    if (etapa) setProc((s) => ({ ...s, etapa, sub_etapa: '' }));
+                  }}
+                  className={`px-3 py-1 rounded border ${
+                    selectedColuna === c ? 'bg-[var(--accent)] text-[var(--fg)]' : 'border-[var(--panel-border)]'
+                  }`}
+                >
+                  {c.toUpperCase()}
+                </button>
+              ))}
             </div>
             <p className="text-xs opacity-70">
               Ao escolher a coluna, a Etapa do processo será preenchida automaticamente (você pode ajustar abaixo).
@@ -573,15 +667,19 @@ export default function AdminEditor() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <input id="novo" type="checkbox" checked={criarNovo} onChange={(e) => setcriarNovo(e.target.checked)} />
+              <input
+                id="novo"
+                type="checkbox"
+                checked={criarNovo}
+                onChange={(e) => setcriarNovo(e.target.checked)}
+              />
               <label htmlFor="novo">Criar novo processo</label>
             </div>
             <button
               className="px-3 py-2 bg-blue-600 text-white rounded"
               onClick={loadById}
               disabled={
-                criarNovo ||
-                (!String(processoId || '').trim() && !String((ucBusca || req?.uc || '')).trim())
+                criarNovo || (!String(processoId || '').trim() && !String((ucBusca || req?.uc || '')).trim())
               }
             >
               Carregar
@@ -644,7 +742,9 @@ export default function AdminEditor() {
                     setTimeout(() => {
                       try {
                         subProcRef.current?.focus();
-                      } catch {}
+                      } catch {
+                        /* ignore */
+                      }
                     }, 0);
                   }}
                 />
@@ -682,23 +782,23 @@ export default function AdminEditor() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {renderInput(
                 'Data Procedência (dd/mm/aaaa)',
-                deferimento.data_Procedência,
-                (v) => setDeferimento((s) => ({ ...s, data_Procedência: v })),
+                deferimento.data_procedencia,
+                (v) => setDeferimento((s) => ({ ...s, data_procedencia: v })),
               )}
               {renderInput(
                 'Crédito Simples',
-                deferimento.Crédito_simples,
-                (v) => setDeferimento((s) => ({ ...s, Crédito_simples: v })),
+                deferimento.credito_simples,
+                (v) => setDeferimento((s) => ({ ...s, credito_simples: v })),
               )}
               {renderInput(
                 'Crédito Dobro',
-                deferimento.Crédito_dobro,
-                (v) => setDeferimento((s) => ({ ...s, Crédito_dobro: v })),
+                deferimento.credito_dobro,
+                (v) => setDeferimento((s) => ({ ...s, credito_dobro: v })),
               )}
               {renderInput(
-                'Data Crédito Dobro (dd/mm/aaaa HH:mm:ss)',
-                deferimento.data_Crédito_dobro,
-                (v) => setDeferimento((s) => ({ ...s, data_Crédito_dobro: v })),
+                'Data Deferimento Dobro (dd/mm/aaaa)',
+                deferimento.data_credito_dobro,
+                (v) => setDeferimento((s) => ({ ...s, data_credito_dobro: v })),
               )}
             </div>
           </section>
@@ -710,40 +810,56 @@ export default function AdminEditor() {
             </button>
             {fluxo.map((it, idx) => (
               <div key={idx} className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-2">
-                <select
-                  value={it.forma_devolucao}
-                  onChange={(e) => updateAt(setFluxo, idx, { ...it, forma_devolucao: e.target.value })}
-                  className="px-2 py-1 border rounded admin-input"
-                >
-                  <option>Fatura</option>
-                  <option>GD</option>
-                  <option>Deposito</option>
-                </select>
-                <input
-                  className="px-2 py-1 border rounded admin-input"
-                  value={it.valor}
-                  onChange={(e) => updateAt(setFluxo, idx, { ...it, valor: e.target.value })}
-                  placeholder="Valor"
-                />
-                <input
-                  className="px-2 py-1 border rounded admin-input"
-                  value={it.data_devolucao || ''}
-                  onChange={(e) =>
-                    updateAt(setFluxo, idx, { ...it, data_devolucao: e.target.value })
-                  }
-                  placeholder="Data Devolução dd/mm/aaaa"
-                />
-                <input
-                  className="px-2 py-1 border rounded admin-input"
-                  value={it.data_envio_financeiro || ''}
-                  onChange={(e) =>
-                    updateAt(setFluxo, idx, { ...it, data_envio_financeiro: e.target.value })
-                  }
-                  placeholder="Data Envio Financeiro dd/mm/aaaa"
-                />
-                <button className="px-2 py-1 border rounded" onClick={() => removeAt(setFluxo, idx)}>
-                  Remover
-                </button>
+                <div>
+                  <label className="block text-xs mb-1">Forma</label>
+                  <select
+                    value={it.forma_devolucao}
+                    onChange={(e) => updateAt(setFluxo, idx, { ...it, forma_devolucao: e.target.value })}
+                    className="px-2 py-1 border rounded admin-input"
+                  >
+                    <option>Fatura</option>
+                    <option>GD</option>
+                    <option>Deposito</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs mb-1">Valor</label>
+                  <input
+                    className="px-2 py-1 border rounded admin-input"
+                    value={it.valor}
+                    onChange={(e) => updateAt(setFluxo, idx, { ...it, valor: e.target.value })}
+                    placeholder="Valor"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs mb-1">Data Devolução</label>
+                  <input
+                    className="px-2 py-1 border rounded admin-input"
+                    value={it.data_devolucao || ''}
+                    onChange={(e) => updateAt(setFluxo, idx, { ...it, data_devolucao: e.target.value })}
+                    placeholder="dd/mm/aaaa"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs mb-1">Data Envio Financeiro</label>
+                  <input
+                    className="px-2 py-1 border rounded admin-input"
+                    value={it.data_envio_financeiro || ''}
+                    onChange={(e) =>
+                      updateAt(setFluxo, idx, { ...it, data_envio_financeiro: e.target.value })
+                    }
+                    placeholder="dd/mm/aaaa"
+                  />
+                </div>
+
+                <div className="flex items-end">
+                  <button className="px-2 py-1 border rounded" onClick={() => removeAt(setFluxo, idx)}>
+                    Remover
+                  </button>
+                </div>
               </div>
             ))}
           </section>
@@ -754,40 +870,80 @@ export default function AdminEditor() {
               Adicionar item
             </button>
             {fat.map((it, idx) => (
-              <div key={idx} className="grid grid-cols-1 md:grid-cols-6 gap-2 mb-2">
-                <input
-                  className="px-2 py-1 border rounded admin-input"
-                  value={it.numero_nf}
-                  onChange={(e) => updateAt(setFat, idx, { ...it, numero_nf: e.target.value })}
-                  placeholder="NF"
-                />
-                <input
-                  className="px-2 py-1 border rounded admin-input"
-                  value={it.data_emissao || ''}
-                  onChange={(e) => updateAt(setFat, idx, { ...it, data_emissao: e.target.value })}
-                  placeholder="Emissão dd/mm/aaaa"
-                />
-                <input
-                  className="px-2 py-1 border rounded admin-input"
-                  value={it.data_vencimento || ''}
-                  onChange={(e) => updateAt(setFat, idx, { ...it, data_vencimento: e.target.value })}
-                  placeholder="Venc. dd/mm/aaaa"
-                />
-                <input
-                  className="px-2 py-1 border rounded admin-input"
-                  value={it.data_pagamento || ''}
-                  onChange={(e) => updateAt(setFat, idx, { ...it, data_pagamento: e.target.value })}
-                  placeholder="Pag. dd/mm/aaaa"
-                />
-                <input
-                  className="px-2 py-1 border rounded admin-input"
-                  value={it.valor}
-                  onChange={(e) => updateAt(setFat, idx, { ...it, valor: e.target.value })}
-                  placeholder="Valor"
-                />
-                <button className="px-2 py-1 border rounded" onClick={() => removeAt(setFat, idx)}>
-                  Remover
-                </button>
+              <div key={idx} className="grid grid-cols-1 md:grid-cols-8 gap-2 mb-2">
+                <div>
+                  <label className="block text-xs mb-1">N° da NF</label>
+                  <input
+                    className="px-2 py-1 border rounded admin-input"
+                    value={it.numero_nf}
+                    onChange={(e) => updateAt(setFat, idx, { ...it, numero_nf: e.target.value })}
+                    placeholder="N° da NF"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs mb-1">Data de Emissão</label>
+                  <input
+                    className="px-2 py-1 border rounded admin-input"
+                    value={it.data_emissao || ''}
+                    onChange={(e) => updateAt(setFat, idx, { ...it, data_emissao: e.target.value })}
+                    placeholder="dd/mm/aaaa"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs mb-1">Data de Vencimento</label>
+                  <input
+                    className="px-2 py-1 border rounded admin-input"
+                    value={it.data_vencimento || ''}
+                    onChange={(e) => updateAt(setFat, idx, { ...it, data_vencimento: e.target.value })}
+                    placeholder="dd/mm/aaaa"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs mb-1">Data de Pagamento</label>
+                  <input
+                    className="px-2 py-1 border rounded admin-input"
+                    value={it.data_pagamento || ''}
+                    onChange={(e) => updateAt(setFat, idx, { ...it, data_pagamento: e.target.value })}
+                    placeholder="dd/mm/aaaa"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs mb-1">Valor</label>
+                  <input
+                    className="px-2 py-1 border rounded admin-input"
+                    value={it.valor}
+                    onChange={(e) => updateAt(setFat, idx, { ...it, valor: e.target.value })}
+                    placeholder="Valor"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs mb-1">Documento</label>
+                  <input
+                    type="file"
+                    className="w-full text-sm"
+                    onChange={(e) => {
+                      const file = e.target.files && e.target.files[0];
+                      updateAt(setFat, idx, { ...it, anexo_nome: file ? file.name : '' });
+                    }}
+                  />
+                  <input
+                    className="mt-1 px-2 py-1 border rounded admin-input"
+                    value={it.anexo_nome || ''}
+                    onChange={(e) => updateAt(setFat, idx, { ...it, anexo_nome: e.target.value })}
+                    placeholder="Nome do documento"
+                  />
+                </div>
+
+                <div className="flex items-end">
+                  <button className="px-2 py-1 border rounded" onClick={() => removeAt(setFat, idx)}>
+                    Remover
+                  </button>
+                </div>
               </div>
             ))}
           </section>
@@ -805,12 +961,14 @@ export default function AdminEditor() {
                   onChange={(e) => updateAt(setHist, idx, { ...it, data: e.target.value })}
                   placeholder="dd/mm/aaaa HH:mm:ss"
                 />
+
                 <input
                   className="px-2 py-1 border rounded admin-input"
                   value={it.comentario || ''}
                   onChange={(e) => updateAt(setHist, idx, { ...it, comentario: e.target.value })}
-                  placeholder="comentario"
+                  placeholder="comentário"
                 />
+
                 <input
                   list="dl-etapas"
                   className="px-2 py-1 border rounded admin-input"
@@ -821,11 +979,14 @@ export default function AdminEditor() {
                     setTimeout(() => {
                       try {
                         subHistRefs.current[idx]?.focus();
-                      } catch {}
+                      } catch {
+                        /* ignore */
+                      }
                     }, 0);
                   }}
                   placeholder="Etapa anterior"
                 />
+
                 <input
                   list="dl-etapas"
                   className="px-2 py-1 border rounded admin-input"
@@ -836,11 +997,14 @@ export default function AdminEditor() {
                     setTimeout(() => {
                       try {
                         subHistRefs.current[idx]?.focus();
-                      } catch {}
+                      } catch {
+                        /* ignore */
+                      }
                     }, 0);
                   }}
                   placeholder="Etapa nova"
                 />
+
                 <input
                   ref={(el) => (subHistRefs.current[idx] = el)}
                   list={`dl-sub-h-${idx}`}
@@ -849,18 +1013,23 @@ export default function AdminEditor() {
                   onChange={(e) => updateAt(setHist, idx, { ...it, sub_etapa: e.target.value })}
                   placeholder="Sub-etapa"
                 />
+
                 <div className="flex items-center gap-2">
                   <label className="text-xs">Rel. ant.</label>
                   <input
                     type="checkbox"
                     checked={!!it.relevancia_anterior}
-                    onChange={(e) => updateAt(setHist, idx, { ...it, relevancia_anterior: e.target.checked })}
+                    onChange={(e) =>
+                      updateAt(setHist, idx, { ...it, relevancia_anterior: e.target.checked })
+                    }
                   />
                   <label className="text-xs">Rel. nova</label>
                   <input
                     type="checkbox"
                     checked={!!it.relevancia_nova}
-                    onChange={(e) => updateAt(setHist, idx, { ...it, relevancia_nova: e.target.checked })}
+                    onChange={(e) =>
+                      updateAt(setHist, idx, { ...it, relevancia_nova: e.target.checked })
+                    }
                   />
                   <button
                     className="ml-2 px-2 py-1 border rounded"
@@ -940,7 +1109,10 @@ export default function AdminEditor() {
                       try {
                         setBulkLoading(true);
                         const raw = String(bulkInput || '');
-                        const parts = raw.split(/[\s,;\n\r]+/).map((s) => s.trim()).filter(Boolean);
+                        const parts = raw
+                          .split(/[\s,;\n\r]+/)
+                          .map((s) => s.trim())
+                          .filter(Boolean);
                         const uniq = Array.from(new Set(parts));
                         if (uniq.length === 0) {
                           setBulkResolvido([]);
@@ -954,8 +1126,7 @@ export default function AdminEditor() {
                           for (const arr of Object.values(colunas)) {
                             (arr || []).forEach((it) => {
                               const u = String(it?.uc || '').trim();
-                              if (u && u.toLowerCase() === String(uc).toLowerCase())
-                                ids.push(Number(it.id));
+                              if (u && u.toLowerCase() === String(uc).toLowerCase()) ids.push(Number(it.id));
                             });
                           }
                           if (ids.length === 0)
@@ -1009,8 +1180,8 @@ export default function AdminEditor() {
                   onChange={(e) => setBulkEtapa(e.target.value)}
                 >
                   <option value="">Selecione...</option>
-                  {etapasOpts.map((n, i) => (
-                    <option key={i} value={n}>
+                  {kanbanCols.map((n) => (
+                    <option key={n} value={n}>
                       {n}
                     </option>
                   ))}
@@ -1073,9 +1244,11 @@ export default function AdminEditor() {
                               className="p-1 border rounded admin-input"
                               value={r.selectedId || ''}
                               onChange={(e) => {
-                                const v = e.target.value ? Number(e.target.value) : null;
+            const v = e.target.value ? parseMoneyInput(e.target.value) : null;
                                 setBulkResolvido((prev) =>
-                                  prev.map((x, i) => (i === idx ? { ...x, selectedId: v, status: v ? 'ok' : 'dup' } : x)),
+                                  prev.map((x, i) =>
+                                    i === idx ? { ...x, selectedId: v, status: v ? 'ok' : 'dup' } : x,
+                                  ),
                                 );
                               }}
                             >
@@ -1127,15 +1300,16 @@ export default function AdminEditor() {
                     }
 
                     setBulkApplying(true);
-                    let ok = 0,
-                      fail = 0;
+                    let ok = 0;
+                    let fail = 0;
                     const errors = [];
 
                     for (let i = 0; i < validos.length; i++) {
                       const r = validos[i];
+                      const etapaDestino = colToEtapa[bulkEtapa] || String(bulkEtapa || '').trim() || 'Ativos';
                       const payload = {
                         processo_id: r.selectedId,
-                        etapa: String(bulkEtapa || '').trim() || 'Improcedente',
+                        etapa: etapaDestino,
                         sub_etapa: '',
                         relevancia: false,
                       };
@@ -1149,11 +1323,11 @@ export default function AdminEditor() {
 
                       if (hasDef) {
                         const defObj = {};
-                        if (ds) defObj['data_procedencia'] = ds;
-                        if (cs) defObj['credito_simples'] = isNaN(Number(cs)) ? null : Number(cs);
-                        if (cd) defObj['credito_dobro'] = isNaN(Number(cd)) ? null : Number(cd);
-                        if (dd) defObj['data_credito_dobro'] = dd;
-                        payload['deferimento'] = defObj;
+                        if (ds) defObj.data_procedencia = ds;
+                        if (cs) defObj.credito_simples = parseMoneyInput(cs);
+                        if (cd) defObj.credito_dobro = parseMoneyInput(cd);
+                        if (dd) defObj.data_credito_dobro = dd;
+                        payload.deferimento = defObj;
                       }
 
                       try {
@@ -1205,20 +1379,29 @@ function renderInput(label, value, onChange) {
 function emptyToNull(v) {
   return v === '' ? null : v;
 }
+
 function normalizeBoolOrNull(v) {
   if (v === undefined || v === null) return null;
   return !!v;
 }
+
 function updateAt(setter, idx, obj) {
   setter((prev) => prev.map((x, i) => (i === idx ? obj : x)));
 }
+
 function removeAt(setter, idx) {
   setter((prev) => prev.filter((_, i) => i !== idx));
 }
+
 function removeHist(setter, idx, it, setDeletes) {
   setter((prev) => prev.filter((_, i) => i !== idx));
-  if (it && it.id_historico) setDeletes((prev) => (prev.includes(it.id_historico) ? prev : [...prev, it.id_historico]));
+  if (it && it.id_historico) {
+    setDeletes((prev) =>
+      prev.includes(it.id_historico) ? prev : [...prev, it.id_historico],
+    );
+  }
 }
+
 function parseBoolLoose(v) {
   if (v === undefined || v === null) return null;
   const s = String(v).toLowerCase();
@@ -1227,25 +1410,11 @@ function parseBoolLoose(v) {
   return null;
 }
 
-// Helpers globais para datas (fallback quando usados fora do escopo do componente)
-function normalizeDateInput(s) {
-  const raw = String(s || '').trim();
-  if (!raw) return null;
-  const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(.+))?$/);
-  if (m) {
-    const [, d, mo, y, t] = m;
-    return `${y}-${mo}-${d}${t ? ` ${t.trim()}` : ''}`;
-  }
-  return raw;
-}
-
-function toBRDateTime(s) {
-  if (!s) return '';
-  const str = String(s).trim().replace('T', ' ');
-  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}:\d{2}:\d{2}|\d{2}:\d{2}))?/);
-  if (m) {
-    const [, y, mo, d, t] = m;
-    return `${d}/${mo}/${y}${t ? ` ${t}` : ''}`;
-  }
-  return str;
+function parseMoneyInput(value) {
+  if (value === undefined || value === null) return null;
+  const str = String(value).trim();
+  if (str === '') return null;
+  const normalized = str.replace(/[.\s]/g, '').replace(',', '.');
+  const num = Number(normalized);
+  return Number.isNaN(num) ? null : num;
 }

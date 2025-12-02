@@ -1,4 +1,4 @@
-﻿package services
+package services
 
 import (
 	"database/sql"
@@ -244,7 +244,7 @@ func VerificarPendenciasDeFluxo() {
 
 // ChecarPrazosRequisicoes cria alertas quando faltar <= 24h para o prazo de triagem/analise
 func ChecarPrazosRequisicoes() {
-	log.Println("Executando tarefa: Checar prazos de RequisiÃ§Ãµes (<=24h)...")
+	log.Println("Executando tarefa: Checar prazos de Requisições (<=24h)...")
 	if database.DB_App == nil {
 		return
 	}

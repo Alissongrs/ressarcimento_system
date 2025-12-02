@@ -2,7 +2,11 @@ package handlers
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"ressarcimento-backend/database"
@@ -143,4 +147,256 @@ func SavePrazosConfig(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// GetProcessosComPrazo retorna processos com prazo configurado (kanban/etapa/sub-etapa) e deadline prГіximo.
+// Query params:
+//   - within_hours: horas restantes mГЎximas para incluir (default: 72)
+//   - min_hours: horas restantes mГ­nimas (default: -168, para incluir atГ© 7 dias atrasados)
+//   - limit: limite de linhas (default: 100)
+func GetProcessosComPrazo(c *gin.Context) {
+	db := database.DB_App
+	if db == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB not initialized"})
+		return
+	}
+
+	withinHours := 72
+	if v := strings.TrimSpace(c.DefaultQuery("within_hours", "72")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 24*30 {
+			withinHours = n
+		}
+	}
+	minHours := -100000 // inclui atrasados de longa data por padrão
+	if v := strings.TrimSpace(c.DefaultQuery("min_hours", "-100000")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= -24*365 {
+			minHours = n
+		}
+	}
+	limit := 100
+	if v := strings.TrimSpace(c.DefaultQuery("limit", "100")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+
+	q := `
+SELECT
+  p.id_processo,
+  kc.nome_coluna,
+  e.etapa,
+  p.sub_etapa,
+  (SELECT a.prazo_dias
+     FROM DM_ALARMES a
+    WHERE a.ativo = 1
+      AND (
+            (a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR LOWER(TRIM(a.sub_etapa)) COLLATE utf8mb4_unicode_ci = LOWER(TRIM(p.sub_etapa)) COLLATE utf8mb4_unicode_ci))
+         OR (a.id_coluna_kanban = e.id_coluna_kanban)
+          )
+    ORDER BY
+      CASE
+        WHEN a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR LOWER(TRIM(a.sub_etapa)) COLLATE utf8mb4_unicode_ci = LOWER(TRIM(p.sub_etapa)) COLLATE utf8mb4_unicode_ci) THEN 2
+        WHEN a.id_etapa_processo = e.id_etapa_processo THEN 1
+        ELSE 0
+      END DESC
+    LIMIT 1) AS prazo_alarm,
+  COALESCE(
+    (SELECT a.prazo_dias
+       FROM DM_ALARMES a
+      WHERE a.ativo = 1
+        AND (
+              (a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR LOWER(TRIM(a.sub_etapa)) COLLATE utf8mb4_unicode_ci = LOWER(TRIM(p.sub_etapa)) COLLATE utf8mb4_unicode_ci))
+           OR (a.id_coluna_kanban = e.id_coluna_kanban)
+            )
+      ORDER BY
+        CASE
+          WHEN a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR LOWER(TRIM(a.sub_etapa)) COLLATE utf8mb4_unicode_ci = LOWER(TRIM(p.sub_etapa)) COLLATE utf8mb4_unicode_ci) THEN 2
+          WHEN a.id_etapa_processo = e.id_etapa_processo THEN 1
+          ELSE 0
+        END DESC
+      LIMIT 1),
+    pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) AS prazo_dias,
+  (SELECT a.severity
+     FROM DM_ALARMES a
+    WHERE a.ativo = 1
+      AND (
+            (a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR LOWER(TRIM(a.sub_etapa)) COLLATE utf8mb4_unicode_ci = LOWER(TRIM(p.sub_etapa)) COLLATE utf8mb4_unicode_ci))
+         OR (a.id_coluna_kanban = e.id_coluna_kanban)
+          )
+    ORDER BY
+      CASE
+        WHEN a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR LOWER(TRIM(a.sub_etapa)) COLLATE utf8mb4_unicode_ci = LOWER(TRIM(p.sub_etapa)) COLLATE utf8mb4_unicode_ci) THEN 2
+        WHEN a.id_etapa_processo = e.id_etapa_processo THEN 1
+        ELSE 0
+      END DESC
+    LIMIT 1) AS severity,
+  COALESCE(vh.data_movimentacao, p.ultima_atualizacao, NOW())                    AS data_base,
+  DATE_ADD(COALESCE(vh.data_movimentacao, p.ultima_atualizacao, NOW()),
+           INTERVAL COALESCE(
+             (SELECT a.prazo_dias
+                FROM DM_ALARMES a
+               WHERE a.ativo = 1
+                 AND (
+                       (a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR a.sub_etapa = p.sub_etapa))
+                    OR (a.id_coluna_kanban = e.id_coluna_kanban)
+                 )
+               ORDER BY
+                 CASE
+                   WHEN a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR a.sub_etapa = p.sub_etapa) THEN 2
+                   WHEN a.id_etapa_processo = e.id_etapa_processo THEN 1
+                   ELSE 0
+                 END DESC
+               LIMIT 1),
+             pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) DAY) AS deadline_dt,
+  TIMESTAMPDIFF(
+    HOUR,
+    NOW(),
+    DATE_ADD(COALESCE(vh.data_movimentacao, p.ultima_atualizacao, NOW()),
+             INTERVAL COALESCE(
+               (SELECT a.prazo_dias
+                  FROM DM_ALARMES a
+                 WHERE a.ativo = 1
+                   AND (
+                         (a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR a.sub_etapa = p.sub_etapa))
+                      OR (a.id_coluna_kanban = e.id_coluna_kanban)
+                   )
+                 ORDER BY
+                   CASE
+                     WHEN a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR a.sub_etapa = p.sub_etapa) THEN 2
+                     WHEN a.id_etapa_processo = e.id_etapa_processo THEN 1
+                     ELSE 0
+                   END DESC
+                 LIMIT 1),
+               pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) DAY)
+  ) AS horas_restantes,
+  r.uc,
+  r.cliente,
+  r.concessionaria
+FROM FT_PROCESSOS p
+JOIN DM_ETAPAS_PROCESSO   e   ON e.id_etapa_processo = p.id_etapa_processo
+JOIN DM_KANBAN_COLUNAS    kc  ON kc.id_coluna        = e.id_coluna_kanban
+LEFT JOIN FT_REQUISICOES  r   ON r.id_requisicao     = p.id_processo
+LEFT JOIN DM_PRAZOS_ETAPA pe   ON pe.id_etapa_processo = e.id_etapa_processo AND pe.sub_etapa IS NULL
+LEFT JOIN DM_PRAZOS_ETAPA pe_sub ON pe_sub.id_etapa_processo = e.id_etapa_processo AND pe_sub.sub_etapa = p.sub_etapa
+LEFT JOIN DM_PRAZOS_KANBAN pk   ON pk.id_coluna_kanban = e.id_coluna_kanban
+LEFT JOIN VW_ULTIMO_HISTORICO vh ON vh.id_requisicao = p.id_processo
+WHERE COALESCE(
+        (SELECT a.prazo_dias
+           FROM DM_ALARMES a
+          WHERE a.ativo = 1
+            AND (
+                  (a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR LOWER(TRIM(a.sub_etapa)) = LOWER(TRIM(p.sub_etapa))))
+               OR (a.id_coluna_kanban = e.id_coluna_kanban)
+            )
+          ORDER BY
+            CASE
+              WHEN a.id_etapa_processo = e.id_etapa_processo AND (a.sub_etapa IS NULL OR LOWER(TRIM(a.sub_etapa)) = LOWER(TRIM(p.sub_etapa))) THEN 2
+              WHEN a.id_etapa_processo = e.id_etapa_processo THEN 1
+              ELSE 0
+            END DESC
+          LIMIT 1),
+        pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias
+      ) IS NOT NULL
+HAVING horas_restantes <= ? AND horas_restantes >= ?
+ORDER BY horas_restantes ASC
+LIMIT ?;
+`
+
+	rows, err := db.Query(q, withinHours, minHours, limit)
+	if err != nil {
+		log.Printf("GetProcessosComPrazo query error: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"rows":         []interface{}{},
+			"within_hours": withinHours,
+			"min_hours":    minHours,
+			"limit":        limit,
+			"error":        "Falha ao buscar prazos (confira se as tabelas DM_PRAZOS_*/VW_ULTIMO_HISTORICO existem).",
+		})
+		return
+	}
+	defer rows.Close()
+
+	type item struct {
+		ID             int64   `json:"id"`
+		Coluna         string  `json:"coluna"`
+		Etapa          string  `json:"etapa"`
+		SubEtapa       string  `json:"sub_etapa"`
+		Severity       string  `json:"severity"`
+		PrazoDias      int64   `json:"prazo_dias"`
+		DataBase       *string `json:"data_base,omitempty"`
+		Deadline       *string `json:"deadline,omitempty"`
+		HorasRestantes int64   `json:"horas_restantes"`
+		UC             string  `json:"uc"`
+		Cliente        string  `json:"cliente"`
+		Concessionaria string  `json:"concessionaria"`
+	}
+	out := make([]item, 0, 32)
+
+	for rows.Next() {
+		var (
+			it   item
+			dbase, deadline sql.NullTime
+			sub             sql.NullString
+			uc, cli, conc   sql.NullString
+			col             sql.NullString
+			et              sql.NullString
+			sev             sql.NullString
+		)
+		if err := rows.Scan(
+			&it.ID,
+			&col,
+			&et,
+			&sub,
+			&sev,
+			&it.PrazoDias,
+			&dbase,
+			&deadline,
+			&it.HorasRestantes,
+			&uc,
+			&cli,
+			&conc,
+		); err != nil {
+			continue
+		}
+		if col.Valid {
+			it.Coluna = col.String
+		}
+		if et.Valid {
+			it.Etapa = et.String
+		}
+		if sub.Valid {
+			it.SubEtapa = sub.String
+		}
+		if sev.Valid {
+			it.Severity = sev.String
+		}
+		if dbase.Valid {
+			s := dbase.Time.Format(time.RFC3339)
+			it.DataBase = &s
+		}
+		if deadline.Valid {
+			s := deadline.Time.Format(time.RFC3339)
+			it.Deadline = &s
+		}
+		if uc.Valid {
+			it.UC = uc.String
+		}
+		if cli.Valid {
+			it.Cliente = cli.String
+		}
+		if conc.Valid {
+			it.Concessionaria = conc.String
+		}
+		out = append(out, it)
+	}
+
+	if out == nil {
+		out = []item{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"rows":         out,
+		"within_hours": withinHours,
+		"min_hours":    minHours,
+		"limit":        limit,
+	})
 }

@@ -70,6 +70,7 @@ type Processo struct {
 	Cidade       sql.NullString `json:"cidade"`
 	Estado       sql.NullString `json:"estado"`
 	ColunaKanban string         `json:"coluna_kanban"`
+	Suspenso     bool           `json:"suspenso"`
 }
 
 // Deferimento representa os dados da tabela FT_DEFERIMENTOS.
