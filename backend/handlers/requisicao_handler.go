@@ -896,6 +896,64 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 			return
 		}
 
+
+		// Histórico da mudança de status (status_anterior/status_novo) com tipo/subtipo
+		var etapaAtual sql.NullString
+		var subAtual sql.NullString
+		_ = tx.QueryRow(`
+            SELECT e.etapa, p.sub_etapa
+              FROM FT_PROCESSOS p
+              JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+             WHERE p.id_processo = ?
+             LIMIT 1`, id).Scan(&etapaAtual, &subAtual)
+
+		commentParts := []string{}
+		if tipoIDPost != "" || tipoAtual.Valid {
+			var tipoNome sql.NullString
+			tid := tipoIDPost
+			if tid == "" && tipoAtual.Valid {
+				tid = strconv.FormatInt(tipoAtual.Int64, 10)
+			}
+			if tid != "" {
+				_ = tx.QueryRow("SELECT nome FROM DM_TIPO_IRREGULARIDADE WHERE id_tipo_irregularidade = ?", tid).Scan(&tipoNome)
+				if tipoNome.Valid {
+					commentParts = append(commentParts, "Tipo: "+strings.TrimSpace(tipoNome.String))
+				}
+			}
+		}
+		if subtipoIDPost != "" || subtipoAtual.Valid {
+			var subTipoNome sql.NullString
+			sid := subtipoIDPost
+			if sid == "" && subtipoAtual.Valid {
+				sid = strconv.FormatInt(subtipoAtual.Int64, 10)
+			}
+			if sid != "" {
+				_ = tx.QueryRow("SELECT nome FROM DM_SUBTIPO_IRREGULARIDADE WHERE id_subtipo_irregularidade = ?", sid).Scan(&subTipoNome)
+				if subTipoNome.Valid {
+					commentParts = append(commentParts, "Subtipo: "+strings.TrimSpace(subTipoNome.String))
+				}
+			}
+		}
+		statusAnterior := strings.TrimSpace(currStatus)
+		if statusAnterior == "" {
+			statusAnterior = "Nova Requisição"
+		}
+		statusNovo := strings.TrimSpace(statusPost)
+		histComentario := strings.Join(commentParts, " | ")
+
+		_, _ = tx.Exec(`
+            INSERT INTO FT_HISTORICO_MOVIMENTACOES
+              (id_requisicao, id_usuario_gestor,
+               status_anterior, status_novo,
+               etapa_anterior, etapa_nova, sub_etapa,
+               comentario, data_movimentacao, tipo_movimentacao)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'status')`,
+			id, gestorID,
+			statusAnterior, statusNovo,
+			etapaAtual.String, etapaAtual.String, subAtual.String,
+			histComentario,
+		)
+
 		// Se aprovado, garantir criação do processo para aparecer no Kanban
 		if strings.EqualFold(statusPost, "Aprovado") {
 			var cnt int

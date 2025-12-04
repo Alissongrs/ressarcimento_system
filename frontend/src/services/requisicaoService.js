@@ -588,6 +588,40 @@ export const getDashboardTempoMedioPorEtapa = async () =>
 export const getDashboardAgingPorColuna = async () =>
   (await getDashboardStatsBI()).aging_por_coluna;
 
+// ======================= Prazos críticos =======================
+export const getProcessosComPrazo = async () => {
+  const { data } = await api.get('/processos/prazos');
+  const rows = Array.isArray(data?.rows)
+    ? data.rows
+    : Array.isArray(data)
+    ? data
+    : [];
+  const grupos = {};
+  for (const r of rows) {
+    const etapa = String(r?.etapa || '').trim() || 'Etapa';
+    if (!grupos[etapa]) grupos[etapa] = [];
+    grupos[etapa].push(r);
+  }
+  return { rows, grupos, count: rows.length };
+};
+
+// Backlog
+export const getBacklog = async (limit) => {
+  const params = {};
+  if (limit) params.limit = limit;
+  const { data } = await api.get('/processos/backlog', { params });
+  const rows = Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
+  return {
+    rows,
+    total: Number(data?.total ?? rows.length),
+    tratados: Number(data?.tratados ?? 0),
+    nao_tratados: Number(data?.nao_tratados ?? rows.length),
+  };
+};
+
+export const toggleBacklogCheck = async (id, checked) =>
+  api.post(`/processos/${id}/backlog-check`, { checked });
+
 export const checkDashboardConnectivity = async () => {
   try {
     const { data, status } = await api.get('/dashboard/stats');
@@ -602,6 +636,8 @@ export const checkDashboardConnectivity = async () => {
     };
   }
 };
+
+// Garantir exportacoes explicitas (evita problemas em builds case-sensitive)
 
 // ======================= Aliases e comentarios =======================
 export const getUsuariosMencoes = async (q = '') =>
@@ -882,4 +918,3 @@ export async function getMesesPorIdUc(idUcOrParams) {
     return { meses: [] };
   }
 }
-

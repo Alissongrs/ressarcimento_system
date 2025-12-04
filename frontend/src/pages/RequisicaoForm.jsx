@@ -245,7 +245,6 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
       showToast('success', 'Requisição enviada com sucesso!');
       setFormData({
         uc: '',
-        uc: '',
         id_uc: '',
         id_empresa: '',
         id_concessionaria: '',

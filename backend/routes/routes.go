@@ -238,6 +238,8 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.POST("/processos/:id/suspender", handlers.SuspenderProcesso)
 			gestorRequired.POST("/processos/:id/retomar", handlers.RetomarProcesso)
 			gestorRequired.GET("/processos/prazos", handlers.GetProcessosComPrazo)
+			gestorRequired.GET("/processos/backlog", handlers.GetBacklogProcessos)
+			gestorRequired.POST("/processos/:id/backlog-check", handlers.ToggleBacklogCheck)
 			gestorRequired.GET("/processos/suspensos", handlers.GetProcessosSuspensos)
 			gestorRequired.DELETE("/processos/:id", handlers.ExcluirProcessoPermanentemente)
 

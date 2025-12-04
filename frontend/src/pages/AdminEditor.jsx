@@ -1414,7 +1414,8 @@ function parseMoneyInput(value) {
   if (value === undefined || value === null) return null;
   const str = String(value).trim();
   if (str === '') return null;
-  const normalized = str.replace(/[.\s]/g, '').replace(',', '.');
+  // aceita BRL: remove separadores de milhar e converte vírgula decimal
+  const normalized = str.replace(/\./g, '').replace(/\s/g, '').replace(',', '.');
   const num = Number(normalized);
-  return Number.isNaN(num) ? null : num;
+  return Number.isFinite(num) ? num : null;
 }

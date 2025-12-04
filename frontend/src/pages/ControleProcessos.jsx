@@ -741,10 +741,16 @@ const ControleProcessos = () => {
         baseColunas[col] = lista.map((p) => {
           const __ultimaDataRaw = p.data_ultima_movimentacao || p.ultima_atualizacao || null;
           const __ultimaData = __ultimaDataRaw ? new Date(__ultimaDataRaw) : null;
-          const __valor =
-            typeof p.valor_estimado === 'number'
-              ? p.valor_estimado
-              : toNumberOrNull(p.valor_estimado?.Float64 ?? p.valor_estimado ?? null);
+        const __valor =
+          typeof p.valor_estimado === 'number'
+            ? p.valor_estimado
+            : toNumberOrNull(
+                p.valor_estimado?.Float64 ??
+                  p.valor_estimado ??
+                  p.ressarcimento_estimado?.Float64 ??
+                  p.ressarcimento_estimado ??
+                  null
+              );
           return {
             ...p,
             __ultimaData,
