@@ -26,14 +26,14 @@ import {
   ListChecks,
   ScanText,
   Inbox,
-  Receipt,
   Mail as MailIcon,
   Bot,
   Megaphone,
   AlarmClock,
   FilePenLine,
   History,
-  Home, // ícone Início
+  Home,
+  Receipt,
 } from 'lucide-react';
 
 import FeedbackModal from './components/FeedbackModal.jsx';
@@ -49,7 +49,6 @@ import GlobalNewProcessNotifier from './components/GlobalNewProcessNotifier.jsx'
 // Pages
 import Login from './pages/LoginPage.jsx';
 import Register from './pages/Register.jsx';
-import RequisicaoForm from './pages/RequisicaoForm.jsx';
 import GestaoRequisicoes from './pages/GestaoRequisicoes.jsx';
 import ControleProcessos from './pages/ControleProcessos.jsx';
 import DetalhesRequisicao from './pages/DetalhesRequisicao.jsx';
@@ -83,6 +82,7 @@ function App() {
   const [openGestorVenc, setOpenGestorVenc] = useState(false);
   const [openFeedback, setOpenFeedback] = useState(false);
   const [toast, setToast] = useState({ open: false, type: 'info', text: '' });
+
   const gestorVencShownRef = useRef(false);
   const esRef = useRef(null);
   const timerRef = useRef(null);
@@ -125,11 +125,7 @@ function App() {
             : 'Nova requisição pendente';
         setToast({ open: true, type: 'info', text: msg });
       } catch {
-        setToast({
-          open: true,
-          type: 'info',
-          text: 'Nova requisição pendente',
-        });
+        setToast({ open: true, type: 'info', text: 'Nova requisição pendente' });
       }
     });
 
@@ -155,9 +151,7 @@ function App() {
       } catch {}
     });
 
-    es.addEventListener('alerta_lido', async () =>
-      setUnread(await getUnreadCount()),
-    );
+    es.addEventListener('alerta_lido', async () => setUnread(await getUnreadCount()));
 
     // Canal unificado do backend para eventos de alerta (payload JSON possui {type, payload})
     es.addEventListener('alerta', (ev) => {
@@ -194,8 +188,7 @@ function App() {
 
     // fallback polling se o SSE fechar
     timerRef.current = setInterval(async () => {
-      if (es.readyState === EventSource.CLOSED)
-        setUnread(await getUnreadCount());
+      if (es.readyState === EventSource.CLOSED) setUnread(await getUnreadCount());
     }, 30000);
 
     return () => {
@@ -229,6 +222,7 @@ function App() {
       <div className="relative flex flex-col h-full">
         <div className="mb-6 px-2 flex flex-col items-center">
           <div className="text-lg font-extrabold sidebar-brand">SURE</div>
+
           <NavLink
             to="/"
             className={({ isActive }) =>
@@ -239,11 +233,7 @@ function App() {
             }
             title="Início"
           >
-<<<<<<< HEAD
             <Home className="sidebar-icon" strokeWidth={1.8} />
-=======
-            <Home className="w-8 h-8 shrink-0" strokeWidth={1.8} />
->>>>>>> 07e4f02 (Fix: alterações de segurança)
             <span className="text-sm font-medium sidebar-label">Início</span>
           </NavLink>
         </div>
@@ -263,9 +253,7 @@ function App() {
             title="Nova Requisição"
           >
             <FilePlus className="sidebar-icon" strokeWidth={1.6} />
-            <span className="text-sm font-medium sidebar-label">
-              Nova Requisição
-            </span>
+            <span className="text-sm font-medium sidebar-label">Nova Requisição</span>
           </NavLink>
 
           {/* 2) Requisições */}
@@ -281,9 +269,7 @@ function App() {
             title="Requisições"
           >
             <FileText className="w-5 h-5" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">
-              Requisições
-            </span>
+            <span className="text-sm font-medium sidebar-label">Requisições</span>
           </NavLink>
 
           {/* 3) Processos */}
@@ -318,7 +304,26 @@ function App() {
             <span className="text-sm font-medium sidebar-label">Backlog</span>
           </NavLink>
 
-          {/* RESTANTE MANTIDO NA MESMA ORDEM DE ANTES */}
+          {/* Alertas (modal) */}
+          <button
+            type="button"
+            onClick={() => setOpenAlerts(true)}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-[var(--menu-hover)] transition-colors"
+            title="Alertas"
+          >
+            <Inbox className="w-5 h-5" strokeWidth={1.25} />
+            <span className="text-sm font-medium sidebar-label">Alertas</span>
+            {unread > 0 && (
+              <span
+                className="ml-auto text-xs px-2 py-0.5 rounded-full"
+                style={{ background: 'var(--accent)', color: '#fff' }}
+                aria-label={`${unread} alertas não lidos`}
+                title={`${unread} não lidos`}
+              >
+                {unread}
+              </span>
+            )}
+          </button>
 
           <NavLink
             to="/auditoria"
@@ -392,9 +397,7 @@ function App() {
             title="Relatórios"
           >
             <BarChart3 className="sidebar-icon" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">
-              Relatórios
-            </span>
+            <span className="text-sm font-medium sidebar-label">Relatórios</span>
           </NavLink>
 
           <NavLink
@@ -409,9 +412,7 @@ function App() {
             title="Caixa de Email"
           >
             <MailIcon className="sidebar-icon" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">
-              Caixa de Email
-            </span>
+            <span className="text-sm font-medium sidebar-label">Caixa de Email</span>
           </NavLink>
 
           <NavLink
@@ -443,9 +444,7 @@ function App() {
                 title="Feedbacks (Admin)"
               >
                 <Megaphone className="sidebar-icon" strokeWidth={1.6} />
-                <span className="text-sm font-medium sidebar-label">
-                  Feedbacks
-                </span>
+                <span className="text-sm font-medium sidebar-label">Feedbacks</span>
               </NavLink>
 
               <NavLink
@@ -460,9 +459,7 @@ function App() {
                 title="Prazos & Alarmes (Admin)"
               >
                 <AlarmClock className="sidebar-icon" strokeWidth={1.6} />
-                <span className="text-sm font-medium sidebar-label">
-                  Prazos & Alarmes
-                </span>
+                <span className="text-sm font-medium sidebar-label">Prazos & Alarmes</span>
               </NavLink>
 
               <NavLink
@@ -477,9 +474,7 @@ function App() {
                 title="Editor (Admin)"
               >
                 <FilePenLine className="sidebar-icon" strokeWidth={1.6} />
-                <span className="text-sm font-medium sidebar-label">
-                  Editor
-                </span>
+                <span className="text-sm font-medium sidebar-label">Editor</span>
               </NavLink>
             </>
           )}
@@ -511,22 +506,18 @@ function App() {
       <div className="relative flex flex-col h-full">
         <div className="mb-6 px-2 flex flex-col items-center">
           <h1 className="text-base font-semibold sidebar-brand">SURE</h1>
+
           <NavLink
             to="/"
             className="w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors hover:bg-[var(--menu-hover)]"
             title="Início"
           >
-<<<<<<< HEAD
-            <Home className="w-5 h-5" />
-=======
             <Home className="w-8 h-8 shrink-0" strokeWidth={1.8} />
->>>>>>> 07e4f02 (Fix: alterações de segurança)
           </NavLink>
         </div>
 
         {/* ORDEM: Nova Requisição, Requisições, Processos, Backlog, resto */}
         <nav className="space-y-1 flex-1 overflow-auto">
-          {/* 1) Nova Requisição */}
           <NavLink
             to="/novo"
             className={({ isActive }) =>
@@ -539,12 +530,9 @@ function App() {
             title="Nova Requisição"
           >
             <FilePlus className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">
-              Nova Requisição
-            </span>
+            <span className="text-sm font-medium sidebar-label">Nova Requisição</span>
           </NavLink>
 
-          {/* 2) Requisições */}
           <NavLink
             to="/Requisicoes"
             className={({ isActive }) =>
@@ -557,12 +545,9 @@ function App() {
             title="Requisições"
           >
             <FileText className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">
-              Requisições
-            </span>
+            <span className="text-sm font-medium sidebar-label">Requisições</span>
           </NavLink>
 
-          {/* 3) Processos */}
           <NavLink
             to="/processos"
             className={({ isActive }) =>
@@ -578,7 +563,6 @@ function App() {
             <span className="text-sm font-medium sidebar-label">Processos</span>
           </NavLink>
 
-          {/* 4) Backlog */}
           <NavLink
             to="/backlog"
             className={({ isActive }) =>
@@ -594,7 +578,26 @@ function App() {
             <span className="text-sm font-medium sidebar-label">Backlog</span>
           </NavLink>
 
-          {/* RESTANTE MANTIDO NA MESMA ORDEM DE ANTES */}
+          {/* Alertas (modal) */}
+          <button
+            type="button"
+            onClick={() => setOpenAlerts(true)}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-[var(--menu-hover)] transition-colors"
+            title="Alertas"
+          >
+            <Inbox className="w-8 h-8 shrink-0" strokeWidth={1.25} />
+            <span className="text-sm font-medium sidebar-label">Alertas</span>
+            {unread > 0 && (
+              <span
+                className="ml-auto text-xs px-2 py-0.5 rounded-full"
+                style={{ background: 'var(--accent)', color: '#fff' }}
+                aria-label={`${unread} alertas não lidos`}
+                title={`${unread} não lidos`}
+              >
+                {unread}
+              </span>
+            )}
+          </button>
 
           <NavLink
             to="/historico"
@@ -623,9 +626,7 @@ function App() {
             title="Relatórios"
           >
             <BarChart3 className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">
-              Relatórios
-            </span>
+            <span className="text-sm font-medium sidebar-label">Relatórios</span>
           </NavLink>
 
           <NavLink
@@ -655,9 +656,7 @@ function App() {
             title="Caixa de Email"
           >
             <MailIcon className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">
-              Caixa de Email
-            </span>
+            <span className="text-sm font-medium sidebar-label">Caixa de Email</span>
           </NavLink>
 
           <NavLink
@@ -704,10 +703,7 @@ function App() {
                   <>
                     <Route path="/login" element={<Login />} />
                     <Route path="/register" element={<Register />} />
-                    <Route
-                      path="*"
-                      element={<Navigate to="/login" replace />}
-                    />
+                    <Route path="*" element={<Navigate to="/login" replace />} />
                   </>
                 )}
 
@@ -724,108 +720,49 @@ function App() {
                       }
                     />
                     <Route path="/novo" element={<ChatRequisicao />} />
-                    <Route
-                      path="/requisicao-chat"
-                      element={<ChatRequisicao />}
-                    />
-                    <Route
-                      path="/requisicao/:id"
-                      element={<DetalhesRequisicao />}
-                    />
+                    <Route path="/requisicao-chat" element={<ChatRequisicao />} />
+                    <Route path="/requisicao/:id" element={<DetalhesRequisicao />} />
                     <Route path="/backlog" element={<Backlog />} />
 
                     {role === 'gestor' || role === 'admin' ? (
                       <>
-                        <Route
-                          path="/Requisicoes"
-                          element={<Requisicoes />}
-                        />
+                        <Route path="/Requisicoes" element={<Requisicoes />} />
                         <Route path="/historico" element={<Historico />} />
-                        <Route
-                          path="/gestao"
-                          element={<GestaoRequisicoes />}
-                        />
+                        <Route path="/gestao" element={<GestaoRequisicoes />} />
                         <Route path="/dashboard" element={<Dashboard />} />
-                        <Route
-                          path="/processos"
-                          element={<ControleProcessos />}
-                        />
-                        <Route
-                          path="/processos/:id"
-                          element={<ProcessoDetalhes />}
-                        />
+                        <Route path="/processos" element={<ControleProcessos />} />
+                        <Route path="/processos/:id" element={<ProcessoDetalhes />} />
                         <Route path="/auditoria" element={<Auditoria />} />
                         <Route path="/ocr" element={<Ocr />} />
                         <Route path="/regras" element={<Regras />} />
-                        <Route
-                          path="/caixa-de-email"
-                          element={<CaixaDeEmail />}
-                        />
+                        <Route path="/caixa-de-email" element={<CaixaDeEmail />} />
                         <Route path="/chat-ia" element={<ChatIA />} />
+
                         {role === 'admin' && (
                           <>
                             {/* Preferred admin feedbacks route */}
-                            <Route
-                              path="/adminfeedbacks"
-                              element={<AdminFeedbacks />}
-                            />
+                            <Route path="/adminfeedbacks" element={<AdminFeedbacks />} />
                             {/* Alias to maintain compatibility */}
-                            <Route
-                              path="/admin/feedbacks"
-                              element={<AdminFeedbacks />}
-                            />
-                            <Route
-                              path="/admin/prazos"
-                              element={<AdminPrazos />}
-                            />
-                            <Route
-                              path="/admin/editor"
-                              element={<AdminEditor />}
-                            />
+                            <Route path="/admin/feedbacks" element={<AdminFeedbacks />} />
+                            <Route path="/admin/prazos" element={<AdminPrazos />} />
+                            <Route path="/admin/editor" element={<AdminEditor />} />
                           </>
                         )}
                       </>
                     ) : (
                       <>
-                        <Route
-                          path="/gestao"
-                          element={<Navigate to="/" replace />}
-                        />
-                        <Route
-                          path="/processos"
-                          element={<Navigate to="/" replace />}
-                        />
-                        <Route
-                          path="/processos/:id"
-                          element={<Navigate to="/" replace />}
-                        />
-                        <Route
-                          path="/auditoria"
-                          element={<Navigate to="/" replace />}
-                        />
-                        <Route
-                          path="/ocr"
-                          element={<Navigate to="/" replace />}
-                        />
-                        <Route
-                          path="/regras"
-                          element={<Navigate to="/" replace />}
-                        />
-                        <Route
-                          path="/caixa-de-email"
-                          element={<Navigate to="/" replace />}
-                        />
-                        <Route
-                          path="/chat-ia"
-                          element={<Navigate to="/" replace />}
-                        />
+                        <Route path="/gestao" element={<Navigate to="/" replace />} />
+                        <Route path="/processos" element={<Navigate to="/" replace />} />
+                        <Route path="/processos/:id" element={<Navigate to="/" replace />} />
+                        <Route path="/auditoria" element={<Navigate to="/" replace />} />
+                        <Route path="/ocr" element={<Navigate to="/" replace />} />
+                        <Route path="/regras" element={<Navigate to="/" replace />} />
+                        <Route path="/caixa-de-email" element={<Navigate to="/" replace />} />
+                        <Route path="/chat-ia" element={<Navigate to="/" replace />} />
                       </>
                     )}
 
-                    <Route
-                      path="/login"
-                      element={<Navigate to="/" replace />}
-                    />
+                    <Route path="/login" element={<Navigate to="/" replace />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </>
                 )}
@@ -884,35 +821,57 @@ function App() {
 
 export default App;
 
-// Persist last route while logged
+// Persist last route while logged + restore once per session after login/reload
 function RouteKeeper({ user }) {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Persist last non-root route
   useEffect(() => {
     if (!user) return;
+
     const path = location.pathname + (location.search || '');
-    if (path !== '/' && path !== '/login') {
+    const isAuth = path === '/login' || path === '/register';
+    const isRoot = path === '/';
+
+    if (!isRoot && !isAuth) {
       try {
         localStorage.setItem('lastRoute', path);
       } catch {}
     }
   }, [user, location.pathname, location.search]);
 
+  // Restore last route ONLY ONCE per session (prevents loop when clicking "Início")
   useEffect(() => {
-    if (!user) return;
-    const isRoot = location.pathname === '/';
-    // Se o usuário está na raiz (Home), não faça redirect automático;
-    // também limpa o lastRoute para evitar loop ao clicar em "Início".
-    if (isRoot) {
-      try { localStorage.removeItem('lastRoute'); } catch {}
+    if (!user) {
+      try {
+        sessionStorage.removeItem('restoredLastRoute');
+      } catch {}
       return;
     }
+
+    const isRoot = location.pathname === '/';
+    if (!isRoot) return;
+
+    let already = false;
     try {
-      const last = localStorage.getItem('lastRoute');
-      if (last && isRoot && last !== '/' && last !== '/login')
-        navigate(last, { replace: true });
+      already = sessionStorage.getItem('restoredLastRoute') === '1';
     } catch {}
+
+    if (already) return;
+
+    let last = null;
+    try {
+      last = localStorage.getItem('lastRoute');
+    } catch {}
+
+    try {
+      sessionStorage.setItem('restoredLastRoute', '1');
+    } catch {}
+
+    if (last && last !== '/' && last !== '/login' && last !== '/register') {
+      navigate(last, { replace: true });
+    }
   }, [user, location.pathname, navigate]);
 
   return null;
