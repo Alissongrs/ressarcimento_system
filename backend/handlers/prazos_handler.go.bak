@@ -171,12 +171,20 @@ WITH alvo AS (
     UNION ALL SELECT 'ANEEL', 'Aguardando retorno', 15
 ),
 hist AS (
+<<<<<<< HEAD
     SELECT id_requisicao, etapa_nova, sub_etapa, MAX(data_movimentacao) AS data_movimentacao
+=======
+    SELECT id_requisicao, MAX(data_movimentacao) AS data_movimentacao
+>>>>>>> 07e4f02 (Fix: alterações de segurança)
       FROM FT_HISTORICO_MOVIMENTACOES
      WHERE etapa_nova IS NOT NULL
        AND LOWER(TRIM(etapa_nova)) IN ('distribuidora','ouvidoria','aneel')
        AND LOWER(TRIM(COALESCE(sub_etapa,''))) LIKE 'aguardando retorno%'
+<<<<<<< HEAD
      GROUP BY id_requisicao, etapa_nova, sub_etapa
+=======
+     GROUP BY id_requisicao
+>>>>>>> 07e4f02 (Fix: alterações de segurança)
 )
 SELECT
     p.id_processo,
@@ -186,8 +194,13 @@ SELECT
     COALESCE(h.data_movimentacao, p.ultima_atualizacao) AS data_base
 FROM FT_PROCESSOS p
 JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+<<<<<<< HEAD
 JOIN alvo a ON LOWER(TRIM(e.etapa)) = LOWER(TRIM(a.etapa)) COLLATE utf8mb4_unicode_ci
            AND LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE LOWER(CONCAT(TRIM(a.sub_etapa), '%')) COLLATE utf8mb4_unicode_ci
+=======
+JOIN alvo a ON LOWER(TRIM(e.etapa)) = LOWER(TRIM(a.etapa))
+           AND LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE CONCAT(LOWER(TRIM(a.sub_etapa)), '%')
+>>>>>>> 07e4f02 (Fix: alterações de segurança)
 LEFT JOIN hist h ON h.id_requisicao = p.id_processo
 WHERE COALESCE(h.data_movimentacao, p.ultima_atualizacao) IS NOT NULL
 LIMIT ?`
@@ -239,9 +252,16 @@ LIMIT ?`
 		base := r.DataBase
 		deadline := base.Add(time.Duration(r.Prazo) * 24 * time.Hour)
 		delta := deadline.Sub(now)
+<<<<<<< HEAD
 		out = append(out, outItem{
 			ID:             r.ID,
 			Etapa:          r.Etapa,
+=======
+
+		item := outItem{
+			ID:             r.ID,
+			Etapa:          strings.TrimSpace(r.Etapa),
+>>>>>>> 07e4f02 (Fix: alterações de segurança)
 			SubEtapa:       strings.TrimSpace(r.SubEtapa.String),
 			PrazoDias:      r.Prazo,
 			Deadline:       deadline.Format(time.RFC3339),
@@ -251,9 +271,17 @@ LIMIT ?`
 			Atrasado:       delta < 0,
 			DataBase:       base.Format(time.RFC3339),
 			DataBaseUnix:   base.Unix(),
+<<<<<<< HEAD
 		})
 		if delta < 0 {
 			atrasados = append(atrasados, out[len(out)-1])
+=======
+		}
+
+		out = append(out, item)
+		if delta < 0 {
+			atrasados = append(atrasados, item)
+>>>>>>> 07e4f02 (Fix: alterações de segurança)
 		}
 	}
 
@@ -288,5 +316,23 @@ LIMIT ?`
 		}
 	}
 
+<<<<<<< HEAD
 	c.JSON(http.StatusOK, gin.H{"rows": out, "count": len(out)})
+=======
+	// Agrupa por etapa (Distribuidora, Ouvidoria, ANEEL)
+	grupos := make(map[string][]outItem)
+	for _, item := range out {
+		key := strings.TrimSpace(item.Etapa)
+		if key == "" {
+			key = "Outros"
+		}
+		grupos[key] = append(grupos[key], item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"rows":   out,
+		"count":  len(out),
+		"grupos": grupos,
+	})
+>>>>>>> 07e4f02 (Fix: alterações de segurança)
 }

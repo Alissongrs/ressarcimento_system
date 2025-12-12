@@ -991,7 +991,10 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 			return
 		}
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 07e4f02 (Fix: alterações de segurança)
 		// Histórico da mudança de status (status_anterior/status_novo) com tipo/subtipo
 		var etapaAtual sql.NullString
 		var subAtual sql.NullString
