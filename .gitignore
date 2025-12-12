@@ -37,3 +37,9 @@ frontend/.vite_theme_fix/
 
 # Docs
 *.md
+
+# backups/temporários
+*.bak
+*.save
+*~
+ressarcimento_system_old_*/
