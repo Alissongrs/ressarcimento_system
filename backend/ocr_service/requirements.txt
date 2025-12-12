@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pytesseract
+opencv-python-headless
+Pillow
+pdf2image
+requests
+python-dotenv
+pydantic

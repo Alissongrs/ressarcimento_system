@@ -239,7 +239,11 @@ function App() {
             }
             title="Início"
           >
+<<<<<<< HEAD
             <Home className="sidebar-icon" strokeWidth={1.8} />
+=======
+            <Home className="w-8 h-8 shrink-0" strokeWidth={1.8} />
+>>>>>>> 07e4f02 (Fix: alterações de segurança)
             <span className="text-sm font-medium sidebar-label">Início</span>
           </NavLink>
         </div>
@@ -512,7 +516,11 @@ function App() {
             className="w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors hover:bg-[var(--menu-hover)]"
             title="Início"
           >
+<<<<<<< HEAD
             <Home className="w-5 h-5" />
+=======
+            <Home className="w-8 h-8 shrink-0" strokeWidth={1.8} />
+>>>>>>> 07e4f02 (Fix: alterações de segurança)
           </NavLink>
         </div>
 
@@ -894,6 +902,12 @@ function RouteKeeper({ user }) {
   useEffect(() => {
     if (!user) return;
     const isRoot = location.pathname === '/';
+    // Se o usuário está na raiz (Home), não faça redirect automático;
+    // também limpa o lastRoute para evitar loop ao clicar em "Início".
+    if (isRoot) {
+      try { localStorage.removeItem('lastRoute'); } catch {}
+      return;
+    }
     try {
       const last = localStorage.getItem('lastRoute');
       if (last && isRoot && last !== '/' && last !== '/login')

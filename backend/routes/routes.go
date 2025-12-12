@@ -74,7 +74,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	}
 	r.Use(cors.New(cfg))
 
-	// Liberar OPTIONS (preflight) antes de autenticaÇõÇœo para evitar 403 em CORS
+	// Liberar OPTIONS (preflight) antes de autenticação para evitar 403 em CORS
 	r.Use(func(c *gin.Context) {
 		if c.Request.Method == http.MethodOptions {
 			c.Status(http.StatusOK)
@@ -82,6 +82,14 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			return
 		}
 	})
+
+	// ===== RATE LIMITING GLOBAL =====
+	// Aplica a todas as rotas exceto health checks
+	r.Use(middleware.GlobalRateLimit())
+
+	// ===== COMPRESSÃO GZIP =====
+	// Comprime respostas JSON e HTML automaticamente
+	r.Use(middleware.Gzip())
 
 	// Arquivos estáticos
 	r.Static("/uploads", "./uploads")
@@ -106,8 +114,11 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	// ============================================================
 	apiV1 := r.Group("/api/v1")
 	{
-		// Healthcheck
-		apiV1.GET("/healthz", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+		// Health checks (múltiplas versões para diferentes necessidades)
+		apiV1.GET("/healthz", handlers.SimpleHealthCheck)           // Simples (ok: true)
+		apiV1.GET("/health", handlers.AdvancedHealthCheck)          // Avançado (verifica dependências)
+		apiV1.GET("/health/live", handlers.LivenessCheck)           // Kubernetes liveness
+		apiV1.GET("/health/ready", handlers.ReadinessCheck)         // Kubernetes readiness
 
 		// ===== SSE oficiais =====
 		apiV1.GET("/alertas/stream", middleware.AuthOrQueryToken(), handlers.StreamAlertas)
@@ -136,9 +147,9 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			})
 		})
 
-		// Público
-		apiV1.POST("/register", handlers.Register)
-		apiV1.POST("/login", handlers.Login)
+		// Público com rate limiting restrito para autenticação
+		apiV1.POST("/register", middleware.AuthRateLimit(), handlers.Register)
+		apiV1.POST("/login", middleware.AuthRateLimit(), handlers.Login)
 		apiV1.GET("/uc/:numero", handlers.GetUCByNumero)
 		apiV1.GET("/uc/:numero/faturas", handlers.GetFaturasByUC)
 
@@ -182,7 +193,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			// Resumos de processo (persistidos)
 			authRequired.GET("/processos/:id/summary", handlers.GetProcessoSummary)
 			authRequired.POST("/processos/:id/summary/refresh", handlers.RefreshProcessoSummary)
-			// Monitoramento simples (status) – sob auth; pode ser filtrado no front para admin
+			// Monitoramento simples (status)
 			authRequired.GET("/resumos/status", handlers.GetResumosStatus)
 			// Lista de pendentes (preview)
 			authRequired.GET("/resumos/pending", handlers.GetResumosPending)
@@ -209,7 +220,9 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			// Irregularidades
 			authRequired.GET("/tipos-irregularidade", handlers.GetTiposIrregularidade)
 			authRequired.GET("/tipos-irregularidade/:tipoID/subtipos", handlers.GetSubtiposIrregularidade)
-			// Dashboard de deferidos
+
+			// Dashboard de deferidos (autenticado)
+			authRequired.GET("/dashboard/deferidos", handlers.GetDashboardDeferidos)
 		}
 
 		// ------------------------- Gestor -------------------------
@@ -285,7 +298,6 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 			// Dashboard
 			gestorRequired.GET("/dashboard/stats", dashHandler.Stats)
-			authRequired.GET("/dashboard/deferidos", handlers.GetDashboardDeferidos)
 			gestorRequired.GET("/dashboard/movimentacoes", dashHandler.MovimentacoesPeriodo)
 			gestorRequired.GET("/dashboard/changes-24h", dashHandler.MovimentacoesUltimas24h)
 
@@ -302,6 +314,8 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 			// OCR (somente gestor/admin)
 			gestorRequired.POST("/ocr/analyze", handlers.OCRAnalyze)
+			gestorRequired.POST("/ocr/quick", handlers.OCRQuick)       // Two-stage OCR: Stage 1 (fast extraction)
+			gestorRequired.POST("/ocr/interpret", handlers.OCRInterpret) // Two-stage OCR: Stage 2 (interpretation)
 
 			// Regras de auditoria (CRUD)
 			gestorRequired.POST("/rules", handlers.CreateRule)
@@ -364,6 +378,9 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			authRequired.POST("/feedback", handlers.CreateFeedback)
 			authRequired.GET("/tipos-irregularidade", handlers.GetTiposIrregularidade)
 			authRequired.GET("/tipos-irregularidade/:tipoID/subtipos", handlers.GetSubtiposIrregularidade)
+
+			// Dashboard de deferidos (legado, autenticado)
+			authRequired.GET("/dashboard/deferidos", handlers.GetDashboardDeferidos)
 		}
 
 		gestorRequired := api.Group("/")
@@ -388,6 +405,8 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.POST("/processos/:id/suspender", handlers.SuspenderProcesso)
 			gestorRequired.POST("/processos/:id/retomar", handlers.RetomarProcesso)
 			gestorRequired.GET("/processos/prazos", handlers.GetProcessosComPrazo)
+			gestorRequired.GET("/processos/backlog", handlers.GetBacklogProcessos)
+			gestorRequired.POST("/processos/:id/backlog-check", handlers.ToggleBacklogCheck)
 			gestorRequired.GET("/processos/suspensos", handlers.GetProcessosSuspensos)
 			gestorRequired.DELETE("/processos/:id", handlers.ExcluirProcessoPermanentemente)
 

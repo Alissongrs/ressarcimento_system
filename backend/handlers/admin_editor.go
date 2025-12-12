@@ -10,6 +10,7 @@ import (
 	"ressarcimento-backend/database"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 // AdminEditPayload consolida campos para criação/edição completa de um processo
@@ -211,20 +212,21 @@ func AdminEditProcesso(c *gin.Context) {
 	// Deferimento (somente se houver pelo menos um campo significativo)
 	if len(body.Deferimento) > 0 {
 		var input struct {
-			DataProcedencia  *string  `json:"data_procedencia"`
-			CreditoSimples   *float64 `json:"credito_simples"`
-			CreditoDobro     *float64 `json:"credito_dobro"`
-			DataCreditoDobro *string  `json:"data_credito_dobro"`
+			DataProcedencia  *string           `json:"data_procedencia"`
+			CreditoSimples   *decimal.Decimal  `json:"credito_simples"`
+			CreditoDobro     *decimal.Decimal  `json:"credito_dobro"`
+			DataCreditoDobro *string           `json:"data_credito_dobro"`
 		}
 		if err2 := json.Unmarshal(body.Deferimento, &input); err2 == nil {
 			hasData := (input.DataProcedencia != nil && strings.TrimSpace(*input.DataProcedencia) != "") ||
 				(input.DataCreditoDobro != nil && strings.TrimSpace(*input.DataCreditoDobro) != "") ||
-				(input.CreditoSimples != nil && *input.CreditoSimples != 0) || (input.CreditoDobro != nil && *input.CreditoDobro != 0)
+				(input.CreditoSimples != nil && input.CreditoSimples.Sign() != 0) ||
+				(input.CreditoDobro != nil && input.CreditoDobro.Sign() != 0)
 			if hasData {
 				_, err = tx.Exec(`INSERT INTO FT_DEFERIMENTOS (id_processo, data_procedencia, credito_simples, credito_dobro, data_credito_dobro)
 				   VALUES (?, NULLIF(?, ''), ?, ?, NULLIF(?, ''))
                                    ON DUPLICATE KEY UPDATE data_procedencia=VALUES(data_procedencia), credito_simples=VALUES(credito_simples), credito_dobro=VALUES(credito_dobro), data_credito_dobro=VALUES(data_credito_dobro)`,
-					pid, valOrEmpty(input.DataProcedencia), valOrNull(input.CreditoSimples), valOrNull(input.CreditoDobro), valOrEmpty(input.DataCreditoDobro))
+					pid, valOrEmpty(input.DataProcedencia), decimalOrNull(input.CreditoSimples), decimalOrNull(input.CreditoDobro), valOrEmpty(input.DataCreditoDobro))
 				if err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao salvar deferimento: " + err.Error()})
 					return
@@ -329,6 +331,12 @@ func valOrNull[T any](p *T) interface{} {
 		return nil
 	}
 	return *p
+}
+func decimalOrNull(d *decimal.Decimal) interface{} {
+	if d == nil {
+		return nil
+	}
+	return d
 }
 func valOrEmpty(p *string) interface{} {
 	if p == nil {

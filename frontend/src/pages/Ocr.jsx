@@ -1,7 +1,7 @@
 // src/pages/Ocr.jsx
-import React, { useEffect, useMemo, useState } from 'react';
-import { UploadCloud, X } from 'lucide-react';
-import { ocrAnalyze, ocrChat } from '@services/ocrService.js';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { UploadCloud, X, Sparkles } from 'lucide-react';
+import { ocrAnalyze, ocrChat, ocrQuick, ocrInterpret } from '@services/ocrService.js';
 import { interpretRule } from '@services/rulesService.js';
 
 export default function Ocr() {
@@ -22,6 +22,8 @@ export default function Ocr() {
   const [lastRawResults, setLastRawResults] = useState([]);
   const [sourceByName, setSourceByName] = useState({}); // filename -> source URL (quando veio de link)
   const [aiView, setAiView] = useState({}); // id -> { open, loading, text, error }
+  const [progress, setProgress] = useState(0);
+  const progressRef = useRef(null);
 
   const canAnalyze = useMemo(() => files.length > 0 && !analyzing, [files, analyzing]);
 
@@ -87,7 +89,7 @@ export default function Ocr() {
   const simNao = (b) => (b === true ? 'Sim' : b === false ? 'Não' : '-');
 
   // Mapeia 1 resultado em 1 linha de tabela
-  const mapResultToRow = (res) => {
+  const mapResultToRow = (res, requestId = null) => {
     const rr = res?.rule_results || {};
     const meta = rr.META || {};
     const b = rr.BANDEIRA_ENEL_SP_GB || {};
@@ -111,10 +113,74 @@ export default function Ocr() {
       sourceUrl: sourceByName[res?.file_name || res?.FileName || ''] || null,
       createdAt: new Date().toISOString(),
       rawOriginal: res,
+      requestId: requestId || res?.request_id || null, // Store request_id for later interpretation
+      rawText: res?.raw_text || null, // Store raw OCR text
+      interpreted: !!(rr && Object.keys(rr).length > 0), // Flag indicating if rules were applied
     };
   };
 
-  // Executa OCR e atualiza tabela (novas linhas no topo)
+  // Stage 1: OCR Rápido (apenas extração de texto)
+  const analyzeQuick = async () => {
+    if (!canAnalyze) return;
+    setAnalyzing(true);
+    try {
+      const response = await ocrQuick(files);
+      const requestId = response?.request_id;
+      const results = response?.results || [];
+
+      // Cria linhas básicas (sem interpretação ainda)
+      const newRows = results.map((res) => mapResultToRow(res, requestId));
+      setLastRawResults(results);
+      setRows((prev) => [...newRows, ...prev]);
+      setFiles([]); // limpa seleção após envio
+    } catch (e) {
+      setLastRawResults([{ error: String(e) }]);
+      alert(`Erro no OCR: ${e.message || e}`);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  // Stage 2: Interpretação com IA (aplica regras ao texto OCR salvo)
+  const interpretWithAI = async (row) => {
+    if (!row.requestId || !row.arquivo) {
+      alert('Dados insuficientes para interpretação. Execute o OCR primeiro.');
+      return;
+    }
+
+    const id = row.id;
+    if (busy) return; // anti-duplo-clique
+    setBusy(true);
+    setAiView((prev) => ({ ...prev, [id]: { open: true, loading: true, text: '', error: '' } }));
+
+    try {
+      const rules = ['BANDEIRA_ENEL_SP_GB'];
+      if (ruleICMS) rules.push('ICMS');
+
+      const result = await ocrInterpret(row.requestId, row.arquivo, rules, false);
+
+      // Atualiza a linha na tabela com os resultados interpretados
+      const updatedRow = mapResultToRow({
+        file_name: result.filename,
+        rule_results: result.rule_results,
+        raw_text: row.rawText,
+        request_id: row.requestId,
+      }, row.requestId);
+
+      setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...updatedRow } : r)));
+      setAiView((prev) => ({ ...prev, [id]: { open: false, loading: false, text: '', error: '' } }));
+    } catch (e) {
+      const msg = String(e || '');
+      const hint = /429/.test(msg)
+        ? 'Muitas requisições. Aguarde alguns segundos.'
+        : 'Falha ao interpretar com a IA.';
+      setAiView((prev) => ({ ...prev, [id]: { open: true, loading: false, text: '', error: `${hint} ${msg}` } }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Mantém função legacy para compatibilidade (usa full OCR)
   const analyze = async () => {
     if (!canAnalyze) return;
     setAnalyzing(true);
@@ -330,13 +396,22 @@ JSON:\n\n${JSON.stringify(row.rawOriginal || row, null, 2)}`;
           </div>
         </div>
 
-        <div className="mt-3 flex gap-3 items-center">
+        <div className="mt-3 flex gap-3 items-center flex-wrap">
           <button
-            onClick={analyze}
+            onClick={analyzeQuick}
             disabled={!canAnalyze}
             className="px-4 py-2 rounded-md bg-[var(--accent)] text-[var(--fg)] disabled:opacity-50 flex items-center gap-2"
           >
-            <UploadCloud size={16} /> {analyzing ? 'Processando…' : 'Enviar para OCR'}
+            <UploadCloud size={16} /> {analyzing ? 'Processando…' : 'OCR Rápido'}
+          </button>
+
+          <button
+            onClick={analyze}
+            disabled={!canAnalyze}
+            className="px-4 py-2 rounded-md bg-[var(--accent)]/80 text-[var(--fg)] disabled:opacity-50 flex items-center gap-2"
+            title="Modo legado: OCR + Interpretação em uma etapa"
+          >
+            <UploadCloud size={16} /> {analyzing ? 'Processando…' : 'OCR Completo (Legado)'}
           </button>
 
           <label className="flex items-center gap-2 text-xs">
@@ -407,14 +482,30 @@ JSON:\n\n${JSON.stringify(row.rawOriginal || row, null, 2)}`;
                         {simNao(r.bandeiraIncorreta)}
                       </td>
                       <td className="px-2 py-1 border border-[var(--border)] text-center">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-center gap-2 flex-wrap">
+                          {r.requestId && !r.interpreted && (
+                            <button
+                              title="Aplicar regras ao OCR salvo"
+                              onClick={() => interpretWithAI(r)}
+                              disabled={busy || aiView[r.id]?.loading}
+                              className={`px-2 py-1 rounded text-[10px] flex items-center gap-1 ${busy || aiView[r.id]?.loading ? 'opacity-50 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                            >
+                              <Sparkles size={12} />
+                              {busy || aiView[r.id]?.loading ? 'Interpretando…' : 'Interpretar com IA'}
+                            </button>
+                          )}
+                          {r.interpreted && (
+                            <span className="px-2 py-1 rounded text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                              ✓ Interpretado
+                            </span>
+                          )}
                           <button
-                            title="Interpretação da IA"
+                            title="Chat com IA sobre este resultado"
                             onClick={() => interpretRow(r)}
                             disabled={busy || aiView[r.id]?.loading}
                             className={`px-2 py-1 rounded text-[10px] ${busy || aiView[r.id]?.loading ? 'opacity-50 cursor-not-allowed' : 'bg-[var(--accent)] text-[var(--fg)]'}`}
                           >
-                            {busy || aiView[r.id]?.loading ? 'Interpretando…' : 'Interpretação da IA'}
+                            {busy || aiView[r.id]?.loading ? 'Processando…' : 'Chat IA'}
                           </button>
                           <button title="Excluir" onClick={() => removeRow(r.id)} className="opacity-80 hover:opacity-100">
                             <X size={14} />

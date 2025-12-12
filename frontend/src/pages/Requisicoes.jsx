@@ -66,8 +66,20 @@ export default function Requisicoes() {
       try {
         setErr('');
         setLoading(true);
-        const rows = await getAllRequisicoes();
-        const list = Array.isArray(rows) ? rows : [];
+        let list = [];
+        try {
+          const rows = await getAllRequisicoes();
+          list = Array.isArray(rows) ? rows : [];
+        } catch (e) {
+          // Se nao for gestor/admin (403), mostra apenas as requisicoes do proprio usuario
+          const status = e?.response?.status;
+          if (status === 403 || status === 401) {
+            const mine = await (await import('../services/requisicaoService')).getMinhasRequisicoes(true);
+            list = Array.isArray(mine) ? mine : [];
+          } else {
+            throw e;
+          }
+        }
         setItems(list);
         setTotal(list.length);
         try {

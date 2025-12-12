@@ -27,12 +27,17 @@ func InitDBs() {
 		if strings.Contains(base, "?") {
 			sep = "&"
 		}
-		// Fixar timezone; collation no DSN mantém unicode_ci (compatível com 5.7+)
+		// Fixar timezone via sessão (abaixo) e usar loc=Local para não depender de tabelas TZ do MySQL
 		// Ajustamos a collation da sessão abaixo com fallback para 0900 quando suportado
-		return fmt.Sprintf("%s%sparseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=America%%2FSao_Paulo", base, sep)
+		return fmt.Sprintf("%s%sparseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=Local", base, sep)
 	}
 	connStrApp := buildDSN(os.Getenv("DB_APP_URL"))
 	connStrConsulta := buildDSN(os.Getenv("DB_CONSULTA_URL"))
+
+	timeZone := strings.TrimSpace(os.Getenv("DB_TIMEZONE"))
+	if timeZone == "" {
+		timeZone = "-03:00" // default para evitar depender de time zone tables
+	}
 
 	var err error
 
@@ -44,7 +49,7 @@ func InitDBs() {
 	if err != nil {
 		log.Fatalf("Erro fatal ao CONECTAR com o banco da aplicação: %v", err)
 	}
-	if _, err := DB_App.Exec("SET time_zone = 'America/Sao_Paulo'"); err != nil {
+	if _, err := DB_App.Exec("SET time_zone = '" + timeZone + "'"); err != nil {
 		log.Printf("Aviso: falha ao definir time_zone na sessão APP: %v (fazendo fallback para -03:00)", err)
 		_, _ = DB_App.Exec("SET time_zone = '-03:00'")
 	}
@@ -65,7 +70,7 @@ func InitDBs() {
             _ = DB_Consulta.Close()
             DB_Consulta = nil
         } else {
-            if _, err := DB_Consulta.Exec("SET time_zone = 'America/Sao_Paulo'"); err != nil {
+            if _, err := DB_Consulta.Exec("SET time_zone = '" + timeZone + "'"); err != nil {
                 log.Printf("Aviso: falha ao definir time_zone na sessão CONSULTA: %v (fazendo fallback para -03:00)", err)
                 _, _ = DB_Consulta.Exec("SET time_zone = '-03:00'")
             }
@@ -88,4 +93,3 @@ func ensureSessionCollation(db *sql.DB) {
 	_, _ = db.Exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci")
 	_, _ = db.Exec("SET collation_connection = 'utf8mb4_unicode_ci'")
 }
-

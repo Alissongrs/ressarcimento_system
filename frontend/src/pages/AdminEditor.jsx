@@ -82,6 +82,16 @@ export default function AdminEditor() {
     Indeferidos: 'Indeferido',
     Suspensos: 'Suspenso',
   };
+  const etapaToColuna = (etapaNome = '') => {
+    const norm = String(etapaNome || '').toLowerCase().trim();
+    if (['distribuidora', 'ouvidoria', 'aneel', 'sma', 'andamento'].some((k) => norm.includes(k))) return 'Ativos';
+    if (['pendente', 'concili', 'contesta'].some((k) => norm.includes(k))) return 'Deferidos';
+    if (norm.includes('fluxo') || norm.includes('financeiro') || norm.includes('validacao')) return 'Fluxo de Ressarcimento';
+    if (norm.includes('fatur')) return 'Faturamento';
+    if (norm.includes('conclu')) return 'Concluídos';
+    if (norm.includes('indefer')) return 'Indeferidos';
+    return '';
+  };
 
   // Helpers de data (exibição BR e normalização para envio)
   const toBRDateTime = (s) => {
@@ -94,8 +104,19 @@ export default function AdminEditor() {
     }
     return str;
   };
+  const toUnix = (s) => {
+    if (!s) return 0;
+    const str = String(s).trim();
+    const m = str.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}:\d{2}:\d{2}|\d{2}:\d{2}))?/);
+    if (m) {
+      const [, d, mo, y, t] = m;
+      return new Date(`${y}-${mo}-${d}${t ? `T${t}` : ''}`).getTime();
+    }
+    const d = new Date(str);
+    return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+  };
 
-  const normalizeDateInput = (s) => {
+const normalizeDateInput = (s) => {
     const raw = String(s || '').trim();
     if (!raw) return null;
     const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(.+))?$/);
@@ -104,6 +125,35 @@ export default function AdminEditor() {
       return `${y}-${mo}-${d}${t ? ` ${t.trim()}` : ''}`;
     }
     return raw;
+  };
+
+  const unwrapNumberLoose = (val) => {
+    if (val === undefined || val === null) return null;
+    if (typeof val === 'number') return val;
+    if (typeof val === 'string') {
+      const n = Number(val.replace(/\./g, '').replace(',', '.'));
+      return Number.isFinite(n) ? n : null;
+    }
+    if (typeof val === 'object') {
+      if (val.Valid === false) return null;
+      if (typeof val.Float64 === 'number') return val.Float64;
+      if (typeof val.Float64 === 'string') {
+        const n = Number(val.Float64);
+        return Number.isFinite(n) ? n : null;
+      }
+      if (typeof val.Float32 === 'number') return val.Float32;
+    }
+    return null;
+  };
+
+  const formatMoneyStr = (val) => {
+    const n = unwrapNumberLoose(val);
+    if (n === null) return '';
+    try {
+      return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+    } catch {
+      return String(n);
+    }
   };
 
   // Refs para foco automático em Sub-etapa
@@ -208,15 +258,15 @@ export default function AdminEditor() {
         setcriarNovo(false);
       }
 
-      const data = await getRequisicaoById(idStr);
-      setReq({
-        uc: data?.uc ?? '',
-        cliente: data?.cliente?.String ?? data?.cliente ?? '',
-        concessionaria: data?.concessionaria ?? '',
+        const data = await getRequisicaoById(idStr);
+        setReq({
+          uc: data?.uc ?? '',
+          cliente: data?.cliente?.String ?? data?.cliente ?? '',
+          concessionaria: data?.concessionaria ?? '',
         cnpj: data?.cnpj ?? '',
         endereco_completo: data?.endereco_completo ?? '',
         razao_social_fatura: data?.razao_social_fatura ?? '',
-        ressarcimento_estimado: data?.valor_estimado ?? data?.ressarcimento_estimado ?? '',
+        ressarcimento_estimado: formatMoneyStr(data?.valor_estimado ?? data?.ressarcimento_estimado ?? ''),
         link_fatura: data?.link_fatura ?? '',
         data_criacao_requisicao: data?.data_criacao ? toBRDateTime(data.data_criacao) : '',
       });
@@ -227,6 +277,13 @@ export default function AdminEditor() {
         data_alerta: data?.data_alerta ? toBRDateTime(data.data_alerta).slice(0, 10) : '',
         ultima_atualizacao: data?.ultima_atualizacao ? toBRDateTime(data.ultima_atualizacao) : '',
       });
+      // Deriva coluna atual para exibir na UI
+      const colNome =
+        data?.coluna_kanban_nome ||
+        data?.coluna_kanban ||
+        etapaToColuna(data?.etapa) ||
+        etapaToColuna(data?.coluna_kanban_nome);
+      if (colNome) setSelectedColuna(String(colNome));
 
       // Deferimento direto do processo, se vier no payload principal
       const unwrapDate = (v) => {
@@ -277,7 +334,8 @@ export default function AdminEditor() {
       ]);
 
       setHist(
-        (h || []).map((x) => ({
+        (h || [])
+          .map((x) => ({
           id_historico: x.id_historico || x.idhistorico || x.id,
           data: toBRDateTime(x.data_movimentacao || x.data || x.created_at),
           comentario: x.comentario || '',
@@ -288,7 +346,8 @@ export default function AdminEditor() {
           status_novo: x.status_novo || '',
           relevancia_anterior: parseBoolLoose(x.relevancia_anterior),
           relevancia_nova: parseBoolLoose(x.relevancia_nova),
-        })),
+        }))
+          .sort((a, b) => toUnix(b.data) - toUnix(a.data)),
       );
 
       const fluxArr = Array.isArray(fluxoSaved?.itens)
@@ -300,7 +359,7 @@ export default function AdminEditor() {
       setFluxo(
         (fluxArr || []).map((it) => ({
           forma_devolucao: it.forma_devolucao || it.formaDevolucao || 'Fatura',
-          valor: it.valor ?? it.valor_fluxo ?? it.valorFluxo ?? 0,
+          valor: formatMoneyStr(it.valor ?? it.valor_fluxo ?? it.valorFluxo ?? 0),
           data_devolucao: toBRDateTime(it.data_devolucao || it.dataDevolucao || '').slice(0, 10),
           data_envio_financeiro: toBRDateTime(
             it.data_envio_financeiro || it.dataEnvioFinanceiro || '',
@@ -320,7 +379,7 @@ export default function AdminEditor() {
           data_emissao: toBRDateTime(it.data_emissao || '').slice(0, 10),
           data_vencimento: toBRDateTime(it.data_vencimento || '').slice(0, 10),
           data_pagamento: toBRDateTime(it.data_pagamento || '').slice(0, 10),
-          valor: it.valor ?? it.valor_nf ?? it.valorNf ?? 0,
+          valor: formatMoneyStr(it.valor ?? it.valor_nf ?? it.valorNf ?? 0),
           anexo_nome: it.anexo_nome || it.anexo || it.nome_anexo || it.nome || '',
         })),
       );
@@ -451,24 +510,20 @@ export default function AdminEditor() {
         deferimento: (() => {
           const ds = normalizeDateInput(deferimento?.data_procedencia);
           const dd = normalizeDateInput(deferimento?.data_credito_dobro);
-          const cs =
-            deferimento?.credito_simples === '' || deferimento?.credito_simples == null
-              ? null
-            : parseMoneyInput(deferimento.credito_simples);
-          const cd =
-            deferimento?.credito_dobro === '' || deferimento?.credito_dobro == null
-              ? null
-            : parseMoneyInput(deferimento.credito_dobro);
+          const cs = parseMoneyInput(deferimento?.credito_simples);
+          const cd = parseMoneyInput(deferimento?.credito_dobro);
           const has =
-            (ds && ds !== '') || (dd && dd !== '') || (cs !== null && cs !== 0) || (cd !== null && cd !== 0);
-          return has
-            ? JSON.stringify({
-                data_procedencia: ds,
-                credito_simples: cs,
-                credito_dobro: cd,
-                data_credito_dobro: dd,
-              })
-            : undefined;
+            (ds && ds !== '') ||
+            (dd && dd !== '') ||
+            cs !== null ||
+            cd !== null;
+          if (!has) return undefined;
+          return JSON.stringify({
+            data_procedencia: ds || '',
+            credito_simples: cs === null ? 0 : cs,
+            credito_dobro: cd === null ? 0 : cd,
+            data_credito_dobro: dd || '',
+          });
         })(),
 
         fluxo_ressarcimento: JSON.stringify({
@@ -528,6 +583,11 @@ export default function AdminEditor() {
         setMsg(sucesso);
         setToast({ open: true, type: 'success', text: sucesso });
         if (criarNovo) setProcessoId(String(res.processo_id));
+        // Recarrega dados do processo para refletir valores persistidos no backend
+        if (pid) {
+          setcriarNovo(false);
+          await loadById();
+        }
       } else {
         setMsg('Falha ao salvar');
         setToast({ open: true, type: 'error', text: 'Falha ao salvar' });
@@ -730,6 +790,21 @@ export default function AdminEditor() {
           <section className="mb-6 p-4 border rounded">
             <h2 className="font-semibold mb-3">Processo</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm mb-1">Coluna Kanban (atual)</label>
+                <input
+                  className="w-full px-3 py-2 border rounded admin-input bg-[var(--panel)]"
+                  value={selectedColuna || ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSelectedColuna(v);
+                    const etapa = colToEtapa[v] || etapaToColuna(v);
+                    if (etapa) setProc((s) => ({ ...s, etapa, sub_etapa: '' }));
+                  }}
+                  list="dl-colunas"
+                  placeholder="Ex.: Ativos, Deferidos..."
+                />
+              </div>
               <div>
                 <label className="block text-sm mb-1">Etapa</label>
                 <input
@@ -1045,6 +1120,11 @@ export default function AdminEditor() {
           {/* Datalists */}
           <datalist id="dl-etapas">
             {etapasOpts.map((n, i) => (
+              <option key={i} value={n} />
+            ))}
+          </datalist>
+          <datalist id="dl-colunas">
+            {kanbanCols.map((n, i) => (
               <option key={i} value={n} />
             ))}
           </datalist>
@@ -1414,8 +1494,24 @@ function parseMoneyInput(value) {
   if (value === undefined || value === null) return null;
   const str = String(value).trim();
   if (str === '') return null;
+<<<<<<< HEAD
   // aceita BRL: remove separadores de milhar e converte vírgula decimal
   const normalized = str.replace(/\./g, '').replace(/\s/g, '').replace(',', '.');
   const num = Number(normalized);
+=======
+  // aceita BRL: remove símbolos/espacos, preserva o último separador como decimal
+  let cleaned = str.replace(/[^\d.,-]/g, '').replace(/\s+/g, '');
+  const lastComma = cleaned.lastIndexOf(',');
+  const lastDot = cleaned.lastIndexOf('.');
+  const decPos = Math.max(lastComma, lastDot);
+  if (decPos !== -1) {
+    const intPart = cleaned.slice(0, decPos).replace(/[.,]/g, '');
+    const decPart = cleaned.slice(decPos + 1);
+    cleaned = `${intPart}.${decPart}`;
+  } else {
+    cleaned = cleaned.replace(/[.,]/g, '');
+  }
+  const num = Number(cleaned);
+>>>>>>> 07e4f02 (Fix: alterações de segurança)
   return Number.isFinite(num) ? num : null;
 }

@@ -34,3 +34,6 @@ frontend/.vite_theme_fix/
 # Logs
 *.log
 
+
+# Docs
+*.md

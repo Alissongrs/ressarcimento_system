@@ -71,7 +71,7 @@ const fixMojibake = (s) => {
     let out = String(s || '');
     const map = [
       ['CriaÃÃo da requisiÃÃo', 'Criação da requisição'],
-      ['CriaÃ§Ã£o da requisiÃ§Ã£o', 'Criação da requisição'],
+      ['CriaÃ§Ã£o da eequisição', 'Criação da requisição'],
       ['Cria??o da requisi??o', 'Criação da requisição'],
       ['Cria?o da requisi?o', 'Criação da requisição'],
     ];

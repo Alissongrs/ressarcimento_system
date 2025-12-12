@@ -1,0 +1,81 @@
+# golangci-lint configuration
+# Docs: https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck      # Erros não verificados
+    - gosimple      # Simplificações de código
+    - govet         # Análise estática do Go
+    - ineffassign   # Atribuições ineficientes
+    - staticcheck   # Análise estática avançada
+    - unused        # Código não utilizado
+    - gofmt         # Formatação
+    - goimports     # Imports
+    - misspell      # Erros ortográficos em comentários
+    - gocritic      # Críticas de código
+    - gosec         # Segurança
+    - bodyclose     # HTTP response bodies devem ser fechados
+    - noctx         # Funções HTTP sem context
+    - sqlclosecheck # SQL rows/statements devem ser fechados
+
+  disable:
+    - deadcode      # Deprecated
+    - structcheck   # Deprecated
+    - varcheck      # Deprecated
+
+linters-settings:
+  errcheck:
+    check-blank: true
+    exclude-functions:
+      - (*database/sql.Rows).Close
+      - (*database/sql.DB).Close
+
+  govet:
+    check-shadowing: true
+
+  gofmt:
+    simplify: true
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    disabled-checks:
+      - commentFormatting
+      - ifElseChain
+
+  gosec:
+    excludes:
+      - G104  # Erros não verificados (coberto por errcheck)
+      - G304  # File path provided as taint input
+
+  misspell:
+    locale: US
+
+issues:
+  exclude-rules:
+    # Excluir alguns checks para testes
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+
+    # Excluir warnings de pacote main (é comum ter muita lógica lá)
+    - path: main\.go
+      linters:
+        - gocyclo
+        - funlen
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true

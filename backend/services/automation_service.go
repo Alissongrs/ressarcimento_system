@@ -252,25 +252,25 @@ func ChecarPrazosRequisicoes() {
         SELECT r.id_requisicao, r.id_usuario,
                TIMESTAMPDIFF(HOUR, NOW(),
                  DATE_ADD(r.data_mudanca_status,
-        INTERVAL CASE WHEN s.status = 'Nova RequisiÃ§Ã£o' THEN 5
-                                        WHEN s.status IN ('Em AnÃ¡lise','Em Analise') THEN 10
+        INTERVAL CASE WHEN s.status = 'Nova Requisição' THEN 5
+                                        WHEN s.status IN ('Em Análise','Em Analise') THEN 10
                                         ELSE 0 END DAY)) AS horas_restantes,
                DATE_ADD(r.data_mudanca_status,
-        INTERVAL CASE WHEN s.status = 'Nova RequisiÃ§Ã£o' THEN 5
-                                        WHEN s.status IN ('Em AnÃ¡lise','Em Analise') THEN 10
+        INTERVAL CASE WHEN s.status = 'Nova Requisição' THEN 5
+                                        WHEN s.status IN ('Em Análise','Em Analise') THEN 10
                                         ELSE 0 END DAY) AS deadline_dt
           FROM FT_REQUISICOES r
           LEFT JOIN DM_STATUS s ON s.id_status = r.id_status
-        WHERE s.status IN ('Nova RequisiÃ§Ã£o','Em AnÃ¡lise','Em Analise')
+        WHERE s.status IN ('Nova Requisição','Em Análise','Em Analise')
            AND TIMESTAMPDIFF(HOUR, NOW(),
                  DATE_ADD(r.data_mudanca_status,
-        INTERVAL CASE WHEN s.status = 'Nova RequisiÃ§Ã£o' THEN 5
-                                        WHEN s.status IN ('Em AnÃ¡lise','Em Analise') THEN 10
+        INTERVAL CASE WHEN s.status = 'Nova Requisição' THEN 5
+                                        WHEN s.status IN ('Em Análise','Em Analise') THEN 10
                                         ELSE 0 END DAY)) BETWEEN 0 AND 24;
     `
 	rows, err := database.DB_App.Query(q)
 	if err != nil {
-		log.Printf("Erro ao checar prazos de requisiÃ§Ãµes: %v", err)
+		log.Printf("Erro ao checar prazos de requisições: %v", err)
 		return
 	}
 	defer rows.Close()

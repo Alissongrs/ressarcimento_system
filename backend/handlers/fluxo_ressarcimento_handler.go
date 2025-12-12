@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"ressarcimento-backend/database"
+	"ressarcimento-backend/utils"
 	"strconv"
 	"strings"
 	"time"
@@ -14,17 +15,18 @@ import (
 	"ressarcimento-backend/sse"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 // FluxoRessarcimentoItem representa um item de devolução no fluxo de ressarcimento
 type FluxoRessarcimentoItem struct {
-	ID                  int     `json:"id" db:"id_fluxo"`
-	IDProcesso          int     `json:"id_processo" db:"id_processo"`
-	FormaDevolucao      string  `json:"forma_devolucao" db:"forma_devolucao"`
-	Valor               float64 `json:"valor" db:"valor"`
-	DataDevolucao       string  `json:"data_devolucao" db:"data_devolucao"`
-	DataEnvioFinanceiro string  `json:"data_envio_financeiro" db:"data_envio_financeiro"`
-	CreatedAt           string  `json:"created_at" db:"created_at"`
+	ID                  int    `json:"id" db:"id_fluxo"`
+	IDProcesso          int    `json:"id_processo" db:"id_processo"`
+	FormaDevolucao      string `json:"forma_devolucao" db:"forma_devolucao"`
+	Valor               string `json:"valor" db:"valor"` // Recebe como string, converte no handler
+	DataDevolucao       string `json:"data_devolucao" db:"data_devolucao"`
+	DataEnvioFinanceiro string `json:"data_envio_financeiro" db:"data_envio_financeiro"`
+	CreatedAt           string `json:"created_at" db:"created_at"`
 }
 
 // FluxoRessarcimentoRequest representa a requisição para salvar dados do fluxo
@@ -83,6 +85,13 @@ func SalvarFluxoRessarcimento(c *gin.Context) {
 			return
 		}
 
+		// Converter valor para decimal
+		valorDec, err := utils.ParseBrazilianCurrency(item.Valor)
+		if err != nil && item.Valor != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Valor inválido: " + err.Error()})
+			return
+		}
+
 		// Converter datas para o formato correto se Não estiverem vazias
 		var dataDevolucao, dataEnvioFinanceiro sql.NullString
 		if item.DataDevolucao != "" {
@@ -94,10 +103,10 @@ func SalvarFluxoRessarcimento(c *gin.Context) {
 
 		if item.ID == 0 {
 			if _, err := tx.Exec(`
-                INSERT INTO FT_FLUXO_RESSARCIMENTO 
-                (id_processo, forma_devolucao, valor, data_devolucao, data_envio_financeiro) 
+                INSERT INTO FT_FLUXO_RESSARCIMENTO
+                (id_processo, forma_devolucao, valor, data_devolucao, data_envio_financeiro)
                 VALUES (?, ?, ?, ?, ?)`,
-				processoID, item.FormaDevolucao, item.Valor, dataDevolucao, dataEnvioFinanceiro,
+				processoID, item.FormaDevolucao, valorDec, dataDevolucao, dataEnvioFinanceiro,
 			); err != nil {
 				log.Printf("Erro ao inserir item do fluxo: %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar item do fluxo de ressarcimento"})
@@ -109,7 +118,7 @@ func SalvarFluxoRessarcimento(c *gin.Context) {
                 UPDATE FT_FLUXO_RESSARCIMENTO SET
                 forma_devolucao = ?, valor = ?, data_devolucao = ?, data_envio_financeiro = ?
                 WHERE id_fluxo = ? AND id_processo = ?`,
-				item.FormaDevolucao, item.Valor, dataDevolucao, dataEnvioFinanceiro, item.ID, processoID,
+				item.FormaDevolucao, valorDec, dataDevolucao, dataEnvioFinanceiro, item.ID, processoID,
 			); err != nil {
 				log.Printf("Erro ao atualizar item do fluxo %d: %v", item.ID, err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar item do fluxo"})
@@ -214,15 +223,18 @@ func BuscarFluxoRessarcimento(c *gin.Context) {
 	for rows.Next() {
 		var item FluxoRessarcimentoItem
 		var createdAt time.Time
+		var valorDec decimal.Decimal
 
 		err := rows.Scan(&item.ID, &item.IDProcesso, &item.FormaDevolucao,
-			&item.Valor, &item.DataDevolucao, &item.DataEnvioFinanceiro, &createdAt)
+			&valorDec, &item.DataDevolucao, &item.DataEnvioFinanceiro, &createdAt)
 
 		if err != nil {
 			log.Printf("Erro ao escanear item: %v", err)
 			continue
 		}
 
+		// Formata o valor para o frontend (formato brasileiro)
+		item.Valor = utils.FormatBrazilianCurrency(valorDec)
 		item.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
 		itens = append(itens, item)
 	}

@@ -82,6 +82,81 @@ var getenv = os.Getenv
 
 // ===== Middleware =====
 
+// GlobalRateLimit aplica rate limiting global a todas as rotas (exceto health checks).
+// Padrão: 100 req/min por IP. Ajuste por env GLOBAL_RATE_LIMIT_PER_MIN.
+func GlobalRateLimit() gin.HandlerFunc {
+	limit := getEnvInt("GLOBAL_RATE_LIMIT_PER_MIN", 100)
+	window := time.Minute
+	rl := newRateLimiter(limit, window)
+
+	// Rotas excluídas do rate limiting global
+	excludedPaths := map[string]bool{
+		"/api/v1/healthz": true,
+		"/api/healthz":    true,
+		"/metrics":        true,
+		"/ping":           true,
+	}
+
+	return func(c *gin.Context) {
+		// Pula rate limit para rotas de health check
+		if excludedPaths[c.Request.URL.Path] {
+			c.Next()
+			return
+		}
+
+		key := "ip:" + c.ClientIP()
+		allowed, resetIn, lim, remaining := rl.allow(key)
+
+		// Cabeçalhos úteis pro cliente
+		c.Header("X-RateLimit-Limit", strconv.Itoa(lim))
+		c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
+		c.Header("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(resetIn).Unix(), 10))
+
+		if !allowed {
+			c.Header("Retry-After", strconv.Itoa(int((resetIn+time.Second-1)/time.Second)))
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error":       "rate_limit_exceeded",
+				"message":     "Muitas requisições. Tente novamente em alguns segundos.",
+				"retry_after": int((resetIn + time.Second - 1) / time.Second),
+				"limit":       lim,
+			})
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// AuthRateLimit rate limiting mais restrito para rotas de autenticação.
+// Padrão: 5 req/5min por IP. Ajuste por env AUTH_RATE_LIMIT_PER_5MIN.
+func AuthRateLimit() gin.HandlerFunc {
+	limit := getEnvInt("AUTH_RATE_LIMIT_PER_5MIN", 5)
+	window := 5 * time.Minute
+	rl := newRateLimiter(limit, window)
+
+	return func(c *gin.Context) {
+		key := "auth-ip:" + c.ClientIP()
+		allowed, resetIn, lim, remaining := rl.allow(key)
+
+		c.Header("X-RateLimit-Limit", strconv.Itoa(lim))
+		c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
+		c.Header("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(resetIn).Unix(), 10))
+
+		if !allowed {
+			c.Header("Retry-After", strconv.Itoa(int((resetIn+time.Second-1)/time.Second)))
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error":       "too_many_auth_attempts",
+				"message":     "Muitas tentativas de login/registro. Aguarde alguns minutos.",
+				"retry_after": int((resetIn + time.Second - 1) / time.Second),
+				"limit":       lim,
+			})
+			return
+		}
+
+		c.Next()
+	}
+}
+
 // OCRChatRateLimit limita requisições ao endpoint /api/v1/ocr/chat.
 // Padrão: 12 req/min por usuário (JWT) ou IP (fallback). Ajuste por env OCR_CHAT_MAX_PER_MIN.
 func OCRChatRateLimit() gin.HandlerFunc {

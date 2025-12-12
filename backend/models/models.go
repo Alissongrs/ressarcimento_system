@@ -5,6 +5,8 @@ package models
 import (
 	"database/sql"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 // User representa a estrutura da tabela 'DM_USUARIO'.
@@ -55,7 +57,7 @@ type Processo struct {
 	NomeCliente        sql.NullString      `json:"nome_cliente"`
 	UnidadeConsumidora sql.NullString      `json:"unidade_consumidora"`
 	DataAlerta         sql.NullTime        `json:"data_alerta"`
-	ValorEstimado      sql.NullFloat64     `json:"ressarcimento_estimado"`
+	ValorEstimado      decimal.NullDecimal `json:"ressarcimento_estimado"`
 	Tags               []Tag               `json:"tags"`
 	TemPendencia       bool                `json:"tem_pendencia"`
 	Relevancia         bool                `json:"relevancia"`
@@ -75,20 +77,20 @@ type Processo struct {
 
 // Deferimento representa os dados da tabela FT_DEFERIMENTOS.
 type Deferimento struct {
-	StatusAnalise    sql.NullString  `json:"status_analise"`
-	DataProcedencia  sql.NullTime    `json:"data_procedencia"`
-	CreditoSimples   sql.NullFloat64 `json:"credito_simples"`
-	CreditoDobro     sql.NullFloat64 `json:"credito_dobro"`
-	DataCreditoDobro sql.NullTime    `json:"data_credito_dobro"`
+	StatusAnalise    sql.NullString      `json:"status_analise"`
+	DataProcedencia  sql.NullTime        `json:"data_procedencia"`
+	CreditoSimples   decimal.NullDecimal `json:"credito_simples"`
+	CreditoDobro     decimal.NullDecimal `json:"credito_dobro"`
+	DataCreditoDobro sql.NullTime        `json:"data_credito_dobro"`
 }
 
 // DeferimentoInput é usada para receber os dados do JSON do frontend ao salvar.
 type DeferimentoInput struct {
-	StatusAnalise    string  `json:"status_analise"`
-	DataProcedencia  string  `json:"data_procedencia"`
-	CreditoSimples   float64 `json:"credito_simples"`
-	CreditoDobro     float64 `json:"credito_dobro"`
-	DataCreditoDobro string  `json:"data_credito_dobro"`
+	StatusAnalise    string `json:"status_analise"`
+	DataProcedencia  string `json:"data_procedencia"`
+	CreditoSimples   string `json:"credito_simples"`   // Recebe como string, converte no handler
+	CreditoDobro     string `json:"credito_dobro"`     // Recebe como string, converte no handler
+	DataCreditoDobro string `json:"data_credito_dobro"`
 }
 
 // FluxoRessarcimento representa os campos do fluxo no banco de dados.
@@ -117,13 +119,13 @@ type FluxoRessarcimentoInput struct {
 
 // FluxoRessarcimentoItem representa um item de devolução no fluxo de ressarcimento
 type FluxoRessarcimentoItem struct {
-	ID                  int     `json:"id" db:"id_fluxo"`
-	IDProcesso          int     `json:"id_processo" db:"id_processo"`
-	FormaDevolucao      string  `json:"forma_devolucao" db:"forma_devolucao"`
-	Valor               float64 `json:"valor" db:"valor"`
-	DataDevolucao       string  `json:"data_devolucao" db:"data_devolucao"`
-	DataEnvioFinanceiro string  `json:"data_envio_financeiro" db:"data_envio_financeiro"`
-	CreatedAt           string  `json:"created_at" db:"created_at"`
+	ID                  int    `json:"id" db:"id_fluxo"`
+	IDProcesso          int    `json:"id_processo" db:"id_processo"`
+	FormaDevolucao      string `json:"forma_devolucao" db:"forma_devolucao"`
+	Valor               string `json:"valor" db:"valor"` // Recebe como string, converte no handler
+	DataDevolucao       string `json:"data_devolucao" db:"data_devolucao"`
+	DataEnvioFinanceiro string `json:"data_envio_financeiro" db:"data_envio_financeiro"`
+	CreatedAt           string `json:"created_at" db:"created_at"`
 }
 
 // FluxoRessarcimentoRequest representa a requisição para salvar dados do fluxo
@@ -133,14 +135,14 @@ type FluxoRessarcimentoRequest struct {
 
 // FaturamentoItem representa um item de faturamento
 type FaturamentoItem struct {
-	ID             int     `json:"id" db:"id_faturamento"`
-	IDProcesso     int     `json:"id_processo" db:"id_processo"`
-	NumeroNF       string  `json:"numero_nf" db:"numero_nf"`
-	DataEmissao    string  `json:"data_emissao" db:"data_emissao"`
-	DataVencimento string  `json:"data_vencimento" db:"data_vencimento"`
-	DataPagamento  string  `json:"data_pagamento" db:"data_pagamento"`
-	Valor          float64 `json:"valor" db:"valor"`
-	CreatedAt      string  `json:"created_at" db:"created_at"`
+	ID             int    `json:"id" db:"id_faturamento"`
+	IDProcesso     int    `json:"id_processo" db:"id_processo"`
+	NumeroNF       string `json:"numero_nf" db:"numero_nf"`
+	DataEmissao    string `json:"data_emissao" db:"data_emissao"`
+	DataVencimento string `json:"data_vencimento" db:"data_vencimento"`
+	DataPagamento  string `json:"data_pagamento" db:"data_pagamento"`
+	Valor          string `json:"valor" db:"valor"` // Recebe como string, converte no handler
+	CreatedAt      string `json:"created_at" db:"created_at"`
 }
 
 // FaturamentoRequest representa a requisição para salvar dados do faturamento
@@ -150,10 +152,10 @@ type FaturamentoRequest struct {
 
 // FaturamentoStats representa estatísticas do faturamento
 type FaturamentoStats struct {
-	TotalItens    int     `json:"total_itens"`
-	ValorTotal    float64 `json:"valor_total"`
-	ItensPagos    int     `json:"itens_pagos"`
-	ItensVencidos int     `json:"itens_vencidos"`
+	TotalItens    int             `json:"total_itens"`
+	ValorTotal    decimal.Decimal `json:"valor_total"`
+	ItensPagos    int             `json:"itens_pagos"`
+	ItensVencidos int             `json:"itens_vencidos"`
 }
 
 // Anexo representa um arquivo anexado.

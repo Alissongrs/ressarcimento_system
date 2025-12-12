@@ -1,21 +1,53 @@
-FROM golang:1.23-alpine AS build
+# Multi-stage build otimizado para o backend Go
+
+# ====== Stage 1: Build ======
+FROM golang:1.23-alpine AS builder
+
+# Instala dependências de build
+RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app
 
-RUN apk add --no-cache tzdata ca-certificates && update-ca-certificates
-
+# Cache de dependências (só redownload se go.mod/go.sum mudarem)
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod download && go mod verify
 
+# Copia código fonte
 COPY . .
-RUN go build -o server .
 
+# Build otimizado (binary menor e mais rápido)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s -X main.Version=$(git describe --tags --always --dirty 2>/dev/null || echo 'dev')" \
+    -trimpath \
+    -o server \
+    .
+
+# ====== Stage 2: Runtime ======
 FROM alpine:3.19
 
-WORKDIR /app
-RUN apk add --no-cache ca-certificates tzdata && update-ca-certificates
+# Instala apenas certificados e timezone data
+RUN apk add --no-cache ca-certificates tzdata && \
+    update-ca-certificates
 
-COPY --from=build /app/server /app/server
+# Cria usuário não-root para segurança
+RUN addgroup -g 1000 app && \
+    adduser -D -u 1000 -G app app
+
+WORKDIR /app
+
+# Copia binary do stage de build
+COPY --from=builder --chown=app:app /app/server /app/server
+
+# Cria diretórios necessários
+RUN mkdir -p /app/uploads && chown -R app:app /app
+
+# Usa usuário não-root
+USER app
 
 EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8080/api/v1/healthz || exit 1
+
 CMD ["/app/server"]

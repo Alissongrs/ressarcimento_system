@@ -5,8 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"mime/multipart"
@@ -17,6 +17,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"ressarcimento-backend/database"
+	"ressarcimento-backend/repositories"
 )
 
 /* ===================== Config OpenAI / Envs ===================== */
@@ -29,6 +33,31 @@ func openAIBase() string {
 }
 
 func openAIKey() string { return strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) }
+
+/* ===================== Config Ollama (LLaMA) ===================== */
+
+func llmProvider() string {
+	if v := strings.TrimSpace(os.Getenv("LLM_PROVIDER")); v != "" {
+		return strings.ToLower(v)
+	}
+	return "ollama"
+}
+
+func ollamaURL() string {
+	if v := strings.TrimSpace(os.Getenv("LLM_OLLAMA_URL")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return "http://localhost:11434"
+}
+
+func ollamaModel() string {
+	if v := strings.TrimSpace(os.Getenv("LLM_OLLAMA_MODEL")); v != "" {
+		return v
+	}
+	return "llama3.1:8b"
+}
+
+func ollamaKey() string { return strings.TrimSpace(os.Getenv("LLM_API_KEY")) }
 
 // normaliza IDs de modelo e corrige typos comuns (ex.: "gtp-4o-mini")
 func normalizeModelID(v string) string {
@@ -109,7 +138,7 @@ func releaseSlot() {
 /* ===================== HTTP helpers / Retry-After ===================== */
 
 func httpClientWithTimeout() *http.Client {
-	to := getEnvDurationMS("OPENAI_TIMEOUT_MS", 60000)
+	to := getEnvDurationMS("OPENAI_TIMEOUT_MS", 0) // 0 = sem timeout global
 	return &http.Client{Timeout: to}
 }
 
@@ -225,27 +254,102 @@ func parseOpenAIErrorBody(b []byte) (msg, code, typ string) {
 
 /* ===================== OCRChat ===================== */
 
+// Monta um prompt simples a partir da lista de mensagens
+func buildPromptFromMessages(msgs []map[string]string) string {
+	var sb strings.Builder
+	for _, m := range msgs {
+		role := strings.ToUpper(strings.TrimSpace(m["role"]))
+		if role == "" {
+			role = "USER"
+		}
+		content := strings.TrimSpace(m["content"])
+		sb.WriteString(role)
+		sb.WriteString(": ")
+		sb.WriteString(content)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// Chama Ollama /api/generate
+func callOllama(ctx context.Context, prompt string) (string, string, error) {
+	payload := map[string]any{
+		"model":  ollamaModel(),
+		"prompt": prompt,
+		"stream": false,
+	}
+	b, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "POST", ollamaURL()+"/api/generate", bytes.NewReader(b))
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if k := ollamaKey(); k != "" {
+		req.Header.Set("Authorization", "Bearer "+k)
+	}
+	resp, err := httpClientWithTimeout().Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("ollama_%d: %s", resp.StatusCode, string(body))
+	}
+	var parsed struct {
+		Response string `json:"response"`
+	}
+	_ = json.Unmarshal(body, &parsed)
+	return strings.TrimSpace(parsed.Response), ollamaModel(), nil
+}
+
 // POST /api/v1/ocr/chat
 // body: { messages: [{role: 'system'|'user'|'assistant', content: string}], model?: string }
 func OCRChat(c *gin.Context) {
-    if openAIKey() == "" {
-        c.JSON(http.StatusServiceUnavailable, gin.H{
-            "error":   "service_unavailable",
-            "message": "OPENAI_API_KEY ausente (defina no .env para habilitar o chat de IA)",
-        })
-        return
-    }
-
 	var body struct {
 		Messages []map[string]string `json:"messages"`
 		Model    string              `json:"model"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "JSON inválido"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JSON invalido"})
 		return
 	}
 
-	// força/normaliza para gpt-4o-mini (corrige "gtp-4o-mini" automaticamente)
+	provider := llmProvider()
+	hasOpenAI := openAIKey() != ""
+	if provider == "" {
+		provider = "ollama"
+	}
+
+	// Tenta primeiro Ollama; se falhar e houver chave OpenAI, faz fallback automatico.
+	if provider == "ollama" || !hasOpenAI {
+		prompt := buildPromptFromMessages(body.Messages)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), getEnvDurationMS("OCR_CHAT_TIMEOUT_MS", 70000))
+		defer cancel()
+
+		text, modelUsed, err := callOllama(ctx, prompt)
+		if err == nil {
+			c.JSON(http.StatusOK, gin.H{
+				"message":       text,
+				"model_used":    modelUsed,
+				"provider_used": "ollama",
+			})
+			return
+		}
+
+		if !hasOpenAI {
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error":         "ollama_failed",
+				"details":       err.Error(),
+				"model_used":    modelUsed,
+				"provider_used": "ollama",
+			})
+			return
+		}
+		provider = "openai"
+	}
+
+	// Caminho OpenAI (ChatGPT ou compat?vel)
 	model := normalizeModelID(body.Model)
 	if model == "" {
 		model = openAIChatModel()
@@ -258,11 +362,9 @@ func OCRChat(c *gin.Context) {
 	}
 	b, _ := json.Marshal(payload)
 
-	// Timeout do handler (maior que o do cliente http para abarcar retries)
 	ctx, cancel := context.WithTimeout(c.Request.Context(), getEnvDurationMS("OCR_CHAT_TIMEOUT_MS", 70000))
 	defer cancel()
 
-	// Gate de concorrência para proteger upstream/local
 	if err := acquireSlot(ctx); err != nil {
 		c.JSON(http.StatusTooManyRequests, gin.H{
 			"error":   "busy",
@@ -274,9 +376,7 @@ func OCRChat(c *gin.Context) {
 
 	up, err := doOpenAIWithRetry(ctx, b)
 
-	// Se houve erro de transporte/retry, trate com mapeamento
 	if err != nil {
-		// Se a última foi 429, propaga com Retry-After (se houver)
 		if up.status == http.StatusTooManyRequests {
 			ra := parseRetryAfter(up.hdr)
 			if ra > 0 {
@@ -284,49 +384,48 @@ func OCRChat(c *gin.Context) {
 			} else {
 				c.Header("Retry-After", "2")
 			}
-			// tenta extrair mensagem/código do upstream
 			msg, code, _ := parseOpenAIErrorBody(up.body)
 			if msg == "" {
 				msg = "IA sobrecarregada no momento. Tente novamente em instantes."
 			}
 			c.JSON(http.StatusTooManyRequests, gin.H{
-				"error":       "upstream_429",
-				"message":     msg,
-				"retry_after": c.Writer.Header().Get("Retry-After"),
-				"code":        code,
-				"model_used":  model,
+				"error":         "upstream_429",
+				"message":       msg,
+				"retry_after":   c.Writer.Header().Get("Retry-After"),
+				"code":          code,
+				"model_used":    model,
+				"provider_used": "openai",
 			})
 			return
 		}
-		// 5xx
 		if up.status >= 500 {
 			c.JSON(http.StatusBadGateway, gin.H{
-				"error":      "ia_failed",
-				"details":    string(up.body),
-				"model_used": model,
+				"error":         "ia_failed",
+				"details":       string(up.body),
+				"model_used":    model,
+				"provider_used": "openai",
 			})
 			return
 		}
-		// Falha genérica
 		c.JSON(http.StatusBadGateway, gin.H{
-			"error":      "ia_failed",
-			"details":    err.Error(),
-			"model_used": model,
+			"error":         "ia_failed",
+			"details":       err.Error(),
+			"model_used":    model,
+			"provider_used": "openai",
 		})
 		return
 	}
 
-	// Se upstream não retornou 200, devolve conteúdo bruto (p.ex. 400, 401, 403)
 	if up.status != http.StatusOK {
-		// enriquecer mensagens comuns
 		if up.status == http.StatusUnauthorized || up.status == http.StatusForbidden || up.status == http.StatusBadRequest {
 			msg, code, typ := parseOpenAIErrorBody(up.body)
 			if msg != "" || code != "" || typ != "" {
 				c.JSON(up.status, gin.H{
-					"error":      typ,
-					"message":    msg,
-					"code":       code,
-					"model_used": model,
+					"error":         typ,
+					"message":       msg,
+					"code":          code,
+					"model_used":    model,
+					"provider_used": "openai",
 				})
 				return
 			}
@@ -335,7 +434,6 @@ func OCRChat(c *gin.Context) {
 		return
 	}
 
-	// Minimiza a resposta ao essencial, mas devolve também model_used
 	var parsed struct {
 		ID      string `json:"id"`
 		Object  string `json:"object"`
@@ -359,28 +457,37 @@ func OCRChat(c *gin.Context) {
 	}
 	used := parsed.Model
 	if strings.TrimSpace(used) == "" {
-		// se a API não retornar o campo (ou retornar vazio), use o solicitado
 		used = model
 	}
 	if content == "" {
 		c.JSON(http.StatusOK, gin.H{
-			"message":    "",
-			"model_used": normalizeModelID(used),
+			"message":       "",
+			"model_used":    normalizeModelID(used),
+			"provider_used": "openai",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":    content,
-		"model_used": normalizeModelID(used),
+		"message":       content,
+		"model_used":    normalizeModelID(used),
+		"provider_used": "openai",
 	})
 }
-
-/* ===================== OCRAnalyze ===================== */
+/* ===================== OCRAnalyze (compatível one-shot) ===================== */
 
 // POST /api/v1/ocr/analyze (multipart/form-data)
-// fields: files[] (one or more), instruction (optional), model (optional)
+// Encaminha arquivos diretamente para o OCR backend Python em modo one-shot.
 func OCRAnalyze(c *gin.Context) {
+	ocrURL := strings.TrimSpace(os.Getenv("OCR_BACKEND_URL"))
+	if ocrURL == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "ocr_backend_not_configured",
+			"message": "OCR_BACKEND_URL não configurado no .env",
+		})
+		return
+	}
+
 	if err := c.Request.ParseMultipartForm(25 << 20); err != nil { // 25MB
 		c.JSON(http.StatusBadRequest, gin.H{"error": "multipart inválido", "details": err.Error()})
 		return
@@ -391,126 +498,46 @@ func OCRAnalyze(c *gin.Context) {
 		return
 	}
 
-    ocrURL := strings.TrimSpace(os.Getenv("OCR_BACKEND_URL"))
-    if ocrURL != "" {
-		var b bytes.Buffer
-		mw := multipart.NewWriter(&b)
-		// copy files
-		for _, fh := range files {
-			f, err := fh.Open()
-			if err != nil {
-				continue
-			}
-			w, _ := mw.CreateFormFile("files", fh.Filename)
-			_, _ = io.Copy(w, f)
-			_ = f.Close()
-		}
-		// optional fields
-		lang := strings.TrimSpace(c.PostForm("lang"))
-		if lang == "" {
-			lang = "por+eng"
-		}
-		_ = mw.WriteField("lang", lang)
-
-		maxPages := strings.TrimSpace(c.PostForm("max_pages"))
-		if maxPages == "" {
-			maxPages = "3"
-		}
-		_ = mw.WriteField("max_pages", maxPages)
-
-		applyRules := strings.TrimSpace(c.PostForm("apply_rules"))
-		rules := strings.TrimSpace(c.PostForm("rules"))
-		if applyRules == "1" || strings.ToLower(applyRules) == "true" {
-			_ = mw.WriteField("apply_rules_flag", "1")
-			if rules != "" {
-				_ = mw.WriteField("rules", rules)
-			}
-		}
-		_ = mw.Close()
-
-		req, _ := http.NewRequest("POST", strings.TrimRight(ocrURL, "/")+"/analyze", &b)
-		req.Header.Set("Content-Type", mw.FormDataContentType())
-		req.Header.Set("Accept", "application/json")
-		resp, err := httpClientWithTimeout().Do(req)
+	var b bytes.Buffer
+	mw := multipart.NewWriter(&b)
+	for _, fh := range files {
+		f, err := fh.Open()
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "Falha ao contatar OCR backend", "details": err.Error()})
-			return
+			continue
 		}
-		defer resp.Body.Close()
-		rb, _ := io.ReadAll(resp.Body)
-        c.Data(resp.StatusCode, "application/json", rb)
-        return
-    }
-    // Fallback: usar OpenAI Vision (gpt-4o-mini) para imagens (png/jpg)
-    // Observação: PDF não é suportado no fallback (sem conversão), retornaremos 415.
-    results := make([]map[string]any, 0, len(files))
-    // Mensagem padrão
-    instr := strings.TrimSpace(c.PostForm("instruction"))
-    if instr == "" {
-        instr = "Extraia o texto legível da imagem da fatura. Responda somente com o texto OCR."
-    }
-    model := openAIOcrModel()
+		w, _ := mw.CreateFormFile("files", fh.Filename)
+		_, _ = io.Copy(w, f)
+		_ = f.Close()
+	}
+	_ = mw.Close()
 
-    for _, fh := range files {
-        f, err := fh.Open()
-        if err != nil { continue }
-        data, _ := io.ReadAll(f)
-        _ = f.Close()
-        mime := detectMime(fh, data)
-        if strings.HasPrefix(mime, "application/pdf") {
-            c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "pdf_unsupported_in_fallback", "message": "PDF não suportado no fallback OpenAI Vision. Configure OCR_BACKEND_URL."})
-            return
-        }
-        b64 := base64.StdEncoding.EncodeToString(data)
-        // Monta payload com content parts (input_text + input_image)
-        messages := []map[string]any{
-            {"role": "system", "content": "Você é um OCR preciso. Retorne somente o texto extraído (pt-BR) sem comentários."},
-            {"role": "user", "content": []any{
-                map[string]any{"type": "input_text", "text": instr},
-                map[string]any{"type": "input_image", "image_url": map[string]any{"url": "data:" + mime + ";base64," + b64}},
-            }},
-        }
-        payload := map[string]any{
-            "model":       model,
-            "messages":    messages,
-            "temperature": 0.0,
-        }
-        body, _ := json.Marshal(payload)
-        ctx, cancel := context.WithTimeout(c.Request.Context(), getEnvDurationMS("OCR_CHAT_TIMEOUT_MS", 70000))
-        defer cancel()
-        if err := acquireSlot(ctx); err != nil {
-            c.JSON(http.StatusTooManyRequests, gin.H{"error": "busy", "message": "Sistema de IA ocupado, tente novamente."})
-            return
-        }
-        up, _ := doOpenAIWithRetry(ctx, body)
-        releaseSlot()
-        text := ""
-        if up.status == http.StatusOK && len(up.body) > 0 {
-            var parsed struct{ Choices []struct{ Message struct{ Content string `json:"content"` } `json:"message"` } `json:"choices"` }
-            _ = json.Unmarshal(up.body, &parsed)
-            if len(parsed.Choices) > 0 {
-                text = strings.TrimSpace(parsed.Choices[0].Message.Content)
-            }
-        }
-        // Normaliza resultado em formato compatível com o front
-        results = append(results, map[string]any{
-            "file_name": fh.Filename,
-            "rule_results": map[string]any{
-                "META": map[string]any{
-                    "texto_extraido": text,
-                    "model_used":     normalizeModelID(model),
-                },
-            },
-        })
-    }
-    if results == nil { results = []map[string]any{} }
-    c.JSON(http.StatusOK, results)
+	req, _ := http.NewRequest("POST", strings.TrimRight(ocrURL, "/")+"/ocr/analyze", &b)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := httpClientWithTimeout().Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Falha ao contatar OCR backend", "details": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	rb, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		c.JSON(resp.StatusCode, gin.H{
+			"error":   "ocr_backend_error",
+			"details": string(rb),
+		})
+		return
+	}
+
+	c.Data(http.StatusOK, "application/json", rb)
 }
 
 /* ===================== Utils ===================== */
 
 func detectMime(fh *multipart.FileHeader, data []byte) string {
-	// Try extension first
+	// Tenta pela extensão primeiro
 	name := strings.ToLower(fh.Filename)
 	switch {
 	case strings.HasSuffix(name, ".png"):
@@ -520,7 +547,7 @@ func detectMime(fh *multipart.FileHeader, data []byte) string {
 	case strings.HasSuffix(name, ".pdf"):
 		return "application/pdf"
 	}
-	// Fallback basic sniff
+	// Fallback: sniff básico
 	ct := http.DetectContentType(data)
 	if ct == "application/octet-stream" {
 		return "image/png"
@@ -528,17 +555,220 @@ func detectMime(fh *multipart.FileHeader, data []byte) string {
 	return ct
 }
 
-// extractJSON tries to find a JSON object or array within a text block
+// extractJSON tenta encontrar um objeto/array JSON dentro de um texto
 func extractJSON(s string) string {
 	s = strings.TrimSpace(s)
-	// fast path
+	// caminho feliz
 	if strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[") {
 		return s
 	}
-	// find first JSON delimiter
+	// procura primeiro delimitador JSON
 	i := strings.IndexAny(s, "{[")
 	if i >= 0 {
 		return s[i:]
 	}
 	return s
+}
+
+/* ===================== OCRQuick (Two-Stage OCR - Stage 1: Fast Extraction) ===================== */
+
+// POST /api/v1/ocr/quick (multipart/form-data)
+// Executa OCR rápido (Tesseract apenas) e salva raw_text no banco
+// Retorna request_id para uso posterior no /ocr/interpret
+func OCRQuick(c *gin.Context) {
+	ocrURL := strings.TrimSpace(os.Getenv("OCR_BACKEND_URL"))
+	if ocrURL == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "ocr_backend_not_configured",
+			"message": "OCR_BACKEND_URL não configurado no .env",
+		})
+		return
+	}
+
+	if err := c.Request.ParseMultipartForm(25 << 20); err != nil { // 25MB
+		c.JSON(http.StatusBadRequest, gin.H{"error": "multipart inválido", "details": err.Error()})
+		return
+	}
+	files := c.Request.MultipartForm.File["files"]
+	if len(files) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "envie pelo menos um arquivo em files[]"})
+		return
+	}
+
+	// Monta multipart para o OCR Service Python
+	var b bytes.Buffer
+	mw := multipart.NewWriter(&b)
+
+	// Copia arquivos
+	for _, fh := range files {
+		f, err := fh.Open()
+		if err != nil {
+			continue
+		}
+		w, _ := mw.CreateFormFile("files", fh.Filename)
+		_, _ = io.Copy(w, f)
+		_ = f.Close()
+	}
+	_ = mw.Close()
+
+	// Chama Python /ocr/quick
+	req, _ := http.NewRequest("POST", strings.TrimRight(ocrURL, "/")+"/ocr/quick", &b)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := httpClientWithTimeout().Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Falha ao contatar OCR backend", "details": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	rb, _ := io.ReadAll(resp.Body)
+
+	// Parse response
+	var pythonResp struct {
+		Results []struct {
+			FileName  string `json:"file_name"`
+			RawText   string `json:"raw_text"`
+			PagesUsed int    `json:"pages_used"`
+			Status    string `json:"status"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(rb, &pythonResp); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Resposta inválida do OCR backend", "details": string(rb)})
+		return
+	}
+
+	// Gera request_id único para este batch
+	reqID := uuid.New().String()
+
+	// Salva no banco (OCR_RESULTS)
+	if database.DB_App != nil {
+		repo := repositories.NewOCRResultRepo(database.DB_App)
+		ctx := c.Request.Context()
+		for _, item := range pythonResp.Results {
+			_ = repo.Insert(ctx, reqID, item.FileName, item.RawText, nil)
+		}
+	}
+
+	// Retorna para o frontend
+	c.JSON(http.StatusOK, gin.H{
+		"request_id": reqID,
+		"results":    pythonResp.Results,
+		"message":    "OCR rápido concluído. Use /ocr/interpret para aplicar regras.",
+	})
+}
+
+/* ===================== OCRInterpret (Two-Stage OCR - Stage 2: Interpretation) ===================== */
+
+// POST /api/v1/ocr/interpret (application/json)
+// Body: { request_id, filename, rules?: string[], use_llm?: bool }
+// Busca OCR text salvo e chama Python para interpretação com regras
+func OCRInterpret(c *gin.Context) {
+	ocrURL := strings.TrimSpace(os.Getenv("OCR_BACKEND_URL"))
+	if ocrURL == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "ocr_backend_not_configured",
+			"message": "OCR_BACKEND_URL não configurado no .env",
+		})
+		return
+	}
+
+	var body struct {
+		RequestID string   `json:"request_id" binding:"required"`
+		Filename  string   `json:"filename" binding:"required"`
+		Rules     []string `json:"rules"`
+		UseLLM    bool     `json:"use_llm"`
+	}
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JSON inválido", "details": err.Error()})
+		return
+	}
+
+	// Busca OCR text salvo no banco
+	if database.DB_App == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database não configurado"})
+		return
+	}
+
+	repo := repositories.NewOCRResultRepo(database.DB_App)
+	ctx := c.Request.Context()
+	ocrText, _, err := repo.GetByRequestAndFilename(ctx, body.RequestID, body.Filename)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":   "ocr_not_found",
+			"message": "OCR text não encontrado. Execute /ocr/quick primeiro.",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	if strings.TrimSpace(ocrText) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "ocr_text_empty",
+			"message": "OCR text vazio. Verifique se o arquivo foi processado corretamente.",
+		})
+		return
+	}
+
+	// Serializa regras para JSON string
+	rulesJSON := "[]"
+	if len(body.Rules) > 0 {
+		if b, err := json.Marshal(body.Rules); err == nil {
+			rulesJSON = string(b)
+		}
+	}
+
+	// Chama Python /ocr/interpret
+	pythonPayload := map[string]string{
+		"request_id": body.RequestID,
+		"filename":   body.Filename,
+		"ocr_text":   ocrText,
+		"rules":      rulesJSON,
+		"use_llm":    fmt.Sprintf("%t", body.UseLLM),
+	}
+
+	payloadBytes, _ := json.Marshal(pythonPayload)
+	req, _ := http.NewRequest("POST", strings.TrimRight(ocrURL, "/")+"/ocr/interpret", bytes.NewReader(payloadBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := httpClientWithTimeout().Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Falha ao contatar OCR backend", "details": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	rb, _ := io.ReadAll(resp.Body)
+
+	// Parse response
+	var pythonResp struct {
+		RequestID   string         `json:"request_id"`
+		Filename    string         `json:"filename"`
+		RuleResults map[string]any `json:"rule_results"`
+		LLMResults  map[string]any `json:"llm_results"`
+		Status      string         `json:"status"`
+	}
+
+	if err := json.Unmarshal(rb, &pythonResp); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Resposta inválida do OCR backend", "details": string(rb)})
+		return
+	}
+
+	// Atualiza llm_json no banco com os resultados
+	combinedResult := map[string]any{
+		"rule_results": pythonResp.RuleResults,
+		"llm_results":  pythonResp.LLMResults,
+	}
+	_ = repo.UpdateLLMResult(ctx, body.RequestID, body.Filename, combinedResult)
+
+	// Retorna para o frontend
+	c.JSON(http.StatusOK, gin.H{
+		"request_id":   pythonResp.RequestID,
+		"filename":     pythonResp.Filename,
+		"rule_results": pythonResp.RuleResults,
+		"llm_results":  pythonResp.LLMResults,
+		"status":       pythonResp.Status,
+	})
 }

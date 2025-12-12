@@ -55,6 +55,45 @@ export async function ocrAnalyze(files, instruction, opts = {}) {
 }
 
 /**
+ * OCR Rápido (Stage 1): Apenas extração de texto sem IA
+ * Retorna { request_id, results: [{ file_name, raw_text, pages_used, status }] }
+ */
+export async function ocrQuick(files, opts = {}) {
+  const fd = new FormData();
+  for (const f of files || []) if (f) fd.append('files', f);
+
+  try {
+    const { data } = await api.post('/ocr/quick', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  } catch (err) {
+    throw wrapAxiosError(err, 'Falha ao enviar arquivos para OCR rápido');
+  }
+}
+
+/**
+ * Interpretação com IA (Stage 2): Aplica regras ao texto OCR salvo
+ * @param {string} requestId - ID retornado pelo /ocr/quick
+ * @param {string} filename - Nome do arquivo
+ * @param {string[]} rules - Lista de regras a aplicar (ex: ['BANDEIRA_ENEL_SP_GB', 'ICMS'])
+ * @param {boolean} useLLM - Se true, também chama LLM para interpretação adicional
+ */
+export async function ocrInterpret(requestId, filename, rules = [], useLLM = false) {
+  try {
+    const { data } = await api.post('/ocr/interpret', {
+      request_id: requestId,
+      filename: filename,
+      rules: rules,
+      use_llm: useLLM,
+    });
+    return data;
+  } catch (err) {
+    throw wrapAxiosError(err, 'Falha ao interpretar OCR com IA');
+  }
+}
+
+/**
  * Chat de IA: tenta com header Authorization e, se vier 401,
  * refaz automaticamente com ?token=<jwt> na URL (fallback).
  */

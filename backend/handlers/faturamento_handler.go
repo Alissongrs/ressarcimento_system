@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"ressarcimento-backend/database"
+	"ressarcimento-backend/utils"
 	"strconv"
 	"strings"
 	"time"
@@ -14,18 +15,19 @@ import (
 	"ressarcimento-backend/sse"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 // FaturamentoItem representa um item de faturamento
 type FaturamentoItem struct {
-	ID             int     `json:"id" db:"id_faturamento"`
-	IDProcesso     int     `json:"id_processo" db:"id_processo"`
-	NumeroNF       string  `json:"numero_nf" db:"numero_nf"`
-	DataEmissao    string  `json:"data_emissao" db:"data_emissao"`
-	DataVencimento string  `json:"data_vencimento" db:"data_vencimento"`
-	DataPagamento  string  `json:"data_pagamento" db:"data_pagamento"`
-	Valor          float64 `json:"valor" db:"valor"`
-	CreatedAt      string  `json:"created_at" db:"created_at"`
+	ID             int    `json:"id" db:"id_faturamento"`
+	IDProcesso     int    `json:"id_processo" db:"id_processo"`
+	NumeroNF       string `json:"numero_nf" db:"numero_nf"`
+	DataEmissao    string `json:"data_emissao" db:"data_emissao"`
+	DataVencimento string `json:"data_vencimento" db:"data_vencimento"`
+	DataPagamento  string `json:"data_pagamento" db:"data_pagamento"`
+	Valor          string `json:"valor" db:"valor"` // Recebe como string, converte no handler
+	CreatedAt      string `json:"created_at" db:"created_at"`
 }
 
 // FaturamentoRequest representa a requisição para salvar dados do faturamento
@@ -79,6 +81,13 @@ func SalvarFaturamento(c *gin.Context) {
 	rows.Close()
 
 	for _, item := range request.Itens {
+		// Converter valor para decimal
+		valorDec, err := utils.ParseBrazilianCurrency(item.Valor)
+		if err != nil && item.Valor != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Valor inválido: " + err.Error()})
+			return
+		}
+
 		// Converter datas para o formato correto se Não estiverem vazias
 		var dataEmissao, dataVencimento, dataPagamento sql.NullString
 
@@ -94,10 +103,10 @@ func SalvarFaturamento(c *gin.Context) {
 
 		if item.ID == 0 {
 			if _, err := tx.Exec(`
-                INSERT INTO FT_FATURAMENTO 
-                (id_processo, numero_nf, data_emissao, data_vencimento, data_pagamento, valor) 
+                INSERT INTO FT_FATURAMENTO
+                (id_processo, numero_nf, data_emissao, data_vencimento, data_pagamento, valor)
                 VALUES (?, ?, ?, ?, ?, ?)`,
-				processoID, item.NumeroNF, dataEmissao, dataVencimento, dataPagamento, item.Valor,
+				processoID, item.NumeroNF, dataEmissao, dataVencimento, dataPagamento, valorDec,
 			); err != nil {
 				log.Printf("Erro ao inserir item do faturamento: %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar item do faturamento"})
@@ -106,10 +115,10 @@ func SalvarFaturamento(c *gin.Context) {
 		} else {
 			delete(existing, item.ID)
 			if _, err := tx.Exec(`
-                UPDATE FT_FATURAMENTO SET 
+                UPDATE FT_FATURAMENTO SET
                 numero_nf = ?, data_emissao = ?, data_vencimento = ?, data_pagamento = ?, valor = ?
                 WHERE id_faturamento = ? AND id_processo = ?`,
-				item.NumeroNF, dataEmissao, dataVencimento, dataPagamento, item.Valor, item.ID, processoID,
+				item.NumeroNF, dataEmissao, dataVencimento, dataPagamento, valorDec, item.ID, processoID,
 			); err != nil {
 				log.Printf("Erro ao atualizar item de faturamento %d: %v", item.ID, err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar item do faturamento"})
@@ -216,16 +225,19 @@ func BuscarFaturamento(c *gin.Context) {
 	for rows.Next() {
 		var item FaturamentoItem
 		var createdAt time.Time
+		var valorDec decimal.Decimal
 
 		err := rows.Scan(&item.ID, &item.IDProcesso, &item.NumeroNF,
 			&item.DataEmissao, &item.DataVencimento, &item.DataPagamento,
-			&item.Valor, &createdAt)
+			&valorDec, &createdAt)
 
 		if err != nil {
 			log.Printf("Erro ao escanear item: %v", err)
 			continue
 		}
 
+		// Formata o valor para o frontend (formato brasileiro)
+		item.Valor = utils.FormatBrazilianCurrency(valorDec)
 		item.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
 		itens = append(itens, item)
 	}
@@ -265,21 +277,26 @@ func GetFaturamentoStats(c *gin.Context) {
 	}
 
 	var stats struct {
-		TotalItens    int     `json:"total_itens"`
-		ValorTotal    float64 `json:"valor_total"`
-		ItensPagos    int     `json:"itens_pagos"`
-		ItensVencidos int     `json:"itens_vencidos"`
+		TotalItens    int    `json:"total_itens"`
+		ValorTotal    string `json:"valor_total"` // Formato brasileiro
+		ItensPagos    int    `json:"itens_pagos"`
+		ItensVencidos int    `json:"itens_vencidos"`
 	}
+
+	var valorTotalDec decimal.Decimal
 
 	// Buscar estatísticas
 	err = database.DB_App.QueryRow(`
-		SELECT 
+		SELECT
 			COUNT(*) as total_itens,
 			COALESCE(SUM(valor), 0) as valor_total,
 			SUM(CASE WHEN data_pagamento IS NOT NULL AND data_pagamento != '' THEN 1 ELSE 0 END) as itens_pagos,
 			SUM(CASE WHEN data_vencimento IS NOT NULL AND data_vencimento != '' AND data_vencimento < CURDATE() AND (data_pagamento IS NULL OR data_pagamento = '') THEN 1 ELSE 0 END) as itens_vencidos
-		FROM FT_FATURAMENTO 
-		WHERE id_processo = ?`, processoID).Scan(&stats.TotalItens, &stats.ValorTotal, &stats.ItensPagos, &stats.ItensVencidos)
+		FROM FT_FATURAMENTO
+		WHERE id_processo = ?`, processoID).Scan(&stats.TotalItens, &valorTotalDec, &stats.ItensPagos, &stats.ItensVencidos)
+
+	// Formata o valor total para o frontend
+	stats.ValorTotal = utils.FormatBrazilianCurrency(valorTotalDec)
 
 	if err != nil {
 		log.Printf("Erro ao buscar estatísticas do faturamento: %v", err)

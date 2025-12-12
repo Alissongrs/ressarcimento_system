@@ -1,4 +1,4 @@
-﻿import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect } from 'react';
 import { jwtDecode } from 'jwt-decode';
 
 const AuthContext = createContext(null);
@@ -13,20 +13,21 @@ export const AuthProvider = ({ children }) => {
         const decoded = jwtDecode(token);
         // Verifica se o token não expirou
         if (decoded.exp * 1000 > Date.now()) {
+          const tipoConta = decoded.tipo_conta || decoded.role || decoded.tipoConta;
           setUser({
             nome: decoded.nome,
-            tipo_conta: decoded.tipo_conta,
+            tipo_conta: tipoConta,
             user_id: decoded.user_id,
           });
         } else {
           // Token expirado, remove
           localStorage.removeItem('userToken');
-    try { localStorage.removeItem('token'); } catch {}
+          try { localStorage.removeItem('token'); } catch {}
         }
       } catch (error) {
         console.error("Erro ao decodificar token:", error);
         localStorage.removeItem('userToken');
-    try { localStorage.removeItem('token'); } catch {}
+        try { localStorage.removeItem('token'); } catch {}
       }
     }
   }, []);
@@ -34,11 +35,12 @@ export const AuthProvider = ({ children }) => {
   const login = (token) => {
     try {
       const decoded = jwtDecode(token);
+      const tipoConta = decoded.tipo_conta || decoded.role || decoded.tipoConta;
       localStorage.setItem('userToken', token);
       try { localStorage.setItem('token', token); } catch {}
       setUser({
         nome: decoded.nome,
-        tipo_conta: decoded.tipo_conta,
+        tipo_conta: tipoConta,
         user_id: decoded.user_id,
       });
     } catch (error) {
@@ -52,16 +54,9 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
-  const value = {
-    user,
-    login,
-    logout,
-  };
+  const value = { user, login, logout };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
-export const useAuth = () => {
-  return useContext(AuthContext);
-};
-
+export const useAuth = () => useContext(AuthContext);

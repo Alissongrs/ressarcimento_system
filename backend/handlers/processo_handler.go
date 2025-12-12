@@ -21,8 +21,11 @@ import (
 	"ressarcimento-backend/repositories"
 	"ressarcimento-backend/services"
 	"ressarcimento-backend/sse"
+	"ressarcimento-backend/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
+	"github.com/spf13/cast"
 )
 
 // helper: allocate *string from value
@@ -117,6 +120,9 @@ func stripAccentsLower(s string) string {
 	}
 	return b.String()
 }
+
+// parseValorString foi substituído por utils.ParseBrazilianCurrency
+// que retorna decimal.Decimal ao invés de float64
 
 // normalizarForma normaliza strings para comparar/aceitar "Depósito" == "Deposito"
 func normalizarForma(f string) string {
@@ -253,18 +259,16 @@ func GetProcessosKanban(c *gin.Context) {
 		var p models.Processo
 		var deferimento models.Deferimento
 		var tagsJSON, enderecoCompleto sql.NullString
-		var valorEstimado sql.NullFloat64
 
 		if err := rows.Scan(
 			&p.ID, &p.Etapa, &p.SubEtapa, &p.ColunaKanban, &p.UltimaAtualizacao, &p.DataAlerta, &p.Relevancia,
-			&p.NomeCliente, &p.UnidadeConsumidora, &p.Concessionaria, &valorEstimado, &enderecoCompleto, &tagsJSON,
+			&p.NomeCliente, &p.UnidadeConsumidora, &p.Concessionaria, &p.ValorEstimado, &enderecoCompleto, &tagsJSON,
 			&deferimento.CreditoSimples, &deferimento.CreditoDobro, &p.Suspenso,
 		); err != nil {
 			log.Printf("Erro ao escanear processo: %v", err)
 			continue
 		}
 
-		p.ValorEstimado = valorEstimado
 		p.Deferimento = &deferimento
 
 		if enderecoCompleto.Valid {
@@ -294,7 +298,7 @@ func GetProcessosKanban(c *gin.Context) {
 		if _, ok := processosAgrupados[nomeColunaKanban]; ok {
 			processosAgrupados[nomeColunaKanban] = append(processosAgrupados[nomeColunaKanban], p)
 			if p.ValorEstimado.Valid {
-				totaisPorColuna[nomeColunaKanban] += p.ValorEstimado.Float64
+				totaisPorColuna[nomeColunaKanban] += utils.ToFloat64(p.ValorEstimado.Decimal)
 			}
 		}
 	}
@@ -558,52 +562,31 @@ func MovimentarProcesso(c *gin.Context) {
 
 	// Deferimento (aceita números com vírgula como decimal no JSON)
 	if strings.TrimSpace(deferimentoJSON) != "" {
-		var deferimentoInput models.DeferimentoInput
-		parsed := false
-		if err := json.Unmarshal([]byte(deferimentoJSON), &deferimentoInput); err == nil {
-			parsed = true
-		} else {
-			// Fallback: parse genérico e converter strings/JSON numbers
-			var m map[string]interface{}
-			if err2 := json.Unmarshal([]byte(deferimentoJSON), &m); err2 == nil {
-				toFloat := func(v interface{}) float64 {
-					switch t := v.(type) {
-					case float64:
-						return t
-					case json.Number:
-						if f, e := t.Float64(); e == nil {
-							return f
-						}
-					case string:
-						s := strings.TrimSpace(t)
-						s = strings.ReplaceAll(s, ".", "")
-						s = strings.ReplaceAll(s, ",", ".")
-						if f, e := strconv.ParseFloat(s, 64); e == nil {
-							return f
-						}
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(deferimentoJSON), &m); err == nil {
+			toDecimal := func(v interface{}) decimal.Decimal {
+				switch t := v.(type) {
+				case float64:
+					return decimal.NewFromFloat(t)
+				case json.Number:
+					if f, e := t.Float64(); e == nil {
+						return decimal.NewFromFloat(f)
 					}
-					return 0
+				case string:
+					s := strings.TrimSpace(t)
+					s = strings.ReplaceAll(s, ".", "")
+					s = strings.ReplaceAll(s, ",", ".")
+					if d, e := decimal.NewFromString(s); e == nil {
+						return d
+					}
 				}
-				if v, ok := m["credito_simples"]; ok {
-					deferimentoInput.CreditoSimples = toFloat(v)
-				}
-				if v, ok := m["credito_dobro"]; ok {
-					deferimentoInput.CreditoDobro = toFloat(v)
-				}
-				if v, ok := m["data_procedencia"].(string); ok {
-					deferimentoInput.DataProcedencia = v
-				}
-				if v, ok := m["data_credito_dobro"].(string); ok {
-					deferimentoInput.DataCreditoDobro = v
-				}
-				parsed = true
+				return decimal.Zero
 			}
-		}
-		if parsed {
-			hasData := strings.TrimSpace(deferimentoInput.DataProcedencia) != "" ||
-				strings.TrimSpace(deferimentoInput.DataCreditoDobro) != "" ||
-				(deferimentoInput.CreditoSimples != 0) ||
-				(deferimentoInput.CreditoDobro != 0)
+			dataProcedencia := strings.TrimSpace(cast.ToString(m["data_procedencia"]))
+			dataCreditoDobro := strings.TrimSpace(cast.ToString(m["data_credito_dobro"]))
+			cs := toDecimal(m["credito_simples"])
+			cd := toDecimal(m["credito_dobro"])
+			hasData := dataProcedencia != "" || dataCreditoDobro != "" || cs.Sign() != 0 || cd.Sign() != 0
 			if hasData {
 				hasDeferimentoUpdate = true
 				q := `INSERT INTO FT_DEFERIMENTOS (id_processo, data_procedencia, credito_simples, credito_dobro, data_credito_dobro)
@@ -613,7 +596,7 @@ func MovimentarProcesso(c *gin.Context) {
                       credito_simples    = VALUES(credito_simples), 
                       credito_dobro      = VALUES(credito_dobro),
                       data_credito_dobro = VALUES(data_credito_dobro)`
-				if _, err = tx.Exec(q, processoID, deferimentoInput.DataProcedencia, deferimentoInput.CreditoSimples, deferimentoInput.CreditoDobro, deferimentoInput.DataCreditoDobro); err != nil {
+				if _, err = tx.Exec(q, processoID, dataProcedencia, cs, cd, dataCreditoDobro); err != nil {
 					log.Printf("Erro ao salvar deferimento no processo %d: %v", processoID, err)
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar dados de deferimento."})
 					return
@@ -1307,6 +1290,8 @@ func salvarFluxoRessarcimentoInterno(processoID int, fluxoJSON string, tx *sql.T
 	if fluxoJSON == "" {
 		return nil
 	}
+	log.Printf("[DEBUG-FLUXO-INTERNO] proc=%d json_preview=%.100s", processoID, fluxoJSON)
+
 	var request struct {
 		Itens []map[string]interface{} `json:"itens"`
 	}
@@ -1315,31 +1300,36 @@ func salvarFluxoRessarcimentoInterno(processoID int, fluxoJSON string, tx *sql.T
 		var quoted string
 		if err2 := json.Unmarshal([]byte(fluxoJSON), &quoted); err2 == nil {
 			if err3 := json.Unmarshal([]byte(quoted), &request); err3 != nil {
+				log.Printf("[ERROR-FLUXO-PARSE] proc=%d err=%v", processoID, err3)
 				return err3
 			}
 		} else {
+			log.Printf("[ERROR-FLUXO-PARSE] proc=%d err=%v", processoID, err)
 			return err
 		}
 	}
 
+	log.Printf("[DEBUG-FLUXO-ITENS] proc=%d itens_count=%d", processoID, len(request.Itens))
+
 	if _, err := tx.Exec("DELETE FROM FT_FLUXO_RESSARCIMENTO WHERE id_processo = ?", processoID); err != nil {
+		log.Printf("[ERROR-FLUXO-DELETE] proc=%d err=%v", processoID, err)
 		return err
 	}
 
-	for _, item := range request.Itens {
+	for idx, item := range request.Itens {
 		// Extrai e normaliza campos com tolerância a tipos
 		forma := strings.TrimSpace(fmt.Sprint(item["forma_devolucao"]))
-		var valorF float64
+		var valorDec decimal.Decimal
 		switch v := item["valor"].(type) {
 		case float64:
-			valorF = v
+			valorDec = utils.ParseFloatToDecimal(v)
 		case string:
-			if f, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(v), ",", "."), 64); err == nil {
-				valorF = f
+			if d, err := utils.ParseBrazilianCurrency(v); err == nil {
+				valorDec = d
 			}
 		case json.Number:
 			if f, err := v.Float64(); err == nil {
-				valorF = f
+				valorDec = utils.ParseFloatToDecimal(f)
 			}
 		}
 		dataDev := strings.TrimSpace(fmt.Sprint(item["data_devolucao"]))
@@ -1354,6 +1344,7 @@ func salvarFluxoRessarcimentoInterno(processoID int, fluxoJSON string, tx *sql.T
 		case "deposito", "depósito":
 			forma = "Depósito"
 		default:
+			log.Printf("[DEBUG-FLUXO-SKIP] proc=%d idx=%d forma_invalida=%s", processoID, idx, forma)
 			continue // ignora valores inválidos
 		}
 
@@ -1365,15 +1356,19 @@ func salvarFluxoRessarcimentoInterno(processoID int, fluxoJSON string, tx *sql.T
 			dataEnvioFinanceiro = sql.NullString{String: dataEnv, Valid: true}
 		}
 
+		log.Printf("[DEBUG-FLUXO-INSERT] proc=%d idx=%d forma=%s valor=%.2f", processoID, idx, forma, valorDec)
+
 		if _, err := tx.Exec(`
-            INSERT INTO FT_FLUXO_RESSARCIMENTO 
-                (id_processo, forma_devolucao, valor, data_devolucao, data_envio_financeiro) 
+            INSERT INTO FT_FLUXO_RESSARCIMENTO
+                (id_processo, forma_devolucao, valor, data_devolucao, data_envio_financeiro)
             VALUES (?, ?, ?, ?, ?)`,
-			processoID, forma, valorF, dataDevolucao, dataEnvioFinanceiro,
+			processoID, forma, valorDec, dataDevolucao, dataEnvioFinanceiro,
 		); err != nil {
+			log.Printf("[ERROR-FLUXO-INSERT] proc=%d idx=%d err=%v", processoID, idx, err)
 			return err
 		}
 	}
+	log.Printf("[DEBUG-FLUXO-SUCESS] proc=%d", processoID)
 	return nil
 }
 
@@ -1381,6 +1376,8 @@ func salvarFaturamentoInterno(processoID int, faturamentoJSON string, tx *sql.Tx
 	if faturamentoJSON == "" {
 		return nil
 	}
+	log.Printf("[DEBUG-FATURA-INTERNO] proc=%d json_preview=%.100s", processoID, faturamentoJSON)
+
 	var request struct {
 		Itens []map[string]interface{} `json:"itens"`
 	}
@@ -1389,16 +1386,22 @@ func salvarFaturamentoInterno(processoID int, faturamentoJSON string, tx *sql.Tx
 		var quoted string
 		if err2 := json.Unmarshal([]byte(faturamentoJSON), &quoted); err2 == nil {
 			if err3 := json.Unmarshal([]byte(quoted), &request); err3 != nil {
+				log.Printf("[ERROR-FATURA-PARSE] proc=%d err=%v", processoID, err3)
 				return err3
 			}
 		} else {
+			log.Printf("[ERROR-FATURA-PARSE] proc=%d err=%v", processoID, err)
 			return err
 		}
 	}
+
+	log.Printf("[DEBUG-FATURA-ITENS] proc=%d itens_count=%d", processoID, len(request.Itens))
+
 	if _, err := tx.Exec("DELETE FROM FT_FATURAMENTO WHERE id_processo = ?", processoID); err != nil {
+		log.Printf("[ERROR-FATURA-DELETE] proc=%d err=%v", processoID, err)
 		return err
 	}
-	for _, item := range request.Itens {
+	for idx, item := range request.Itens {
 		var dataEmissao, dataVencimento, dataPagamento sql.NullString
 		de := strings.TrimSpace(fmt.Sprint(item["data_emissao"]))
 		dv := strings.TrimSpace(fmt.Sprint(item["data_vencimento"]))
@@ -1413,30 +1416,34 @@ func salvarFaturamentoInterno(processoID int, faturamentoJSON string, tx *sql.Tx
 			dataPagamento = sql.NullString{String: dp, Valid: true}
 		}
 
-		var valorF float64
+		var valorDec decimal.Decimal
 		switch v := item["valor"].(type) {
 		case float64:
-			valorF = v
+			valorDec = utils.ParseFloatToDecimal(v)
 		case string:
-			if f, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(v), ",", "."), 64); err == nil {
-				valorF = f
+			if d, err := utils.ParseBrazilianCurrency(v); err == nil {
+				valorDec = d
 			}
 		case json.Number:
 			if f, err := v.Float64(); err == nil {
-				valorF = f
+				valorDec = utils.ParseFloatToDecimal(f)
 			}
 		}
 		numeroNF := strings.TrimSpace(fmt.Sprint(item["numero_nf"]))
 
+		log.Printf("[DEBUG-FATURA-INSERT] proc=%d idx=%d nf=%s valor=%.2f", processoID, idx, numeroNF, valorDec)
+
 		if _, err := tx.Exec(`
-			INSERT INTO FT_FATURAMENTO 
-			(id_processo, numero_nf, data_emissao, data_vencimento, data_pagamento, valor) 
+			INSERT INTO FT_FATURAMENTO
+			(id_processo, numero_nf, data_emissao, data_vencimento, data_pagamento, valor)
 			VALUES (?, ?, ?, ?, ?, ?)`,
-			processoID, numeroNF, dataEmissao, dataVencimento, dataPagamento, valorF,
+			processoID, numeroNF, dataEmissao, dataVencimento, dataPagamento, valorDec,
 		); err != nil {
+			log.Printf("[ERROR-FATURA-INSERT] proc=%d idx=%d err=%v", processoID, idx, err)
 			return err
 		}
 	}
+	log.Printf("[DEBUG-FATURA-SUCCESS] proc=%d", processoID)
 	return nil
 }
 
@@ -1449,10 +1456,10 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 	}
 
 	var payload struct {
-		CreditoSimples   float64 `json:"credito_simples"`
-		CreditoDobro     float64 `json:"credito_dobro"`
-		DataProcedencia  string  `json:"data_procedencia"`
-		DataCreditoDobro string  `json:"data_credito_dobro"`
+		CreditoSimples   string `json:"credito_simples"`   // Recebe como string, converte abaixo
+		CreditoDobro     string `json:"credito_dobro"`     // Recebe como string, converte abaixo
+		DataProcedencia  string `json:"data_procedencia"`
+		DataCreditoDobro string `json:"data_credito_dobro"`
 	}
 	body, _ := io.ReadAll(c.Request.Body)
 	if len(body) > 0 {
@@ -1463,6 +1470,19 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 		return
 	}
 
+	// Converte strings para decimal
+	creditoSimples, err := utils.ParseBrazilianCurrency(payload.CreditoSimples)
+	if err != nil && payload.CreditoSimples != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Crédito simples inválido: " + err.Error()})
+		return
+	}
+
+	creditoDobro, err := utils.ParseBrazilianCurrency(payload.CreditoDobro)
+	if err != nil && payload.CreditoDobro != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Crédito dobro inválido: " + err.Error()})
+		return
+	}
+
 	tx, err := database.DB_App.Begin()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao iniciar transação"})
@@ -1470,7 +1490,7 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 	}
 	defer tx.Rollback()
 
-	var prevCS, prevCD sql.NullFloat64
+	var prevCS, prevCD decimal.NullDecimal
 	var prevDP, prevDD sql.NullString
 	_ = tx.QueryRow(`SELECT credito_simples, credito_dobro, data_procedencia, data_credito_dobro FROM FT_DEFERIMENTOS WHERE id_processo = ?`, processoID).
 		Scan(&prevCS, &prevCD, &prevDP, &prevDD)
@@ -1479,7 +1499,7 @@ func SalvarDeferimentoSimples(c *gin.Context) {
         INSERT INTO FT_DEFERIMENTOS (id_processo, data_procedencia, credito_simples, credito_dobro, data_credito_dobro)
         VALUES (?, NULLIF(?, ''), ?, ?, NULLIF(?, ''))
         ON DUPLICATE KEY UPDATE data_procedencia=VALUES(data_procedencia), credito_simples=VALUES(credito_simples), credito_dobro=VALUES(credito_dobro), data_credito_dobro=VALUES(data_credito_dobro)
-    `, processoID, strings.TrimSpace(payload.DataProcedencia), payload.CreditoSimples, payload.CreditoDobro, strings.TrimSpace(payload.DataCreditoDobro)); err != nil {
+    `, processoID, strings.TrimSpace(payload.DataProcedencia), creditoSimples, creditoDobro, strings.TrimSpace(payload.DataCreditoDobro)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao salvar deferimento"})
 		return
 	}
@@ -1492,10 +1512,12 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 		Scan(&etapaNome, &subEtapa)
 
 	msg := "Deferimento atualizado"
-	if !prevCS.Valid && payload.CreditoSimples != 0 {
+	if !prevCS.Valid && !utils.IsZero(creditoSimples) {
 		msg = "Valor de crédito simples adicionado"
-	} else if prevCS.Valid && prevCS.Float64 != payload.CreditoSimples {
-		msg = fmt.Sprintf("Crédito simples alterado de %.2f para %.2f", prevCS.Float64, payload.CreditoSimples)
+	} else if prevCS.Valid && !prevCS.Decimal.Equal(creditoSimples) {
+		msg = fmt.Sprintf("Crédito simples alterado de %s para %s",
+			utils.FormatBrazilianCurrencyWithSymbol(prevCS.Decimal),
+			utils.FormatBrazilianCurrencyWithSymbol(creditoSimples))
 	}
 	if strings.TrimSpace(payload.DataProcedencia) != "" && payload.DataProcedencia != prevDP.String {
 		msg = msg + " na data " + payload.DataProcedencia

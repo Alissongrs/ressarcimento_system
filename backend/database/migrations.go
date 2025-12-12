@@ -331,5 +331,124 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	// 13) Índices adicionais de performance
+	{
+		log.Println("[migrate] Criando índices de performance (se não existirem) ...")
+
+		// Helper para criar índice se não existir
+		ensureIndex := func(table, indexName, indexDef string) {
+			// Evita erro 1072: checa se todas as colunas existem
+			cols := strings.Split(indexDef, ",")
+			for _, raw := range cols {
+				part := strings.TrimSpace(raw)
+				if part == "" {
+					continue
+				}
+				fields := strings.Fields(part)
+				col := strings.Trim(fields[0], "`")
+				var colExists int
+				_ = db.QueryRow(`
+					SELECT COUNT(1)
+					FROM INFORMATION_SCHEMA.COLUMNS
+					WHERE TABLE_SCHEMA = DATABASE()
+					  AND TABLE_NAME = ?
+					  AND COLUMN_NAME = ?`,
+					table, col,
+				).Scan(&colExists)
+				if colExists == 0 {
+					log.Printf("[migrate] aviso: pulando índice %s em %s (coluna %s não existe)", indexName, table, col)
+					return
+				}
+			}
+
+			var has int
+			_ = db.QueryRow(`
+				SELECT COUNT(1)
+				FROM INFORMATION_SCHEMA.STATISTICS
+				WHERE TABLE_SCHEMA = DATABASE()
+				  AND TABLE_NAME = ?
+				  AND INDEX_NAME = ?`,
+				table, indexName,
+			).Scan(&has)
+
+			if has == 0 {
+				log.Printf("[migrate] Criando índice %s em %s...", indexName, table)
+				query := fmt.Sprintf("CREATE INDEX %s ON %s (%s)", indexName, table, indexDef)
+				if _, err := db.Exec(query); err != nil {
+					if !strings.Contains(strings.ToLower(err.Error()), "exists") &&
+					   !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+						log.Printf("[migrate] aviso: falha ao criar índice %s: %v", indexName, err)
+					}
+				}
+			}
+		}
+
+		// Índices em FT_HISTORICO_MOVIMENTACOES
+		ensureIndex("FT_HISTORICO_MOVIMENTACOES", "idx_historico_data_movimentacao", "data_movimentacao DESC")
+		// ensureIndex("FT_HISTORICO_MOVIMENTACOES", "idx_historico_id_processo", "id_processo") // Coluna id_processo não existe
+
+		// Índices em FT_PROCESSOS
+		ensureIndex("FT_PROCESSOS", "idx_processos_etapa", "id_etapa_processo")
+		// ensureIndex("FT_PROCESSOS", "idx_processos_data_criacao", "data_criacao DESC") // Coluna data_criacao não existe
+
+		// Índices em FT_REQUISICOES
+		ensureIndex("FT_REQUISICOES", "idx_requisicoes_data_criacao", "data_criacao DESC")
+		ensureIndex("FT_REQUISICOES", "idx_requisicoes_status", "id_status")
+		ensureIndex("FT_REQUISICOES", "idx_requisicoes_usuario", "id_usuario")
+
+		// Índices em DM_ALERTAS (se a tabela existir)
+		var hasAlertas int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.TABLES
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME='DM_ALERTAS'`,
+		).Scan(&hasAlertas)
+
+		if hasAlertas > 0 {
+			ensureIndex("DM_ALERTAS", "idx_alertas_usuario_lido", "id_usuario, lido, data_criacao DESC")
+		}
+
+		// Índices em FT_DEFERIMENTOS
+		var hasDeferimentos int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.TABLES
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME='FT_DEFERIMENTOS'`,
+		).Scan(&hasDeferimentos)
+
+		if hasDeferimentos > 0 {
+			ensureIndex("FT_DEFERIMENTOS", "idx_deferimento_processo", "id_processo")
+		}
+
+		// Índices em FT_FLUXO_RESSARCIMENTO
+		var hasFluxo int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.TABLES
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME='FT_FLUXO_RESSARCIMENTO'`,
+		).Scan(&hasFluxo)
+
+		if hasFluxo > 0 {
+			ensureIndex("FT_FLUXO_RESSARCIMENTO", "idx_fluxo_processo", "id_processo")
+		}
+
+		// Índices em FT_FATURAMENTO
+		var hasFaturamento int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.TABLES
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME='FT_FATURAMENTO'`,
+		).Scan(&hasFaturamento)
+
+		if hasFaturamento > 0 {
+			ensureIndex("FT_FATURAMENTO", "idx_faturamento_processo", "id_processo")
+		}
+	}
+
+	log.Println("✓ Todas as migrações concluídas com sucesso")
 	return nil
 }

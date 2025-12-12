@@ -1,15 +1,16 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"time"
 
+	"ressarcimento-backend/auth"
 	"ressarcimento-backend/database"
+	"ressarcimento-backend/repositories"
 	"ressarcimento-backend/routes"
 	"ressarcimento-backend/services"
-	"ressarcimento-backend/repositories"
-	"context"
 
 	"github.com/go-co-op/gocron"
 	"github.com/joho/godotenv"
@@ -25,6 +26,11 @@ func main() {
 		time.Local = loc
 	} else {
 		log.Printf("Aviso: falha ao carregar timezone America/Sao_Paulo: %v", err)
+	}
+
+	// Valida configuração de segurança JWT (crítico em produção)
+	if err := auth.ValidateJWTSetup(); err != nil {
+		log.Fatalf("ERRO CRÍTICO na validação JWT: %v", err)
 	}
 
 	// Abre as conexões (populará database.DB_App e database.DB_Consulta)

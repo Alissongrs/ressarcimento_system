@@ -16,16 +16,78 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
-// Sal para hash de senha (pode vir do env também, se quiser)
+// Sal legado para compatibilidade com hashes SHA256 antigos
+// DEPRECATED: usado apenas para migração de senhas antigas
 var salt = "um-sal-secreto-para-aumentar-a-seguranca"
 
-func hashPassword(password string) string {
+// hashPasswordBcrypt cria um hash seguro usando bcrypt (custo 12)
+func hashPasswordBcrypt(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+// verifyPasswordBcrypt verifica se a senha corresponde ao hash bcrypt
+func verifyPasswordBcrypt(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
+
+// hashPasswordSHA256Legacy gera hash SHA256 (DEPRECATED: apenas para compatibilidade)
+func hashPasswordSHA256Legacy(password string) string {
 	saltedPassword := password + salt
 	hasher := sha256.New()
 	hasher.Write([]byte(saltedPassword))
 	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+// isBcryptHash verifica se o hash é bcrypt (começa com $2a$, $2b$ ou $2y$)
+func isBcryptHash(hash string) bool {
+	return strings.HasPrefix(hash, "$2a$") ||
+	       strings.HasPrefix(hash, "$2b$") ||
+	       strings.HasPrefix(hash, "$2y$")
+}
+
+// verifyPassword verifica senha com suporte a bcrypt e SHA256 legacy
+// Se detectar SHA256, automaticamente migra para bcrypt
+func verifyPassword(password, hash string, userID int64) (bool, error) {
+	if isBcryptHash(hash) {
+		// Hash moderno (bcrypt)
+		return verifyPasswordBcrypt(password, hash), nil
+	}
+
+	// Hash legado (SHA256) - verifica e migra
+	legacyHash := hashPasswordSHA256Legacy(password)
+	if legacyHash == hash {
+		log.Printf("Migrando senha do usuário ID %d de SHA256 para bcrypt", userID)
+
+		// Gera novo hash bcrypt
+		newHash, err := hashPasswordBcrypt(password)
+		if err != nil {
+			log.Printf("ERRO ao gerar hash bcrypt na migração para usuário ID %d: %v", userID, err)
+			return true, nil // Senha está correta, mas falhou migração
+		}
+
+		// Atualiza no banco
+		_, err = database.DB_App.Exec(
+			"UPDATE DM_USUARIO SET senha_hash = ? WHERE id_usuario = ?",
+			newHash, userID,
+		)
+		if err != nil {
+			log.Printf("ERRO ao atualizar hash no banco para usuário ID %d: %v", userID, err)
+			return true, nil // Senha está correta, mas falhou migração
+		}
+
+		log.Printf("✓ Senha migrada com sucesso para usuário ID %d", userID)
+		return true, nil
+	}
+
+	return false, nil
 }
 
 // Register cria um novo usuário na tabela DM_USUARIO.
@@ -42,10 +104,16 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	hashedPassword := hashPassword(user.Senha)
+	// Gera hash seguro com bcrypt
+	hashedPassword, err := hashPasswordBcrypt(user.Senha)
+	if err != nil {
+		log.Printf("Erro ao gerar hash de senha: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao processar senha"})
+		return
+	}
 
 	// Insert incluindo id_departamento e perfil padrão 'solicitante'
-	_, err := database.DB_App.Exec(
+	_, err = database.DB_App.Exec(
 		"INSERT INTO DM_USUARIO (nome_usuario, email, senha_hash, id_departamento, perfil) VALUES (?, ?, ?, ?, ?)",
 		user.Nome, user.Email, hashedPassword, user.IDDepartamento, "solicitante",
 	)
@@ -90,13 +158,16 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// Compara hash da senha
-	hashOfInputPassword := hashPassword(input.Password)
-	log.Printf("Hash do DB para '%s': %s", input.Email, hashedPasswordFromDB)
-	log.Printf("Hash do Input para '%s': %s", input.Email, hashOfInputPassword)
+	// Verifica senha com suporte a migração automática de SHA256 para bcrypt
+	passwordValid, err := verifyPassword(input.Password, hashedPasswordFromDB, user.ID)
+	if err != nil {
+		log.Printf("Erro ao verificar senha para '%s': %v", input.Email, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro no servidor"})
+		return
+	}
 
-	if hashOfInputPassword != hashedPasswordFromDB {
-		log.Printf("Falha na verificação da senha para '%s'. Hashes não coincidem.", input.Email)
+	if !passwordValid {
+		log.Printf("Falha na verificação da senha para '%s'", input.Email)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email ou senha inválidos"})
 		return
 	}
