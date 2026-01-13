@@ -19,7 +19,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s -X main.Version=$(git describe --tags --always --dirty 2>/dev/null || echo 'dev')" \
     -trimpath \
-    -o server \
+    -o backend \
     .
 
 # ====== Stage 2: Runtime ======
@@ -36,7 +36,7 @@ RUN addgroup -g 1000 app && \
 WORKDIR /app
 
 # Copia binary do stage de build
-COPY --from=builder --chown=app:app /app/server /app/server
+COPY --from=builder --chown=app:app /app/backend /app/backend
 
 # Cria diretórios necessários
 RUN mkdir -p /app/uploads && chown -R app:app /app
@@ -50,4 +50,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD wget -qO- http://localhost:8080/api/v1/healthz || exit 1
 
-CMD ["/app/server"]
+CMD ["/app/backend"]

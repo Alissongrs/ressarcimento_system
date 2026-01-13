@@ -142,7 +142,7 @@ export default function Backlog() {
                   {g.items.map((r) => (
                     <tr key={r.id} className="border-b border-[var(--border)] hover:bg-[var(--panel)]/60">
                       <td className="px-3 py-2 w-16">
-                        <Link to={`/processos/${r.id}`} className="text-[var(--accent)] underline">
+                        <Link to={`/admin/planilha?pid=${r.id}`} className="text-[var(--accent)] underline">
                           #{r.id}
                         </Link>
                       </td>
@@ -176,10 +176,26 @@ export default function Backlog() {
                             Aguardando definicao
                           </button>
                         ) : (
-                          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-500 border border-amber-400">
-                            Aguardando definição
-                          </span>
-                        )}
+  <button
+    className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-500 border border-amber-400 hover:bg-amber-500/30 disabled:opacity-60"
+    disabled={updating}
+    onClick={async () => {
+      setUpdating(true);
+      try {
+        await toggleBacklogCheck(r.id, false);
+        setRows((prev) =>
+          sortRows(prev.map((x) => (x.id === r.id ? { ...x, checked: false } : x))),
+        );
+      } catch {
+        setErr('Falha ao remover de Aguardando definicao.');
+      } finally {
+        setUpdating(false);
+      }
+    }}
+  >
+    Aguardando definicao
+  </button>
+)}
                       </td>
                     </tr>
                   ))}
@@ -222,7 +238,7 @@ export default function Backlog() {
         </label>
       </div>
 
-      {loading && <div className="opacity-70">Carregando...</div>}
+      {loading && <div className="opacity-70 sap-loading">Carregando...</div>}
       {err && <div className="text-red-500 text-sm mb-3">{err}</div>}
 
       {!loading && (
@@ -258,3 +274,4 @@ export default function Backlog() {
     </div>
   );
 }
+

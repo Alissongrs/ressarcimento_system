@@ -72,9 +72,9 @@ func startScheduler() {
 	// Tarefa 1: Verificar pendências de fluxo a cada 10 dias às 10:00
 	s.Every(10).Days().At("10:00").Do(services.VerificarPendenciasDeFluxo)
 
-	// Tarefa 2: Enviar e-mail com movimentações de processos duas vezes ao dia
-	s.Every(1).Day().At("06:00").Do(services.EnviarEmailMovimentacoesDiarias)
-	s.Every(1).Day().At("12:00").Do(services.EnviarEmailMovimentacoesDiarias)
+	// Tarefa 2: Enviar e-mail com movimentações de processos duas vezes ao dia (DESABILITADO)
+	// s.Every(1).Day().At("06:00").Do(services.EnviarEmailMovimentacoesDiarias)
+	// s.Every(1).Day().At("12:00").Do(services.EnviarEmailMovimentacoesDiarias)
 
 	// Tarefa 3: Enviar informativo geral toda sexta-feira às 18:00
 	s.Cron("0 18 * * 5").Do(services.EnviarInformativoSemanal)

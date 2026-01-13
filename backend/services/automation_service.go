@@ -15,7 +15,7 @@ import (
 	"gopkg.in/gomail.v2"
 )
 
-// SendEmail envia um e-mail usando as configuraÃ€Â§Ã€Âµes do .env.
+// SendEmail envia um e-mail usando as configurações do .env.
 func SendEmail(to, subject, body string) error {
 	smtpHost := os.Getenv("SMTP_HOST")
 	smtpPortStr := os.Getenv("SMTP_PORT")
@@ -23,13 +23,13 @@ func SendEmail(to, subject, body string) error {
 	smtpPass := os.Getenv("SMTP_PASS")
 
 	if smtpHost == "" || smtpPortStr == "" || smtpUser == "" || smtpPass == "" {
-		log.Println("Aviso: ConfiguraÃ€Â§Ã€Âµes de SMTP incompletas. E-mail nÃ£o serÃ¡ enviado.")
-		return fmt.Errorf("configuraÃ€Â§Ã€Âµes de SMTP nÃ£o encontradas nas variÃ¡veis de ambiente")
+		log.Println("Aviso: Configurações de SMTP incompletas. E-mail não será enviado.")
+		return fmt.Errorf("configurações de SMTP não encontradas nas variáveis de ambiente")
 	}
 
 	smtpPort, err := strconv.Atoi(smtpPortStr)
 	if err != nil {
-		return fmt.Errorf("porta SMTP invÃ¡lida: %v", err)
+		return fmt.Errorf("porta SMTP inválida: %v", err)
 	}
 
 	m := gomail.NewMessage()
@@ -46,18 +46,18 @@ func SendEmail(to, subject, body string) error {
 	return nil
 }
 
-// EnviarEmailMovimentacoesDiarias busca as movimentaÃ€Â§Ã€Âµes de processos e envia o relatÃ€Â³rio.
+// EnviarEmailMovimentacoesDiarias busca as movimentações de processos e envia o relatório.
 func EnviarEmailMovimentacoesDiarias() {
-	log.Println("Executando tarefa: Enviar e-mails de movimentaÃ€Â§Ã£o de processos...")
+	log.Println("Executando tarefa: Enviar e-mails de movimentação de processos...")
 
-	// Ã€Å¡Ãšltimas 12h
+	// Últimas 12h
 	periodo := time.Now().Add(-12 * time.Hour)
 
 	query := `
         SELECT
-            h.id_movimentacao,
+            h.id_historico,
             h.id_requisicao,
-            COALESCE(u.nome, 'Sistema') AS nome_usuario,
+            COALESCE(u.nome_usuario, 'Sistema') AS nome_usuario,
             COALESCE(h.status_anterior, '') AS status_anterior,
             COALESCE(h.status_novo, '')    AS status_novo,
             COALESCE(h.comentario, '')     AS comentario,
@@ -70,7 +70,7 @@ func EnviarEmailMovimentacoesDiarias() {
 
 	rows, err := database.DB_App.Query(query, periodo)
 	if err != nil {
-		log.Printf("Erro ao buscar histÃ€Â³rico de movimentaÃ€Â§Ã€Âµes: %v", err)
+		log.Printf("Erro ao buscar histórico de movimentações: %v", err)
 		return
 	}
 	defer rows.Close()
@@ -87,14 +87,14 @@ func EnviarEmailMovimentacoesDiarias() {
 			&hist.Comentario,
 			&hist.DataMovimentacao,
 		); err != nil {
-			log.Printf("Erro ao escanear movimentaÃ€Â§Ã£o: %v", err)
+			log.Printf("Erro ao escanear movimentação: %v", err)
 			continue
 		}
 		movimentacoes = append(movimentacoes, hist)
 	}
 
 	if len(movimentacoes) == 0 {
-		log.Println("Nenhuma movimentaÃ€Â§Ã£o de processo nas Ã€ÂºÃšltimas 12 horas.")
+		log.Println("Nenhuma movimentação de processo nas últimas 12 horas.")
 		return
 	}
 
@@ -102,15 +102,15 @@ func EnviarEmailMovimentacoesDiarias() {
 	bodyBuilder.WriteString(`
         <html>
         <body>
-            <h1 style="color: #333;">RelatÃ€Â³rio de MovimentaÃ€Â§Ã£o de Processos</h1>
-            <p>Resumo das atividades nas Ã€ÂºÃšltimas 12 horas.</p>
+            <h1 style="color: #333;">Relatório de Movimentação de Processos</h1>
+            <p>Resumo das atividades nas últimas 12 horas.</p>
             <table style="width: 100%; border-collapse: collapse; font-family: sans-serif;">
                 <thead style="background-color: #f2f2f2;">
                     <tr>
                         <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Processo ID</th>
                         <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Gestor</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">MovimentaÃ€Â§Ã£o de Etapa</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">ComentÃ¡rio</th>
+                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Movimentação de Etapa</th>
+                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Comentário</th>
                         <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Data</th>
                     </tr>
                 </thead>
@@ -162,24 +162,24 @@ func EnviarEmailMovimentacoesDiarias() {
 		if emailGestor == "" {
 			continue
 		}
-		if err := SendEmail(emailGestor, "RelatÃ€Â³rio DiÃ¡rio de MovimentaÃ€Â§Ã£o de Processos", bodyBuilder.String()); err != nil {
+		if err := SendEmail(emailGestor, "Relatório Diário de Movimentação de Processos", bodyBuilder.String()); err != nil {
 			log.Printf("Erro ao enviar e-mail para %s: %v", emailGestor, err)
 		} else {
-			log.Printf("RelatÃ€Â³rio de movimentaÃ€Â§Ã£o enviado para %s", emailGestor)
+			log.Printf("Relatório de movimentação enviado para %s", emailGestor)
 		}
 	}
 }
 
-// EnviarInformativoSemanal envia o relatÃ€Â³rio geral da semana (placeholder).
+// EnviarInformativoSemanal envia o relatório geral da semana (placeholder).
 func EnviarInformativoSemanal() {
 	log.Println("Executando tarefa: Enviar informativo semanal...")
 }
 
 // VerificarPendenciasDeFluxo verifica processos na etapa \"Enviado ao Financeiro\" com dados faltando e cria alertas.
 func VerificarPendenciasDeFluxo() {
-	log.Println("Executando tarefa: Verificar pendÃ€Âªncias de fluxo...")
+	log.Println("Executando tarefa: Verificar pendências de fluxo...")
 
-	// etapa \"Enviado ao Financeiro\" no seu dicionÃ¡rio de etapas
+	// etapa \"Enviado ao Financeiro\" no seu dicionário de etapas
 	var etapaFluxoID int
 	err := database.DB_App.QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = 'Enviado ao Financeiro'").Scan(&etapaFluxoID)
 	if err != nil {
@@ -187,9 +187,19 @@ func VerificarPendenciasDeFluxo() {
 		return
 	}
 
-	// Processos nessa etapa que nÃ£o tÃ€Âªm registros em fluxo de ressarcimento ou faturamento
+	// Processos nessa etapa que não têm registros em fluxo de ressarcimento ou faturamento
 	query := `
-        SELECT p.id_processo,\n               p.id_responsavel,\n               TIMESTAMPDIFF(HOUR, NOW(), DATE_ADD(COALESCE(vh.data_movimentacao, p.ultima_atualizacao), INTERVAL COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) DAY)) AS horas_restantes,\n               DATE_ADD(COALESCE(vh.data_movimentacao, p.ultima_atualizacao), INTERVAL COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) DAY) AS deadline_dt\n          FROM FT_PROCESSOS p\n          JOIN DM_ETAPAS_PROCESSO e  ON e.id_etapa_processo = p.id_etapa_processo\n     LEFT JOIN DM_PRAZOS_ETAPA pe    ON pe.id_etapa_processo = e.id_etapa_processo AND pe.sub_etapa IS NULL\n     LEFT JOIN DM_PRAZOS_ETAPA pe_sub ON pe_sub.id_etapa_processo = e.id_etapa_processo AND pe_sub.sub_etapa = p.sub_etapa\n     LEFT JOIN DM_PRAZOS_KANBAN pk   ON pk.id_coluna_kanban = e.id_coluna_kanban\n     LEFT JOIN VW_ULTIMO_HISTORICO vh ON vh.id_requisicao = p.id_processo\n         WHERE COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) IS NOT NULL;
+        SELECT p.id_processo,
+               p.id_responsavel,
+               TIMESTAMPDIFF(HOUR, NOW(), DATE_ADD(COALESCE(vh.data_movimentacao, p.ultima_atualizacao), INTERVAL COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) DAY)) AS horas_restantes,
+               DATE_ADD(COALESCE(vh.data_movimentacao, p.ultima_atualizacao), INTERVAL COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) DAY) AS deadline_dt
+          FROM FT_PROCESSOS p
+          JOIN DM_ETAPAS_PROCESSO e  ON e.id_etapa_processo = p.id_etapa_processo
+     LEFT JOIN DM_PRAZOS_ETAPA pe    ON pe.id_etapa_processo = e.id_etapa_processo AND pe.sub_etapa IS NULL
+     LEFT JOIN DM_PRAZOS_ETAPA pe_sub ON pe_sub.id_etapa_processo = e.id_etapa_processo AND pe_sub.sub_etapa = p.sub_etapa
+     LEFT JOIN DM_PRAZOS_KANBAN pk   ON pk.id_coluna_kanban = e.id_coluna_kanban
+     LEFT JOIN VW_ULTIMO_HISTORICO vh ON vh.id_requisicao = p.id_processo
+         WHERE COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) IS NOT NULL;
     `
 	rows, err := database.DB_App.Query(query)
 	if err != nil {
@@ -209,7 +219,7 @@ func VerificarPendenciasDeFluxo() {
 		if !userID.Valid {
 			continue
 		}
-		// SÃ³ alerta se faltar <=24h (0..24) ou jÃ¡ vencido (<0)
+		// Só alerta se faltar <=24h (0..24) ou já vencido (<0)
 		if !horas.Valid {
 			continue
 		}
@@ -293,7 +303,7 @@ func ChecarPrazosRequisicoes() {
 		if exists > 0 {
 			continue
 		}
-		msg := fmt.Sprintf("Prazo da triagem/anÃ¡lise da Req #%d vence em %d hora(s).", reqID, horas.Int64)
+		msg := fmt.Sprintf("Prazo da triagem/análise da Req #%d vence em %d hora(s).", reqID, horas.Int64)
 		if _, err := database.DB_App.Exec(
 			"INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta) VALUES (?, NULL, ?, 0, 0, NOW(), DATE(?))",
 			userID.Int64, msg, deadline.Time,

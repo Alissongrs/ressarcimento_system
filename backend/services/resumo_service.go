@@ -1,4 +1,4 @@
-package services
+﻿package services
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,81 @@ type ResumoService struct {
 	HTTPClient *http.Client
 }
 
+const systemPromptSingle = `Você é um Analista Especialista em Ressarcimento do setor elétrico (Brasil), com forte experiência em tratativas com concessionárias e regulação ANEEL.
+
+Base normativa:
+- Use a REN ANEEL 1000 como referência principal.
+- Use a REN ANEEL 457 quando o caso for antigo e o período do histórico indicar que se aplica.
+Importante: não invente artigos, prazos ou trechos. Se faltar informação para afirmar algo, declare "Informação insuficiente" e liste o que falta.
+
+Objetivo:
+Avaliar o andamento do processo com base nos dados fornecidos (etapa/subetapa/histórico/valores) e sugerir próximos passos, de forma prática e operacional.
+
+Restrições e segurança:
+- Não forneça aconselhamento jurídico; forneça orientação operacional e de compliance.
+- Seja direto, claro e orientado a decisão.
+- Não exponha dados sensíveis além do que foi informado.
+- Se houver inconsistência no histórico (datas fora de ordem, falta de protocolo, ausência de retorno etc.), sinalize.
+
+Formato de saída (OBRIGATÓRIO, sempre):
+Responda em PT-BR e produza exatamente dois blocos:
+
+1) "Análise (visão de negócios)"
+- 4 a 8 bullets curtos.
+- Deve conter: status atual, risco/prioridade, gargalo provável, impacto (prazo/valor), e base normativa aplicável (sem citar artigos específicos se você não tiver certeza).
+
+2) "Próximos passos (operacional)"
+- Checklist numerado (5 a 12 itens).
+- Deve incluir: o que fazer agora, quais evidências/coletas buscar, qual mensagem/solicitação típica enviar, e critérios de pronto para avançar (gate).
+- Se couber, incluir 2 variações: se houve retorno vs se não houve retorno.
+
+Extras:
+- Se o histórico for grande, use apenas os eventos fornecidos e o resumo fornecido; não tente reconstruir o que não existe.
+- Quando mencionar norma, use esta forma:
+  "Base normativa: REN 1000 (tema: ...); REN 457 (aplicável se período antigo)."`
+
+const systemPromptBatch = `Você é um Analista Especialista em Ressarcimento do setor elétrico (Brasil), com forte experiência em tratativas com concessionárias e regulação ANEEL.
+
+Base normativa:
+- Use a REN ANEEL 1000 como referência principal.
+- Use a REN ANEEL 457 quando o caso for antigo e o período do histórico indicar que se aplica.
+Importante: não invente artigos, prazos ou trechos. Se faltar informação para afirmar algo, declare "Informação insuficiente" e liste o que falta.
+
+Objetivo:
+Avaliar o andamento do processo com base nos dados fornecidos (etapa/subetapa/histórico/valores) e sugerir próximos passos, de forma prática e operacional.
+
+Restrições e segurança:
+- Não forneça aconselhamento jurídico; forneça orientação operacional e de compliance.
+- Seja direto, claro e orientado a decisão.
+- Não exponha dados sensíveis além do que foi informado.
+- Se houver inconsistência no histórico (datas fora de ordem, falta de protocolo, ausência de retorno etc.), sinalize.
+
+Formato de saída (OBRIGATÓRIO, sempre):
+Para cada processo, gere exatamente dois blocos no resumo:
+
+1) "Análise (visão de negócios)"
+- 4 a 8 bullets curtos.
+- Deve conter: status atual, risco/prioridade, gargalo provável, impacto (prazo/valor), e base normativa aplicável (sem citar artigos específicos se você não tiver certeza).
+
+2) "Próximos passos (operacional)"
+- Checklist numerado (5 a 12 itens).
+- Deve incluir: o que fazer agora, quais evidências/coletas buscar, qual mensagem/solicitação típica enviar, e critérios de pronto para avançar (gate).
+- Se couber, incluir 2 variações: se houve retorno vs se não houve retorno.
+
+Extras:
+- Se o histórico for grande, use apenas os eventos fornecidos e o resumo fornecido; não tente reconstruir o que não existe.
+- Quando mencionar norma, use esta forma:
+  "Base normativa: REN 1000 (tema: ...); REN 457 (aplicável se período antigo)."
+
+Retorne apenas JSON estrito no formato: {"summaries":[{"id":<numero>,"summary":"..."}], "ok":true}. Sem texto extra.`
+
+func openAIModel() string {
+	if v := os.Getenv("OPENAI_MODEL"); v != "" {
+		return v
+	}
+	return "gpt-5-nano"
+}
+
 func NewResumoService(res *repositories.ResumoRepo, proc *repositories.ProcessosRepo) *ResumoService {
 	return &ResumoService{
 		Repo:       res,
@@ -29,7 +105,56 @@ func NewResumoService(res *repositories.ResumoRepo, proc *repositories.Processos
 
 // buildPrompt collects latest history items for a process
 func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (system string, user string) {
-	system = "Você é um assistente que explica de forma clara e objetiva o momento do processo com base no histórico de movimentações. Resuma em 3-6 linhas em pt-BR, aponte etapa atual, últimos eventos relevantes e próximos passos. Seja direto."
+	system = systemPromptSingle
+
+	// Fetch processo info
+	var (
+		uc, cliente, concessionaria, status string
+		descricaoIrregularidade, periodosIrregularidade, linkFatura string
+		razaoSocial, cnpj, endereco string
+		tipoIrregularidade, subtipoIrregularidade string
+		etapaAtual, subEtapaAtual string
+	)
+	_ = s.DBRepo.DB.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(r.uc, ''),
+			COALESCE(r.cliente, ''),
+			COALESCE(r.concessionaria, ''),
+			COALESCE(s.status, ''),
+			COALESCE(r.descricao_irregularidade, ''),
+			COALESCE(r.periodos_irregularidade, ''),
+			COALESCE(r.link_fatura, ''),
+			COALESCE(r.razao_social_fatura, ''),
+			COALESCE(r.cnpj, ''),
+			COALESCE(r.endereco_completo, ''),
+			COALESCE(ti.nome, ''),
+			COALESCE(sti.nome, ''),
+			COALESCE(e.etapa, ''),
+			COALESCE(p.sub_etapa, '')
+		FROM FT_REQUISICOES r
+		LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+		LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
+		LEFT JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo
+		LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo_irregularidade = r.id_tipo_irregularidade
+		LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo_irregularidade = r.id_subtipo_irregularidade
+		WHERE r.id_requisicao = ?
+	`, processoID).Scan(
+		&uc,
+		&cliente,
+		&concessionaria,
+		&status,
+		&descricaoIrregularidade,
+		&periodosIrregularidade,
+		&linkFatura,
+		&razaoSocial,
+		&cnpj,
+		&endereco,
+		&tipoIrregularidade,
+		&subtipoIrregularidade,
+		&etapaAtual,
+		&subEtapaAtual,
+	)
+
 	// Fetch last 20 history rows
 	type item struct {
 		Data   string `json:"data"`
@@ -38,8 +163,16 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 		Coment string `json:"comentario"`
 		Tipo   string `json:"tipo"`
 	}
-	rows, _ := s.DBRepo.DB.QueryContext(ctx, `SELECT DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') as d, COALESCE(h.etapa_nova,''), COALESCE(h.sub_etapa,''), COALESCE(h.comentario,''), COALESCE(h.tipo_movimentacao,'')
-      FROM FT_HISTORICO_MOVIMENTACOES h WHERE h.id_requisicao = ? ORDER BY h.data_movimentacao DESC LIMIT 20`, processoID)
+	rows, _ := s.DBRepo.DB.QueryContext(ctx, `
+		SELECT DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') as d,
+			   COALESCE(h.etapa_nova,''),
+			   COALESCE(h.sub_etapa,''),
+			   COALESCE(h.comentario,''),
+			   COALESCE(h.tipo_movimentacao,'')
+		FROM FT_HISTORICO_MOVIMENTACOES h
+		WHERE h.id_requisicao = ?
+		ORDER BY h.data_movimentacao DESC
+		LIMIT 20`, processoID)
 	defer func() {
 		if rows != nil {
 			rows.Close()
@@ -51,10 +184,32 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 		_ = rows.Scan(&it.Data, &it.Etapa, &it.Sub, &it.Coment, &it.Tipo)
 		arr = append(arr, it)
 	}
+
 	payload := map[string]any{
 		"processo_id": processoID,
+		"identificacao": map[string]any{
+			"uc":            uc,
+			"cliente":       cliente,
+			"concessionaria": concessionaria,
+			"cnpj":          cnpj,
+			"razao_social":  razaoSocial,
+		},
+		"status_atual": map[string]any{
+			"status":        status,
+			"etapa":         etapaAtual,
+			"sub_etapa":     subEtapaAtual,
+		},
+		"irregularidade": map[string]any{
+			"descricao":    descricaoIrregularidade,
+			"periodos":     periodosIrregularidade,
+			"tipo":         tipoIrregularidade,
+			"subtipo":      subtipoIrregularidade,
+		},
+		"link_fatura": linkFatura,
+		"endereco":    endereco,
 		"historico":   arr,
 	}
+
 	b, _ := json.MarshalIndent(payload, "", "  ")
 	user = "Dados do processo (JSON):\n" + string(b)
 	return
@@ -64,10 +219,10 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 func (s *ResumoService) callOpenAI(ctx context.Context, system, user string) (string, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return "", Err("OPENAI_API_KEY não definido")
+		return "", Err("OPENAI_API_KEY nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o definido")
 	}
 	body := map[string]any{
-		"model": "gpt-4o-mini",
+		"model": openAIModel(),
 		"messages": []map[string]string{
 			{"role": "system", "content": system},
 			{"role": "user", "content": user},
@@ -103,7 +258,7 @@ func (s *ResumoService) callOpenAI(ctx context.Context, system, user string) (st
 
 // buildBatchPrompt builds a batch payload for multiple processos
 func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (system string, user string, items map[int64]any) {
-	system = "Você é um assistente que explica de forma clara e objetiva o momento do processo com base no histórico de movimentações. Para cada processo, responda em 3-6 linhas pt-BR com etapa atual, últimos eventos relevantes e próximos passos. Retorne apenas JSON estrito no formato: {\"summaries\":[{\"id\":<numero>,\"summary\":\"...\"}], \"ok\":true}. Sem texto extra."
+	system = systemPromptBatch
 	type hist struct {
 		Data   string `json:"data"`
 		Etapa  string `json:"etapa"`
@@ -113,6 +268,52 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 	}
 	items = make(map[int64]any, len(ids))
 	for _, pid := range ids {
+		var (
+			uc, cliente, concessionaria, status string
+			descricaoIrregularidade, periodosIrregularidade, linkFatura string
+			razaoSocial, cnpj, endereco string
+			tipoIrregularidade, subtipoIrregularidade string
+			etapaAtual, subEtapaAtual string
+		)
+		_ = s.DBRepo.DB.QueryRowContext(ctx, `
+			SELECT
+				COALESCE(r.uc, ''),
+				COALESCE(r.cliente, ''),
+				COALESCE(r.concessionaria, ''),
+				COALESCE(s.status, ''),
+				COALESCE(r.descricao_irregularidade, ''),
+				COALESCE(r.periodos_irregularidade, ''),
+				COALESCE(r.link_fatura, ''),
+				COALESCE(r.razao_social_fatura, ''),
+				COALESCE(r.cnpj, ''),
+				COALESCE(r.endereco_completo, ''),
+				COALESCE(ti.nome, ''),
+				COALESCE(sti.nome, ''),
+				COALESCE(e.etapa, ''),
+				COALESCE(p.sub_etapa, '')
+			FROM FT_REQUISICOES r
+			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+			LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
+			LEFT JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo
+			LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo_irregularidade = r.id_tipo_irregularidade
+			LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo_irregularidade = r.id_subtipo_irregularidade
+			WHERE r.id_requisicao = ?
+		`, pid).Scan(
+			&uc,
+			&cliente,
+			&concessionaria,
+			&status,
+			&descricaoIrregularidade,
+			&periodosIrregularidade,
+			&linkFatura,
+			&razaoSocial,
+			&cnpj,
+			&endereco,
+			&tipoIrregularidade,
+			&subtipoIrregularidade,
+			&etapaAtual,
+			&subEtapaAtual,
+		)
 		rows, _ := s.DBRepo.DB.QueryContext(ctx, `SELECT DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') as d, COALESCE(h.etapa_nova,''), COALESCE(h.sub_etapa,''), COALESCE(h.comentario,''), COALESCE(h.tipo_movimentacao,'')
           FROM FT_HISTORICO_MOVIMENTACOES h WHERE h.id_requisicao = ? ORDER BY h.data_movimentacao DESC LIMIT 20`, pid)
 		arr := make([]hist, 0, 20)
@@ -124,7 +325,30 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 		if rows != nil {
 			rows.Close()
 		}
-		items[pid] = map[string]any{"id": pid, "historico": arr}
+		items[pid] = map[string]any{
+			"id": pid,
+			"identificacao": map[string]any{
+				"uc":            uc,
+				"cliente":       cliente,
+				"concessionaria": concessionaria,
+				"cnpj":          cnpj,
+				"razao_social":  razaoSocial,
+			},
+			"status_atual": map[string]any{
+				"status":    status,
+				"etapa":     etapaAtual,
+				"sub_etapa": subEtapaAtual,
+			},
+			"irregularidade": map[string]any{
+				"descricao": descricaoIrregularidade,
+				"periodos":  periodosIrregularidade,
+				"tipo":      tipoIrregularidade,
+				"subtipo":   subtipoIrregularidade,
+			},
+			"link_fatura": linkFatura,
+			"endereco":    endereco,
+			"historico":   arr,
+		}
 	}
 	// user message
 	msg := struct {
@@ -137,15 +361,14 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 	user = "Dados dos processos (JSON):\n" + string(b)
 	return
 }
-
 // callOpenAIJSON asks the model to return a JSON object
 func (s *ResumoService) callOpenAIJSON(ctx context.Context, system, user string) (map[string]any, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return nil, Err("OPENAI_API_KEY não definido")
+		return nil, Err("OPENAI_API_KEY nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o definido")
 	}
 	body := map[string]any{
-		"model": "gpt-4o-mini",
+		"model": openAIModel(),
 		"messages": []map[string]string{
 			{"role": "system", "content": system},
 			{"role": "user", "content": user},
@@ -184,6 +407,23 @@ func (s *ResumoService) callOpenAIJSON(ctx context.Context, system, user string)
 	return obj, nil
 }
 
+
+// GerarResumoAgora gera o resumo de um processo de forma síncrona.
+func (s *ResumoService) GerarResumoAgora(ctx context.Context, processoID int64) (string, error) {
+	system, user := s.buildPrompt(ctx, processoID)
+	text, err := s.callOpenAI(ctx, system, user)
+	if err != nil {
+		_ = s.Repo.SaveError(ctx, processoID, err.Error())
+		return "", err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		_ = s.Repo.SaveError(ctx, processoID, "summary vazio")
+		return "", Err("summary vazio")
+	}
+	_ = s.Repo.SaveReady(ctx, processoID, text, "openai", openAIModel())
+	return text, nil
+}
 // ProcessarResumos busca pendentes e gera texto
 func (s *ResumoService) ProcessarResumos(ctx context.Context, limit int) error {
 	if err := s.Repo.EnsureTable(ctx); err != nil {
@@ -194,7 +434,7 @@ func (s *ResumoService) ProcessarResumos(ctx context.Context, limit int) error {
 		return err
 	}
 	if len(ids) == 0 {
-		// silencioso quando não há pendentes
+		// silencioso quando nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o hÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ pendentes
 		resumoStats.updateCycleStart(0, 0, limit)
 		return nil
 	}
@@ -264,7 +504,7 @@ func (s *ResumoService) ProcessarResumos(ctx context.Context, limit int) error {
 			seen[pid] = true
 			okIDs = append(okIDs, pid)
 		}
-		// os que não vieram na resposta, marcam erro
+		// os que nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o vieram na resposta, marcam erro
 		for _, id := range batch {
 			if !seen[id] {
 				_ = s.Repo.SaveError(ctx, id, "sem retorno no batch")
@@ -370,3 +610,12 @@ func GetResumoRuntimeStatus() ResumoRuntimeStatus {
 	}
 	return cp
 }
+
+
+
+
+
+
+
+
+

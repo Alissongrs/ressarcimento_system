@@ -126,7 +126,7 @@ const ModalGerenciarTags = ({ processo, allTags, onClose, onSave, onTagCreated }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex justify-center items-center z-50">
-      <div className="bg-[var(--panel-processos)] border panel-border text-[var(--fg)] p-6 rounded-lg shadow-xl w-full max-w-md">
+      <div className="bg-[var(--panel-processos)] sap-card text-[var(--fg)] p-6 w-full max-w-md">
         <h2 className="text-2xl font-bold mb-4">Gerenciar Tags - Processo #{processo.id}</h2>
 
         <div className="border-b panel-border pb-4 mb-4">
@@ -137,7 +137,7 @@ const ModalGerenciarTags = ({ processo, allTags, onClose, onSave, onTagCreated }
               value={newTagName}
               onChange={(e) => setNewTagName(e.target.value)}
               placeholder="Nome da tag"
-              className="flex-grow p-2 border panel-border panel-bg-60 rounded"
+              className="flex-grow input-themed"
             />
             <input
               type="color"
@@ -148,7 +148,7 @@ const ModalGerenciarTags = ({ processo, allTags, onClose, onSave, onTagCreated }
             />
             <button
               onClick={handleCreateTag}
-              className="px-4 py-2 bg-success text-[var(--fg)] font-bold rounded hover:opacity-90"
+              className="btn-themed"
             >
               Criar
             </button>
@@ -177,13 +177,13 @@ const ModalGerenciarTags = ({ processo, allTags, onClose, onSave, onTagCreated }
         <div className="flex justify-end space-x-4 mt-6">
           <button
             onClick={onClose}
-            className="px-4 py-2 panel-bg-60 rounded border panel-border hover:opacity-90"
+            className="btn-outline"
           >
             Cancelar
           </button>
           <button
             onClick={handleSave}
-            className="px-4 py-2 bg-[var(--accent)] text-[var(--fg)] font-bold rounded hover:opacity-90"
+            className="btn-themed"
           >
             Salvar Tags
           </button>
@@ -221,16 +221,16 @@ const ModalDeferimento = ({ processo, onClose, onSave }) => {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
-      <div className="bg-[var(--panel-processos)] border panel-border text-[var(--fg)] p-6 rounded-lg shadow-xl w/full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-[var(--panel-processos)] sap-card text-[var(--fg)] p-6 w/full max-w-2xl max-h-[90vh] overflow-y-auto">
         <h2 className="text-2xl font-bold mb-4">Mover Processo #{processo.id} para Deferidos</h2>
 
         <div className="mb-6">
-          <label className="block font-semibold mb-1">Comentário da movimentação (Obrigatório)</label>
+          <label className="sap-label mb-2">Comentário da movimentação (Obrigatório)</label>
           <textarea
             value={comentario}
             onChange={(e) => setComentario(e.target.value)}
             rows="4"
-            className="w-full p-2 border panel-border panel-bg-60 rounded"
+            className="w-full input-themed"
             placeholder="Ex.: Procedência confirmada pela concessionária..."
           />
         </div>
@@ -239,33 +239,33 @@ const ModalDeferimento = ({ processo, onClose, onSave }) => {
           <h3 className="text-xl font-semibold mb-4 text-[var(--accent)]">Detalhes do Deferimento</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block font-semibold text-sm">Data da Procedência</label>
+              <label className="sap-label mb-2">Data da Procedência</label>
               <input
                 type="date"
                 name="data_procedencia"
                 value={dadosDeferimento.data_procedencia}
                 onChange={handleChange}
-                className="w-full p-2 border panel-border panel-bg-60 rounded mt-1"
+                className="w-full input-themed"
               />
             </div>
             <div>
-              <label className="block font-semibold text-sm">Crédito Simples (R$)</label>
+              <label className="sap-label mb-2">Crédito Simples (R$)</label>
               <input
                 type="number"
                 name="credito_simples"
                 value={dadosDeferimento.credito_simples}
                 onChange={handleChange}
-                className="w-full p-2 border panel-border panel-bg-60 rounded mt-1"
+                className="w-full input-themed"
               />
             </div>
             <div>
-              <label className="block font-semibold text-sm">Crédito em Dobro (R$)</label>
+              <label className="sap-label mb-2">Crédito em Dobro (R$)</label>
               <input
                 type="number"
                 name="credito_dobro"
                 value={dadosDeferimento.credito_dobro}
                 onChange={handleChange}
-                className="w-full p-2 border panel-border panel-bg-60 rounded mt-1 disabled:opacity-50"
+                className="w-full input-themed disabled:opacity-50"
                 disabled={!aplicarDobro}
               />
             </div>
@@ -287,13 +287,13 @@ const ModalDeferimento = ({ processo, onClose, onSave }) => {
         <div className="flex justify-end space-x-4 mt-6">
           <button
             onClick={onClose}
-            className="px-4 py-2 panel-bg-60 rounded border panel-border hover:opacity-90"
+            className="btn-outline"
           >
             Cancelar
           </button>
           <button
             onClick={handleSave}
-            className="px-4 py-2 bg-[var(--accent)] text-[var(--fg)] font-bold rounded hover:opacity-90"
+            className="btn-themed"
           >
             Salvar e Mover
           </button>
@@ -1078,6 +1078,7 @@ const ControleProcessos = () => {
         fd.append('etapa_atual', novaEtapa);
         const subEtapaAtual = extrair(processoMovido.sub_etapa);
         if (subEtapaAtual) fd.append('sub_etapa', subEtapaAtual);
+        fd.append('comentario', 'Movimentado via kanban');
         await movimentarProcesso(processoMovido.id, fd);
       }
       carregarDados();
@@ -1503,7 +1504,7 @@ Deixe em branco para não registrar.`
                     const fd = new FormData();
                     fd.append('etapa_atual', etapaFinal);
                     if (destinoSub) fd.append('sub_etapa', destinoSub);
-                    if (moveComment) fd.append('comentario', moveComment);
+                    fd.append('comentario', moveComment || 'Movimentado via controle de processos');
                     if (moveChannels && moveChannels.trim() !== '') {
                       const canais = moveChannels
                         .split(',')

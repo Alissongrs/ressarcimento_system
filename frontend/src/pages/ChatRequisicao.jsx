@@ -115,10 +115,10 @@ export default function ChatRequisicao() {
     const parts = String(s || '').split(',').map((t) => t.trim()).filter(Boolean);
     for (const part of parts) {
       const pLow = part.toLowerCase();
-      // suporta intervalos: "mm-yyyy a mm-yyyy" | "mm/yyyy at� mm/yyyy" | "mm/yyyy ate mm/yyyy"
-      let token = pLow.replace('at�', 'a').replace('ate', 'a');
+      // suporta intervalos: "mm-yyyy a mm-yyyy" | "mm/yyyy até mm/yyyy" | "mm/yyyy ate mm/yyyy"
+      let token = pLow.replace('até', 'a').replace('ate', 'a');
       if (token.includes(' a ')) {
-        const [iniRaw, fimRaw] = part.replace(/at�|ate/gi, 'a').split(/\sa\s/);
+        const [iniRaw, fimRaw] = part.replace(/até|ate/gi, 'a').split(/\sa\s/);
         const ini = parseOneMonth(iniRaw);
         const fim = parseOneMonth(fimRaw);
         const rng = expandMonths(ini, fim);
@@ -184,19 +184,19 @@ export default function ChatRequisicao() {
           enderecoCompleto: (dados?.endereco_completo?.String ?? dados?.endereco_completo) || '',
           linkFatura: (dados?.link_fatura?.String ?? dados?.link_fatura) || '',
         }));
-        push(BOT, 'Perfeito! Para quais meses devemos olhar? Voc� pode enviar algo como "07/2024, 08/2024" ou um intervalo "07/2024 a 09/2024".');
+        push(BOT, 'Perfeito! Para quais meses devemos olhar? você pode enviar algo como "07/2024, 08/2024" ou um intervalo "07/2024 a 09/2024".');
         setStep(1);
         return;
       }
 
       if (step === 1) {
         const meses = parseMeses(text);
-        if (meses.length === 0) { push(BOT, 'Envie meses v�lidos (separe por v�rgula) ou um intervalo. Ex.: 07/2024, 08/2024 ou 07/2024 a 09/2024'); setBusy(false); return; }
+        if (meses.length === 0) { push(BOT, 'Envie meses válidos (separe por vírgula) ou um intervalo. Ex.: 07/2024, 08/2024 ou 07/2024 a 09/2024'); setBusy(false); return; }
         setPeriodos(meses);
         try {
-          // 1) Tenta via alias p�blico /faturas-uc (usa unidade + meses)
+          // 1) Tenta via alias público /faturas-uc (usa unidade + meses)
           const dados = await buscarFaturasPorUnidadeMeses(form.uc, mesesRefs(meses));
-          // Normaliza poss�veis formatos de resposta do backend
+          // Normaliza possíveis formatos de resposta do backend
           let det = [];
           if (Array.isArray(dados?.faturas)) {
             det = dados.faturas.map((f) => ({
@@ -210,7 +210,7 @@ export default function ChatRequisicao() {
           } else if (Array.isArray(dados?.links_faturas)) {
             det = dados.links_faturas.map((l) => ({ link: l, mes_ref: '' }));
           } else if (dados && typeof dados === 'object' && (dados.link || dados.mes_ref)) {
-            // Caso singular (quando apenas um m�s foi pedido)
+            // Caso singular (quando apenas um mês foi pedido)
             det = [{ link: dados.link ?? '', mes_ref: dados.mes_ref ?? '' }];
           }
 

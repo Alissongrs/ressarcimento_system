@@ -1,4 +1,4 @@
-﻿// src/components/DetalhesProcessoModal.jsx - VERSÀO COM CARREGAMENTO DINMICO
+﻿// src/components/DetalhesProcessoModal.jsx - VERSÀO COM CARREGAMENTO DINÂMICO
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     getHistoricoById,
@@ -141,7 +141,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
                 <div className="flex gap-2">
                     <button
                         onClick={adicionarItem}
-                        className="flex items-center gap-1 px-3 py-1 bg-success hover:opacity-90 text-[var(--fg)] rounded text-xs transition-colors"
+                        className="btn-outline text-xs inline-flex items-center gap-1"
                         title="Adicionar nova devolução"
                     >
                         <PlusCircle size={14} />
@@ -150,7 +150,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
                     <button
                         onClick={salvarDados}
                         disabled={loading}
-                        className="px-3 py-1 bg-[var(--accent)] hover:opacity-90 disabled:bg-gray-600 text-[var(--fg)] rounded text-xs transition-colors"
+                        className="btn-themed text-xs"
                     >
                         {loading ? 'Salvando...' : 'Salvar'}
                     </button>
@@ -159,7 +159,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
 
             <div className="space-y-4">
                 {itens.map((item, index) => (
-                    <div key={index} className="border border-[var(--border)] rounded-lg p-4 bg-[var(--card)]/50">
+                    <div key={index} className="sap-card p-4">
                         <div className="flex justify-between items-center mb-3">
                             <span className="text-xs font-semibold text-gray-400">
                                 Devolução #{index + 1}
@@ -176,7 +176,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
                         </div>
 
                         <div className="mb-4">
-                            <label className="block text-xs font-semibold text-gray-400 mb-2">
+                            <label className="sap-label mb-2">
                                 Forma de Devolução
                             </label>
                             <div className="flex gap-4">
@@ -198,7 +198,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                             <div>
-                                <label className="block text-xs font-semibold text-gray-400 mb-1">
+                                <label className="sap-label mb-2">
                                     Valor (R$)
                                 </label>
                                 <input
@@ -206,30 +206,30 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
                                     step="0.01"
                                     value={item.valor}
                                     onChange={(e) => handleItemChange(index, 'valor', e.target.value)}
-                                    className="w-full p-2 border border-[var(--border)] bg-[var(--card)] text-[var(--fg)] rounded focus:border-blue-500 focus:outline-none"
+                                    className="w-full input-themed"
                                     placeholder="0,00"
                                 />
                             </div>
                             <div>
-                                <label className="block text-xs font-semibold text-gray-400 mb-1">
+                                <label className="sap-label mb-2">
                                     Data da Devolução
                                 </label>
                                 <input
                                     type="date"
                                     value={item.data_devolucao}
                                     onChange={(e) => handleItemChange(index, 'data_devolucao', e.target.value)}
-                                    className="w-full p-2 border border-[var(--border)] bg-[var(--card)] text-[var(--fg)] rounded focus:border-blue-500 focus:outline-none"
+                                    className="w-full input-themed"
                                 />
                             </div>
                             <div>
-                                <label className="block text-xs font-semibold text-gray-400 mb-1">
+                                <label className="sap-label mb-2">
                                     Data de Envio ao Financeiro/Gestão
                                 </label>
                                 <input
                                     type="date"
                                     value={item.data_envio_financeiro}
                                     onChange={(e) => handleItemChange(index, 'data_envio_financeiro', e.target.value)}
-                                    className="w-full p-2 border border-[var(--border)] bg-[var(--card)] text-[var(--fg)] rounded focus:border-blue-500 focus:outline-none"
+                                    className="w-full input-themed"
                                 />
                             </div>
                         </div>
@@ -306,7 +306,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
         });
     };
 
-    // ===== FUNÇÕES DE CARREGAMENTO DINMICO =====
+    // ===== FUNÇÕES DE CARREGAMENTO DINÂMICO =====
 
     const carregarEtapas = useCallback(async () => {
         setLoadingEtapas(true);
@@ -676,10 +676,10 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 glass-card flex items-center justify-center z-50 p-4">
-            <div className="glass-card rounded-lg w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-50 p-4">
+            <div className="sap-card w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
                 {/* Header */}
-                <div className="flex items-center justify-between p-6 border-b border-gray-700">
+                <div className="flex items-center justify-between p-6 border-b panel-border">
                     <div className="flex items-center gap-4">
                         <h2 className="text-xl font-bold text-[var(--fg)]">
                             Detalhes do Processo #{extrairTextoSeguro(processo?.numero_processo)}
@@ -695,7 +695,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                     </div>
                     <button
                         onClick={onClose}
-                        className="text-gray-400 hover:text-[var(--fg)] transition-colors"
+                        className="btn-outline p-2"
                     >
                         <X size={24} />
                     </button>
@@ -725,7 +725,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                             {/* INãormações Básicas */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                    <label className="sap-label mb-2">
                                         <Tag className="inline w-4 h-4 mr-2" />
                                         Etapa Atual
                                         {loadingEtapas && (
@@ -735,7 +735,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                     <select
                                         value={etapa}
                                         onChange={(e) => handleEtapaChange(e.target.value)}
-                                        className="w-full p-3 border border-[var(--border)] bg-[var(--card)] text-[var(--fg)] rounded-lg focus:border-blue-500 focus:outline-none"
+                                        className="w-full input-themed"
 
                                         disabled={loadingEtapas}
                                     >
@@ -775,7 +775,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                    <label className="sap-label mb-2">
                                         <User className="inline w-4 h-4 mr-2" />
                                         Sub-etapa
                                         {loadingSubEtapas && (
@@ -785,7 +785,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                     <select
                                         value={subEtapa}
                                         onChange={(e) => setSubEtapa(e.target.value)}
-                                        className="w-full p-3 border border-[var(--border)] bg-[var(--card)] text-[var(--fg)] rounded-lg focus:border-blue-500 focus:outline-none"
+                                        className="w-full input-themed"
                                         disabled={!etapa || loadingSubEtapas}
                                     >
                                         <option value="">
@@ -815,7 +815,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                             {/* Data de Alerta e Relevncia */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                    <label className="sap-label mb-2">
                                         <Calendar className="inline w-4 h-4 mr-2" />
                                         Data de Alerta
                                     </label>
@@ -823,7 +823,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                         type="date"
                                         value={dataAlerta}
                                         onChange={(e) => setDataAlerta(e.target.value)}
-                                        className="w-full p-3 border border-[var(--border)] bg-[var(--card)] text-[var(--fg)] rounded-lg focus:border-blue-500 focus:outline-none"
+                                        className="w-full input-themed"
                                     />
                                 </div>
 
@@ -903,7 +903,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
 
                             {/* comentário */}
                             <div>
-                                <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                <label className="sap-label mb-2">
                                     <MessageSquare className="inline w-4 h-4 mr-2" />
                                     Comentário da movimentação
                                 </label>
@@ -911,7 +911,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                     value={comentario}
                                     onChange={(e) => setComentario(e.target.value)}
                                     rows={4}
-                                    className="w-full p-3 border border-[var(--border)] bg-[var(--card)] text-[var(--fg)] rounded-lg focus:border-blue-500 focus:outline-none resize-none"
+                                    className="w-full input-themed resize-none"
                                     placeholder="Descreva as ações realizadas ou observações importantes..."
 
                                 />
@@ -942,7 +942,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
 
                             {/* Anexos */}
                             <div>
-                                <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                <label className="sap-label mb-2">
                                     <Paperclip className="inline w-4 h-4 mr-2" />
                                     Anexos
                                 </label>
@@ -1047,7 +1047,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
 
                     {/* Right Panel - Histórico */}
                     <div className="w-1/3 bg-[var(--card)] border-l border-gray-700 flex flex-col">
-                        <div className="p-4 border-b border-gray-700">
+                        <div className="p-4 border-b panel-border">
                             <h3 className="font-semibold text-[var(--fg)] flex items-center gap-2">
                                 <Clock size={16} />
                                 Histórico de movimentações
@@ -1123,14 +1123,14 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                             Tem certeza que deseja descartar este processo? Esta ação no pode serádesfeita.
                         </p>
                         <div className="mb-4">
-                            <label className="block text-sm font-semibold text-gray-300 mb-2">
+                            <label className="sap-label mb-2">
                                 Motivo do descarte (obrigatório):
                             </label>
                             <textarea
                                 value={comentarioDescarte}
                                 onChange={(e) => setComentarioDescarte(e.target.value)}
                                 rows={3}
-                                className="w-full p-3 border border-[var(--border)] bg-[var(--card)] text-[var(--fg)] rounded-lg focus:border-blue-500 focus:outline-none resize-none"
+                                className="w-full input-themed resize-none"
                                 placeholder="Descreva o motivo do descarte..."
 
                             />
@@ -1192,4 +1192,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
 };
 
 export default DetalhesProcessoModal;
+
+
+
 

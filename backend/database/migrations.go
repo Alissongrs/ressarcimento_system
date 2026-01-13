@@ -122,6 +122,41 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	// 6b) Tabela de feedbacks de resumo IA (se não existir)
+	var hasAIResumo int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME='ai_resumo_feedback'`,
+	).Scan(&hasAIResumo)
+
+	if hasAIResumo == 0 {
+		log.Println("[migrate] Criando tabela ai_resumo_feedback ...")
+		if _, err := db.Exec(`
+			CREATE TABLE ai_resumo_feedback (
+			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			  processo_id BIGINT UNSIGNED NOT NULL,
+			  model VARCHAR(100) NOT NULL,
+			  prompt_version VARCHAR(50) NOT NULL,
+			  input_hash CHAR(64) NOT NULL,
+			  input_payload JSON NOT NULL,
+			  output_text LONGTEXT NOT NULL,
+			  label ENUM('aceitar','parcial','nada_a_ver') NOT NULL,
+			  comentario TEXT NULL,
+			  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			  created_by BIGINT UNSIGNED NULL,
+			  PRIMARY KEY (id),
+			  KEY idx_processo (processo_id),
+			  KEY idx_label (label),
+			  KEY idx_created_at (created_at),
+			  UNIQUE KEY uq_input_hash (input_hash)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
+		); err != nil {
+			return fmt.Errorf("criando ai_resumo_feedback: %w", err)
+		}
+	}
+
 	// 7) Tabela de prazos por coluna do Kanban (admin configura)
 	var hasPrazosKanban int
 	_ = db.QueryRow(`

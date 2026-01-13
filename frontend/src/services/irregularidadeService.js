@@ -1,5 +1,5 @@
 // src/services/irregularidadeService.js
-import api from "./apiClient"; // <- o mesmo cliente axios que vocÀª já usa nos outros services
+import api from "./apiClient"; // <- o mesmo cliente axios que vocÃª jÃ¡ usa nos outros services
 
 // Busca todos os tipos de irregularidade
 export async function getTiposIrregularidade() {

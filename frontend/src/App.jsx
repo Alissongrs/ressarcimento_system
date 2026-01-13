@@ -66,6 +66,7 @@ import Historico from './pages/HistoricoFixed.jsx';
 import AdminFeedbacks from './pages/AdminFeedbacks.jsx';
 import AdminPrazos from './pages/AdminPrazos.jsx';
 import AdminEditor from './pages/AdminEditor.jsx';
+import AdminPlanilha from './pages/AdminPlanilha.jsx';
 import Backlog from './pages/Backlog.jsx';
 
 // Alerts SSE
@@ -222,24 +223,26 @@ function App() {
       <div className="relative flex flex-col h-full">
         <div className="mb-6 px-2 flex flex-col items-center">
           <div className="text-lg font-extrabold sidebar-brand">SURE</div>
+        </div>
 
+        {/* ORDEM: Início, Nova Requisição, Requisições, Processos, Backlog, resto */}
+        <nav className="space-y-1 flex-1 overflow-auto">
+          {/* 0) Início */}
           <NavLink
             to="/"
             className={({ isActive }) =>
-              'sidebar-item transition-colors w-full flex items-center gap-2 px-3 py-2 rounded-md justify-center ' +
-              (isActive
-                ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                : 'hover:bg-[var(--menu-hover)]')
+              `w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                isActive
+                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                  : 'hover:bg-[var(--menu-hover)]'
+              }`
             }
             title="Início"
           >
             <Home className="sidebar-icon" strokeWidth={1.8} />
             <span className="text-sm font-medium sidebar-label">Início</span>
           </NavLink>
-        </div>
 
-        {/* ORDEM: Nova Requisição, Requisições, Processos, Backlog, resto */}
-        <nav className="space-y-1 flex-1 overflow-auto">
           {/* 1) Nova Requisição */}
           <NavLink
             to="/novo"
@@ -272,9 +275,9 @@ function App() {
             <span className="text-sm font-medium sidebar-label">Requisições</span>
           </NavLink>
 
-          {/* 3) Processos */}
+          {/* 3) Gerenciar Processos */}
           <NavLink
-            to="/processos"
+            to="/admin/planilha"
             className={({ isActive }) =>
               `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
                 isActive
@@ -282,13 +285,12 @@ function App() {
                   : 'hover:bg-[var(--menu-hover)]'
               }`
             }
-            title="Processos"
+            title="Gerenciar Processos"
           >
-            <Workflow className="w-5 h-5" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Processos</span>
+            <FileText className="w-5 h-5" strokeWidth={1.25} />
+            <span className="text-sm font-medium sidebar-label">Gerenciar Processos</span>
           </NavLink>
-
-          {/* 4) Backlog */}
+{/* 4) Backlog */}
           <NavLink
             to="/backlog"
             className={({ isActive }) =>
@@ -460,9 +462,7 @@ function App() {
               >
                 <AlarmClock className="sidebar-icon" strokeWidth={1.6} />
                 <span className="text-sm font-medium sidebar-label">Prazos & Alarmes</span>
-              </NavLink>
-
-              <NavLink
+              </NavLink><NavLink
                 to="/admin/editor"
                 className={({ isActive }) =>
                   `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
@@ -506,18 +506,25 @@ function App() {
       <div className="relative flex flex-col h-full">
         <div className="mb-6 px-2 flex flex-col items-center">
           <h1 className="text-base font-semibold sidebar-brand">SURE</h1>
+        </div>
 
+        {/* ORDEM: Início, Nova Requisição, Requisições, Processos, Backlog, resto */}
+        <nav className="space-y-1 flex-1 overflow-auto">
           <NavLink
             to="/"
-            className="w-full flex items-center justify-center px-3 py-2 rounded-md transition-colors hover:bg-[var(--menu-hover)]"
+            className={({ isActive }) =>
+              `w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+                isActive
+                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                  : 'hover:bg-[var(--menu-hover)]'
+              }`
+            }
             title="Início"
           >
             <Home className="w-8 h-8 shrink-0" strokeWidth={1.8} />
+            <span className="text-sm font-medium sidebar-label">Início</span>
           </NavLink>
-        </div>
 
-        {/* ORDEM: Nova Requisição, Requisições, Processos, Backlog, resto */}
-        <nav className="space-y-1 flex-1 overflow-auto">
           <NavLink
             to="/novo"
             className={({ isActive }) =>
@@ -549,7 +556,7 @@ function App() {
           </NavLink>
 
           <NavLink
-            to="/processos"
+            to="/admin/planilha"
             className={({ isActive }) =>
               `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
                 isActive
@@ -557,10 +564,10 @@ function App() {
                   : 'hover:bg-[var(--menu-hover)]'
               }`
             }
-            title="Processos"
+            title="Gerenciar Processos"
           >
-            <Workflow className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Processos</span>
+            <FileText className="w-8 h-8 shrink-0" strokeWidth={1.25} />
+            <span className="text-sm font-medium sidebar-label">Gerenciar Processos</span>
           </NavLink>
 
           <NavLink
@@ -746,6 +753,7 @@ function App() {
                             <Route path="/admin/feedbacks" element={<AdminFeedbacks />} />
                             <Route path="/admin/prazos" element={<AdminPrazos />} />
                             <Route path="/admin/editor" element={<AdminEditor />} />
+                            <Route path="/admin/planilha" element={<AdminPlanilha />} />
                           </>
                         )}
                       </>
@@ -876,3 +884,8 @@ function RouteKeeper({ user }) {
 
   return null;
 }
+
+
+
+
+

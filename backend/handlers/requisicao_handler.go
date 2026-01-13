@@ -20,8 +20,8 @@ import (
 )
 
 /* ============================================================
-   CREATE – compatibilidade
-   ============================================================ */
+CREATE – compatibilidade
+============================================================ */
 
 // CreateRequisicao: mantida para compatibilidade com rotas legadas.
 // Hoje delega para CreateRequisicaoSimple (não persiste em banco).
@@ -54,9 +54,22 @@ func createRequisicaoPersistente(c *gin.Context) {
 	cliente := strings.TrimSpace(get("cliente"))
 	uc := strings.TrimSpace(get("uc"))
 	concessionaria := strings.TrimSpace(get("concessionaria"))
-	ressarc := strings.TrimSpace(get("ressarcimento_estimado"))
-	if ressarc == "" {
-		ressarc = strings.TrimSpace(get("valor_estimado"))
+	enderecoCompleto := strings.TrimSpace(get("enderecoCompleto"))
+	descricaoIrregularidade := strings.TrimSpace(get("descricaoIrregularidade"))
+	periodosIrregularidade := strings.TrimSpace(get("periodosIrregularidade"))
+	linkFatura := strings.TrimSpace(get("linkFatura"))
+	var ressarc string
+	keysRessarc := []string{
+		"ressarcimento_estimado",
+		"valor_estimado",
+		"ressarcimentoEstimado",
+		"RessarcimentoEstimado",
+	}
+	for _, k := range keysRessarc {
+		ressarc = strings.TrimSpace(get(k))
+		if ressarc != "" {
+			break
+		}
 	}
 	var ressarcNum sql.NullFloat64
 	if ressarc != "" {
@@ -74,8 +87,30 @@ func createRequisicaoPersistente(c *gin.Context) {
 	}
 	defer tx.Rollback()
 
-	res, err := tx.Exec(`INSERT INTO FT_REQUISICOES (cliente, uc, concessionaria, ressarcimento_estimado, data_criacao, data_mudanca_status) VALUES (?, ?, ?, ?, NOW(), NOW())`,
-		valOrNullStr(cliente), valOrNullStr(uc), valOrNullStr(concessionaria), nullFloatOrNil(ressarcNum))
+	log.Printf("[CreateRequisicaoPersist] recebidos: uc=%q cliente=%q endereco=%q descricao=%q periodos=%q link=%q",
+		uc, cliente, enderecoCompleto, descricaoIrregularidade, periodosIrregularidade, linkFatura)
+
+	res, err := tx.Exec(`
+			INSERT INTO FT_REQUISICOES (
+				cliente,
+				uc,
+				concessionaria,
+				ressarcimento_estimado,
+				endereco_completo,
+				descricao_irregularidade,
+				periodos_irregularidade,
+				link_fatura,
+				data_criacao,
+				data_mudanca_status
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+		valOrNullStr(cliente),
+		valOrNullStr(uc),
+		valOrNullStr(concessionaria),
+		nullFloatOrNil(ressarcNum),
+		valOrNullStr(enderecoCompleto),
+		valOrNullStr(descricaoIrregularidade),
+		valOrNullStr(periodosIrregularidade),
+		valOrNullStr(linkFatura))
 	if err != nil {
 		log.Printf("Erro ao inserir requisicao: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar requisição"})
@@ -126,8 +161,8 @@ func CreateRequisicaoPersist(c *gin.Context) {
 }
 
 /* ============================================================
-   HISTÓRICO
-   ============================================================ */
+HISTÓRICO
+============================================================ */
 
 // GET /api/requisicoes/:id/historico
 func GetHistoricoByRequisicaoID(c *gin.Context) {
@@ -153,40 +188,40 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 
 	// --- Tenta "schema novo" (com sub_etapa_anterior/nova e tipo_movimentacao)
 	queryNew := `
-        SELECT
-            h.id_historico,
-            IFNULL(u.nome_usuario, 'Sistema') AS nome_usuario,
-            IFNULL(
-                CASE
-                    WHEN COALESCE(h.sub_etapa_anterior,'') <> '' THEN CONCAT(IFNULL(h.etapa_anterior,''), ' - ', h.sub_etapa_anterior)
-                    ELSE IFNULL(h.etapa_anterior,'')
-                END, ''
-            ) AS status_anterior,
-            IFNULL(
-                CASE
-                    WHEN COALESCE(h.sub_etapa_nova,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa_nova)
-                    ELSE IFNULL(h.etapa_nova,'')
-                END, ''
-            ) AS status_novo,
-            IFNULL(
-                CASE
-                    WHEN COALESCE(h.sub_etapa_nova,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa_nova)
-                    ELSE IFNULL(h.etapa_nova,'')
-                END, ''
-            ) AS status_composto,
-            IFNULL(h.etapa_anterior, '') AS etapa_anterior,
-            IFNULL(h.etapa_nova, '')     AS etapa_nova,
-            IFNULL(h.sub_etapa_anterior, '') AS sub_etapa_anterior,
-            IFNULL(h.sub_etapa_nova, '') AS sub_etapa_nova,
-            IFNULL(CAST(h.relevancia_anterior AS CHAR), '') AS relevancia_anterior,
-            IFNULL(CAST(h.relevancia_nova AS CHAR), '')     AS relevancia_nova,
-            IFNULL(h.comentario, '') AS comentario,
-            DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao,
-            IFNULL(h.tipo_movimentacao,'') AS tipo_movimentacao
-        FROM FT_HISTORICO_MOVIMENTACOES h
-        LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
-        WHERE h.id_requisicao = ?
-        ORDER BY h.data_movimentacao DESC`
+			SELECT
+				h.id_historico,
+				IFNULL(u.nome_usuario, 'Sistema') AS nome_usuario,
+				IFNULL(
+					CASE
+						WHEN COALESCE(h.sub_etapa_anterior,'') <> '' THEN CONCAT(IFNULL(h.etapa_anterior,''), ' - ', h.sub_etapa_anterior)
+						ELSE IFNULL(h.etapa_anterior,'')
+					END, ''
+				) AS status_anterior,
+				IFNULL(
+					CASE
+						WHEN COALESCE(h.sub_etapa_nova,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa_nova)
+						ELSE IFNULL(h.etapa_nova,'')
+					END, ''
+				) AS status_novo,
+				IFNULL(
+					CASE
+						WHEN COALESCE(h.sub_etapa_nova,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa_nova)
+						ELSE IFNULL(h.etapa_nova,'')
+					END, ''
+				) AS status_composto,
+				IFNULL(h.etapa_anterior, '') AS etapa_anterior,
+				IFNULL(h.etapa_nova, '')     AS etapa_nova,
+				IFNULL(h.sub_etapa_anterior, '') AS sub_etapa_anterior,
+				IFNULL(h.sub_etapa_nova, '') AS sub_etapa_nova,
+				IFNULL(CAST(h.relevancia_anterior AS CHAR), '') AS relevancia_anterior,
+				IFNULL(CAST(h.relevancia_nova AS CHAR), '')     AS relevancia_nova,
+				IFNULL(h.comentario, '') AS comentario,
+				DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao,
+				IFNULL(h.tipo_movimentacao,'') AS tipo_movimentacao
+			FROM FT_HISTORICO_MOVIMENTACOES h
+			LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
+			WHERE h.id_requisicao = ?
+			ORDER BY h.data_movimentacao DESC`
 
 	if rows, err := database.DB_App.Query(queryNew, id); err == nil {
 		defer rows.Close()
@@ -216,11 +251,12 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 			historicos = make([]HistoricoItem, 0)
 		}
 		// Prepend criação do processo, se houver
-		var createdAt string
+		var createdAt sql.NullTime
 		if err := database.DB_App.QueryRow(
-			"SELECT DATE_FORMAT(data_criacao, '%Y-%m-%d %H:%i:%s') FROM FT_REQUISICOES WHERE id_requisicao = ?",
+			"SELECT data_criacao FROM FT_REQUISICOES WHERE id_requisicao = ?",
 			id,
-		).Scan(&createdAt); err == nil && createdAt != "" {
+		).Scan(&createdAt); err == nil && createdAt.Valid {
+			ts := createdAt.Time.In(time.Local).Format("02/01/2006 15:04:05")
 			created := HistoricoItem{
 				ID:                 0,
 				NomeUsuario:        "Sistema",
@@ -234,7 +270,7 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 				RelevanciaAnterior: "",
 				RelevanciaNova:     "",
 				Comentario:         "Processo criado",
-				DataMovimentacao:   createdAt,
+				DataMovimentacao:   ts,
 				TipoMovimentacao:   "criacao",
 			}
 			historicos = append([]HistoricoItem{created}, historicos...)
@@ -245,38 +281,38 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 
 	// --- Fallback: "schema antigo" (sub_etapa única)
 	queryOld := `
-        SELECT
-            h.id_historico,
-            IFNULL(u.nome_usuario, 'Sistema') AS nome_usuario,
-            IFNULL(
-                CASE
-                    WHEN COALESCE(h.sub_etapa,'') <> '' THEN CONCAT(IFNULL(h.etapa_anterior,''), ' - ', h.sub_etapa)
-                    ELSE IFNULL(h.etapa_anterior,'')
-                END, ''
-            ) AS status_anterior,
-            IFNULL(
-                CASE
-                    WHEN COALESCE(h.sub_etapa,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa)
-                    ELSE IFNULL(h.etapa_nova,'')
-                END, ''
-            ) AS status_novo,
-            IFNULL(
-                CASE
-                    WHEN COALESCE(h.sub_etapa,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa)
-                    ELSE IFNULL(h.etapa_nova,'')
-                END, ''
-            ) AS status_composto,
-            IFNULL(h.etapa_anterior, '') AS etapa_anterior,
-            IFNULL(h.etapa_nova, '')     AS etapa_nova,
-            IFNULL(h.sub_etapa, '')      AS sub_etapa,
-            IFNULL(CAST(h.relevancia_anterior AS CHAR), '') AS relevancia_anterior,
-            IFNULL(CAST(h.relevancia_nova AS CHAR), '')     AS relevancia_nova,
-            IFNULL(h.comentario, '')     AS comentario,
-            DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao
-        FROM FT_HISTORICO_MOVIMENTACOES h
-        LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
-        WHERE h.id_requisicao = ?
-        ORDER BY h.data_movimentacao DESC`
+			SELECT
+				h.id_historico,
+				IFNULL(u.nome_usuario, 'Sistema') AS nome_usuario,
+				IFNULL(
+					CASE
+						WHEN COALESCE(h.sub_etapa,'') <> '' THEN CONCAT(IFNULL(h.etapa_anterior,''), ' - ', h.sub_etapa)
+						ELSE IFNULL(h.etapa_anterior,'')
+					END, ''
+				) AS status_anterior,
+				IFNULL(
+					CASE
+						WHEN COALESCE(h.sub_etapa,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa)
+						ELSE IFNULL(h.etapa_nova,'')
+					END, ''
+				) AS status_novo,
+				IFNULL(
+					CASE
+						WHEN COALESCE(h.sub_etapa,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa)
+						ELSE IFNULL(h.etapa_nova,'')
+					END, ''
+				) AS status_composto,
+				IFNULL(h.etapa_anterior, '') AS etapa_anterior,
+				IFNULL(h.etapa_nova, '')     AS etapa_nova,
+				IFNULL(h.sub_etapa, '')      AS sub_etapa,
+				IFNULL(CAST(h.relevancia_anterior AS CHAR), '') AS relevancia_anterior,
+				IFNULL(CAST(h.relevancia_nova AS CHAR), '')     AS relevancia_nova,
+				IFNULL(h.comentario, '')     AS comentario,
+				DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao
+			FROM FT_HISTORICO_MOVIMENTACOES h
+			LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
+			WHERE h.id_requisicao = ?
+			ORDER BY h.data_movimentacao DESC`
 
 	rows2, err2 := database.DB_App.Query(queryOld, id)
 	if err2 != nil {
@@ -340,8 +376,8 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 }
 
 /* ============================================================
-   CREATE (versão simples para destravar o front)
-   ============================================================ */
+CREATE (versão simples para destravar o front)
+============================================================ */
 
 // CreateRequisicaoSimple aceita multipart/form-data e retorna 201 com eco dos dados.
 // Não persiste em banco nesta versão.
@@ -399,8 +435,8 @@ func CreateRequisicaoSimple(c *gin.Context) {
 }
 
 /* ============================================================
-   ANEXOS
-   ============================================================ */
+ANEXOS
+============================================================ */
 
 // GET /api/requisicoes/:id/anexos
 func GetAnexosByRequisicaoID(c *gin.Context) {
@@ -417,11 +453,11 @@ func GetAnexosByRequisicaoID(c *gin.Context) {
 
 	// Tenta com data_upload
 	qNew := `
-		SELECT id_anexo, nome_arquivo, caminho_arquivo, enviado_por,
-		       DATE_FORMAT(data_upload, '%Y-%m-%d %H:%i:%s') AS data_upload
-		FROM FT_ANEXOS
-		WHERE id_requisicao = ?
-		ORDER BY data_upload DESC`
+			SELECT id_anexo, nome_arquivo, caminho_arquivo, enviado_por,
+				DATE_FORMAT(data_upload, '%Y-%m-%d %H:%i:%s') AS data_upload
+			FROM FT_ANEXOS
+			WHERE id_requisicao = ?
+			ORDER BY data_upload DESC`
 	if rows, err := database.DB_App.Query(qNew, id); err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -440,9 +476,9 @@ func GetAnexosByRequisicaoID(c *gin.Context) {
 
 	// Fallback sem data_upload
 	qOld := `
-		SELECT id_anexo, nome_arquivo, caminho_arquivo, enviado_por
-		FROM FT_ANEXOS
-		WHERE id_requisicao = ?`
+			SELECT id_anexo, nome_arquivo, caminho_arquivo, enviado_por
+			FROM FT_ANEXOS
+			WHERE id_requisicao = ?`
 	rows2, err2 := database.DB_App.Query(qOld, id)
 	if err2 != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar anexos"})
@@ -464,8 +500,8 @@ func GetAnexosByRequisicaoID(c *gin.Context) {
 }
 
 /* ============================================================
-   LISTAGEM E DETALHE
-   ============================================================ */
+LISTAGEM E DETALHE
+============================================================ */
 
 // GET /api/requisicoes
 func GetAllRequisicoes(c *gin.Context) {
@@ -482,19 +518,19 @@ func GetAllRequisicoes(c *gin.Context) {
 	}
 
 	base := `
-        SELECT
-            r.id_requisicao,
-            COALESCE(r.cliente,'')               AS cliente,
-            COALESCE(r.uc,'')                    AS uc,
-            COALESCE(r.concessionaria,'')        AS concessionaria,
-            COALESCE(r.ressarcimento_estimado,0) AS ressarcimento_estimado,
-            COALESCE(r.endereco_completo,'')     AS endereco_completo,
-            COALESCE(s.status,'Nova Requisição') AS status,
-            DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
-            DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status
-        FROM FT_REQUISICOES r
-        LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
-        ORDER BY r.data_criacao DESC`
+			SELECT
+				r.id_requisicao,
+				COALESCE(r.cliente,'')               AS cliente,
+				COALESCE(r.uc,'')                    AS uc,
+				COALESCE(r.concessionaria,'')        AS concessionaria,
+				COALESCE(r.ressarcimento_estimado,0) AS ressarcimento_estimado,
+				COALESCE(r.endereco_completo,'')     AS endereco_completo,
+				COALESCE(s.status,'Nova Requisição') AS status,
+				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
+				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status
+			FROM FT_REQUISICOES r
+			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+			ORDER BY r.data_criacao DESC`
 
 	// Suporte opcional a paginação: ?limit=...&offset=...
 	limitStr := strings.TrimSpace(c.Query("limit"))
@@ -576,18 +612,18 @@ func GetRequisicoesDepartamento(c *gin.Context) {
 	}
 
 	baseSelect := `
-        SELECT
-            r.id_requisicao,
-            COALESCE(r.cliente,'')               AS cliente,
-            COALESCE(r.uc,'')                    AS uc,
-            COALESCE(r.concessionaria,'')        AS concessionaria,
-            COALESCE(r.ressarcimento_estimado,0) AS ressarcimento_estimado,
-            COALESCE(r.endereco_completo,'')     AS endereco_completo,
-            COALESCE(s.status,'Nova Requisição') AS status,
-            DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
-            DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status
-        FROM FT_REQUISICOES r
-        LEFT JOIN DM_STATUS s ON r.id_status = s.id_status`
+			SELECT
+				r.id_requisicao,
+				COALESCE(r.cliente,'')               AS cliente,
+				COALESCE(r.uc,'')                    AS uc,
+				COALESCE(r.concessionaria,'')        AS concessionaria,
+				COALESCE(r.ressarcimento_estimado,0) AS ressarcimento_estimado,
+				COALESCE(r.endereco_completo,'')     AS endereco_completo,
+				COALESCE(s.status,'Nova Requisição') AS status,
+				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
+				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status
+			FROM FT_REQUISICOES r
+			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status`
 
 	orderBy := " ORDER BY r.data_criacao DESC"
 
@@ -661,30 +697,38 @@ func GetRequisicaoByID(c *gin.Context) {
 		EnderecoCompleto        string  `json:"endereco_completo"`
 		Status                  string  `json:"status"`
 		DataCriacao             string  `json:"data_criacao"`
+		DataMudancaStatus       string  `json:"data_mudanca_status"`
 		CreatedAt               string  `json:"created_at"`
 		DescricaoIrregularidade string  `json:"descricao_irregularidade"`
 		PeriodosIrregularidade  string  `json:"periodos_irregularidade"`
+		TipoIrregularidade      string  `json:"tipo_irregularidade"`
+		SubtipoIrregularidade   string  `json:"subtipo_irregularidade"`
 		LinkFatura              string  `json:"link_fatura"`
 	}
 
 	const q = `
-        SELECT
-            r.id_requisicao,
-            COALESCE(r.cliente, '')                AS cliente,
-            COALESCE(r.uc, '')                     AS uc,
-            COALESCE(r.concessionaria, '')         AS concessionaria,
-            COALESCE(r.ressarcimento_estimado, 0)  AS ressarcimento_estimado,
-            COALESCE(r.endereco_completo, '')      AS endereco_completo,
-            COALESCE(s.status, 'Nova Requisição')  AS status,
-            DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
-            DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS created_at,
-            COALESCE(r.descricao_irregularidade, '') AS descricao_irregularidade,
-            COALESCE(r.periodos_irregularidade, '')  AS periodos_irregularidade,
-            COALESCE(r.link_fatura, '')              AS link_fatura
-        FROM FT_REQUISICOES r
-        LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
-        WHERE r.id_requisicao = ?
-        LIMIT 1`
+			SELECT
+				r.id_requisicao,
+				COALESCE(r.cliente, '')                AS cliente,
+				COALESCE(r.uc, '')                     AS uc,
+				COALESCE(r.concessionaria, '')         AS concessionaria,
+				COALESCE(r.ressarcimento_estimado, 0)  AS ressarcimento_estimado,
+				COALESCE(r.endereco_completo, '')      AS endereco_completo,
+				COALESCE(s.status, 'Nova Requisição')  AS status,
+				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
+				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status,
+				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS created_at,
+				COALESCE(r.descricao_irregularidade, '') AS descricao_irregularidade,
+				COALESCE(r.periodos_irregularidade, '')  AS periodos_irregularidade,
+				COALESCE(ti.nome, '')                     AS tipo_irregularidade,
+				COALESCE(sti.nome, '')                    AS subtipo_irregularidade,
+				COALESCE(r.link_fatura, '')              AS link_fatura
+			FROM FT_REQUISICOES r
+			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+			LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo_irregularidade = r.id_tipo_irregularidade
+			LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo_irregularidade = r.id_subtipo_irregularidade
+			WHERE r.id_requisicao = ?
+			LIMIT 1`
 
 	var d RequisicaoDetail
 	if err := database.DB_App.QueryRow(q, id).Scan(
@@ -696,18 +740,66 @@ func GetRequisicaoByID(c *gin.Context) {
 		&d.EnderecoCompleto,
 		&d.Status,
 		&d.DataCriacao,
+		&d.DataMudancaStatus,
 		&d.CreatedAt,
 		&d.DescricaoIrregularidade,
 		&d.PeriodosIrregularidade,
+		&d.TipoIrregularidade,
+		&d.SubtipoIrregularidade,
 		&d.LinkFatura,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Requisição não encontrada"})
 			return
 		}
-		log.Printf("GetRequisicaoByID: erro ao buscar id=%s: %v", id, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar requisição"})
-		return
+		// Fallback: ambientes sem tabela/coluna de subtipo.
+		log.Printf("GetRequisicaoByID: erro na query completa id=%s: %v", id, err)
+		const qFallback = `
+			SELECT
+				r.id_requisicao,
+				COALESCE(r.cliente, '')                AS cliente,
+				COALESCE(r.uc, '')                     AS uc,
+				COALESCE(r.concessionaria, '')         AS concessionaria,
+				COALESCE(r.ressarcimento_estimado, 0)  AS ressarcimento_estimado,
+				COALESCE(r.endereco_completo, '')      AS endereco_completo,
+				COALESCE(s.status, 'Nova Requisição')  AS status,
+				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
+				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status,
+				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS created_at,
+				COALESCE(r.descricao_irregularidade, '') AS descricao_irregularidade,
+				COALESCE(r.periodos_irregularidade, '')  AS periodos_irregularidade,
+				''                                        AS tipo_irregularidade,
+				''                                        AS subtipo_irregularidade,
+				COALESCE(r.link_fatura, '')              AS link_fatura
+			FROM FT_REQUISICOES r
+			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+			WHERE r.id_requisicao = ?
+			LIMIT 1`
+		if err2 := database.DB_App.QueryRow(qFallback, id).Scan(
+			&d.ID,
+			&d.Cliente,
+			&d.UC,
+			&d.Concessionaria,
+			&d.ValorEstimado,
+			&d.EnderecoCompleto,
+			&d.Status,
+			&d.DataCriacao,
+			&d.DataMudancaStatus,
+			&d.CreatedAt,
+			&d.DescricaoIrregularidade,
+			&d.PeriodosIrregularidade,
+			&d.TipoIrregularidade,
+			&d.SubtipoIrregularidade,
+			&d.LinkFatura,
+		); err2 != nil {
+			if errors.Is(err2, sql.ErrNoRows) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Requisição não encontrada"})
+				return
+			}
+			log.Printf("GetRequisicaoByID: erro no fallback id=%s: %v", id, err2)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar requisição"})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, d)
@@ -726,9 +818,9 @@ func GetFaturasSelecionadasByRequisicaoID(c *gin.Context) {
 	list := make([]Fat, 0)
 
 	const q = `SELECT link, COALESCE(mes_ref,''), COALESCE(dt_vencimento,''), valor_total
-               FROM FT_REQUISICOES_FATURAS
-               WHERE id_requisicao = ?
-               ORDER BY id ASC`
+				FROM FT_REQUISICOES_FATURAS
+				WHERE id_requisicao = ?
+				ORDER BY id ASC`
 	rows, err := database.DB_App.Query(q, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar faturas"})
@@ -748,8 +840,8 @@ func GetFaturasSelecionadasByRequisicaoID(c *gin.Context) {
 }
 
 /* ============================================================
-   UPDATE (com histórico completo)
-   ============================================================ */
+UPDATE (com histórico completo)
+============================================================ */
 
 // POST /api/requisicoes/:id/update
 func UpdateRequisicaoCompleta(c *gin.Context) {
@@ -821,9 +913,9 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		norm = strings.ReplaceAll(norm, ",", ".")
 		if f, err := strconv.ParseFloat(norm, 64); err == nil {
 			if _, err := tx.Exec(`
-                UPDATE FT_REQUISICOES
-                   SET ressarcimento_estimado = ?
-                 WHERE id_requisicao = ?`,
+					UPDATE FT_REQUISICOES
+					SET ressarcimento_estimado = ?
+					WHERE id_requisicao = ?`,
 				f, id); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar valor estimado"})
 				return
@@ -852,10 +944,10 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		// Registrar no histórico (informativo)
 		var etapaAtual, subAtual sql.NullString
 		_ = tx.QueryRow(`
-            SELECT e.etapa, p.sub_etapa
-              FROM FT_PROCESSOS p
-              JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-             WHERE p.id_processo = ?`,
+				SELECT e.etapa, p.sub_etapa
+				FROM FT_PROCESSOS p
+				JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+				WHERE p.id_processo = ?`,
 			id,
 		).Scan(&etapaAtual, &subAtual)
 		statusComp := strings.TrimSpace(etapaAtual.String)
@@ -863,12 +955,12 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 			statusComp = statusComp + " - " + strings.TrimSpace(subAtual.String)
 		}
 		if _, err := tx.Exec(`
-            INSERT INTO FT_HISTORICO_MOVIMENTACOES
-              (id_requisicao, id_usuario_gestor,
-               status_anterior, status_novo,
-               etapa_anterior, etapa_nova, sub_etapa,
-               comentario, data_movimentacao, tipo_movimentacao)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'classificacao')`,
+				INSERT INTO FT_HISTORICO_MOVIMENTACOES
+				(id_requisicao, id_usuario_gestor,
+				status_anterior, status_novo,
+				etapa_anterior, etapa_nova, sub_etapa,
+				comentario, data_movimentacao, tipo_movimentacao)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'classificacao')`,
 			id, gestorID,
 			statusComp, statusComp,
 			etapaAtual.String, etapaAtual.String, subAtual.String,
@@ -886,10 +978,10 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		// Busca etapa/subetapa vigentes do processo (se existir)
 		var etapaAtual, subAtual sql.NullString
 		_ = tx.QueryRow(`
-			SELECT e.etapa, p.sub_etapa
-			  FROM FT_PROCESSOS p
-			  JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-			 WHERE p.id_processo = ?`,
+				SELECT e.etapa, p.sub_etapa
+				FROM FT_PROCESSOS p
+				JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+				WHERE p.id_processo = ?`,
 			id,
 		).Scan(&etapaAtual, &subAtual)
 
@@ -914,12 +1006,12 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		}
 
 		if _, err := tx.Exec(`
-            INSERT INTO FT_HISTORICO_MOVIMENTACOES
-              (id_requisicao, id_usuario_gestor,
-               status_anterior, status_novo,
-               etapa_anterior, etapa_nova, sub_etapa,
-               comentario, data_movimentacao)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+				INSERT INTO FT_HISTORICO_MOVIMENTACOES
+				(id_requisicao, id_usuario_gestor,
+				status_anterior, status_novo,
+				etapa_anterior, etapa_nova, sub_etapa,
+				comentario, data_movimentacao)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
 			id, gestorID,
 			status, status,
 			etapaTxt, etapaTxt, subTxt,
@@ -950,10 +1042,10 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		var tipoAtual sql.NullInt64
 		var subtipoAtual sql.NullInt64
 		_ = tx.QueryRow(`
-            SELECT s.status, r.data_mudanca_status, r.id_tipo_irregularidade, r.id_subtipo_irregularidade
-              FROM FT_REQUISICOES r
-              LEFT JOIN DM_STATUS s ON s.id_status = r.id_status
-             WHERE r.id_requisicao = ?`, id).Scan(&currStatus, &dataMudanca, &tipoAtual, &subtipoAtual)
+				SELECT s.status, r.data_mudanca_status, r.id_tipo_irregularidade, r.id_subtipo_irregularidade
+				FROM FT_REQUISICOES r
+				LEFT JOIN DM_STATUS s ON s.id_status = r.id_status
+				WHERE r.id_requisicao = ?`, id).Scan(&currStatus, &dataMudanca, &tipoAtual, &subtipoAtual)
 
 		if strings.EqualFold(currStatus, "Nova Requisição") && !strings.EqualFold(statusPost, "Nova Requisição") {
 			if (!tipoAtual.Valid && strings.TrimSpace(c.PostForm("id_tipo_irregularidade")) == "") ||
@@ -984,23 +1076,22 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 			return
 		}
 		if _, err := tx.Exec(`
-            UPDATE FT_REQUISICOES
-               SET id_status = ?, data_mudanca_status = NOW()
-             WHERE id_requisicao = ?`, idStatus, id); err != nil {
+				UPDATE FT_REQUISICOES
+				SET id_status = ?, data_mudanca_status = NOW()
+				WHERE id_requisicao = ?`, idStatus, id); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar status da requisição"})
 			return
 		}
-
 
 		// Histórico da mudança de status (status_anterior/status_novo) com tipo/subtipo
 		var etapaAtual sql.NullString
 		var subAtual sql.NullString
 		_ = tx.QueryRow(`
-            SELECT e.etapa, p.sub_etapa
-              FROM FT_PROCESSOS p
-              JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-             WHERE p.id_processo = ?
-             LIMIT 1`, id).Scan(&etapaAtual, &subAtual)
+				SELECT e.etapa, p.sub_etapa
+				FROM FT_PROCESSOS p
+				JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+				WHERE p.id_processo = ?
+				LIMIT 1`, id).Scan(&etapaAtual, &subAtual)
 
 		commentParts := []string{}
 		if tipoIDPost != "" || tipoAtual.Valid {
@@ -1037,12 +1128,12 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		histComentario := strings.Join(commentParts, " | ")
 
 		_, _ = tx.Exec(`
-            INSERT INTO FT_HISTORICO_MOVIMENTACOES
-              (id_requisicao, id_usuario_gestor,
-               status_anterior, status_novo,
-               etapa_anterior, etapa_nova, sub_etapa,
-               comentario, data_movimentacao, tipo_movimentacao)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'status')`,
+				INSERT INTO FT_HISTORICO_MOVIMENTACOES
+				(id_requisicao, id_usuario_gestor,
+				status_anterior, status_novo,
+				etapa_anterior, etapa_nova, sub_etapa,
+				comentario, data_movimentacao, tipo_movimentacao)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'status')`,
 			id, gestorID,
 			statusAnterior, statusNovo,
 			etapaAtual.String, etapaAtual.String, subAtual.String,
@@ -1084,8 +1175,8 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 					return
 				}
 				if _, err := tx.Exec(`
-                    INSERT INTO FT_PROCESSOS (id_processo, id_etapa_processo, id_responsavel, sub_etapa, relevancia, data_alerta, ultima_atualizacao)
-                    VALUES (?, ?, ?, NULL, FALSE, NULL, NOW())`, id, idEtapa, gestorID); err != nil {
+						INSERT INTO FT_PROCESSOS (id_processo, id_etapa_processo, id_responsavel, sub_etapa, relevancia, data_alerta, ultima_atualizacao)
+						VALUES (?, ?, ?, NULL, FALSE, NULL, NOW())`, id, idEtapa, gestorID); err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar processo após aprovação"})
 					return
 				}
@@ -1111,9 +1202,9 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 					return
 				}
 				if _, err := tx.Exec(`
-                    INSERT INTO FT_ANEXOS
-                    (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload)
-                    VALUES (?, ?, ?, 'gestor', NOW())`,
+						INSERT INTO FT_ANEXOS
+						(id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload)
+						VALUES (?, ?, ?, 'gestor', NOW())`,
 					id, name, path); err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao registrar anexo"})
 					return

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { X, Clock, User, MessageSquare } from 'lucide-react';
 import { getHistoricoById } from '../services/requisicaoService';
 
@@ -42,7 +42,7 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
 
         <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
-            <div className="py-10 text-center opacity-80">Carregando…</div>
+            <div className="py-10 text-center opacity-80 sap-loading">Carregando…</div>
           ) : error ? (
             <div className="py-10 text-center text-red-400">{error}</div>
           ) : itens.length === 0 ? (
@@ -85,3 +85,4 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
     </div>
   );
 }
+

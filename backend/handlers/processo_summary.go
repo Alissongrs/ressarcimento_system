@@ -7,6 +7,7 @@ import (
     "github.com/gin-gonic/gin"
     "ressarcimento-backend/database"
     "ressarcimento-backend/repositories"
+    "ressarcimento-backend/services"
 )
 
 // GET /api/v1/processos/:id/summary
@@ -37,7 +38,16 @@ func RefreshProcessoSummary(c *gin.Context) {
     if !changed {
         _, _ = database.DB_App.Exec(`UPDATE FT_RESUMOS_PROCESSO SET status='pending', updated_at=NOW() WHERE processo_id = ?`, pid)
     }
+
+    // gerar imediatamente para evitar status "none"
+    procRepo := repositories.NewProcessosRepo(database.DB_App)
+    srv := services.NewResumoService(repo, procRepo)
+    if _, err := srv.GerarResumoAgora(c.Request.Context(), pid); err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+
     // log simples para auditoria
     println("[resumo] enqueue by refresh id=", pid, "changed=", changed)
-    c.JSON(http.StatusOK, gin.H{"ok": true})
+    c.JSON(http.StatusOK, gin.H{"ok": true, "status": "ready"})
 }

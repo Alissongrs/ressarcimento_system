@@ -22,6 +22,27 @@ const api = axios.create({
   withCredentials: true,
 });
 
+let savingCount = 0;
+const isWriteMethod = (method) => {
+  const m = String(method || 'get').toLowerCase();
+  return !['get', 'head', 'options'].includes(m);
+};
+const getSavingCount = () => {
+  if (typeof window !== 'undefined' && typeof window.__appSavingCount === 'number') {
+    return window.__appSavingCount;
+  }
+  return savingCount;
+};
+const setSavingCount = (next) => {
+  savingCount = next;
+  if (typeof window !== 'undefined') window.__appSavingCount = next;
+  notifySaving();
+};
+const notifySaving = () => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('app-saving', { detail: { count: getSavingCount() } }));
+};
+
 api.interceptors.request.use((config) => {
   const raw = getRawToken();
   const token = cleanToken(raw);
@@ -39,7 +60,25 @@ api.interceptors.request.use((config) => {
     config.params = { ...(config.params || {}), token };
   }
 
+  if (isWriteMethod(config.method)) {
+    setSavingCount(getSavingCount() + 1);
+  }
   return config;
 });
+
+api.interceptors.response.use(
+  (resp) => {
+    if (isWriteMethod(resp?.config?.method)) {
+      setSavingCount(Math.max(0, getSavingCount() - 1));
+    }
+    return resp;
+  },
+  (error) => {
+    if (isWriteMethod(error?.config?.method)) {
+      setSavingCount(Math.max(0, getSavingCount() - 1));
+    }
+    return Promise.reject(error);
+  }
+);
 
 export default api;

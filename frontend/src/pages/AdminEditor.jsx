@@ -18,6 +18,7 @@ import { listPlanilha } from '../services/adminPlanilhaService';
 import { useAuth } from '../context/AuthContext.jsx';
 
 import { getEtapas, getSubEtapas, getEtapaSubMap } from '../services/filtersService';
+import { normalizeDecimalValue, normalizeCreditoValue, toNumberBR } from '../utils/brl';
 
 import './admin-editor.css';
 
@@ -74,10 +75,10 @@ export default function AdminEditor() {
   ];
 
   const colToEtapa = {
-    Ativos: 'Andamento',
+    Ativos: 'Distribuidora',
     Deferidos: 'Pendente',
     'Fluxo de Ressarcimento': 'Enviado ao Financeiro',
-    Faturamento: 'Ressarcimento',
+    Faturamento: 'Repasse Amee',
     Concluídos: 'Concluído',
     Indeferidos: 'Indeferido',
     Suspensos: 'Suspenso',
@@ -127,34 +128,27 @@ const normalizeDateInput = (s) => {
     return raw;
   };
 
-  const unwrapNumberLoose = (val) => {
-    if (val === undefined || val === null) return null;
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string') {
-      const n = Number(val.replace(/\./g, '').replace(',', '.'));
-      return Number.isFinite(n) ? n : null;
-    }
-    if (typeof val === 'object') {
-      if (val.Valid === false) return null;
-      if (typeof val.Float64 === 'number') return val.Float64;
-      if (typeof val.Float64 === 'string') {
-        const n = Number(val.Float64);
-        return Number.isFinite(n) ? n : null;
-      }
-      if (typeof val.Float32 === 'number') return val.Float32;
-    }
-    return null;
+  const normalizeStatusValue = (value) => {
+    const raw = String(value || '').toLowerCase();
+    if (raw.includes('nova') || raw.includes('pendente')) return 'Nova Requisição';
+    if (raw.includes('analise')) return 'Em Análise';
+    if (raw.includes('aprov')) return 'Aprovado';
+    if (raw.includes('rejeit')) return 'Rejeitado';
+    return value || '';
   };
 
-  const formatMoneyStr = (val) => {
-    const n = unwrapNumberLoose(val);
-    if (n === null) return '';
-    try {
-      return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
-    } catch {
-      return String(n);
+  // Ao aprovar, direciona a coluna para "Ativos"
+  useEffect(() => {
+    const statusValue = normalizeStatusValue(selectedStatus);
+    if (statusValue === 'Aprovado') {
+      setSelectedColuna('Ativos');
+      const etapa = colToEtapa.Ativos;
+      if (etapa) {
+        setProc((s) => ({ ...s, etapa, sub_etapa: '' }));
+      }
     }
-  };
+  }, [selectedStatus]);
+
 
   // Refs para foco automático em Sub-etapa
   const subProcRef = useRef(null);
@@ -217,7 +211,7 @@ const normalizeDateInput = (s) => {
 
   const Toolbar = () => (
     <div className="mb-4 flex items-center gap-2">
-      <button className="px-4 py-2 border rounded" onClick={() => setPlanilhaOpen((v) => !v)}>
+      <button className="btn-outline" onClick={() => setPlanilhaOpen((v) => !v)}>
         {planilhaOpen ? 'Voltar ao editor' : 'Em Massa'}
       </button>
     </div>
@@ -260,16 +254,19 @@ const normalizeDateInput = (s) => {
 
         const data = await getRequisicaoById(idStr);
         setReq({
+          id: data?.id ?? data?.requisicao_id ?? data?.req_id ?? null,
           uc: data?.uc ?? '',
           cliente: data?.cliente?.String ?? data?.cliente ?? '',
           concessionaria: data?.concessionaria ?? '',
-        cnpj: data?.cnpj ?? '',
-        endereco_completo: data?.endereco_completo ?? '',
-        razao_social_fatura: data?.razao_social_fatura ?? '',
-        ressarcimento_estimado: formatMoneyStr(data?.valor_estimado ?? data?.ressarcimento_estimado ?? ''),
-        link_fatura: data?.link_fatura ?? '',
-        data_criacao_requisicao: data?.data_criacao ? toBRDateTime(data.data_criacao) : '',
-      });
+          cnpj: data?.cnpj ?? '',
+          endereco_completo: data?.endereco_completo ?? '',
+          razao_social_fatura: data?.razao_social_fatura ?? '',
+          ressarcimento_estimado: normalizeDecimalValue(
+            data?.valor_estimado ?? data?.ressarcimento_estimado ?? '',
+          ),
+          link_fatura: data?.link_fatura ?? '',
+          data_criacao_requisicao: data?.data_criacao ? toBRDateTime(data.data_criacao) : '',
+        });
       setProc({
         etapa: data?.etapa ?? '',
         sub_etapa: data?.sub_etapa ?? '',
@@ -296,28 +293,16 @@ const normalizeDateInput = (s) => {
         return String(v);
       };
 
-      const unwrapNumber = (v) => {
-        if (v === undefined || v === null) return '';
-        if (typeof v === 'number') return v;
-        if (typeof v === 'string') return v;
-        if (typeof v === 'object') {
-          if (v.Valid === false) return '';
-          if (typeof v.Float64 === 'number') return v.Float64;
-          if (typeof v.Float64 === 'string') return Number(v.Float64);
-          if (typeof v.Float32 === 'number') return v.Float32;
-          if (typeof v.Float32 === 'string') return Number(v.Float32);
-        }
-        return '';
-      };
-
       const normalizeDef = (src = {}) => ({
         data_procedencia: toBRDateTime(
           unwrapDate(src.data_procedencia || src.DataProcedencia || src.dataProcedencia || ''),
         ).slice(0, 10),
-        credito_simples:
-          unwrapNumber(src.credito_simples ?? src.CreditoSimples ?? src.creditoSimples) ?? '',
-        credito_dobro:
-          unwrapNumber(src.credito_dobro ?? src.CreditoDobro ?? src.creditoDobro) ?? '',
+        credito_simples: normalizeCreditoValue(
+          src.credito_simples ?? src.CreditoSimples ?? src.creditoSimples ?? '',
+        ),
+        credito_dobro: normalizeCreditoValue(
+          src.credito_dobro ?? src.CreditoDobro ?? src.creditoDobro ?? '',
+        ),
         data_credito_dobro: toBRDateTime(
           unwrapDate(src.data_credito_dobro || src.DataCreditoDobro || src.dataCreditoDobro || ''),
         ).slice(0, 10),
@@ -356,16 +341,16 @@ const normalizeDateInput = (s) => {
         ? fluxoSaved
         : [];
 
-      setFluxo(
-        (fluxArr || []).map((it) => ({
-          forma_devolucao: it.forma_devolucao || it.formaDevolucao || 'Fatura',
-          valor: formatMoneyStr(it.valor ?? it.valor_fluxo ?? it.valorFluxo ?? 0),
-          data_devolucao: toBRDateTime(it.data_devolucao || it.dataDevolucao || '').slice(0, 10),
-          data_envio_financeiro: toBRDateTime(
-            it.data_envio_financeiro || it.dataEnvioFinanceiro || '',
-          ).slice(0, 10),
-        })),
-      );
+        setFluxo(
+          (fluxArr || []).map((it) => ({
+            forma_devolucao: it.forma_devolucao || it.formaDevolucao || 'Fatura',
+            valor: normalizeDecimalValue(it.valor ?? it.valor_fluxo ?? it.valorFluxo ?? ''),
+            data_devolucao: toBRDateTime(it.data_devolucao || it.dataDevolucao || '').slice(0, 10),
+            data_envio_financeiro: toBRDateTime(
+              it.data_envio_financeiro || it.dataEnvioFinanceiro || '',
+            ).slice(0, 10),
+          })),
+        );
 
       const fatArr = Array.isArray(fatSaved?.itens)
         ? fatSaved.itens
@@ -373,16 +358,16 @@ const normalizeDateInput = (s) => {
         ? fatSaved
         : [];
 
-      setFat(
-        (fatArr || []).map((it) => ({
-          numero_nf: it.numero_nf || it.numero || it.nf || '',
-          data_emissao: toBRDateTime(it.data_emissao || '').slice(0, 10),
-          data_vencimento: toBRDateTime(it.data_vencimento || '').slice(0, 10),
-          data_pagamento: toBRDateTime(it.data_pagamento || '').slice(0, 10),
-          valor: formatMoneyStr(it.valor ?? it.valor_nf ?? it.valorNf ?? 0),
-          anexo_nome: it.anexo_nome || it.anexo || it.nome_anexo || it.nome || '',
-        })),
-      );
+        setFat(
+          (fatArr || []).map((it) => ({
+            numero_nf: it.numero_nf || it.numero || it.nf || '',
+            data_emissao: toBRDateTime(it.data_emissao || '').slice(0, 10),
+            data_vencimento: toBRDateTime(it.data_vencimento || '').slice(0, 10),
+            data_pagamento: toBRDateTime(it.data_pagamento || '').slice(0, 10),
+            valor: normalizeDecimalValue(it.valor ?? it.valor_nf ?? it.valorNf ?? ''),
+            anexo_nome: it.anexo_nome || it.anexo || it.nome_anexo || it.nome || '',
+          })),
+        );
 
       const row = Array.isArray(planRows) && planRows.length ? planRows[0] : null;
       const defFromPlan = row
@@ -496,8 +481,10 @@ const normalizeDateInput = (s) => {
         cnpj: emptyToNull(req.cnpj),
         endereco_completo: emptyToNull(req.endereco_completo),
         razao_social_fatura: emptyToNull(req.razao_social_fatura),
-        ressarcimento_estimado:
-        req.ressarcimento_estimado === '' ? null : parseMoneyInput(req.ressarcimento_estimado),
+        ressarcimento_estimado: (() => {
+          const normalized = normalizeDecimalValue(req.ressarcimento_estimado);
+          return normalized === '' ? null : toNumberBR(normalized);
+        })(),
         link_fatura: emptyToNull(req.link_fatura),
         data_criacao_requisicao: normalizeDateInput(req.data_criacao_requisicao),
 
@@ -510,39 +497,45 @@ const normalizeDateInput = (s) => {
         deferimento: (() => {
           const ds = normalizeDateInput(deferimento?.data_procedencia);
           const dd = normalizeDateInput(deferimento?.data_credito_dobro);
-          const cs = parseMoneyInput(deferimento?.credito_simples);
-          const cd = parseMoneyInput(deferimento?.credito_dobro);
+          const csNormalized = normalizeCreditoValue(deferimento?.credito_simples);
+          const cdNormalized = normalizeCreditoValue(deferimento?.credito_dobro);
           const has =
             (ds && ds !== '') ||
             (dd && dd !== '') ||
-            cs !== null ||
-            cd !== null;
+            csNormalized !== '' ||
+            cdNormalized !== '';
           if (!has) return undefined;
           return JSON.stringify({
             data_procedencia: ds || '',
-            credito_simples: cs === null ? 0 : cs,
-            credito_dobro: cd === null ? 0 : cd,
+            credito_simples: csNormalized === '' ? 0 : toNumberBR(csNormalized),
+            credito_dobro: cdNormalized === '' ? 0 : toNumberBR(cdNormalized),
             data_credito_dobro: dd || '',
           });
         })(),
 
         fluxo_ressarcimento: JSON.stringify({
-          itens: (fluxo || []).map((it) => ({
-            ...it,
-            valor: parseMoneyInput(it.valor),
-            data_devolucao: normalizeDateInput(it.data_devolucao) || '',
-            data_envio_financeiro: normalizeDateInput(it.data_envio_financeiro) || '',
-          })),
+          itens: (fluxo || []).map((it) => {
+            const valorNormalizado = normalizeDecimalValue(it.valor);
+            return {
+              ...it,
+              valor: toNumberBR(valorNormalizado),
+              data_devolucao: normalizeDateInput(it.data_devolucao) || '',
+              data_envio_financeiro: normalizeDateInput(it.data_envio_financeiro) || '',
+            };
+          }),
         }),
         faturamento: JSON.stringify({
-          itens: (fat || []).map((it) => ({
-            ...it,
-            valor: parseMoneyInput(it.valor),
-            data_emissao: normalizeDateInput(it.data_emissao) || '',
-            data_vencimento: normalizeDateInput(it.data_vencimento) || '',
-            data_pagamento: normalizeDateInput(it.data_pagamento) || '',
-            anexo_nome: it.anexo_nome || '',
-          })),
+          itens: (fat || []).map((it) => {
+            const valorNormalizado = normalizeDecimalValue(it.valor);
+            return {
+              ...it,
+              valor: toNumberBR(valorNormalizado),
+              data_emissao: normalizeDateInput(it.data_emissao) || '',
+              data_vencimento: normalizeDateInput(it.data_vencimento) || '',
+              data_pagamento: normalizeDateInput(it.data_pagamento) || '',
+              anexo_nome: it.anexo_nome || '',
+            };
+          }),
         }),
         historico: (hist || [])
           .filter((x) => x.data) // mantém registros com ou sem comentário
@@ -568,14 +561,28 @@ const normalizeDateInput = (s) => {
         const pid = Number(criarNovo ? res.processo_id : processoId);
 
         // Atualiza status da requisição se houver seleção nos botões
-        if (selectedStatus && pid) {
+        const requisicaoId = req?.id ?? req?.requisicao_id ?? req?.req_id ?? null;
+        const statusValue = normalizeStatusValue(selectedStatus);
+        if (statusValue && requisicaoId) {
           try {
             const fd = new FormData();
-            fd.append('status', selectedStatus);
+            fd.append('status', statusValue);
             fd.append('comentario', 'Atualizado via Admin Editor');
-            await atualizarRequisicaoCompleta(pid, fd);
+            await atualizarRequisicaoCompleta(requisicaoId, fd);
           } catch {
             /* mantém o save mesmo se status falhar */
+          }
+        }
+
+        if (statusValue === 'Aprovado' && pid) {
+          try {
+            const fd = new FormData();
+            const etapaDestino = colToEtapa.Ativos || proc.etapa || colToEtapa[selectedColuna];
+            if (etapaDestino) fd.append('etapa_atual', etapaDestino);
+            fd.append('comentario', 'Aprovado via Admin Editor');
+            await movimentarProcesso(pid, fd);
+          } catch {
+            /* não bloqueia o save */
           }
         }
 
@@ -601,22 +608,7 @@ const normalizeDateInput = (s) => {
     }
   };
 
-  // Se marcar Aprovado e houver dados de deferimento, direciona Deferidos automaticamente
-  useEffect(() => {
-    try {
-      if (selectedStatus === 'Aprovado') {
-        const hasDef = Object.values(deferimento || {}).some(
-          (v) => v !== '' && v !== null && v !== undefined,
-        );
-        if (hasDef) {
-          setSelectedColuna('Deferidos');
-          setProc((s) => ({ ...s, etapa: 'Pendente', sub_etapa: '' }));
-        }
-      }
-    } catch {
-      /* silencioso */
-    }
-  }, [selectedStatus, deferimento]);
+  // Mantém a coluna escolhida pelo usuário ao aprovar (não força "Deferidos")
 
   if (!isAdmin) return <div className="p-8 text-center">Acesso restrito ao administrador.</div>;
 
@@ -643,13 +635,13 @@ const normalizeDateInput = (s) => {
               </button>
               <button
                 type="button"
-                className="px-4 py-2 border rounded"
+                className="btn-outline"
                 onClick={() => setBulkOpen(true)}
                 disabled={saving}
               >
                 Bulk por UC
               </button>
-              <button type="button" className="px-4 py-2 border rounded" onClick={clearAll} disabled={saving}>
+              <button type="button" className="btn-outline" onClick={clearAll} disabled={saving}>
                 Limpar
               </button>
             </div>
@@ -719,7 +711,7 @@ const normalizeDateInput = (s) => {
             <div>
               <label className="block text-sm mb-1">ID do Processo</label>
               <input
-                className="w-full px-3 py-2 border rounded admin-input"
+                className="w-full input-themed"
                 value={processoId}
                 onChange={(e) => setProcessoId(e.target.value)}
                 placeholder="ex.: 123"
@@ -750,7 +742,7 @@ const normalizeDateInput = (s) => {
             <div>
               <label className="block text-sm mb-1">UC</label>
               <input
-                className="w-full px-3 py-2 border rounded admin-input"
+                className="w-full input-themed"
                 value={ucBusca}
                 onChange={(e) => setUcBusca(e.target.value)}
                 placeholder="ex.: 1234567"
@@ -793,7 +785,7 @@ const normalizeDateInput = (s) => {
               <div>
                 <label className="block text-sm mb-1">Coluna Kanban (atual)</label>
                 <input
-                  className="w-full px-3 py-2 border rounded admin-input bg-[var(--panel)]"
+                  className="w-full input-themed bg-[var(--panel)]"
                   value={selectedColuna || ''}
                   onChange={(e) => {
                     const v = e.target.value;
@@ -809,7 +801,7 @@ const normalizeDateInput = (s) => {
                 <label className="block text-sm mb-1">Etapa</label>
                 <input
                   list="dl-etapas"
-                  className="w-full px-3 py-2 border rounded admin-input"
+                  className="w-full input-themed"
                   value={proc.etapa || ''}
                   onChange={(e) => {
                     const v = e.target.value;
@@ -829,7 +821,7 @@ const normalizeDateInput = (s) => {
                 <input
                   ref={subProcRef}
                   list="dl-sub-proc"
-                  className="w-full px-3 py-2 border rounded admin-input"
+                  className="w-full input-themed"
                   value={proc.sub_etapa || ''}
                   onChange={(e) => setProc((s) => ({ ...s, sub_etapa: e.target.value }))}
                 />
@@ -890,7 +882,7 @@ const normalizeDateInput = (s) => {
                   <select
                     value={it.forma_devolucao}
                     onChange={(e) => updateAt(setFluxo, idx, { ...it, forma_devolucao: e.target.value })}
-                    className="px-2 py-1 border rounded admin-input"
+                    className="input-themed text-xs"
                   >
                     <option>Fatura</option>
                     <option>GD</option>
@@ -901,7 +893,7 @@ const normalizeDateInput = (s) => {
                 <div>
                   <label className="block text-xs mb-1">Valor</label>
                   <input
-                    className="px-2 py-1 border rounded admin-input"
+                    className="input-themed text-xs"
                     value={it.valor}
                     onChange={(e) => updateAt(setFluxo, idx, { ...it, valor: e.target.value })}
                     placeholder="Valor"
@@ -911,7 +903,7 @@ const normalizeDateInput = (s) => {
                 <div>
                   <label className="block text-xs mb-1">Data Devolução</label>
                   <input
-                    className="px-2 py-1 border rounded admin-input"
+                    className="input-themed text-xs"
                     value={it.data_devolucao || ''}
                     onChange={(e) => updateAt(setFluxo, idx, { ...it, data_devolucao: e.target.value })}
                     placeholder="dd/mm/aaaa"
@@ -921,7 +913,7 @@ const normalizeDateInput = (s) => {
                 <div>
                   <label className="block text-xs mb-1">Data Envio Financeiro</label>
                   <input
-                    className="px-2 py-1 border rounded admin-input"
+                    className="input-themed text-xs"
                     value={it.data_envio_financeiro || ''}
                     onChange={(e) =>
                       updateAt(setFluxo, idx, { ...it, data_envio_financeiro: e.target.value })
@@ -931,7 +923,7 @@ const normalizeDateInput = (s) => {
                 </div>
 
                 <div className="flex items-end">
-                  <button className="px-2 py-1 border rounded" onClick={() => removeAt(setFluxo, idx)}>
+                  <button className="btn-outline text-xs" onClick={() => removeAt(setFluxo, idx)}>
                     Remover
                   </button>
                 </div>
@@ -949,7 +941,7 @@ const normalizeDateInput = (s) => {
                 <div>
                   <label className="block text-xs mb-1">N° da NF</label>
                   <input
-                    className="px-2 py-1 border rounded admin-input"
+                    className="input-themed text-xs"
                     value={it.numero_nf}
                     onChange={(e) => updateAt(setFat, idx, { ...it, numero_nf: e.target.value })}
                     placeholder="N° da NF"
@@ -959,7 +951,7 @@ const normalizeDateInput = (s) => {
                 <div>
                   <label className="block text-xs mb-1">Data de Emissão</label>
                   <input
-                    className="px-2 py-1 border rounded admin-input"
+                    className="input-themed text-xs"
                     value={it.data_emissao || ''}
                     onChange={(e) => updateAt(setFat, idx, { ...it, data_emissao: e.target.value })}
                     placeholder="dd/mm/aaaa"
@@ -969,7 +961,7 @@ const normalizeDateInput = (s) => {
                 <div>
                   <label className="block text-xs mb-1">Data de Vencimento</label>
                   <input
-                    className="px-2 py-1 border rounded admin-input"
+                    className="input-themed text-xs"
                     value={it.data_vencimento || ''}
                     onChange={(e) => updateAt(setFat, idx, { ...it, data_vencimento: e.target.value })}
                     placeholder="dd/mm/aaaa"
@@ -979,7 +971,7 @@ const normalizeDateInput = (s) => {
                 <div>
                   <label className="block text-xs mb-1">Data de Pagamento</label>
                   <input
-                    className="px-2 py-1 border rounded admin-input"
+                    className="input-themed text-xs"
                     value={it.data_pagamento || ''}
                     onChange={(e) => updateAt(setFat, idx, { ...it, data_pagamento: e.target.value })}
                     placeholder="dd/mm/aaaa"
@@ -989,7 +981,7 @@ const normalizeDateInput = (s) => {
                 <div>
                   <label className="block text-xs mb-1">Valor</label>
                   <input
-                    className="px-2 py-1 border rounded admin-input"
+                    className="input-themed text-xs"
                     value={it.valor}
                     onChange={(e) => updateAt(setFat, idx, { ...it, valor: e.target.value })}
                     placeholder="Valor"
@@ -1007,7 +999,7 @@ const normalizeDateInput = (s) => {
                     }}
                   />
                   <input
-                    className="mt-1 px-2 py-1 border rounded admin-input"
+                    className="mt-1 input-themed text-xs"
                     value={it.anexo_nome || ''}
                     onChange={(e) => updateAt(setFat, idx, { ...it, anexo_nome: e.target.value })}
                     placeholder="Nome do documento"
@@ -1015,7 +1007,7 @@ const normalizeDateInput = (s) => {
                 </div>
 
                 <div className="flex items-end">
-                  <button className="px-2 py-1 border rounded" onClick={() => removeAt(setFat, idx)}>
+                  <button className="btn-outline text-xs" onClick={() => removeAt(setFat, idx)}>
                     Remover
                   </button>
                 </div>
@@ -1031,14 +1023,14 @@ const normalizeDateInput = (s) => {
             {hist.map((it, idx) => (
               <div key={idx} className="grid grid-cols-1 md:grid-cols-6 gap-2 mb-2">
                 <input
-                  className="px-2 py-1 border rounded admin-input"
+                  className="input-themed text-xs"
                   value={it.data || ''}
                   onChange={(e) => updateAt(setHist, idx, { ...it, data: e.target.value })}
                   placeholder="dd/mm/aaaa HH:mm:ss"
                 />
 
                 <input
-                  className="px-2 py-1 border rounded admin-input"
+                  className="input-themed text-xs"
                   value={it.comentario || ''}
                   onChange={(e) => updateAt(setHist, idx, { ...it, comentario: e.target.value })}
                   placeholder="comentário"
@@ -1046,7 +1038,7 @@ const normalizeDateInput = (s) => {
 
                 <input
                   list="dl-etapas"
-                  className="px-2 py-1 border rounded admin-input"
+                  className="input-themed text-xs"
                   value={it.etapa_anterior || ''}
                   onChange={(e) => {
                     const v = e.target.value;
@@ -1064,7 +1056,7 @@ const normalizeDateInput = (s) => {
 
                 <input
                   list="dl-etapas"
-                  className="px-2 py-1 border rounded admin-input"
+                  className="input-themed text-xs"
                   value={it.etapa_nova || ''}
                   onChange={(e) => {
                     const v = e.target.value;
@@ -1083,7 +1075,7 @@ const normalizeDateInput = (s) => {
                 <input
                   ref={(el) => (subHistRefs.current[idx] = el)}
                   list={`dl-sub-h-${idx}`}
-                  className="px-2 py-1 border rounded admin-input"
+                  className="input-themed text-xs"
                   value={it.sub_etapa || ''}
                   onChange={(e) => updateAt(setHist, idx, { ...it, sub_etapa: e.target.value })}
                   placeholder="Sub-etapa"
@@ -1107,7 +1099,7 @@ const normalizeDateInput = (s) => {
                     }
                   />
                   <button
-                    className="ml-2 px-2 py-1 border rounded"
+                    className="ml-2 btn-outline text-xs"
                     onClick={() => removeHist(setHist, idx, it, setHistDeletes)}
                   >
                     Remover
@@ -1143,14 +1135,14 @@ const normalizeDateInput = (s) => {
 
           {toast.open && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-              <div className="w-full max-w-md bg-[var(--panel)] text-[var(--fg)] border border-[var(--panel-border)] rounded-lg shadow-xl p-4">
+              <div className="w-full max-w-md sap-card text-[var(--fg)] p-5">
                 <h3 className="text-lg font-semibold mb-2">
                   {toast.type === 'error' ? 'Aviso' : toast.type === 'success' ? 'Sucesso' : 'Mensagem'}
                 </h3>
                 <p className="mb-4 text-sm">{toast.text}</p>
                 <div className="text-right">
                   <button
-                    className="px-4 py-2 border rounded"
+                    className="btn-outline"
                     onClick={() => setToast((t) => ({ ...t, open: false }))}
                   >
                     Ok
@@ -1165,26 +1157,26 @@ const normalizeDateInput = (s) => {
       {/* Modal Bulk por UC */}
       {bulkOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-full max-w-4xl bg-[var(--panel)] text-[var(--fg)] border border-[var(--panel-border)] rounded-lg shadow-xl p-4">
-            <div className="flex items-center justify-between mb-3">
+          <div className="w-full max-w-4xl sap-card text-[var(--fg)] p-5">
+            <div className="flex items-center justify-between mb-3 pb-3 border-b panel-border">
               <h2 className="text-lg font-semibold">Bulk por UC</h2>
-              <button onClick={() => setBulkOpen(false)} className="px-2 py-1 border rounded">
+              <button onClick={() => setBulkOpen(false)} className="btn-outline">
                 Fechar
               </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm mb-1">UCs (uma por linha ou separadas por vírgula)</label>
+                <label className="sap-label mb-2">UCs (uma por linha ou separadas por vírgula)</label>
                 <textarea
-                  className="w-full h-32 p-2 border rounded admin-input"
+                  className="w-full h-32 input-themed"
                   value={bulkInput}
                   onChange={(e) => setBulkInput(e.target.value)}
                   placeholder="Ex.: 14105119, 13105155, 14643001"
                 />
                 <div className="mt-2 flex gap-2">
                   <button
-                    className="px-3 py-2 bg-blue-600 text-white rounded"
+                    className="btn-themed"
                     onClick={async () => {
                       try {
                         setBulkLoading(true);
@@ -1238,7 +1230,7 @@ const normalizeDateInput = (s) => {
                     {bulkLoading ? 'Buscando...' : 'Buscar'}
                   </button>
                   <button
-                    className="px-3 py-2 border rounded"
+                    className="btn-outline"
                     onClick={() => {
                       setBulkResolvido([]);
                       setBulkCSimples('');
@@ -1253,9 +1245,9 @@ const normalizeDateInput = (s) => {
               </div>
 
               <div>
-                <label className="block text-sm mb-1">Etapa destino</label>
+                <label className="sap-label mb-2">Etapa destino</label>
                 <select
-                  className="w-full p-2 border rounded admin-input"
+                  className="w-full input-themed"
                   value={bulkEtapa}
                   onChange={(e) => setBulkEtapa(e.target.value)}
                 >
@@ -1269,33 +1261,33 @@ const normalizeDateInput = (s) => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
                   <div>
-                    <label className="block text-xs mb-1">Crédito Simples (número ou CSV)</label>
+                    <label className="sap-label mb-2">Crédito Simples (número ou CSV)</label>
                     <input
-                      className="w-full p-2 border rounded admin-input"
+                      className="w-full input-themed"
                       value={bulkCSimples}
                       onChange={(e) => setBulkCSimples(e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs mb-1">Data Simples (dd/mm/aaaa ou CSV)</label>
+                    <label className="sap-label mb-2">Data Simples (dd/mm/aaaa ou CSV)</label>
                     <input
-                      className="w-full p-2 border rounded admin-input"
+                      className="w-full input-themed"
                       value={bulkDSimples}
                       onChange={(e) => setBulkDSimples(e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs mb-1">Crédito Dobro (número ou CSV)</label>
+                    <label className="sap-label mb-2">Crédito Dobro (número ou CSV)</label>
                     <input
-                      className="w-full p-2 border rounded admin-input"
+                      className="w-full input-themed"
                       value={bulkCDobro}
                       onChange={(e) => setBulkCDobro(e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs mb-1">Data Dobro (dd/mm/aaaa ou CSV)</label>
+                    <label className="sap-label mb-2">Data Dobro (dd/mm/aaaa ou CSV)</label>
                     <input
-                      className="w-full p-2 border rounded admin-input"
+                      className="w-full input-themed"
                       value={bulkDDobro}
                       onChange={(e) => setBulkDDobro(e.target.value)}
                     />
@@ -1321,16 +1313,16 @@ const normalizeDateInput = (s) => {
                           <div className="flex items-center gap-2">
                             <span className="text-amber-600">{r.msg}</span>
                             <select
-                              className="p-1 border rounded admin-input"
-                              value={r.selectedId || ''}
-                              onChange={(e) => {
-            const v = e.target.value ? parseMoneyInput(e.target.value) : null;
-                                setBulkResolvido((prev) =>
-                                  prev.map((x, i) =>
-                                    i === idx ? { ...x, selectedId: v, status: v ? 'ok' : 'dup' } : x,
-                                  ),
-                                );
-                              }}
+                              className="input-themed text-xs p-1"
+                                value={r.selectedId || ''}
+                                onChange={(e) => {
+                                  const v = e.target.value ? Number(e.target.value) : null;
+                                  setBulkResolvido((prev) =>
+                                    prev.map((x, i) =>
+                                      i === idx ? { ...x, selectedId: v, status: v ? 'ok' : 'dup' } : x,
+                                    ),
+                                  );
+                                }}
                             >
                               <option value="">Selecione...</option>
                               {r.ids.map((id) => (
@@ -1350,7 +1342,7 @@ const normalizeDateInput = (s) => {
 
             {/* Aplicar */}
             <div className="mt-4 flex items-center justify-end gap-2">
-              <button className="px-3 py-2 border rounded" onClick={() => setBulkOpen(false)} disabled={bulkApplying}>
+              <button className="btn-outline" onClick={() => setBulkOpen(false)} disabled={bulkApplying}>
                 Cancelar
               </button>
               <button
@@ -1404,8 +1396,14 @@ const normalizeDateInput = (s) => {
                       if (hasDef) {
                         const defObj = {};
                         if (ds) defObj.data_procedencia = ds;
-                        if (cs) defObj.credito_simples = parseMoneyInput(cs);
-                        if (cd) defObj.credito_dobro = parseMoneyInput(cd);
+                        if (cs) {
+                          const normalized = normalizeCreditoValue(cs);
+                          if (normalized) defObj.credito_simples = toNumberBR(normalized);
+                        }
+                        if (cd) {
+                          const normalized = normalizeCreditoValue(cd);
+                          if (normalized) defObj.credito_dobro = toNumberBR(normalized);
+                        }
                         if (dd) defObj.data_credito_dobro = dd;
                         payload.deferimento = defObj;
                       }
@@ -1448,7 +1446,7 @@ function renderInput(label, value, onChange) {
     <div>
       <label className="block text-sm mb-1">{label}</label>
       <input
-        className="w-full px-3 py-2 border rounded admin-input"
+        className="w-full input-themed"
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value)}
       />
@@ -1490,12 +1488,5 @@ function parseBoolLoose(v) {
   return null;
 }
 
-function parseMoneyInput(value) {
-  if (value === undefined || value === null) return null;
-  const str = String(value).trim();
-  if (str === '') return null;
-  // aceita BRL: remove separadores de milhar e converte vírgula decimal
-  const normalized = str.replace(/\./g, '').replace(/\s/g, '').replace(',', '.');
-  const num = Number(normalized);
-  return Number.isFinite(num) ? num : null;
-}
+
+

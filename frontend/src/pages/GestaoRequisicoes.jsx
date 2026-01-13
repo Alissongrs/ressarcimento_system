@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { DndContext, PointerSensor, useSensor, useSensors, useDraggable, useDroppable } from '@dnd-kit/core';
@@ -10,6 +10,15 @@ import { Clock, Check, X, ArrowRight } from 'lucide-react';
 const normalize = (s) => {
   try { return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
   catch { return String(s || '').toLowerCase(); }
+};
+
+const normalizeStatusValue = (value) => {
+  const n = normalize(value);
+  if (n.includes('nova requisicao') || n.includes('pendente')) return 'Nova Requisição';
+  if (n.includes('analise')) return 'Em Análise';
+  if (n.includes('aprov')) return 'Aprovado';
+  if (n.includes('rejeit')) return 'Rejeitado';
+  return value || '';
 };
 
 // Datas em PT-BR -> ISO para backend
@@ -44,6 +53,16 @@ const RequisicaoCard = ({ requisicao, onUpdate }) => {
   const now = useTimer();
   const { user } = useAuth();
   const isAdmin = (user?.tipo_conta || '').toLowerCase() === 'admin';
+  const criador =
+    requisicao?.usuario_nome ||
+    requisicao?.nome_usuario ||
+    requisicao?.criado_por ||
+    requisicao?.created_by ||
+    requisicao?.autor ||
+    requisicao?.solicitante_nome ||
+    requisicao?.solicitante?.nome ||
+    requisicao?.usuario?.nome ||
+    '';
   const calcPrazo = useMemo(() => {
     const dataBaseStr = requisicao.data_mudanca_status;
     const statusNorm = normalize(requisicao.status);
@@ -64,7 +83,7 @@ const RequisicaoCard = ({ requisicao, onUpdate }) => {
 
   const handleAction = (newStatus) => {
     const comentario = prompt(`Adicione um comentário para mover a requisição para "${newStatus}":`);
-    if (comentario != null) onUpdate(requisicao.id, newStatus, comentario || '');
+    if (comentario != null) onUpdate(requisicao, newStatus, comentario || '');
   };
 
   return (
@@ -73,6 +92,7 @@ const RequisicaoCard = ({ requisicao, onUpdate }) => {
         Req. #{requisicao.id} - {requisicao.cliente?.String || 'Cliente não definido'}
       </Link>
       <p className="text-xs opacity-70">UC: {requisicao.uc?.String || 'N/A'}</p>
+      <p className="text-xs opacity-70">Criado por: {criador || 'N/A'}</p>
       <div className={`flex justify-between items-center text-xs ${calcPrazo.isOverdue ? 'text-red-400' : 'opacity-70'}`}>
         <span className="flex items-center gap-1"><Clock size={14} /> Prazo:</span>
         <span className="font-bold">{calcPrazo.text}</span>
@@ -249,10 +269,32 @@ const GestaoRequisicoes = () => {
     })();
   }, []);
 
-  const handleUpdateRequisicao = async (id, newStatus, comentario, extra = {}) => {
-    // Se for "Aprovado" e no veio destino, abre modal para escolher etapa/sub-etapa
-    if (newStatus === 'Aprovado' && !(extra?.etapa || extra?.sub_etapa)) {
+  const handleUpdateRequisicao = async (reqOrId, newStatus, comentario, extra = {}) => {
+    const statusValue = normalizeStatusValue(newStatus);
+    const isApproved = normalize(statusValue).includes('aprov');
+    const req = reqOrId && typeof reqOrId === 'object' ? reqOrId : null;
+    const id = req?.id ?? reqOrId;
+    let processoId =
+      extra?.processoId ??
+      req?.processo_id ??
+      req?.id_processo ??
+      req?.processoId ??
+      req?.ProcessoID ??
+      null;
+    if (!processoId) {
+      const all = Object.values(columns || {}).flat();
+      const found = all.find((r) => String(r?.id) === String(id));
+      processoId =
+        found?.processo_id ??
+        found?.id_processo ??
+        found?.processoId ??
+        found?.ProcessoID ??
+        processoId;
+    }
+    // Se for "Aprovado" e não veio destino, abre modal para escolher etapa/sub-etapa
+    if (isApproved && !(extra?.etapa || extra?.sub_etapa)) {
       setMoveTarget({ id, destino: 'Aprovado' });
+      setDestinoStatus('Aprovado');
       setDestinoEtapa('');
       setDestinoSub('');
       setMoveComment(comentario || '');
@@ -260,27 +302,27 @@ const GestaoRequisicoes = () => {
       return;
     }
     const formData = new FormData();
-    formData.append('status', newStatus);
+    formData.append('status', statusValue);
     formData.append('comentario', comentario || '');
-    if (newStatus === 'Aprovado') {
+    if (isApproved) {
       if (extra?.etapa) formData.append('etapa', extra.etapa);
       if (extra?.sub_etapa) formData.append('sub_etapa', extra.sub_etapa);
     }
     try {
       await atualizarRequisicaoCompleta(id, formData);
-      if (newStatus === 'Aprovado' && (extra?.etapa || extra?.sub_etapa)) {
+      if (isApproved && (extra?.etapa || extra?.sub_etapa) && processoId) {
         setTimeout(async () => {
           try {
             const fd = new FormData();
-            if (extra?.etapa) fd.append('etapa', extra.etapa);
+            if (extra?.etapa) fd.append('etapa_atual', extra.etapa);
             if (extra?.sub_etapa) fd.append('sub_etapa', extra.sub_etapa);
-            fd.append('comentario', 'Destino definido na aprovação');
-            await movimentarProcesso(id, fd);
+            fd.append('comentario', comentario || 'Destino definido na aprovação');
+            await movimentarProcesso(processoId, fd);
           } catch {}
         }, 300);
       }
       carregarDados();
-      showToast(`Requisição #${id} movida para "${newStatus}"`);
+      showToast(`Requisição #${id} movida para "${statusValue}"`);
     } catch (err) {
       alert('Falha ao atualizar o status da requisição.');
       console.error('Erro ao atualizar requisição:', err);
@@ -302,7 +344,7 @@ const GestaoRequisicoes = () => {
     setMoveOpen(true);
   }, [isAdmin, columns]);
 
-  if (isLoading) return <div className="p-8 text-center text-[var(--fg)]">Carregando painel de gestão...</div>;
+  if (isLoading) return <div className="p-8 text-center text-[var(--fg)]"><span className="sap-loading">Carregando painel de gestão...</span></div>;
 
   return (
     <div className="w-full max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -480,6 +522,7 @@ const GestaoRequisicoes = () => {
 };
 
 export default GestaoRequisicoes;
+
 
 
 

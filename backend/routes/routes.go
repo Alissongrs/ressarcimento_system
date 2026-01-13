@@ -1,4 +1,4 @@
-// routes/routes.go
+﻿// routes/routes.go
 package routes
 
 import (
@@ -21,17 +21,17 @@ import (
 func SetupRouter(db *sql.DB) *gin.Engine {
 	r := gin.Default()
 
-	// Não confiar em proxies por padrão
+	// NÃ£o confiar em proxies por padrÃ£o
 	if err := r.SetTrustedProxies(nil); err != nil {
 		println("[routes] aviso: falha ao definir trusted proxies:", err.Error())
 	}
 
-	// Memória p/ multipart (uploads)
+	// MemÃ³ria p/ multipart (uploads)
 	r.MaxMultipartMemory = 512 << 20 // 512MB
 
-	// Migrações básicas
+	// MigraÃ§Ãµes bÃ¡sicas
 	if err := database.RunMigrations(); err != nil {
-		println("[routes] migrações falharam:", err.Error())
+		println("[routes] migraÃ§Ãµes falharam:", err.Error())
 	}
 
 	// VIEW usada no Kanban Fast
@@ -55,13 +55,13 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			"X-Auth-Token", "X-Session-Token", "Accept", "Cache-Control",
 		},
 		AllowCredentials: true,
-		// Expor cabeçalhos úteis ao front (rate limit / auth)
+		// Expor cabeÃ§alhos Ãºteis ao front (rate limit / auth)
 		ExposeHeaders: []string{
 			"Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "WWW-Authenticate",
 		},
 	}
 
-	// Permite override de origens via env CORS_ALLOW_ORIGINS (lista separada por vírgulas)
+	// Permite override de origens via env CORS_ALLOW_ORIGINS (lista separada por vÃ­rgulas)
 	if env := strings.TrimSpace(os.Getenv("CORS_ALLOW_ORIGINS")); env != "" {
 		parts := strings.Split(env, ",")
 		cfg.AllowOrigins = make([]string, 0, len(parts))
@@ -74,7 +74,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	}
 	r.Use(cors.New(cfg))
 
-	// Liberar OPTIONS (preflight) antes de autenticação para evitar 403 em CORS
+	// Liberar OPTIONS (preflight) antes de autenticaÃ§Ã£o para evitar 403 em CORS
 	r.Use(func(c *gin.Context) {
 		if c.Request.Method == http.MethodOptions {
 			c.Status(http.StatusOK)
@@ -87,15 +87,15 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	// Aplica a todas as rotas exceto health checks
 	r.Use(middleware.GlobalRateLimit())
 
-	// ===== COMPRESSÃO GZIP =====
+	// ===== COMPRESSÃƒO GZIP =====
 	// Comprime respostas JSON e HTML automaticamente
 	r.Use(middleware.Gzip())
 
-	// Arquivos estáticos
+	// Arquivos estÃ¡ticos
 	r.Static("/uploads", "./uploads")
 
-	// ===== SSE públicas (aliases DEV) =====
-	// Aceitam ?token= porque EventSource não envia Authorization
+	// ===== SSE pÃºblicas (aliases DEV) =====
+	// Aceitam ?token= porque EventSource nÃ£o envia Authorization
 	r.GET("/apialertasstream", middleware.AuthOrQueryToken(), handlers.StreamAlertas)
 	r.GET("/apievents", middleware.AuthOrQueryToken(), handlers.StreamGlobalEvents)
 
@@ -114,9 +114,9 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	// ============================================================
 	apiV1 := r.Group("/api/v1")
 	{
-		// Health checks (múltiplas versões para diferentes necessidades)
+		// Health checks (mÃºltiplas versÃµes para diferentes necessidades)
 		apiV1.GET("/healthz", handlers.SimpleHealthCheck)           // Simples (ok: true)
-		apiV1.GET("/health", handlers.AdvancedHealthCheck)          // Avançado (verifica dependências)
+		apiV1.GET("/health", handlers.AdvancedHealthCheck)          // AvanÃ§ado (verifica dependÃªncias)
 		apiV1.GET("/health/live", handlers.LivenessCheck)           // Kubernetes liveness
 		apiV1.GET("/health/ready", handlers.ReadinessCheck)         // Kubernetes readiness
 
@@ -125,7 +125,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 		apiV1.GET("/events", middleware.AuthOrQueryToken(), handlers.StreamGlobalEvents)
 		apiV1.GET("/processos/:id/events", middleware.AuthOrQueryToken(), handlers.StreamProcessoEvents)
 
-		// ===== OCR CHAT (fora do grupo autenticado padrão)
+		// ===== OCR CHAT (fora do grupo autenticado padrÃ£o)
 		// Aceita Authorization: Bearer <jwt> OU ?token=<jwt> / cookies
 		apiV1.POST("/ocr/chat",
 			middleware.AuthOrQueryToken(),
@@ -133,7 +133,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			handlers.OCRChat,
 		)
 
-		// ===== Diagnóstico simples (quem sou? / exp / role)
+		// ===== DiagnÃ³stico simples (quem sou? / exp / role)
 		apiV1.GET("/whoami", middleware.AuthOrQueryToken(), func(c *gin.Context) {
 			uid, _ := c.Get("userID")
 			userName, _ := c.Get("userName")
@@ -147,13 +147,13 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			})
 		})
 
-		// Público com rate limiting restrito para autenticação
+		// PÃºblico com rate limiting restrito para autenticaÃ§Ã£o
 		apiV1.POST("/register", middleware.AuthRateLimit(), handlers.Register)
 		apiV1.POST("/login", middleware.AuthRateLimit(), handlers.Login)
 		apiV1.GET("/uc/:numero", handlers.GetUCByNumero)
 		apiV1.GET("/uc/:numero/faturas", handlers.GetFaturasByUC)
 
-		// Alias público para faturas por unidade (Amee_Serving)
+		// Alias pÃºblico para faturas por unidade (Amee_Serving)
 		apiV1.GET("/faturas-uc", handlers.GetFaturas)
 
 		// Faturas Implantadas (por id_uc)
@@ -164,11 +164,11 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 		apiV1.GET("/departamentos", handlers.GetDepartamentos)
 
-		// Rotas que podem alterar alertas por ID sem sessão (casos específicos)
+		// Rotas que podem alterar alertas por ID sem sessÃ£o (casos especÃ­ficos)
 		apiV1.PUT("/alertas/:id", handlers.UpdateAlerta)
 		apiV1.DELETE("/alertas/:id", handlers.DeleteAlerta)
 
-		// ------------------- Autenticado (qualquer usuário) -------------------
+		// ------------------- Autenticado (qualquer usuÃ¡rio) -------------------
 		authRequired := apiV1.Group("/")
 		authRequired.Use(middleware.AuthMiddleware())
 		{
@@ -187,7 +187,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			// Batch meta para cards do Kanban
 			authRequired.GET("/processos/cards-meta", handlers.GetProcessosCardsMeta)
 
-			// UC: opções (unidade/empresa/concessionária)
+			// UC: opÃ§Ãµes (unidade/empresa/concessionÃ¡ria)
 			authRequired.GET("/uc/:numero/opcoes", handlers.GetUCOpcoesByNumero)
 
 			// Resumos de processo (persistidos)
@@ -200,7 +200,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			// Enfileirar em massa (ids, mode=changed|all, limit)
 			authRequired.POST("/resumos/enqueue", handlers.EnqueueResumos)
 
-			// Requisições
+			// RequisiÃ§Ãµes
 			authRequired.POST("/requisicoes", handlers.CreateRequisicaoPersist)
 			authRequired.GET("/requisicoes/departamento", handlers.GetRequisicoesDepartamento)
 
@@ -216,6 +216,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 			// Feedback
 			authRequired.POST("/feedback", handlers.CreateFeedback)
+			authRequired.POST("/ai/resumo/feedback", handlers.CreateResumoFeedback)
 
 			// Irregularidades
 			authRequired.GET("/tipos-irregularidade", handlers.GetTiposIrregularidade)
@@ -229,18 +230,20 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 		gestorRequired := apiV1.Group("/")
 		gestorRequired.Use(middleware.AuthMiddleware(), middleware.GestorMiddleware())
 		{
-			// Requisições (triagem)
+			// RequisiÃ§Ãµes (triagem)
 			gestorRequired.GET("/requisicoes", handlers.GetAllRequisicoes)
 			gestorRequired.GET("/requisicoes/:id", handlers.GetRequisicaoByID)
 			gestorRequired.GET("/requisicoes/:id/faturas", handlers.GetFaturasSelecionadasByRequisicaoID)
 			gestorRequired.POST("/requisicoes/:id/update", handlers.UpdateRequisicaoCompleta)
 			gestorRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
 			gestorRequired.GET("/requisicoes/:id/anexos", handlers.GetAnexosByRequisicaoID)
+			gestorRequired.DELETE("/requisicoes/:id/anexos/:anexoId", handlers.DeleteAnexoByRequisicaoID)
 
 			// Processos (fluxo)
 			gestorRequired.GET("/processos/kanban", handlers.GetProcessosKanban) // legado
 			gestorRequired.GET("/processos/kanban-fast", procHandler.KanbanFast) // fast
 			gestorRequired.GET("/processos/:id/historico", handlers.GetHistoricoMovimentacoes)
+			gestorRequired.POST("/processos/:id/historico/:hid/anexos", handlers.AddHistoricoAnexo)
 			gestorRequired.GET("/processos/:id/deferimento", handlers.GetDeferimentoByProcesso)
 			gestorRequired.POST("/processos/:id/movimentar", handlers.MovimentarProcesso)
 			gestorRequired.POST("/processos/:id/deferimento", handlers.SalvarDeferimentoSimples)
@@ -277,13 +280,15 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.GET("/filtros/concessionarias", handlers.GetConcessionariasParaFiltro)
 			gestorRequired.GET("/filtros/tensao", handlers.GetTensaoParaFiltro)
 
-			// Admin - Planilha (lista e operações em massa)
+			// Admin - Planilha (lista e operaÃ§Ãµes em massa)
 			gestorRequired.GET("/admin/planilha", handlers.AdminPlanilhaList)
+			gestorRequired.GET("/admin/planilha/export", handlers.AdminPlanilhaExport)
+			gestorRequired.POST("/admin/planilha/import", handlers.AdminPlanilhaImport)
 			gestorRequired.POST("/admin/planilha/bulk-mover", handlers.AdminPlanilhaBulkMover)
 			gestorRequired.POST("/admin/planilha/bulk-comentario-replace", handlers.AdminPlanilhaBulkComentarioReplace)
 			gestorRequired.DELETE("/admin/historico/:id", handlers.AdminDeleteHistorico)
 
-			// Admin - Prazos (configurações de prazos por kanban/etapa)
+			// Admin - Prazos (configuraÃ§Ãµes de prazos por kanban/etapa)
 			gestorRequired.GET("/admin/prazos", handlers.GetPrazosConfig)
 			gestorRequired.POST("/admin/prazos", handlers.SavePrazosConfig)
 
@@ -292,9 +297,14 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.POST("/admin/alarmes", handlers.SaveAlarme)
 			gestorRequired.DELETE("/admin/alarmes/:id", handlers.DeleteAlarme)
 
-			// Admin - Editor completo (processo + módulos)
+			// Admin - Editor completo (processo + mÃ³dulos)
 			gestorRequired.POST("/admin/editor/processo", handlers.AdminEditProcesso)
 			gestorRequired.GET("/admin/editor/next-id", handlers.AdminNextProcessID)
+
+			// Snapshot - SincronizaÃ§Ã£o com tabelas originais
+			gestorRequired.GET("/processo-snapshot/:id_processo", handlers.GetProcessoSnapshot)
+			gestorRequired.POST("/processo-snapshot/:id_processo", handlers.UpdateProcessoSnapshot)
+			gestorRequired.POST("/processo-snapshot/:id_processo/sync", handlers.SyncProcessoSnapshot)
 
 			// Dashboard
 			gestorRequired.GET("/dashboard/stats", dashHandler.Stats)
@@ -304,7 +314,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			// IA
 			gestorRequired.POST("/perguntar-ia", handlers.PerguntaIAHandler)
 
-			// Menções
+			// MenÃ§Ãµes
 			gestorRequired.GET("/usuarios/mencoes", handlers.GetUsuariosMencoes)
 
 			// Tags
@@ -342,7 +352,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			handlers.OCRChat,
 		)
 
-		// Diagnóstico legado
+		// DiagnÃ³stico legado
 		api.GET("/whoami", middleware.AuthOrQueryToken(), func(c *gin.Context) {
 			uid, _ := c.Get("userID")
 			userName, _ := c.Get("userName")
@@ -376,6 +386,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			authRequired.GET("/alertas", handlers.GetAlertasByUser)
 			authRequired.POST("/alertas/marcar-lido", handlers.MarcarAlertaComoLido)
 			authRequired.POST("/feedback", handlers.CreateFeedback)
+			authRequired.POST("/ai/resumo/feedback", handlers.CreateResumoFeedback)
 			authRequired.GET("/tipos-irregularidade", handlers.GetTiposIrregularidade)
 			authRequired.GET("/tipos-irregularidade/:tipoID/subtipos", handlers.GetSubtiposIrregularidade)
 
@@ -392,10 +403,12 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.POST("/requisicoes/:id/update", handlers.UpdateRequisicaoCompleta)
 			gestorRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
 			gestorRequired.GET("/requisicoes/:id/anexos", handlers.GetAnexosByRequisicaoID)
+			gestorRequired.DELETE("/requisicoes/:id/anexos/:anexoId", handlers.DeleteAnexoByRequisicaoID)
 
 			gestorRequired.GET("/processos/kanban", handlers.GetProcessosKanban)
 			gestorRequired.GET("/processos/kanban-fast", procHandler.KanbanFast)
 			gestorRequired.GET("/processos/:id/historico", handlers.GetHistoricoMovimentacoes)
+			gestorRequired.POST("/processos/:id/historico/:hid/anexos", handlers.AddHistoricoAnexo)
 			gestorRequired.GET("/processos/:id/deferimento", handlers.GetDeferimentoByProcesso)
 			gestorRequired.POST("/processos/:id/movimentar", handlers.MovimentarProcesso)
 			gestorRequired.POST("/processos/:id/comentar", handlers.ComentarProcesso)

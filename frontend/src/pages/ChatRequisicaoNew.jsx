@@ -890,16 +890,17 @@ export default function ChatRequisicaoNew() {
         const periodosForm = periodos.map((p) => ({ mes: Number(p.mes), ano: p.ano }));
         fd.append('periodosIrregularidade', JSON.stringify(periodosForm));
         fd.append('RessarcimentoEstimado', form.ressarcimentoEstimado);
+        fd.append('comentario', form.descricaoIrregularidade || '');
         // Anexa faturas selecionadas (se houver)
         try {
           const itens = Array.isArray(faturas) ? faturas : [];
           if (itens.length > 0) {
             const payload = itens.map((f) => ({
-              link: String(f?.link || ''),
-              mes_ref: String(f?.mes_ref || ''),
-              dt_vencimento: String(f?.dt_vencimento || ''),
-              valor_total: (f?.valor_total ?? null),
-            })).filter((x) => x.link);
+              link: String(f?.link || f?.link_fatura || f?.Link?.String || f?.Link || ''),
+              mes_ref: String(f?.mes_ref || f?.MesRef?.String || f?.MesRef || ''),
+              dt_vencimento: String(f?.dt_vencimento || f?.DtVenc || f?.Dt_Vencimento || ''),
+              valor_total: (f?.valor_total ?? f?.ValorTotal ?? null),
+            })).filter((x) => x.link || x.mes_ref);
             if (payload.length > 0) fd.append('faturas', JSON.stringify(payload));
           }
         } catch {}
@@ -1235,5 +1236,4 @@ export default function ChatRequisicaoNew() {
     </>
   );
 }
-
 

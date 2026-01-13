@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { getPrazos, savePrazos } from '../services/prazosService';
 import { getAlarmes, saveAlarme, deleteAlarme } from '../services/alarmesService';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -84,7 +84,7 @@ export default function AdminPrazos() {
   };
 
   if (!isAdmin) return <div className="p-8 text-center">Acesso restrito ao administrador.</div>;
-  if (loading) return <div className="p-8 text-center">Carregando...</div>;
+  if (loading) return <div className="p-8 text-center"><span className="sap-loading">Carregando...</span></div>;
 
   return (
     <div className="max-w-5xl mx-auto p-6 bg-background text-foreground min-h-screen">
@@ -265,4 +265,5 @@ function toInt(v) {
   const n = Number(v); return Number.isFinite(n) ? n : null;
 }
 function normIntOrNull(v) { const n = toInt(v); return Number.isFinite(n) ? n : null; }
+
 

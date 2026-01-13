@@ -45,6 +45,7 @@ services:
       start_period: 10s
 
   backend:
+    image: ressarcimento-backend
     build:
       context: ./backend
       dockerfile: Dockerfile

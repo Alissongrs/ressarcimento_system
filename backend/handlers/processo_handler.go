@@ -823,8 +823,9 @@ func MovimentarProcesso(c *gin.Context) {
 				_ = os.MkdirAll("uploads/", os.ModePerm)
 				for _, file := range files {
 					filename := filepath.Base(file.Filename)
-					filePath := filepath.Join("uploads/", fmt.Sprintf("%d-gestor-%d-%s", processoID, time.Now().Unix(), filename))
+						filePath := filepath.Join("uploads/", fmt.Sprintf("%d-gestor-%d-%s", processoID, time.Now().Unix(), filename))
 					if err := c.SaveUploadedFile(file, filePath); err != nil {
+						log.Printf("[MOV-ANEXO] save error (proc=%d file=%s): %v", processoID, filename, err)
 						c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar anexo do gestor"})
 						return
 					}
@@ -832,6 +833,7 @@ func MovimentarProcesso(c *gin.Context) {
 						"INSERT INTO FT_ANEXOS (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por) VALUES (?, ?, ?, 'gestor')",
 						processoID, filename, filePath,
 					); err != nil {
+						log.Printf("[MOV-ANEXO] insert error (proc=%d file=%s): %v", processoID, filename, err)
 						c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar anexo no banco"})
 						return
 					}
@@ -842,6 +844,7 @@ func MovimentarProcesso(c *gin.Context) {
 
 	// Commit (mesmo se não tiver histórico — evita handler sem resposta)
 	if err := tx.Commit(); err != nil {
+    log.Printf("[DEBUG-MOV] commit error (proc=%d): %v", processoID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar a transação"})
 		return
 	}
@@ -905,8 +908,43 @@ func MovimentarProcesso(c *gin.Context) {
 	}(processoID, colID, colNome)
 }
 
+func parseHistIDFromPath(path string) (int64, bool) {
+	clean := filepath.ToSlash(strings.TrimSpace(path))
+	if clean == "" {
+		return 0, false
+	}
+	pos := strings.Index(clean, "hist-")
+	if pos < 0 {
+		return 0, false
+	}
+	start := pos + len("hist-")
+	end := start
+	for end < len(clean) {
+		c := clean[end]
+		if c < '0' || c > '9' {
+			break
+		}
+		end++
+	}
+	if end == start {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(clean[start:end], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
+}
+
 func GetHistoricoMovimentacoes(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id")) // id da requisição/processo
+
+	type AnexoOut struct {
+		Nome       string `json:"nome"`
+		URL        string `json:"url"`
+		DataUpload string `json:"data_upload,omitempty"`
+	}
+
 
 	rows, err := database.DB_App.Query(`
         SELECT
@@ -967,11 +1005,12 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 		RelNova          *bool     `json:"relevancia_nova"`
 		Comentario       *string   `json:"comentario"`
 		JustAtraso       *string   `json:"justificativa_atraso"`
-		DataMov          time.Time `json:"data_movimentacao"`
+		DataMov          *time.Time `json:"data_movimentacao,omitempty"`
 		TipoMov          *string   `json:"tipo_movimentacao,omitempty"`
 		Canais           []string  `json:"canais,omitempty"`
 		CanalComunicacao string    `json:"canal_comunicacao,omitempty"`
 		UsuarioNome      *string   `json:"usuario_nome,omitempty"`
+		Anexos           []AnexoOut `json:"anexos,omitempty"`
 	}
 	var out []Item
 
@@ -981,10 +1020,11 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 		var canaisCSV sql.NullString
 		var usuarioNome sql.NullString
 		var tipoMov sql.NullString
+		var dataMov sql.NullTime
 		if err := rows.Scan(
 			&it.ID, &it.GestorID, &it.StatusAnt, &it.StatusNovo,
 			&it.EtapaAnt, &it.EtapaNova, &it.SubEtapa,
-			&relAnt, &relNov, &it.Comentario, &it.JustAtraso, &it.DataMov,
+			&relAnt, &relNov, &it.Comentario, &it.JustAtraso, &dataMov,
 			&tipoMov, &usuarioNome, &canaisCSV,
 		); err == nil {
 			if relAnt.Valid {
@@ -1002,6 +1042,10 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 			if tipoMov.Valid {
 				v := strings.TrimSpace(tipoMov.String)
 				it.TipoMov = &v
+			}
+			if dataMov.Valid {
+				v := dataMov.Time
+				it.DataMov = &v
 			}
 
 			// status_composto (sempre Etapa - Subetapa)
@@ -1046,6 +1090,94 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 	if out == nil {
 		out = make([]Item, 0)
 	}
+	// Carrega anexos do processo e tenta associar ao historico por proximidade de data
+	type anexoDB struct {
+		Nome   string
+		Caminho string
+	HistID  sql.NullInt64
+		Data   sql.NullTime
+	}
+	anexosDB := make([]anexoDB, 0)
+	if rowsA, errA := database.DB_App.Query(`
+		SELECT nome_arquivo, caminho_arquivo, data_upload
+		  FROM FT_ANEXOS
+		 WHERE id_requisicao = ?
+		 ORDER BY data_upload DESC`, id); errA == nil {
+		defer rowsA.Close()
+		for rowsA.Next() {
+			var a anexoDB
+			if err := rowsA.Scan(&a.Nome, &a.Caminho, &a.Data); err == nil {
+				if id, ok := parseHistIDFromPath(a.Caminho); ok { a.HistID = sql.NullInt64{Int64: id, Valid: true} }
+				anexosDB = append(anexosDB, a)
+			}
+		}
+	} else if rowsA, errA := database.DB_App.Query(`
+		SELECT nome_arquivo, caminho_arquivo, NULL
+		  FROM FT_ANEXOS
+		 WHERE id_requisicao = ?`, id); errA == nil {
+		defer rowsA.Close()
+		for rowsA.Next() {
+			var a anexoDB
+			if err := rowsA.Scan(&a.Nome, &a.Caminho, &a.Data); err == nil {
+				if id, ok := parseHistIDFromPath(a.Caminho); ok { a.HistID = sql.NullInt64{Int64: id, Valid: true} }
+				anexosDB = append(anexosDB, a)
+			}
+		}
+	}
+	if len(anexosDB) > 0 && len(out) > 0 {
+		attached := make([][]AnexoOut, len(out))
+		idIndex := make(map[int64]int, len(out))
+		for i, it := range out {
+			if it.ID > 0 {
+				idIndex[it.ID] = i
+			}
+		}
+		for _, a := range anexosDB {
+			if a.HistID.Valid {
+				if idx, ok := idIndex[a.HistID.Int64]; ok {
+					an := AnexoOut{
+						Nome: a.Nome,
+						URL:  a.Caminho,
+					}
+					if a.Data.Valid {
+						an.DataUpload = a.Data.Time.Format("2006-01-02 15:04:05")
+					}
+					attached[idx] = append(attached[idx], an)
+					continue
+				}
+			}
+			targetIdx := 0
+			if a.Data.Valid {
+				minDiff := time.Duration(1<<63 - 1)
+				for i, it := range out {
+					if it.DataMov == nil {
+						continue
+					}
+					diff := it.DataMov.Sub(a.Data.Time)
+					if diff < 0 {
+						diff = -diff
+					}
+					if diff < minDiff {
+						minDiff = diff
+						targetIdx = i
+					}
+				}
+			}
+			an := AnexoOut{
+				Nome: a.Nome,
+				URL:  a.Caminho,
+			}
+			if a.Data.Valid {
+				an.DataUpload = a.Data.Time.Format("2006-01-02 15:04:05")
+			}
+			attached[targetIdx] = append(attached[targetIdx], an)
+		}
+		for i := range out {
+			if len(attached[i]) > 0 {
+				out[i].Anexos = attached[i]
+			}
+		}
+	}
 
 	// Prepend: criação da requisição como primeiro item do histórico
 	// Busca data_criacao e, opcionalmente, nome do criador
@@ -1077,7 +1209,7 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 			RelNova:          nil,
 			Comentario:       strPtr("Criação da requisição"),
 			JustAtraso:       nil,
-			DataMov:          createdAt,
+			DataMov:          &createdAt,
 			TipoMov:          strPtr("criacao"),
 			Canais:           nil,
 			CanalComunicacao: "",
@@ -1098,6 +1230,90 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, out)
+}
+
+// POST /processos/:id/historico/:hid/anexos
+func AddHistoricoAnexo(c *gin.Context) {
+	processoID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do processo invÇ­lido"})
+		return
+	}
+	histID, err := strconv.Atoi(c.Param("hid"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do histÇürico invÇ­lido"})
+		return
+	}
+
+	var histTime sql.NullTime
+	_ = database.DB_App.QueryRow(
+		"SELECT data_movimentacao FROM FT_HISTORICO_MOVIMENTACOES WHERE id_historico = ? AND id_requisicao = ?",
+		histID, processoID,
+	).Scan(&histTime)
+	if !histTime.Valid {
+		histTime = sql.NullTime{Time: time.Now(), Valid: true}
+	}
+
+	if err := c.Request.ParseMultipartForm(50 << 20); err != nil {
+		log.Printf("[HIST-ANEXO] parse multipart error (proc=%d hist=%d): %v", processoID, histID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Falha ao ler anexos"})
+		return
+	}
+	form := c.Request.MultipartForm
+	if form == nil {
+		log.Printf("[HIST-ANEXO] multipart form vazia (proc=%d hist=%d)", processoID, histID)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Formulario de anexos vazio"})
+		return
+	}
+	files := form.File["anexos"]
+	if len(files) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Nenhum anexo enviado"})
+		return
+	}
+
+	tx, err := database.DB_App.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transaÇõÇœo"})
+		return
+	}
+	defer tx.Rollback()
+
+	_ = os.MkdirAll("uploads/", os.ModePerm)
+	for _, file := range files {
+		filename := filepath.Base(file.Filename)
+		dir := filepath.Join("uploads", fmt.Sprintf("hist-%d", histID))
+		_ = os.MkdirAll(dir, os.ModePerm)
+		filePath := filepath.Join(dir, fmt.Sprintf("%d-gestor-%d-%s", processoID, time.Now().Unix(), filename))
+		if err := c.SaveUploadedFile(file, filePath); err != nil {
+			log.Printf("[HIST-ANEXO] save error (proc=%d hist=%d file=%s): %v", processoID, histID, filename, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar anexo"})
+			return
+		}
+		_, err := tx.Exec(
+			"INSERT INTO FT_ANEXOS (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload) VALUES (?, ?, ?, 'gestor', ?)",
+			processoID, filename, filePath, histTime.Time,
+		)
+		if err != nil {
+			log.Printf("[HIST-ANEXO] insert error (proc=%d hist=%d file=%s): %v", processoID, histID, filename, err)
+			// Fallback: coluna data_upload pode não existir
+			if _, err2 := tx.Exec(
+				"INSERT INTO FT_ANEXOS (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por) VALUES (?, ?, ?, 'gestor')",
+				processoID, filename, filePath,
+			); err2 != nil {
+				log.Printf("[HIST-ANEXO] insert fallback error (proc=%d hist=%d file=%s): %v", processoID, histID, filename, err2)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar anexo"})
+				return
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("[HIST-ANEXO] commit error (proc=%d hist=%d): %v", processoID, histID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar a transaÇõÇœo"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // normalizeAndAppendCanais normaliza (lower+trim), deduplica e ordena os canais;
@@ -1356,7 +1572,8 @@ func salvarFluxoRessarcimentoInterno(processoID int, fluxoJSON string, tx *sql.T
 			dataEnvioFinanceiro = sql.NullString{String: dataEnv, Valid: true}
 		}
 
-		log.Printf("[DEBUG-FLUXO-INSERT] proc=%d idx=%d forma=%s valor=%.2f", processoID, idx, forma, valorDec)
+		valorFloat, _ := valorDec.Float64()
+		log.Printf("[DEBUG-FLUXO-INSERT] proc=%d idx=%d forma=%s valor=%.2f", processoID, idx, forma, valorFloat)
 
 		if _, err := tx.Exec(`
             INSERT INTO FT_FLUXO_RESSARCIMENTO
@@ -1431,7 +1648,8 @@ func salvarFaturamentoInterno(processoID int, faturamentoJSON string, tx *sql.Tx
 		}
 		numeroNF := strings.TrimSpace(fmt.Sprint(item["numero_nf"]))
 
-		log.Printf("[DEBUG-FATURA-INSERT] proc=%d idx=%d nf=%s valor=%.2f", processoID, idx, numeroNF, valorDec)
+		valorFloat, _ := valorDec.Float64()
+		log.Printf("[DEBUG-FATURA-INSERT] proc=%d idx=%d nf=%s valor=%.2f", processoID, idx, numeroNF, valorFloat)
 
 		if _, err := tx.Exec(`
 			INSERT INTO FT_FATURAMENTO
@@ -2089,3 +2307,6 @@ func notifyUnread(userID int64) {
 		},
 	})
 }
+
+
+

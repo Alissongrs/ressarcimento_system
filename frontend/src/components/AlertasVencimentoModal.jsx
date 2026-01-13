@@ -41,14 +41,14 @@ export default function AlertasVencimentoModal({ open, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-full max-w-3xl bg-[var(--panel)] text-[var(--fg)] border border-[var(--panel-border)] rounded-lg shadow-lg p-4 max-h-[85vh] flex flex-col">
-        <div className="flex items-center justify-between mb-2">
+      <div className="w-full max-w-3xl sap-card text-[var(--fg)] p-5 max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between mb-3 pb-3 border-b panel-border">
           <h2 className="text-lg font-semibold inline-flex items-center gap-2"><AlertTriangle size={18} /> Alertas de vencimento</h2>
-          <button onClick={onClose} className="p-2 rounded-md hover:bg-[var(--border)]/20" aria-label="Fechar">
+          <button onClick={onClose} className="btn-outline p-2" aria-label="Fechar">
             <X size={18} />
           </button>
         </div>
-        {loading && <div className="opacity-70">Carregando...</div>}
+        {loading && <div className="opacity-70 sap-loading">Carregando...</div>}
         {err && <div className="text-red-600 mb-3">{err}</div>}
         <div className="flex-1 overflow-auto space-y-4">
           <Section title="Vencem hoje" items={dueToday} emptyMsg="Nenhum alerta para hoje." />
@@ -56,7 +56,7 @@ export default function AlertasVencimentoModal({ open, onClose }) {
           <Section title="Atrasados (1 dia)" items={overdueYesterday} emptyMsg="Nenhum alerta atrasado de ontem." />
         </div>
         <div className="mt-3 flex justify-end">
-          <button onClick={onClose} className="px-3 py-2 rounded-md bg-[var(--accent)] text-[var(--fg)]">OK</button>
+          <button onClick={onClose} className="btn-themed">OK</button>
         </div>
       </div>
     </div>
@@ -65,11 +65,13 @@ export default function AlertasVencimentoModal({ open, onClose }) {
 
 function Section({ title, items, emptyMsg }) {
   return (
-    <div>
-      <div className="text-sm font-semibold mb-2 inline-flex items-center gap-2"><CalendarDays size={14} /> {title}</div>
-      <div className="space-y-2">
+    <div className="sap-section">
+      <div className="sap-section-header text-sm font-semibold inline-flex items-center gap-2">
+        <CalendarDays size={14} /> {title}
+      </div>
+      <div className="p-3 space-y-2">
         {items.map(it => (
-          <div key={it.id_alerta} className="rounded-md border border-[var(--border)] p-3 text-sm">
+          <div key={it.id_alerta} className="sap-card p-3 text-sm">
             <div className="opacity-80 mb-1">{it.mensagem}</div>
             {it.id_processo && (
               <div className="opacity-60">Processo #{it.id_processo}</div>
@@ -83,4 +85,3 @@ function Section({ title, items, emptyMsg }) {
     </div>
   );
 }
-

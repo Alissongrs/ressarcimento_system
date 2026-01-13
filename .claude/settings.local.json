@@ -4,7 +4,28 @@
       "Bash(go build:*)",
       "Bash(tasklist:*)",
       "Bash(findstr:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(tree:*)",
+      "Bash(python -c \"import mysql.connector; conn = mysql.connector.connect\\(host=''177.70.31.41'', port=3306, user=''alisson_rodrigues'', password=''LpQKeDKud3!0giERA0Ig2NSvZ'', database=''Amee_Serving''\\); cursor = conn.cursor\\(\\); cursor.execute\\(\"\"SHOW TABLES LIKE ''%PROCESSO%''\"\"\\); tables = cursor.fetchall\\(\\); print\\(''Tables with PROCESSO:''\\); [print\\(t[0]\\) for t in tables]; cursor.execute\\(\"\"SHOW TABLES LIKE ''%SNAPSHOT%''\"\"\\); tables = cursor.fetchall\\(\\); print\\(''\\\\nTables with SNAPSHOT:''\\); [print\\(t[0]\\) for t in tables]; cursor.close\\(\\); conn.close\\(\\)\")",
+      "Bash(where:*)",
+      "Bash(.venvScriptspython.exe -c \"import mysql.connector; conn = mysql.connector.connect\\(host=''177.70.31.41'', port=3306, user=''alisson_rodrigues'', password=''LpQKeDKud3!0giERA0Ig2NSvZ'', database=''Amee_Serving''\\); cursor = conn.cursor\\(\\); cursor.execute\\(\"\"SHOW TABLES LIKE ''%PROCESSO%''\"\"\\); tables_processo = cursor.fetchall\\(\\); cursor.execute\\(\"\"SHOW TABLES LIKE ''%SNAPSHOT%''\"\"\\); tables_snapshot = cursor.fetchall\\(\\); print\\(''=== TABLES WITH PROCESSO ===''\\); [print\\(t[0]\\) for t in tables_processo]; print\\(''\\\\n=== TABLES WITH SNAPSHOT ===''\\); [print\\(t[0]\\) for t in tables_snapshot]; cursor.close\\(\\); conn.close\\(\\)\")",
+      "Bash(powershell -Command \"cd ''C:\\\\Users\\\\AlissonGonçalvesRodr\\\\OneDrive - AMEnergia\\\\Área de Trabalho\\\\Docker\\\\ressarcimento_system''; .\\\\.venv\\\\Scripts\\\\python.exe -c \"\"import mysql.connector; conn = mysql.connector.connect\\(host=''177.70.31.41'', port=3306, user=''alisson_rodrigues'', password=''LpQKeDKud3!0giERA0Ig2NSvZ'', database=''Amee_Serving''\\); cursor = conn.cursor\\(\\); cursor.execute\\(''SHOW TABLES LIKE \\\\\"\"%%PROCESSO%%\\\\\"\"''\\); tables_processo = cursor.fetchall\\(\\); cursor.execute\\(''SHOW TABLES LIKE \\\\\"\"%%SNAPSHOT%%\\\\\"\"''\\); tables_snapshot = cursor.fetchall\\(\\); print\\(''=== TABLES WITH PROCESSO ===''\\); [print\\(t[0]\\) for t in tables_processo]; print\\(''\\\\n=== TABLES WITH SNAPSHOT ===''\\); [print\\(t[0]\\) for t in tables_snapshot]; cursor.close\\(\\); conn.close\\(\\)\"\"\")",
+      "Bash(python -m pip:*)",
+      "Bash(py query_db.py:*)",
+      "Bash(python3:*)",
+      "Bash(chcp 6500)",
+      "Bash(npm run build:*)",
+      "Bash(npm install:*)",
+      "Bash(cd:*)",
+      "Bash(go vet:*)",
+      "Bash(cat:*)",
+      "Bash(git checkout:*)",
+      "Bash(grep:*)",
+      "Bash(powershell -Command \"Get-Process | Where-Object {$_ProcessName -match ''backend|go''} | Select-Object ProcessName, Id\")",
+      "Bash(netstat:*)",
+      "Bash(cmd /c taskkill /PID 29860 /F)",
+      "Bash(pip install:*)",
+      "Bash(ls:*)"
     ]
   }
 }

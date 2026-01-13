@@ -1,8 +1,9 @@
-// handlers/deferimento_handler.go
+﻿// handlers/deferimento_handler.go
 package handlers
 
 //
-// ATENÇÀO: Este ficheiro está obsoleto e causa erros de compilação.
+//
+// ATENÇÃO: Este ficheiro está obsoleto e causa erros de compilação.
 // A sua lógica foi movida para o ficheiro 'processo_handler.go'.
 // Comentei todo o código para resolver o erro. Recomendo que apague este ficheiro do seu projeto.
 //
@@ -57,3 +58,5 @@ package handlers
 		c.JSON(http.StatusOK, gin.H{"message": "Deferimento salvo com sucesso!"})
 	}
 */
+
+

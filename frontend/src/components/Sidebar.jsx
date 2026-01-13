@@ -120,7 +120,7 @@ export default function Sidebar() {
 
   return (
     <nav
-      className="w-64 sidebar-collapsible h-full flex flex-col shadow-soft border-r rounded-tr-3xl rounded-br-3xl overflow-hidden"
+      className="w-64 sidebar-collapsible h-full flex flex-col shadow-soft border-r rounded-tr-3xl rounded-br-3xl overflow-hidden pt-[60px]"
       style={{
         background: 'var(--sidebar-background, var(--menu-bg))',
         color: 'var(--menu-fg, var(--fg))',

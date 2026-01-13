@@ -1,4 +1,4 @@
-// src/pages/Requisicoes.jsx
+﻿// src/pages/Requisicoes.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
@@ -581,7 +581,7 @@ export default function Requisicoes() {
 
         <div className="space-y-4">
           {loading && (
-            <div className="text-sm opacity-70">Carregando...</div>
+            <div className="text-sm opacity-70 sap-loading">Carregando...</div>
           )}
 
           {!loading && err && (
@@ -653,7 +653,7 @@ export default function Requisicoes() {
 
             <div className="p-4 max-h-[90vh] overflow-auto space-y-2">
               {modal.loading && (
-                <div className="opacity-70">Carregando...</div>
+                <div className="opacity-70 sap-loading">Carregando...</div>
               )}
 
               {!modal.loading && modal.type === 'anexos' && (
@@ -799,3 +799,4 @@ export default function Requisicoes() {
     </div>
   );
 }
+

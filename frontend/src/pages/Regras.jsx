@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Save, Trash2, Wand2 } from 'lucide-react';
 import { getRules, createRule, updateRule, deleteRule, interpretRule } from '@services/rulesService.js';
 
@@ -74,7 +74,7 @@ export default function Regras() {
           <h2 className="font-semibold">Regras de Auditoria</h2>
           <button className="px-3 py-2 rounded bg-[var(--accent)] text-[var(--fg)]" onClick={startNew}><Plus size={16} /> Nova</button>
         </div>
-        {loading ? (<div>Carregando…</div>) : err ? (<div className="text-danger">{err}</div>) : (
+        {loading ? (<div><span className="sap-loading">Carregando…</span></div>) : err ? (<div className="text-danger">{err}</div>) : (
           <table className="w-full text-sm">
             <thead className="text-left opacity-70">
               <tr>
@@ -153,4 +153,5 @@ export default function Regras() {
     </div>
   );
 }
+
 

@@ -58,7 +58,7 @@ const CaixaDeEmail = () => {
 
             {/* Lista de E-mails */}
             <div className="w-96 border-r border-border overflow-y-auto">
-                {isLoading ? <p className="p-4 text-center opacity-70">Carregando e-mails...</p> : emailsFiltrados.map(email => (
+                {isLoading ? <p className="p-4 text-center opacity-70 sap-loading">Carregando e-mails...</p> : emailsFiltrados.map(email => (
                     <div key={email.id_email} onClick={() => setEmailSelecionado(email)} className={`p-4 border-b border-border cursor-pointer transition-smooth ${emailSelecionado?.id_email === email.id_email ? 'bg-[var(--panel)]' : 'hover:bg-[var(--panel)]/60'}`}>
                         <p className="font-bold truncate">{caixaAtual === 'entrada' ? email.de_email : email.para_email}</p>
                         <p className="font-semibold text-sm truncate opacity-90">{email.Assunto?.String || '(Sem Assunto)'}</p>
@@ -94,4 +94,5 @@ const CaixaDeEmail = () => {
 };
 
 export default CaixaDeEmail;
+
 

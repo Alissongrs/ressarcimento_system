@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   getDashboardDeferidos,
   getDashboardStats,
@@ -237,7 +237,7 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-[var(--fg)]">
-        Carregando painel...
+        <span className="sap-loading">Carregando painel...</span>
       </div>
     );
   }
@@ -498,7 +498,7 @@ export default function Dashboard() {
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-700">Requisições por status</h2>
-          {statsLoading && <span className="text-xs text-slate-500">Carregando...</span>}
+          {statsLoading && <span className="text-xs text-slate-500 sap-loading">Carregando...</span>}
         </div>
         {statsError ? (
           <div className="text-sm text-red-500">{statsError}</div>
@@ -530,7 +530,7 @@ export default function Dashboard() {
         </div>
         {kanbanLoading ? (
           <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-6 text-sm text-center text-slate-500">
-            Carregando colunas do Kanban...
+            <span className="sap-loading">Carregando colunas do Kanban...</span>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -794,3 +794,4 @@ export default function Dashboard() {
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-// src/components/ProcessoCard.jsx
+﻿// src/components/ProcessoCard.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { Star, Clock, User, PauseCircle, PlayCircle, Bell, AlertTriangle, CalendarDays, Paperclip, FileText, X, Link as LinkIcon, BadgeDollarSign } from 'lucide-react';
 import {
@@ -23,7 +23,7 @@ const extrair = (v) => {
 
 const pick = (obj, keys = []) => keys.map((k) => obj?.[k]).find((v) => v !== undefined && v !== null);
 
-/** Parser numÀ©rico tolerante: aceita 1.234,56 e 1234.56 */
+/** Parser numérico tolerante: aceita 1.234,56 e 1234.56 */
 const toNum = (v) => {
   if (v === null || v === undefined) return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
@@ -70,7 +70,7 @@ const toDate = (v) => {
   if (!v && v !== 0) return null;
   if (v instanceof Date) return isNaN(v) ? null : v;
   if (typeof v === 'object' && 'Time' in v) {
-    // NullTime no back â†’ {Time: "...", Valid: true}
+    // NullTime no back: {Time: "...", Valid: true}
     try { const d = new Date(v.Time ?? v); return isNaN(d) ? null : d; } catch { return null; }
   }
   if (typeof v === 'object' && 'String' in v) {
@@ -104,7 +104,7 @@ export default function ProcessoCard({ processo, meta, onClick }) {
   const [suspLocal, setSuspLocal] = useState(suspensoInicial);
   useEffect(() => { setSuspLocal(suspensoInicial); }, [suspensoInicial]);
 
-  // Re-render “tempo relativo†
+  //   // Re-render do tempo relativo
   const [nowTick, setNowTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setNowTick((t) => t + 1), 30000);
@@ -188,7 +188,7 @@ export default function ProcessoCard({ processo, meta, onClick }) {
 
   const alertaVencido = useMemo(() => { if (typeof DISABLE_ALERTS !== 'undefined' && DISABLE_ALERTS) return false; if (!dataAlerta) return false; const hoje = new Date(); const d = new Date(dataAlerta.getFullYear(), dataAlerta.getMonth(), dataAlerta.getDate(), 23, 59, 59); return d.getTime() < hoje.getTime(); }, [dataAlerta, nowTick]);
 
-  // Àšltima movimentaÀ§ão (histÀ³rico)
+  // Última movimentação (histórico)
   const [ultimaMovLocal, setUltimaMovLocal] = useState(null);
   const [carregandoHist, setCarregandoHist] = useState(false);
   const [erroHist, setErroHist] = useState('');
@@ -377,13 +377,13 @@ const ultimaDataISO = useMemo(() => {
           });
         }
       } catch (e) {
-        setErroHist('Erro ao carregar histÀ³rico');
+        setErroHist('Erro ao carregar histórico');
       } finally { setCarregandoHist(false); }
     })();
     return () => { cancel = true; };
   }, [pid, ultimaMovLocal]);
 
-  // AÀ§Àµes
+  // Ações
   const toggleFavorito = async (e) => {
     e.stopPropagation();
     if (!pid) return;
@@ -393,7 +393,7 @@ const ultimaDataISO = useMemo(() => {
       await movimentarProcesso(pid, fd);
     } catch {
       setFav(!novo);
-      alert('Não foi possÀ­vel atualizar o favorito.');
+      alert('Não foi possível atualizar o favorito.');
     }
   };
 
@@ -431,7 +431,7 @@ const ultimaDataISO = useMemo(() => {
     ultimaMovLocal?.comentario || ''
   ].filter(Boolean).join(' • ');
 
-  // Classes de borda: prioridade (favorito > suspenso > default) — alertas desativados
+  // Classes de borda: prioridade (favorito > suspenso > default) – alertas desativados
   const borderClasses = (() => {
     // Alertas desativados: ignora contornos de vencido
     if (fav) return 'border-2 border-yellow-400 ring-1 ring-yellow-400/30';
@@ -462,7 +462,7 @@ const ultimaDataISO = useMemo(() => {
         </div>
       )}
 
-      {/* FITA: Vencido — desativada */}
+      {/* FITA: Vencido – desativada */}
       {false && alertaVencido && (
         <div className="absolute -left-2 -top-2 flex items-center gap-1 rounded-md bg-red-600 text-white text-[10px] px-2 py-0.5 shadow">
           <AlertTriangle size={12} /> Vencido
@@ -614,13 +614,13 @@ const ultimaDataISO = useMemo(() => {
 
       {/* Ações */}
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#0B5ED7] text-white hover:brightness-95 text-sm" onClick={(e)=>{e.stopPropagation(); handleOpen();}}>
+        <button className="btn-themed text-sm inline-flex items-center gap-2" onClick={(e)=>{e.stopPropagation(); handleOpen();}}>
           Ver Detalhes
         </button>
-        <button onClick={(e)=>{e.stopPropagation(); openAnexos();}} className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--border)] text-sm">
+        <button onClick={(e)=>{e.stopPropagation(); openAnexos();}} className="btn-outline text-sm inline-flex items-center gap-2">
           <Paperclip size={16} /> Anexos
         </button>
-        <button onClick={(e)=>{e.stopPropagation(); openFaturas();}} className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--border)] text-sm">
+        <button onClick={(e)=>{e.stopPropagation(); openFaturas();}} className="btn-outline text-sm inline-flex items-center gap-2">
           <BadgeDollarSign size={16} /> Faturas
         </button>
       </div>
@@ -628,18 +628,18 @@ const ultimaDataISO = useMemo(() => {
       {/* Modal */}
       {modal.open && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onMouseDown={(e)=>e.stopPropagation()}>
-          <div className="w-full max-w-2xl rounded-xl border border-[var(--border)] bg-[var(--panel)] text-[var(--fg)] shadow-elevated">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+          <div className="w-full max-w-2xl sap-card text-[var(--fg)]">
+            <div className="flex items-center justify-between px-4 py-3 border-b panel-border">
               <h3 className="text-lg font-bold">{modal.title}</h3>
-              <button onClick={closeModal} className="p-1 rounded hover:bg-[var(--border)]/20"><X size={18} /></button>
+              <button onClick={closeModal} className="btn-outline p-2"><X size={18} /></button>
             </div>
             <div className="p-4 max-h-[65vh] overflow-auto">
-              {modal.loading && <div className="opacity-70">Carregando...</div>}
+              {modal.loading && <div className="opacity-70 sap-loading">Carregando...</div>}
               {!modal.loading && modal.type === 'anexos' && (
                 <div className="space-y-2">
                   {modal.rows.length === 0 && <div className="opacity-70">Sem anexos.</div>}
                   {modal.rows.map((a) => (
-                    <div key={a.id || a.ID || a.nome_arquivo} className="flex items-center justify-between gap-3 rounded border border-[var(--panel-border)] px-3 py-2">
+                    <div key={a.id || a.ID || a.nome_arquivo} className="flex items-center justify-between gap-3 sap-card px-3 py-2">
                       <div className="flex items-center gap-2 shrink-0 w-[72px] justify-end">
                         <Paperclip size={16} />
                         <div>
@@ -660,7 +660,7 @@ const ultimaDataISO = useMemo(() => {
                 <div className="space-y-2">
                   {modal.rows.length === 0 && <div className="opacity-70">Sem faturas.</div>}
                   {modal.rows.map((f, i) => (
-                    <div key={i} className="flex items-center justify-between gap-3 rounded border border-[var(--panel-border)] px-3 py-2">
+                    <div key={i} className="flex items-center justify-between gap-3 sap-card px-3 py-2">
                       <div className="flex items-center gap-3">
                         <FileText size={16} />
                         <div>
@@ -678,8 +678,8 @@ const ultimaDataISO = useMemo(() => {
                 </div>
               )}
             </div>
-            <div className="px-4 py-3 border-t border-[var(--border)] text-right">
-              <button onClick={closeModal} className="px-3 py-2 rounded border border-[var(--border)]">Fechar</button>
+            <div className="px-4 py-3 border-t panel-border text-right">
+              <button onClick={closeModal} className="btn-outline">Fechar</button>
             </div>
           </div>
         </div>
@@ -687,6 +687,12 @@ const ultimaDataISO = useMemo(() => {
     </div>
   );
 }
+
+
+
+
+
+
 
 
 

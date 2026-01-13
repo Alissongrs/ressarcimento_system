@@ -1,4 +1,4 @@
-// src/pages/MinhasRequisicoes.jsx
+﻿// src/pages/MinhasRequisicoes.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useNavigate } from 'react-router-dom';
@@ -134,7 +134,7 @@ export default function MinhasRequisicoes() {
 
   const itens = useMemo(() => (Array.isArray(list) ? list : []), [list]);
 
-  if (loading) return <div className="p-6">Carregando...</div>;
+  if (loading) return <div className="p-6"><span className="sap-loading">Carregando...</span></div>;
   if (error) return <div className="p-6 text-red-400">{error}</div>;
 
   return (
@@ -439,3 +439,4 @@ export default function MinhasRequisicoes() {
     </>
   );
 }
+

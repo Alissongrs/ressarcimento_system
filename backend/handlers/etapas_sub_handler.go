@@ -8,8 +8,8 @@ import (
 	"ressarcimento-backend/database"
 )
 
-// GetEtapaSubCombinacoes retorna combinaÃ§Ãµes vÃ¡lidas etapa -> sub_etapas.
-// PreferÃªncia: DM_ETAPA_SUBETAPAS_VALIDAS; fallback: pares observados em FT_PROCESSOS.
+// GetEtapaSubCombinacoes retorna combinações válidas etapa -> sub_etapas.
+// Preferência: DM_ETAPA_SUBETAPAS_VALIDAS; fallback: pares observados em FT_PROCESSOS.
 func GetEtapaSubCombinacoes(c *gin.Context) {
 	db := database.DB_App
 	if db == nil {
@@ -17,7 +17,7 @@ func GetEtapaSubCombinacoes(c *gin.Context) {
 		return
 	}
 
-	// Tenta via tabelas de domÃ­nio (se existirem)
+	// Tenta via tabelas de domínio (se existirem)
 	rows, err := db.Query(`
         SELECT e.etapa AS nome_etapa, s.sub_etapa AS nome_subetapa
           FROM DM_ETAPA_SUBETAPAS_VALIDAS v
@@ -64,7 +64,7 @@ func GetEtapaSubCombinacoes(c *gin.Context) {
 		out[p.etapa] = append(out[p.etapa], p.sub)
 	}
 
-	// Regras de negÃ³cio: garantir subetapas do Fluxo de Ressarcimento
+	// Regras de negócio: garantir subetapas do Fluxo de Ressarcimento
 	ensure := func(m map[string][]string, etapa string, subs ...string) {
 		cur := m[etapa]
 		exists := func(s string) bool {

@@ -17,14 +17,9 @@ export default function ThemeSwitcher({ inline = false }) {
 
   const Menu = () => (
     <div className="space-y-2">
-      <Option name="Escuro A" value="flowtory-dark" sample="linear-gradient(45deg,#0f1624,#6ea8ff)" />
-      <Option name="Escuro B" value="dark" sample="#111827" />
-      <Option name="Claro (Padrão)" value="light" sample="#f3f4f6" />
-      <Option name="Claro A" value="light-1" sample="linear-gradient(45deg,#eef2ff,#6366f1)" />
-      <Option name="Claro B" value="light-2" sample="linear-gradient(45deg,#ecfdf5,#14b8a6)" />
-      <Option name="Claro C" value="light-3" sample="linear-gradient(45deg,#f0f9ff,#0ea5e9)" />
-      <Option name="Claro D" value="light-4" sample="linear-gradient(45deg,#f3f4f6,#9ca3af)" />
-      <Option name="Rosa (Claro)" value="pink" sample="#ec4899" />
+      <Option name="Padrão (Claro D)" value="light-4" sample="linear-gradient(45deg,#ffffff,#e5e7eb)" />
+      <Option name="Rosa" value="pink" sample="linear-gradient(45deg,#ffffff,#fbcfe8)" />
+      <Option name="Azul" value="azul" sample="linear-gradient(45deg,#ffffff,#bfdbfe)" />
     </div>
   );
 

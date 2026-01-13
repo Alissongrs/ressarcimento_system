@@ -8,6 +8,27 @@ import axios from 'axios';
 // Manter baseURL vazio evita URLs quebradas como "http:localhost:5173apiv1..."
 const api = axios.create({ baseURL: '' });
 
+let savingCount = 0;
+const isWriteMethod = (method) => {
+  const m = String(method || 'get').toLowerCase();
+  return !['get', 'head', 'options'].includes(m);
+};
+const getSavingCount = () => {
+  if (typeof window !== 'undefined' && typeof window.__appSavingCount === 'number') {
+    return window.__appSavingCount;
+  }
+  return savingCount;
+};
+const setSavingCount = (next) => {
+  savingCount = next;
+  if (typeof window !== 'undefined') window.__appSavingCount = next;
+  notifySaving();
+};
+const notifySaving = () => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('app-saving', { detail: { count: getSavingCount() } }));
+};
+
 if (import.meta?.env?.DEV) {
   // eslint-disable-next-line no-console
   console.info('[apiClient] baseURL =', api.defaults.baseURL);
@@ -37,9 +58,27 @@ api.interceptors.request.use(
       }
       config.url = u;
     }
+    if (isWriteMethod(config.method)) {
+      setSavingCount(getSavingCount() + 1);
+    }
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+api.interceptors.response.use(
+  (resp) => {
+    if (isWriteMethod(resp?.config?.method)) {
+      setSavingCount(Math.max(0, getSavingCount() - 1));
+    }
+    return resp;
+  },
+  (error) => {
+    if (isWriteMethod(error?.config?.method)) {
+      setSavingCount(Math.max(0, getSavingCount() - 1));
+    }
+    return Promise.reject(error);
+  }
 );
 
 export default api;

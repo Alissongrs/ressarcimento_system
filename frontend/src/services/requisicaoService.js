@@ -1,6 +1,7 @@
 // src/services/requisicaoService.js (cleaned)
 
 import api from './apiClient';
+import { normalizeCreditoValue } from '../utils/brl';
 
 // ======================= Auth & usuario =======================
 export const login = (email, password) => api.post('/login', { email, password });
@@ -155,13 +156,13 @@ export const getDeferimentoByProcesso = async (id) => {
       return '';
     };
     const src = Array.isArray(data) ? data[0] : data.deferimento || data;
-    const cs = unwrapNumber(src.credito_simples ?? src.creditoSimples ?? src.CreditoSimples);
-    const cd = unwrapNumber(src.credito_dobro ?? src.creditoDobro ?? src.CreditoDobro);
+    const csRaw = unwrapNumber(src.credito_simples ?? src.creditoSimples ?? src.CreditoSimples);
+    const cdRaw = unwrapNumber(src.credito_dobro ?? src.creditoDobro ?? src.CreditoDobro);
     const out = {
       data_procedencia:
         unwrapDate(src.data_procedencia || src.dataProcedencia || src.DataProcedencia) || '',
-      credito_simples: cs ?? '',
-      credito_dobro: cd ?? '',
+      credito_simples: normalizeCreditoValue(csRaw ?? ''),
+      credito_dobro: normalizeCreditoValue(cdRaw ?? ''),
       data_credito_dobro:
         unwrapDate(src.data_credito_dobro || src.dataCreditoDobro || src.DataCreditoDobro) || '',
       status_analise: src.status_analise || src.statusAnalise || src.status || '',
@@ -174,9 +175,46 @@ export const getDeferimentoByProcesso = async (id) => {
 
 // Histórico do processo/requisição
 export const getHistoricoById = async (id) => {
-  const { data } = await api.get(`/processos/${id}/historico`);
-  if (!Array.isArray(data)) return [];
-  return data.map((h) => {
+  const [reqResp, procResp] = await Promise.allSettled([
+    api.get(`/requisicoes/${id}/historico`),
+    api.get(`/processos/${id}/historico`),
+  ]);
+  const reqList =
+    reqResp.status === 'fulfilled' && Array.isArray(reqResp.value?.data)
+      ? reqResp.value.data
+      : [];
+  const procList =
+    procResp.status === 'fulfilled' && Array.isArray(procResp.value?.data)
+      ? procResp.value.data
+      : [];
+
+  const getKey = (h) =>
+    h?.id_historico ?? h?.historico_id ?? h?.hist_id ?? h?.id ?? h?.ID ?? null;
+
+  const procMap = new Map();
+  procList.forEach((h) => {
+    const key = getKey(h);
+    if (key != null) procMap.set(String(key), h);
+  });
+
+  const merged = reqList.map((h) => {
+    const key = getKey(h);
+    const extras = key != null ? procMap.get(String(key)) : null;
+    const combined = { ...(extras || {}), ...(h || {}) };
+    if (extras?.anexos) combined.anexos = extras.anexos;
+    if (extras?.canais) combined.canais = extras.canais;
+    if (extras?.canal_comunicacao) combined.canal_comunicacao = extras.canal_comunicacao;
+    return combined;
+  });
+
+  procList.forEach((h) => {
+    const key = getKey(h);
+    if (key == null) return;
+    const exists = merged.some((m) => String(getKey(m)) === String(key));
+    if (!exists) merged.push(h);
+  });
+
+  return merged.map((h) => {
     const arr = Array.isArray(h.canais)
       ? h.canais
       : h.canal_comunicacao

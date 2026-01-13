@@ -1,6 +1,7 @@
 // src/pages/HomeGestorAdmin.jsx
 
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import Toast from '../components/Toast.jsx';
 import { Clock } from 'lucide-react';
@@ -9,6 +10,7 @@ import { getProcessosComPrazo } from '../services/requisicaoService';
 export default function HomeGestorAdmin() {
   const { user } = useAuth();
   const isAdmin = String(user?.tipo_conta || '').toLowerCase() === 'admin';
+  const navigate = useNavigate();
 
   const [prazos, setPrazos] = React.useState({ grupos: {}, rows: [], count: 0 });
   const [errPrazos, setErrPrazos] = React.useState('');
@@ -119,14 +121,13 @@ export default function HomeGestorAdmin() {
                               : 'border-[var(--border)]'
                           }`}
                         >
-                          <a
-                            href={`/processos/${r.id_processo}`}
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/admin/planilha?pid=${r.id_processo}`)}
                             className="font-semibold text-[var(--accent)] underline"
-                            target="_self"
-                            rel="noreferrer"
                           >
                             Proc #{r.id_processo}
-                          </a>
+                          </button>
                           <span className="opacity-80">
                             Sub-etapa:{' '}
                             {r.sub_etapa || 'Aguardando retorno'}

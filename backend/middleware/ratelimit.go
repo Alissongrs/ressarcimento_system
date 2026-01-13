@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -85,7 +86,7 @@ var getenv = os.Getenv
 // GlobalRateLimit aplica rate limiting global a todas as rotas (exceto health checks).
 // Padrão: 100 req/min por IP. Ajuste por env GLOBAL_RATE_LIMIT_PER_MIN.
 func GlobalRateLimit() gin.HandlerFunc {
-	limit := getEnvInt("GLOBAL_RATE_LIMIT_PER_MIN", 100)
+	limit := getEnvInt("GLOBAL_RATE_LIMIT_PER_MIN", 1000)
 	window := time.Minute
 	rl := newRateLimiter(limit, window)
 
@@ -95,11 +96,29 @@ func GlobalRateLimit() gin.HandlerFunc {
 		"/api/healthz":    true,
 		"/metrics":        true,
 		"/ping":           true,
+		"/api/v1/login":   true,
+		"/api/v1/register": true,
+		"/api/login":      true,
+		"/api/register":   true,
 	}
 
 	return func(c *gin.Context) {
-		// Pula rate limit para rotas de health check
-		if excludedPaths[c.Request.URL.Path] {
+		path := c.Request.URL.Path
+		// Pula rate limit para rotas de health check e auth
+		if excludedPaths[path] {
+			c.Next()
+			return
+		}
+		// Pula rate limit para rotas de alto volume de leitura
+		if strings.HasPrefix(path, "/api/v1/admin/planilha") || strings.HasPrefix(path, "/api/admin/planilha") {
+			c.Next()
+			return
+		}
+		if (strings.HasPrefix(path, "/api/v1/processos/") || strings.HasPrefix(path, "/api/processos/")) && strings.HasSuffix(path, "/historico") {
+			c.Next()
+			return
+		}
+		if (strings.HasPrefix(path, "/api/v1/requisicoes/") || strings.HasPrefix(path, "/api/requisicoes/")) && strings.HasSuffix(path, "/historico") {
 			c.Next()
 			return
 		}

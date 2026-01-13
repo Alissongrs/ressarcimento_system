@@ -1,4 +1,4 @@
-// src/pages/DetalhesProcesso.jsx - PÁGINA COMPLETA PARA DETALHES DO PROCESSO
+﻿// src/pages/DetalhesProcesso.jsx - PÁGINA COMPLETA PARA DETALHES DO PROCESSO
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -965,7 +965,7 @@ const DetalhesProcesso = () => {
       <div className="flex items-center justify-center h-screen flex-col">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--accent)]" />
         <p className="mt-4 text-[var(--fg)]">
-          Carregando processo...
+          <span className="sap-loading">Carregando processo...</span>
         </p>
       </div>
     );
@@ -1678,3 +1678,4 @@ const DetalhesProcesso = () => {
 };
 
 export default DetalhesProcesso;
+

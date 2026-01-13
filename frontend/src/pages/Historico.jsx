@@ -1,4 +1,4 @@
-// src/pages/Historico.jsx
+﻿// src/pages/Historico.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCcw, GitCompare, User, Clock } from 'lucide-react';
@@ -92,7 +92,7 @@ export default function Historico() {
         e?.response?.data?.detail ||
         e?.response?.data?.error ||
         e?.message ||
-        'Falha ao carregar movimentações.';
+        'Falha ao carregar movimentacoes.';
       setErr(String(msg));
       setItems([]);
     } finally {
@@ -368,7 +368,7 @@ export default function Historico() {
       </div>
 
       {/* Estado */}
-      {loading && <div className="opacity-70">Carregando...</div>}
+      {loading && <div className="opacity-70 sap-loading">Carregando...</div>}
       {err && <div className="text-red-500 mb-3 break-words">{err}</div>}
 
       {/* Lista */}
@@ -475,3 +475,4 @@ export default function Historico() {
     </div>
   );
 }
+

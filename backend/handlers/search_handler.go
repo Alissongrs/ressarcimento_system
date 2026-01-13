@@ -44,29 +44,45 @@ func SearchGlobal(c *gin.Context) {
 	}
 
 	like := "%" + strings.ToLower(q) + "%"
-	rows, err := database.DB_App.Query(`
-        SELECT
-            h.id_historico,
-            h.id_requisicao AS processo_id,
-            DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao,
-            COALESCE(u.nome_usuario, '') AS usuario_nome,
-            COALESCE(h.comentario, '') AS comentario,
-            CONCAT_WS(' - ', COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa, '')) AS status_composto,
-            GROUP_CONCAT(LOWER(TRIM(dc.nome)) ORDER BY dc.nome SEPARATOR ',') AS canais_csv
-        FROM FT_HISTORICO_MOVIMENTACOES h
-        LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
-        LEFT JOIN FT_HISTORICO_CANAIS hc ON hc.id_historico = h.id_historico
-        LEFT JOIN DM_CANAIS_COMUNICACAO dc ON dc.id_canal = hc.id_canal
-        WHERE 
-            LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa,''))) LIKE ?
-            OR EXISTS (
+	processID := int64(0)
+	if n, err := strconv.ParseInt(q, 10, 64); err == nil && n > 0 {
+		processID = n
+	}
+	whereParts := []string{
+		"LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa,''))) LIKE ?",
+		`EXISTS (
                 SELECT 1 
                 FROM FT_HISTORICO_CANAIS hc2
                 JOIN DM_CANAIS_COMUNICACAO dc2 ON dc2.id_canal = hc2.id_canal
                 WHERE hc2.id_historico = h.id_historico
                   AND LOWER(TRIM(dc2.nome)) LIKE ?
-            )
+            )`,
+		"LOWER(COALESCE(r.uc,'')) LIKE ?",
+	}
+	args := []any{like, like, like}
+	if processID > 0 {
+		whereParts = append(whereParts, "r.id_requisicao = ?")
+		args = append(args, processID)
+	}
+	whereSQL := "WHERE " + strings.Join(whereParts, " OR ")
+
+	rows, err := database.DB_App.Query(`
+        SELECT
+            COALESCE(h.id_historico, 0) AS id_historico,
+            r.id_requisicao AS processo_id,
+            DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao,
+            COALESCE(u.nome_usuario, '') AS usuario_nome,
+            COALESCE(h.comentario, '') AS comentario,
+            CONCAT_WS(' - ', COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa, '')) AS status_composto,
+            COALESCE(GROUP_CONCAT(LOWER(TRIM(dc.nome)) ORDER BY dc.nome SEPARATOR ','), '') AS canais_csv
+        FROM FT_REQUISICOES r
+        LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = r.id_requisicao
+        LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
+        LEFT JOIN FT_HISTORICO_CANAIS hc ON hc.id_historico = h.id_historico
+        LEFT JOIN DM_CANAIS_COMUNICACAO dc ON dc.id_canal = hc.id_canal
+        `+whereSQL+`
         GROUP BY
+            r.id_requisicao,
             h.id_historico,
             h.id_requisicao,
             h.data_movimentacao,
@@ -79,25 +95,36 @@ func SearchGlobal(c *gin.Context) {
             h.sub_etapa
         ORDER BY h.data_movimentacao DESC, h.id_historico DESC
         LIMIT ? OFFSET ?
-    `, like, like, limit, offset)
+    `, append(args, limit, offset)...)
 	if err != nil {
 		log.Printf("[SearchGlobal] primary query error: %v\n", err)
 		// Fallback: sem canais (sem joins/exists), evita 500 em ambientes sem tabelas auxiliares
+		fallbackWhereParts := []string{
+			"LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa,''))) LIKE ?",
+			"LOWER(COALESCE(r.uc,'')) LIKE ?",
+		}
+		fallbackArgs := []any{like, like}
+		if processID > 0 {
+			fallbackWhereParts = append(fallbackWhereParts, "r.id_requisicao = ?")
+			fallbackArgs = append(fallbackArgs, processID)
+		}
+		fallbackWhereSQL := "WHERE " + strings.Join(fallbackWhereParts, " OR ")
 		rows, err = database.DB_App.Query(`
             SELECT
-                h.id_historico,
-                h.id_requisicao AS processo_id,
+                COALESCE(h.id_historico, 0) AS id_historico,
+                r.id_requisicao AS processo_id,
                 DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao,
                 COALESCE(u.nome_usuario, '') AS usuario_nome,
                 COALESCE(h.comentario, '') AS comentario,
                 CONCAT_WS(' - ', COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa, '')) AS status_composto,
                 '' AS canais_csv
-            FROM FT_HISTORICO_MOVIMENTACOES h
+            FROM FT_REQUISICOES r
+            LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = r.id_requisicao
             LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
-            WHERE LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa,''))) LIKE ?
+            `+fallbackWhereSQL+`
             ORDER BY h.data_movimentacao DESC, h.id_historico DESC
             LIMIT ? OFFSET ?
-        `, like, limit, offset)
+        `, append(fallbackArgs, limit, offset)...)
 		if err != nil {
 			log.Printf("[SearchGlobal] fallback query error: %v\n", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "falha na busca"})

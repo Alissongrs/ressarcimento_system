@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"database/sql"
@@ -113,7 +113,7 @@ SELECT COUNT(*) AS total,
 ` + dataFilter
 	if err := db.QueryRow(countQuery).Scan(&totalCount, &tratadosCount); err != nil {
 		log.Printf("GetBacklogProcessos count error: %v", err)
-		// fallback para os contadores obtidos na paginaÇõÇœo
+		// fallback para os contadores obtidos na paginação
 		totalCount = total
 		tratadosCount = tratados
 	}
@@ -175,3 +175,5 @@ func ToggleBacklogCheck(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
+
+

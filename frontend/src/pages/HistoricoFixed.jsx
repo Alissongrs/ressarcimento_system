@@ -1,4 +1,4 @@
-// src/pages/HistoricoFixed.jsx
+﻿// src/pages/HistoricoFixed.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { Search as SearchIcon, RefreshCcw, Download } from 'lucide-react';
 import api from '../services/api';
@@ -182,7 +182,7 @@ export default function HistoricoFixed() {
     URL.revokeObjectURL(a.href);
   };
 
-  if (loading) return <div className="p-6">Carregando histórico…</div>;
+  if (loading) return <div className="p-6"><span className="sap-loading">Carregando histórico…</span></div>;
   if (error) return (
     <div className="p-6 text-red-400">
       {error}
@@ -325,3 +325,4 @@ export default function HistoricoFixed() {
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { listFeedbacks } from '../services/feedbackService';
 import { User, Clock } from 'lucide-react';
 
@@ -23,7 +23,7 @@ export default function AdminFeedbacks() {
     <div className="p-4 md:p-6">
       <h1 className="text-2xl font-semibold mb-1">Feedbacks dos usuários</h1>
       <p className="opacity-70 mb-4">Somente administradores.</p>
-      {loading && <div className="opacity-70">Carregando...</div>}
+      {loading && <div className="opacity-70 sap-loading">Carregando...</div>}
       {err && <div className="text-red-600 mb-3">{err}</div>}
       <div className="space-y-3">
         {items.map((it) => (
@@ -42,4 +42,5 @@ export default function AdminFeedbacks() {
     </div>
   );
 }
+
 
