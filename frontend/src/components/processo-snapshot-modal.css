@@ -1,49 +1,49 @@
-/* processo-snapshot-modal.css */
+    /* processo-snapshot-modal.css */
 
-.processo-snapshot-modal {
-  animation: slideIn 0.3s ease-out;
-}
+    .processo-snapshot-modal {
+      animation: slideIn 0.3s ease-out;
+    }
 
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
 
-/* Garantir boa legibilidade */
-.processo-snapshot-modal input,
-.processo-snapshot-modal textarea,
-.processo-snapshot-modal select {
-  font-size: 14px;
-  font-family: inherit;
-}
+    /* Garantir boa legibilidade */
+    .processo-snapshot-modal input,
+    .processo-snapshot-modal textarea,
+    .processo-snapshot-modal select {
+      font-size: 14px;
+      font-family: inherit;
+    }
 
-/* Melhor feedback visual de campo alterado */
-.processo-snapshot-modal input:focus,
-.processo-snapshot-modal textarea:focus,
-.processo-snapshot-modal select:focus {
-  outline: 2px solid #4f46e5;
-  outline-offset: 2px;
-}
+    /* Melhor feedback visual de campo alterado */
+    .processo-snapshot-modal input:focus,
+    .processo-snapshot-modal textarea:focus,
+    .processo-snapshot-modal select:focus {
+      outline: 2px solid #4f46e5;
+      outline-offset: 2px;
+    }
 
-/* Animação de sucesso */
-@keyframes checkmark {
-  0% {
-    transform: scale(0);
-  }
-  50% {
-    transform: scale(1.2);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
+    /* Animação de sucesso */
+    @keyframes checkmark {
+      0% {
+        transform: scale(0);
+      }
+      50% {
+        transform: scale(1.2);
+      }
+      100% {
+        transform: scale(1);
+      }
+    }
 
-.processo-snapshot-modal .success-checkmark {
-  animation: checkmark 0.4s ease-out;
-}
+    .processo-snapshot-modal .success-checkmark {
+      animation: checkmark 0.4s ease-out;
+    }
