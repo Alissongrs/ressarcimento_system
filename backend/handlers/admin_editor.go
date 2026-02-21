@@ -327,9 +327,6 @@ func AdminEditProcesso(c *gin.Context) {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao salvar deferimento: " + err.Error()})
 					return
 				}
-			} else {
-				// Se veio vazio e j? existia um registro somente com nulos/zeros, podemos optar por limpar
-				// (comportamento seguro: n?o cria registro vazio)
 			}
 		}
 	}
@@ -483,7 +480,6 @@ func adminBoolStrOrNull(p *bool) interface{} {
 	}
 	return "false"
 }
-
 
 
 

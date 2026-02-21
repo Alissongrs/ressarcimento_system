@@ -18,6 +18,7 @@ backend/.env.local
 # Backend artifacts/logs
 backend/ressarcimento-backend
 backend/ressarcimento-backend.exe
+backend/backend.exe
 backend/server
 backend/server.exe
 backend/server.log

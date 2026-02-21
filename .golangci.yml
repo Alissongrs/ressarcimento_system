@@ -23,10 +23,7 @@ linters:
     - noctx         # Funções HTTP sem context
     - sqlclosecheck # SQL rows/statements devem ser fechados
 
-  disable:
-    - deadcode      # Deprecated
-    - structcheck   # Deprecated
-    - varcheck      # Deprecated
+  disable: []
 
 linters-settings:
   errcheck:

@@ -83,13 +83,13 @@ func SalvarFluxoRessarcimento(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro interno"})
 		return
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var idFluxo int
 		if err := rows.Scan(&idFluxo); err == nil {
 			existing[idFluxo] = true
 		}
 	}
-	rows.Close()
 
 	for _, item := range request.Itens {
 		// Validar forma de devoluÃ§ão
@@ -319,7 +319,6 @@ func DeletarItemFluxoRessarcimento(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Item deletado com sucesso!"})
 }
-
 
 
 

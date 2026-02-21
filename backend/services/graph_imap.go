@@ -91,7 +91,7 @@ func lerEmailsRecebidosGraph() error {
 			processoID, from, to, cc, subject, body,
 		)
 		if dbErr != nil {
-			// segue para o próximo
+			log.Printf("Erro ao salvar e-mail recebido no banco: %v", dbErr)
 		}
 
 		// marca como lido
@@ -133,6 +133,5 @@ func markGraphRead(token, sender, msgID string) error {
 	}
 	return nil
 }
-
 
 

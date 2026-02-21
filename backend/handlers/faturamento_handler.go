@@ -82,13 +82,13 @@ func SalvarFaturamento(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro interno"})
 		return
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var idFat int
 		if err := rows.Scan(&idFat); err == nil {
 			existing[idFat] = true
 		}
 	}
-	rows.Close()
 
 	for _, item := range request.Itens {
 		// Converter valor para decimal
@@ -353,7 +353,6 @@ func GetFaturamentoStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, stats)
 }
-
 
 
 
