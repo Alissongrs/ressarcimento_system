@@ -1,4 +1,4 @@
-// src/App.jsx — clean, UTF-8, routes and menus fixed
+﻿// src/App.jsx — clean, UTF-8, routes and menus fixed
 import React, { useEffect, useState, useRef } from 'react';
 import {
   BrowserRouter as Router,
@@ -27,13 +27,14 @@ import {
   ScanText,
   Inbox,
   Mail as MailIcon,
-  Bot,
   Megaphone,
   AlarmClock,
   FilePenLine,
+  PlusCircle,
   History,
   Home,
   Receipt,
+  ChevronRight,
 } from 'lucide-react';
 
 import FeedbackModal from './components/FeedbackModal.jsx';
@@ -53,9 +54,9 @@ import GestaoRequisicoes from './pages/GestaoRequisicoes.jsx';
 import ControleProcessos from './pages/ControleProcessos.jsx';
 import DetalhesRequisicao from './pages/DetalhesRequisicao.jsx';
 import ProcessoDetalhes from './pages/ProcessoDetalhes.jsx';
-import Dashboard from './pages/Dashboard.jsx';
+import Relatorios from './pages/Relatorios.jsx';
 import CaixaDeEmail from './pages/CaixaDeEmail.jsx';
-import ChatIA from './pages/ChatIA.jsx';
+import AnaliseDesvio from './pages/AnaliseDesvio.jsx';
 import Ocr from './pages/Ocr.jsx';
 import Regras from './pages/Regras.jsx';
 import Auditoria from './pages/Auditoria.jsx';
@@ -72,17 +73,198 @@ import Backlog from './pages/Backlog.jsx';
 // Alerts SSE
 import { getUnreadCount, connectAlertasSSE } from './services/alertaService.js';
 import { sendFeedback } from './services/feedbackService.js';
+import { getMailMessages } from './services/mailService';
+
+// Corrige strings que chegaram como UTF-8 lido como latin1 (ex.: "RequisiÃ§ão" -> "Requisição")
+const fixMojibake = (v) => {
+  if (v == null) return '';
+  const s = String(v);
+  // Heurística simples: se não tem sinais típicos, não mexe
+  if (!/[ÃÂ]/.test(s)) return s;
+
+  try {
+    // Converte "caracteres latin1" em bytes e decodifica como utf-8
+    const bytes = Uint8Array.from([...s].map((ch) => ch.charCodeAt(0) & 0xff));
+    // TextDecoder existe na maioria dos browsers modernos
+    // eslint-disable-next-line no-undef
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  } catch {
+    // Fallback (legado)
+    try {
+      // eslint-disable-next-line no-undef
+      return decodeURIComponent(escape(s));
+    } catch {
+      return s;
+    }
+  }
+};
+
+function MailLinkMinimizedBar({ visible, onRestore }) {
+  if (!visible) return null;
+  return (
+    <button
+      type="button"
+      onClick={onRestore}
+      className="fixed left-4 bottom-4 z-50 bg-[var(--panel)]/90 border border-amber-400/70 shadow-lg rounded-xl px-4 py-3 flex items-center gap-3"
+      title="Continuar anexar ao processo"
+    >
+      <div className="h-9 w-9 rounded-lg bg-[var(--muted)]/30 flex items-center justify-center border panel-border">
+        <Inbox className="w-4 h-4" />
+      </div>
+      <div className="text-left">
+        <div className="text-sm font-semibold">Anexar ao processo</div>
+        <div className="text-[11px] opacity-70">Clique para continuar</div>
+      </div>
+    </button>
+  );
+}
+
+function TopNav({ role, unread, mailUnread, onOpenAlerts, onLogout }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const navigate = useNavigate();
+  const baseItems = [
+    { to: '/', label: 'Início', Icon: Home },
+    { to: '/novo', label: 'Nova Requisição', Icon: PlusCircle },
+    { to: '/admin/planilha', label: 'Gerenciar Processos', Icon: Workflow },
+    { to: '/backlog', label: 'Backlog', Icon: Archive },
+    { to: '/auditoria', label: 'Auditoria', Icon: ShieldCheck },
+    { to: '/ocr', label: 'OCR', Icon: ScanText },
+    { to: '/analise-desvio', label: 'Análise de Desvio', Icon: Receipt },
+    { to: '/regras', label: 'Regras', Icon: ListChecks },
+    { to: '/historico', label: 'Histórico', Icon: History },
+    { to: '/dashboard', label: 'Métricas', Icon: BarChart3 },
+  ];
+  const adminItems = [{ to: '/admin/editor', label: 'Editor', Icon: FilePenLine }];
+  const items = role === 'admin' ? baseItems.concat(adminItems) : baseItems.filter((i) => !i.adminOnly);
+  const visibleItems = items.slice(0, 8);
+  const moreItems = items.slice(8);
+
+  return (
+    <header className="top-nav">
+      <div className="top-nav-inner">
+        <div className="top-nav-brand">SURE</div>
+        <nav className="top-nav-links">
+          <div className="top-nav-links-scroll">
+            {visibleItems.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) => `top-nav-link ${isActive ? 'is-active' : ''}`}
+                title={item.label}
+              >
+                <item.Icon className="top-nav-icon" />
+                <span className="top-nav-text">{item.label}</span>
+                {Number(item.badge) > 0 && <span className="top-nav-badge">{item.badge}</span>}
+              </NavLink>
+            ))}
+            <button
+              type="button"
+              onClick={onOpenAlerts}
+              className="top-nav-link top-nav-alert"
+              title="Alertas"
+            >
+              <Megaphone className="top-nav-icon" />
+              <span className="top-nav-text">Alertas</span>
+              {unread > 0 && <span className="top-nav-badge">{unread}</span>}
+            </button>
+          </div>
+          {moreItems.length > 0 && (
+            <div className="top-nav-more">
+              <button
+                type="button"
+                className="top-nav-link"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setMoreOpen((v) => !v);
+                }}
+                title="Mais"
+              >
+                <span className="top-nav-text">Mais</span>
+                <ChevronRight className={`top-nav-icon transition ${moreOpen ? 'rotate-90' : ''}`} />
+              </button>
+              {moreOpen && (
+                <div className="top-nav-more-menu">
+                  {moreItems.map((item) => (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-[var(--hover)] text-sm"
+                      onClick={() => setMoreOpen(false)}
+                    >
+                      <item.Icon className="h-4 w-4" />
+                      <span>{item.label}</span>
+                      {Number(item.badge) > 0 && <span className="top-nav-badge ml-auto">{item.badge}</span>}
+                    </NavLink>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </nav>
+        <div className="top-nav-actions">
+          {(role === 'admin' || role === 'gestor') && (
+            <button
+              type="button"
+              onClick={() => navigate('/caixa-de-email')}
+              className="top-nav-link top-nav-alert relative"
+              title="Caixa de Email"
+              aria-label="Caixa de Email"
+            >
+              <MailIcon className="top-nav-icon" />
+              {Number(mailUnread) > 0 && <span className="top-nav-badge">{mailUnread}</span>}
+            </button>
+          )}
+          <button type="button" onClick={onLogout} className="top-nav-link top-nav-logout">
+            <LogOut className="top-nav-icon" />
+            <span className="top-nav-text">Sair</span>
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+}
 
 function App() {
-  const { user, logout } = useAuth();
+  const { user, logout, sessionExpired, clearSessionExpired, remainingSeconds } = useAuth();
   const role = String(user?.tipo_conta || '').trim().toLowerCase();
+  const isSolicitante = role === 'solicitante';
+  const solicitanteAllowed = (key) => {
+    const allowed = new Set(['inicio', 'novo', 'backlog', 'alertas', 'auditoria']);
+    return allowed.has(key);
+  };
+  const solicitanteClass = (key) =>
+    isSolicitante && solicitanteAllowed(key) ? 'text-orange-400' : '';
+
+  const formatRemaining = (sec) => {
+    if (sec == null) return '';
+    const s = Math.max(0, Number(sec) || 0);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const r = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+    return `${m}:${String(r).padStart(2, '0')}`;
+  };
 
   // Alerts state
   const [unread, setUnread] = useState(0);
   const [openAlerts, setOpenAlerts] = useState(false);
   const [openGestorVenc, setOpenGestorVenc] = useState(false);
   const [openFeedback, setOpenFeedback] = useState(false);
-  const [toast, setToast] = useState({ open: false, type: 'info', text: '' });
+  const [toast, setToast] = useState({ open: false, type: 'info', text: '', position: 'bottom-right' });
+
+  // Mail polling
+  const [mailUnread, setMailUnread] = useState(0);
+  const lastMailUnreadRef = useRef(0);
+  const mailTimerRef = useRef(null);
+  const mailPollRef = useRef(null);
+
+  useEffect(() => {
+    if (!toast.open) return;
+    const id = setTimeout(() => {
+      setToast((t) => ({ ...t, open: false }));
+    }, 500);
+    return () => clearTimeout(id);
+  }, [toast.open]);
 
   const gestorVencShownRef = useRef(false);
   const esRef = useRef(null);
@@ -92,6 +274,9 @@ function App() {
     // cleanup on logout
     if (!user) {
       setUnread(0);
+      setMailUnread(0);
+      lastMailUnreadRef.current = 0;
+      if (mailTimerRef.current) clearInterval(mailTimerRef.current);
       try {
         esRef.current?.close();
       } catch {}
@@ -117,12 +302,10 @@ function App() {
       try {
         const data = JSON.parse(ev.data || '{}');
         const uc = data?.payload?.uc || data?.uc;
-        const cliente = data?.payload?.cliente || data?.cliente;
+        const cliente = fixMojibake(data?.payload?.cliente || data?.cliente);
         const msg =
           uc || cliente
-            ? `Nova requisição pendente${uc ? ' — UC ' + uc : ''}${
-                cliente ? ' — ' + cliente : ''
-              }`
+            ? `Nova requisição pendente${uc ? ' — UC ' + uc : ''}${cliente ? ' — ' + cliente : ''}`
             : 'Nova requisição pendente';
         setToast({ open: true, type: 'info', text: msg });
       } catch {
@@ -167,12 +350,10 @@ function App() {
           case 'alerta_novo': {
             setUnread((u) => (Number.isFinite(u) ? u + 1 : 1));
             const uc = data?.payload?.uc;
-            const cliente = data?.payload?.cliente;
+            const cliente = fixMojibake(data?.payload?.cliente);
             const msg =
               uc || cliente
-                ? `Nova requisição pendente${uc ? ' — UC ' + uc : ''}${
-                    cliente ? ' — ' + cliente : ''
-                  }`
+                ? `Nova requisição pendente${uc ? ' — UC ' + uc : ''}${cliente ? ' — ' + cliente : ''}`
                 : 'Nova requisição pendente';
             setToast({ open: true, type: 'info', text: msg });
             break;
@@ -201,6 +382,94 @@ function App() {
     };
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    if (role !== 'admin' && role !== 'gestor') return;
+    let stopped = false;
+
+    const poll = async () => {
+      try {
+        const inboxId = localStorage.getItem('mail_inbox_folder_id');
+        if (!inboxId) return;
+
+        const list = await getMailMessages({ folderId: inboxId, limit: 50 });
+        if (stopped) return;
+
+        let groupByThread = false;
+        try {
+          const raw = localStorage.getItem('mail_layout_v1');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (typeof parsed?.groupByThread === 'boolean') groupByThread = parsed.groupByThread;
+          }
+        } catch {}
+
+        const unreadCount = (() => {
+          if (!Array.isArray(list)) return 0;
+          const unread = list.filter((m) => !m.is_read_local);
+          if (!groupByThread) return unread.length;
+
+          const seen = new Set();
+          const normalizeSubject = (s) =>
+            String(s || '')
+              .replace(/^\s*(re|fw|fwd)\s*:\s*/gi, '')
+              .trim()
+              .toLowerCase();
+
+          for (const m of unread) {
+            const key = m.thread_id || normalizeSubject(m.subject) || m.id;
+            if (key) seen.add(key);
+          }
+          return seen.size;
+        })();
+        setMailUnread(unreadCount);
+
+        if (unreadCount > lastMailUnreadRef.current) {
+          const newest = Array.isArray(list)
+            ? list.find((m) => !m.is_read_local) || list[0]
+            : null;
+
+          const from = fixMojibake(newest?.from_name || newest?.from_email || 'remetente');
+          const subject = fixMojibake(newest?.subject || 'Sem assunto');
+
+          setToast({
+            open: true,
+            type: 'info',
+            text: `Novo e-mail de ${from}: ${subject}`,
+            position: 'center',
+          });
+        }
+
+        lastMailUnreadRef.current = unreadCount;
+      } catch {
+        // ignore polling errors
+      }
+    };
+
+    mailPollRef.current = poll;
+    poll();
+    mailTimerRef.current = setInterval(poll, 60000);
+
+    const onUnreadRefresh = () => {
+      if (mailPollRef.current) mailPollRef.current();
+    };
+    const onUnreadSet = (ev) => {
+      const count = Number(ev?.detail?.count ?? 0);
+      if (Number.isNaN(count)) return;
+      setMailUnread(count);
+      lastMailUnreadRef.current = count;
+    };
+    window.addEventListener('mail-unread-refresh', onUnreadRefresh);
+    window.addEventListener('mail-unread-set', onUnreadSet);
+
+    return () => {
+      stopped = true;
+      if (mailTimerRef.current) clearInterval(mailTimerRef.current);
+      window.removeEventListener('mail-unread-refresh', onUnreadRefresh);
+      window.removeEventListener('mail-unread-set', onUnreadSet);
+    };
+  }, [user, role]);
+
   // Abre alertas de vencimento para gestor uma vez por sessão
   useEffect(() => {
     if (!user) return;
@@ -211,16 +480,30 @@ function App() {
   }, [user]);
 
   // Sidebars
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   const AdminSidebar = () => (
-    <aside
-      className="sticky top-0 sidebar-collapsible p-4 border-r h-auto min-h-screen shrink-0 flex flex-col"
-      style={{
-        background: 'var(--menu-bg)',
-        borderColor: 'var(--menu-border)',
-        color: 'var(--menu-fg)',
-      }}
-    >
+    <div className="sidebar-hoverzone sticky top-0 shrink-0">
+      <aside
+        className={`sidebar-collapsible p-4 border-r h-auto min-h-[125vh] flex flex-col ${
+          sidebarOpen ? 'is-open' : ''
+        }`}
+        style={{
+          background: 'var(--menu-bg)',
+          borderColor: 'var(--menu-border)',
+          color: 'var(--menu-fg)',
+        }}
+      >
       <div className="relative flex flex-col h-full">
+        <button
+          type="button"
+          className="sidebar-handle"
+          onClick={() => setSidebarOpen((v) => !v)}
+          aria-label={sidebarOpen ? 'Recolher menu' : 'Expandir menu'}
+          title={sidebarOpen ? 'Recolher menu' : 'Expandir menu'}
+        >
+          <ChevronRight className="sidebar-handle-icon" size={16} />
+        </button>
         <div className="mb-6 px-2 flex flex-col items-center">
           <div className="text-lg font-extrabold sidebar-brand">SURE</div>
         </div>
@@ -240,7 +523,7 @@ function App() {
             title="Início"
           >
             <Home className="sidebar-icon" strokeWidth={1.8} />
-            <span className="text-sm font-medium sidebar-label">Início</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('inicio')}`}>Início</span>
           </NavLink>
 
           {/* 1) Nova Requisição */}
@@ -256,7 +539,7 @@ function App() {
             title="Nova Requisição"
           >
             <FilePlus className="sidebar-icon" strokeWidth={1.6} />
-            <span className="text-sm font-medium sidebar-label">Nova Requisição</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('novo')}`}>Nova Requisição</span>
           </NavLink>
 
           {/* 2) Requisições */}
@@ -272,7 +555,7 @@ function App() {
             title="Requisições"
           >
             <FileText className="w-5 h-5" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Requisições</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('requisicoes')}`}>Requisições</span>
           </NavLink>
 
           {/* 3) Gerenciar Processos */}
@@ -288,9 +571,10 @@ function App() {
             title="Gerenciar Processos"
           >
             <FileText className="w-5 h-5" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Gerenciar Processos</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('processos')}`}>Gerenciar Processos</span>
           </NavLink>
-{/* 4) Backlog */}
+
+          {/* 4) Backlog */}
           <NavLink
             to="/backlog"
             className={({ isActive }) =>
@@ -303,7 +587,7 @@ function App() {
             title="Backlog"
           >
             <Archive className="w-5 h-5" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Backlog</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('backlog')}`}>Backlog</span>
           </NavLink>
 
           {/* Alertas (modal) */}
@@ -314,7 +598,7 @@ function App() {
             title="Alertas"
           >
             <Inbox className="w-5 h-5" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Alertas</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('alertas')}`}>Alertas</span>
             {unread > 0 && (
               <span
                 className="ml-auto text-xs px-2 py-0.5 rounded-full"
@@ -339,7 +623,7 @@ function App() {
             title="Auditoria"
           >
             <ShieldCheck className="w-5 h-5" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Auditoria</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('auditoria')}`}>Auditoria</span>
           </NavLink>
 
           <NavLink
@@ -354,7 +638,22 @@ function App() {
             title="OCR"
           >
             <ScanText className="sidebar-icon" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">OCR</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('ocr')}`}>OCR</span>
+          </NavLink>
+
+          <NavLink
+            to="/analise-desvio"
+            className={({ isActive }) =>
+              `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                isActive
+                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                  : 'hover:bg-[var(--menu-hover)]'
+              }`
+            }
+            title="Análise de Desvio"
+          >
+            <Workflow className="w-5 h-5" strokeWidth={1.25} />
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('analise')}`}>Análise de Desvio</span>
           </NavLink>
 
           <NavLink
@@ -369,7 +668,7 @@ function App() {
             title="Regras"
           >
             <ListChecks className="w-5 h-5" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Regras</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('regras')}`}>Regras</span>
           </NavLink>
 
           <NavLink
@@ -384,7 +683,7 @@ function App() {
             title="Histórico"
           >
             <History className="sidebar-icon" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Histórico</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('historico')}`}>Histórico</span>
           </NavLink>
 
           <NavLink
@@ -396,114 +695,72 @@ function App() {
                   : 'hover:bg-[var(--menu-hover)]'
               }`
             }
-            title="Relatórios"
+            title="Métricas"
           >
             <BarChart3 className="sidebar-icon" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Relatórios</span>
-          </NavLink>
-
-          <NavLink
-            to="/caixa-de-email"
-            className={({ isActive }) =>
-              `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                isActive
-                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                  : 'hover:bg-[var(--menu-hover)]'
-              }`
-            }
-            title="Caixa de Email"
-          >
-            <MailIcon className="sidebar-icon" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Caixa de Email</span>
-          </NavLink>
-
-          <NavLink
-            to="/chat-ia"
-            className={({ isActive }) =>
-              `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                isActive
-                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                  : 'hover:bg-[var(--menu-hover)]'
-              }`
-            }
-            title="Chat IA"
-          >
-            <Bot className="sidebar-icon" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Chat IA</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('metricas')}`}>Métricas</span>
           </NavLink>
 
           {role === 'admin' && (
-            <>
-              <NavLink
-                to="/adminfeedbacks"
-                className={({ isActive }) =>
-                  `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                    isActive
-                      ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                      : 'hover:bg-[var(--menu-hover)]'
-                  }`
-                }
-                title="Feedbacks (Admin)"
-              >
-                <Megaphone className="sidebar-icon" strokeWidth={1.6} />
-                <span className="text-sm font-medium sidebar-label">Feedbacks</span>
-              </NavLink>
-
-              <NavLink
-                to="/admin/prazos"
-                className={({ isActive }) =>
-                  `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                    isActive
-                      ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                      : 'hover:bg-[var(--menu-hover)]'
-                  }`
-                }
-                title="Prazos & Alarmes (Admin)"
-              >
-                <AlarmClock className="sidebar-icon" strokeWidth={1.6} />
-                <span className="text-sm font-medium sidebar-label">Prazos & Alarmes</span>
-              </NavLink><NavLink
-                to="/admin/editor"
-                className={({ isActive }) =>
-                  `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                    isActive
-                      ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                      : 'hover:bg-[var(--menu-hover)]'
-                  }`
-                }
-                title="Editor (Admin)"
-              >
-                <FilePenLine className="sidebar-icon" strokeWidth={1.6} />
-                <span className="text-sm font-medium sidebar-label">Editor</span>
-              </NavLink>
-            </>
+            <NavLink
+              to="/admin/editor"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="Editor (Admin)"
+            >
+              <FilePenLine className="sidebar-icon" strokeWidth={1.6} />
+              <span className="text-sm font-medium sidebar-label">Editor</span>
+            </NavLink>
           )}
         </nav>
 
         <div className="mt-auto space-y-2">
+          {remainingSeconds != null && (
+            <div className="text-[11px] opacity-70 text-center mb-1">
+              Tempo restante: {formatRemaining(remainingSeconds)}
+            </div>
+          )}
           <button
             onClick={logout}
             className="w-full px-4 py-3 rounded-md hover:bg-[var(--menu-hover)] flex items-center justify-center gap-2"
           >
-            <LogOut className="sidebar-icon sidebar-icon-logout w-5 h-5" />
+            <LogOut className="sidebar-icon sidebar-icon-logout" />
             <span className="text-xs sidebar-label">Sair</span>
           </button>
           <div className="text-[10px] opacity-60 text-center">v1.0.0</div>
         </div>
       </div>
-    </aside>
+      </aside>
+    </div>
   );
 
   const CompactSidebar = () => (
-    <aside
-      className="sticky top-0 sidebar-collapsible p-3 border-r h-auto min-h-screen shrink-0 flex flex-col"
-      style={{
-        background: 'var(--menu-bg)',
-        borderColor: 'var(--menu-border)',
-        color: 'var(--menu-fg)',
-      }}
-    >
+    <div className="sidebar-hoverzone sticky top-0 shrink-0">
+      <aside
+        className={`sidebar-collapsible p-3 border-r h-auto min-h-[125vh] flex flex-col ${
+          sidebarOpen ? 'is-open' : ''
+        }`}
+        style={{
+          background: 'var(--menu-bg)',
+          borderColor: 'var(--menu-border)',
+          color: 'var(--menu-fg)',
+        }}
+      >
       <div className="relative flex flex-col h-full">
+        <button
+          type="button"
+          className="sidebar-handle"
+          onClick={() => setSidebarOpen((v) => !v)}
+          aria-label={sidebarOpen ? 'Recolher menu' : 'Expandir menu'}
+          title={sidebarOpen ? 'Recolher menu' : 'Expandir menu'}
+        >
+          <ChevronRight className="sidebar-handle-icon" size={16} />
+        </button>
         <div className="mb-6 px-2 flex flex-col items-center">
           <h1 className="text-base font-semibold sidebar-brand">SURE</h1>
         </div>
@@ -521,8 +778,8 @@ function App() {
             }
             title="Início"
           >
-            <Home className="w-8 h-8 shrink-0" strokeWidth={1.8} />
-            <span className="text-sm font-medium sidebar-label">Início</span>
+            <Home className="sidebar-icon shrink-0" strokeWidth={1.8} />
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('inicio')}`}>Início</span>
           </NavLink>
 
           <NavLink
@@ -536,8 +793,8 @@ function App() {
             }
             title="Nova Requisição"
           >
-            <FilePlus className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Nova Requisição</span>
+            <FilePlus className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('novo')}`}>Nova Requisição</span>
           </NavLink>
 
           <NavLink
@@ -551,8 +808,8 @@ function App() {
             }
             title="Requisições"
           >
-            <FileText className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Requisições</span>
+            <FileText className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('requisicoes')}`}>Requisições</span>
           </NavLink>
 
           <NavLink
@@ -566,8 +823,8 @@ function App() {
             }
             title="Gerenciar Processos"
           >
-            <FileText className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Gerenciar Processos</span>
+            <FileText className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('processos')}`}>Gerenciar Processos</span>
           </NavLink>
 
           <NavLink
@@ -581,8 +838,8 @@ function App() {
             }
             title="Backlog"
           >
-            <Archive className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Backlog</span>
+            <Archive className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('backlog')}`}>Backlog</span>
           </NavLink>
 
           {/* Alertas (modal) */}
@@ -592,8 +849,8 @@ function App() {
             className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-[var(--menu-hover)] transition-colors"
             title="Alertas"
           >
-            <Inbox className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Alertas</span>
+            <Inbox className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('alertas')}`}>Alertas</span>
             {unread > 0 && (
               <span
                 className="ml-auto text-xs px-2 py-0.5 rounded-full"
@@ -617,8 +874,8 @@ function App() {
             }
             title="Histórico"
           >
-            <History className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Histórico</span>
+            <History className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('historico')}`}>Histórico</span>
           </NavLink>
 
           <NavLink
@@ -630,10 +887,10 @@ function App() {
                   : 'hover:bg-[var(--menu-hover)]'
               }`
             }
-            title="Relatórios"
+            title="Métricas"
           >
-            <BarChart3 className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Relatórios</span>
+            <BarChart3 className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('metricas')}`}>Métricas</span>
           </NavLink>
 
           <NavLink
@@ -647,12 +904,12 @@ function App() {
             }
             title="Auditoria"
           >
-            <Receipt className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Auditoria</span>
+            <Receipt className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('auditoria')}`}>Auditoria</span>
           </NavLink>
 
           <NavLink
-            to="/caixa-de-email"
+            to="/analise-desvio"
             className={({ isActive }) =>
               `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
                 isActive
@@ -660,51 +917,53 @@ function App() {
                   : 'hover:bg-[var(--menu-hover)]'
               }`
             }
-            title="Caixa de Email"
+            title="Análise de Desvio"
           >
-            <MailIcon className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Caixa de Email</span>
-          </NavLink>
-
-          <NavLink
-            to="/chat-ia"
-            className={({ isActive }) =>
-              `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                isActive
-                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                  : 'hover:bg-[var(--menu-hover)]'
-              }`
-            }
-            title="Chat IA"
-          >
-            <Bot className="w-8 h-8 shrink-0" strokeWidth={1.25} />
-            <span className="text-sm font-medium sidebar-label">Chat IA</span>
+            <Workflow className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('analise')}`}>Análise de Desvio</span>
           </NavLink>
         </nav>
 
         <div className="mt-auto space-y-2">
+          {remainingSeconds != null && (
+            <div className="text-[11px] opacity-70 text-center mb-1">
+              Tempo restante: {formatRemaining(remainingSeconds)}
+            </div>
+          )}
           <button
             onClick={logout}
             className="w-full px-4 py-3 rounded-md hover:bg-[var(--menu-hover)] flex items-center justify-center gap-2"
           >
-            <LogOut className="w-5 h-5" />
+            <LogOut className="sidebar-icon sidebar-icon-logout" />
             <span className="text-xs sidebar-label">Sair</span>
           </button>
           <div className="text-[10px] opacity-60 text-center">v1.0.0</div>
         </div>
       </div>
-    </aside>
+      </aside>
+    </div>
   );
+
+  // TopNav is a separate component (defined above) to keep its state stable.
 
   return (
     <ThemeProvider>
       <Router>
         <RouteKeeper user={user} />
-        <div className="flex min-h-screen themed-surface">
-          {user && (role === 'admin' ? <AdminSidebar /> : <CompactSidebar />)}
+        <div className="flex min-h-screen themed-surface flex-col">
+          {user && (
+            <TopNav
+              role={role}
+              unread={unread}
+              mailUnread={mailUnread}
+              onOpenAlerts={() => setOpenAlerts(true)}
+              onLogout={logout}
+            />
+          )}
 
-          <main className="flex-1 min-w-0">
+          <main className="flex-1 min-w-0 pt-16">
             <PageContainer>
+              <MailLinkMinimizedBarHost />
               <Routes>
                 {!user && (
                   <>
@@ -736,14 +995,13 @@ function App() {
                         <Route path="/Requisicoes" element={<Requisicoes />} />
                         <Route path="/historico" element={<Historico />} />
                         <Route path="/gestao" element={<GestaoRequisicoes />} />
-                        <Route path="/dashboard" element={<Dashboard />} />
+                        <Route path="/dashboard" element={<Relatorios />} />
                         <Route path="/processos" element={<ControleProcessos />} />
                         <Route path="/processos/:id" element={<ProcessoDetalhes />} />
-                        <Route path="/auditoria" element={<Auditoria />} />
                         <Route path="/ocr" element={<Ocr />} />
+                        <Route path="/analise-desvio" element={<AnaliseDesvio />} />
                         <Route path="/regras" element={<Regras />} />
                         <Route path="/caixa-de-email" element={<CaixaDeEmail />} />
-                        <Route path="/chat-ia" element={<ChatIA />} />
 
                         {role === 'admin' && (
                           <>
@@ -762,14 +1020,14 @@ function App() {
                         <Route path="/gestao" element={<Navigate to="/" replace />} />
                         <Route path="/processos" element={<Navigate to="/" replace />} />
                         <Route path="/processos/:id" element={<Navigate to="/" replace />} />
-                        <Route path="/auditoria" element={<Navigate to="/" replace />} />
                         <Route path="/ocr" element={<Navigate to="/" replace />} />
+                        <Route path="/analise-desvio" element={<Navigate to="/" replace />} />
                         <Route path="/regras" element={<Navigate to="/" replace />} />
                         <Route path="/caixa-de-email" element={<Navigate to="/" replace />} />
-                        <Route path="/chat-ia" element={<Navigate to="/" replace />} />
                       </>
                     )}
 
+                    <Route path="/auditoria" element={<Auditoria />} />
                     <Route path="/login" element={<Navigate to="/" replace />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </>
@@ -811,10 +1069,72 @@ function App() {
           onClose={() => setOpenGestorVenc(false)}
         />
         <CommandPaletteHost onOpenAlerts={() => setOpenAlerts(true)} />
+
+        {sessionExpired && (
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div
+              className="w-full max-w-md border"
+              style={{
+                background: '#f6f6f6',
+                color: '#111',
+                borderColor: '#9a9a9a',
+                borderRadius: 6,
+                boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+                fontFamily: '"Segoe UI", Tahoma, Arial, sans-serif',
+              }}
+            >
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderBottom: '1px solid #c9c9c9',
+                  fontWeight: 600,
+                  background: 'linear-gradient(#ffffff, #eaeaea)',
+                }}
+              >
+                Sessão expirada
+              </div>
+              <div style={{ padding: '16px 12px', fontSize: 14, lineHeight: 1.4 }}>
+                Seu tempo de login expirou. Faça login novamente para continuar.
+              </div>
+              <div
+                style={{
+                  padding: '12px',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: 8,
+                  borderTop: '1px solid #c9c9c9',
+                  background: '#ededed',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearSessionExpired();
+                    window.location.href = '/login';
+                  }}
+                  style={{
+                    minWidth: 88,
+                    padding: '6px 14px',
+                    border: '1px solid #0a5bd7',
+                    borderRadius: 4,
+                    background: 'linear-gradient(#5aa0ff, #2f6edc)',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                  }}
+                >
+                  Ok
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <Toast
           open={toast.open}
           type={toast.type}
           message={toast.text}
+          position={toast.position || 'bottom-right'}
           onClose={() =>
             setToast((t) => ({
               ...t,
@@ -824,6 +1144,59 @@ function App() {
         />
       </Router>
     </ThemeProvider>
+  );
+}
+
+function MailLinkMinimizedBarHost() {
+  const [visible, setVisible] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    try {
+      setVisible(localStorage.getItem('mail_link_minimized') === '1');
+    } catch {
+      setVisible(false);
+    }
+
+    const handler = (e) => {
+      const minimized = e?.detail?.minimized;
+      if (typeof minimized === 'boolean') setVisible(minimized);
+      else {
+        try {
+          setVisible(localStorage.getItem('mail_link_minimized') === '1');
+        } catch {
+          setVisible(false);
+        }
+      }
+    };
+
+    window.addEventListener('mail-link-minimized', handler);
+    window.addEventListener('storage', handler);
+
+    return () => {
+      window.removeEventListener('mail-link-minimized', handler);
+      window.removeEventListener('storage', handler);
+    };
+  }, []);
+
+  if (!visible) return null;
+
+  return (
+    <MailLinkMinimizedBar
+      visible={visible}
+      onRestore={() => {
+        try {
+          localStorage.setItem('mail_link_restore', '1');
+          localStorage.removeItem('mail_link_minimized');
+          window.dispatchEvent(
+            new CustomEvent('mail-link-minimized', { detail: { minimized: false } })
+          );
+        } catch {
+          // ignore
+        }
+        navigate('/caixa-de-email');
+      }}
+    />
   );
 }
 
@@ -884,8 +1257,3 @@ function RouteKeeper({ user }) {
 
   return null;
 }
-
-
-
-
-

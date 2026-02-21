@@ -28,11 +28,22 @@ type Health struct {
 }
 
 // SimpleHealthCheck health check simples (apenas status ok)
+// @Summary Healthcheck simples
+// @Tags Health
+// @Produce json
+// @Success 200 {object} map[string]bool
+// @Router /api/v1/healthz [get]
 func SimpleHealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // AdvancedHealthCheck health check avançado (verifica dependências)
+// @Summary Healthcheck avancado
+// @Tags Health
+// @Produce json
+// @Success 200 {object} HealthResponse
+// @Failure 503 {object} HealthResponse
+// @Router /api/v1/health [get]
 func AdvancedHealthCheck(c *gin.Context) {
 	start := time.Now()
 	checks := make(map[string]Health)
@@ -84,7 +95,7 @@ func AdvancedHealthCheck(c *gin.Context) {
 }
 
 func checkDatabase() Health {
-	if database.DB_App == nil {
+	if database.GormDB_App == nil {
 		return Health{
 			Status:  "unhealthy",
 			Message: "database connection not initialized",
@@ -95,7 +106,14 @@ func checkDatabase() Health {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	if err := database.DB_App.PingContext(ctx); err != nil {
+	sqlDB, err := database.GormDB_App.DB()
+	if err != nil {
+		return Health{
+			Status:  "unhealthy",
+			Message: err.Error(),
+		}
+	}
+	if err := sqlDB.PingContext(ctx); err != nil {
 		return Health{
 			Status:  "unhealthy",
 			Message: err.Error(),
@@ -187,9 +205,15 @@ func checkLLMService(url string) Health {
 }
 
 // ReadinessCheck verifica se o serviço está pronto para receber tráfego
+// @Summary Readiness check
+// @Tags Health
+// @Produce json
+// @Success 200 {object} map[string]bool
+// @Failure 503 {object} map[string]any
+// @Router /api/v1/health/ready [get]
 func ReadinessCheck(c *gin.Context) {
 	// Verifica apenas componentes críticos
-	if database.DB_App == nil {
+	if database.GormDB_App == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"ready": false,
 			"error": "database not initialized",
@@ -200,7 +224,15 @@ func ReadinessCheck(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	if err := database.DB_App.PingContext(ctx); err != nil {
+	sqlDB, err := database.GormDB_App.DB()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"ready": false,
+			"error": "database unreachable",
+		})
+		return
+	}
+	if err := sqlDB.PingContext(ctx); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"ready": false,
 			"error": "database unreachable",
@@ -212,6 +244,11 @@ func ReadinessCheck(c *gin.Context) {
 }
 
 // LivenessCheck verifica se o serviço está vivo (sem verificar dependências)
+// @Summary Liveness check
+// @Tags Health
+// @Produce json
+// @Success 200 {object} map[string]bool
+// @Router /api/v1/health/live [get]
 func LivenessCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"alive": true})
 }

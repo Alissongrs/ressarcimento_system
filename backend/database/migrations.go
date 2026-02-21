@@ -1,4 +1,4 @@
-﻿package database
+package database
 
 import (
 	"database/sql"
@@ -154,6 +154,133 @@ func runMigrations(db *sql.DB) error {
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
 		); err != nil {
 			return fmt.Errorf("criando ai_resumo_feedback: %w", err)
+		}
+	}
+
+	// 6c) Tabela de feedbacks do chat IA (RAG)
+	var hasChatFeedback int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME='AI_CHAT_FEEDBACK'`,
+	).Scan(&hasChatFeedback)
+
+	if hasChatFeedback == 0 {
+		log.Println("[migrate] Criando tabela AI_CHAT_FEEDBACK ...")
+		if _, err := db.Exec(`
+			CREATE TABLE AI_CHAT_FEEDBACK (
+			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			  user_id INT NOT NULL,
+			  question TEXT NOT NULL,
+			  answer LONGTEXT NOT NULL,
+			  rating TINYINT NOT NULL,
+			  comment TEXT NULL,
+			  sources JSON NULL,
+			  model VARCHAR(100) NULL,
+			  prompt_version VARCHAR(50) NULL,
+			  doc_text LONGTEXT NULL,
+			  embedding JSON NULL,
+			  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			  PRIMARY KEY (id),
+			  KEY idx_chat_feedback_user (user_id),
+			  KEY idx_chat_feedback_rating (rating),
+			  KEY idx_chat_feedback_created (created_at),
+			  CONSTRAINT fk_chat_feedback_user FOREIGN KEY (user_id) REFERENCES DM_USUARIO(id_usuario)
+			    ON DELETE CASCADE ON UPDATE CASCADE
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
+		); err != nil {
+			return fmt.Errorf("criando AI_CHAT_FEEDBACK: %w", err)
+		}
+	}
+
+	// 6d) Tabela de log do chat IA (RAG)
+	var hasChatLog int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME='AI_CHAT_LOG'`,
+	).Scan(&hasChatLog)
+
+	if hasChatLog == 0 {
+		log.Println("[migrate] Criando tabela AI_CHAT_LOG ...")
+		if _, err := db.Exec(`
+			CREATE TABLE AI_CHAT_LOG (
+			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			  user_id INT NOT NULL,
+			  question TEXT NOT NULL,
+			  answer LONGTEXT NOT NULL,
+			  sources JSON NULL,
+			  model VARCHAR(100) NULL,
+			  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			  PRIMARY KEY (id),
+			  KEY idx_chat_log_user (user_id),
+			  KEY idx_chat_log_created (created_at),
+			  CONSTRAINT fk_chat_log_user FOREIGN KEY (user_id) REFERENCES DM_USUARIO(id_usuario)
+			    ON DELETE CASCADE ON UPDATE CASCADE
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
+		); err != nil {
+			return fmt.Errorf("criando AI_CHAT_LOG: %w", err)
+		}
+	}
+
+	// 6e) Tabela de sessoes do chat IA
+	var hasChatSessions int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME='AI_CHAT_SESSIONS'`,
+	).Scan(&hasChatSessions)
+
+	if hasChatSessions == 0 {
+		log.Println("[migrate] Criando tabela AI_CHAT_SESSIONS ...")
+		if _, err := db.Exec(`
+			CREATE TABLE AI_CHAT_SESSIONS (
+			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			  user_id INT NOT NULL,
+			  title VARCHAR(200) NULL,
+			  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			  deleted_at TIMESTAMP NULL,
+			  PRIMARY KEY (id),
+			  KEY idx_chat_sessions_user (user_id),
+			  KEY idx_chat_sessions_created (created_at),
+			  CONSTRAINT fk_chat_sessions_user FOREIGN KEY (user_id) REFERENCES DM_USUARIO(id_usuario)
+			    ON DELETE CASCADE ON UPDATE CASCADE
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
+		); err != nil {
+			return fmt.Errorf("criando AI_CHAT_SESSIONS: %w", err)
+		}
+	}
+
+	// 6f) Tabela de mensagens do chat IA
+	var hasChatMessages int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME='AI_CHAT_MESSAGES'`,
+	).Scan(&hasChatMessages)
+
+	if hasChatMessages == 0 {
+		log.Println("[migrate] Criando tabela AI_CHAT_MESSAGES ...")
+		if _, err := db.Exec(`
+			CREATE TABLE AI_CHAT_MESSAGES (
+			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			  session_id BIGINT UNSIGNED NOT NULL,
+			  role ENUM('user','assistant') NOT NULL,
+			  content LONGTEXT NOT NULL,
+			  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			  PRIMARY KEY (id),
+			  KEY idx_chat_messages_session (session_id),
+			  KEY idx_chat_messages_created (created_at),
+			  CONSTRAINT fk_chat_messages_session FOREIGN KEY (session_id) REFERENCES AI_CHAT_SESSIONS(id)
+			    ON DELETE CASCADE ON UPDATE CASCADE
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
+		); err != nil {
+			return fmt.Errorf("criando AI_CHAT_MESSAGES: %w", err)
 		}
 	}
 
@@ -411,7 +538,7 @@ func runMigrations(db *sql.DB) error {
 				query := fmt.Sprintf("CREATE INDEX %s ON %s (%s)", indexName, table, indexDef)
 				if _, err := db.Exec(query); err != nil {
 					if !strings.Contains(strings.ToLower(err.Error()), "exists") &&
-					   !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+						!strings.Contains(strings.ToLower(err.Error()), "duplicate") {
 						log.Printf("[migrate] aviso: falha ao criar índice %s: %v", indexName, err)
 					}
 				}
@@ -484,6 +611,384 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
-	log.Println("✓ Todas as migrações concluídas com sucesso")
+	// 14) Colunas de repasse no deferimento (se não existirem)
+	{
+		var hasDef int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.TABLES
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME='FT_DEFERIMENTOS'`,
+		).Scan(&hasDef)
+		if hasDef > 0 {
+			ensureColumn := func(name, colType string) {
+				var colCount int
+				_ = db.QueryRow(`
+					SELECT COUNT(1)
+					FROM INFORMATION_SCHEMA.COLUMNS
+					WHERE TABLE_SCHEMA = DATABASE()
+					  AND TABLE_NAME='FT_DEFERIMENTOS'
+					  AND COLUMN_NAME=?`, name,
+				).Scan(&colCount)
+				if colCount == 0 {
+					log.Printf("[migrate] Adicionando coluna FT_DEFERIMENTOS.%s ...", name)
+					_, _ = db.Exec(fmt.Sprintf("ALTER TABLE FT_DEFERIMENTOS ADD COLUMN %s %s NULL", name, colType))
+				}
+			}
+			ensureColumn("repasse_simples", "DECIMAL(12,2)")
+			ensureColumn("repasse_dobro", "DECIMAL(12,2)")
+		}
+	}
+
+	// 14b) Colunas para anexos em banco (MEDIUMBLOB)
+	{
+		var hasAnexos int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.TABLES
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME='FT_ANEXOS'`,
+		).Scan(&hasAnexos)
+		if hasAnexos > 0 {
+			ensureColumn := func(name, colType string) {
+				var colCount int
+				_ = db.QueryRow(`
+					SELECT COUNT(1)
+					FROM INFORMATION_SCHEMA.COLUMNS
+					WHERE TABLE_SCHEMA = DATABASE()
+					  AND TABLE_NAME='FT_ANEXOS'
+					  AND COLUMN_NAME=?`, name,
+				).Scan(&colCount)
+				if colCount == 0 {
+					log.Printf("[migrate] Adicionando coluna FT_ANEXOS.%s ...", name)
+					_, _ = db.Exec(fmt.Sprintf("ALTER TABLE FT_ANEXOS ADD COLUMN %s %s NULL", name, colType))
+				}
+			}
+			ensureColumn("data_upload", "DATETIME")
+			ensureColumn("mime_type", "VARCHAR(120)")
+			ensureColumn("tamanho_bytes", "BIGINT")
+			ensureColumn("arquivo_blob", "MEDIUMBLOB")
+		}
+	}
+
+	// 15) Trigger para garantir defaults na criação de FT_PROCESSOS
+	{
+		var triggerCount int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.TRIGGERS
+			WHERE TRIGGER_SCHEMA = DATABASE()
+			  AND TRIGGER_NAME = 'trg_ft_processos_before_insert_defaults'`,
+		).Scan(&triggerCount)
+
+		if triggerCount == 0 {
+			triggerSQL := `
+CREATE TRIGGER trg_ft_processos_before_insert_defaults
+BEFORE INSERT ON FT_PROCESSOS
+FOR EACH ROW
+BEGIN
+  SET NEW.id_etapa_processo = 1;
+  SET NEW.sub_etapa = 'Primeira reclamação da etapa - Em elaboração';
+  SET NEW.id_sub_etapa_processo = (
+    SELECT id_subetapa
+    FROM DM_SUBETAPA_PROCESSOS
+    WHERE nome_subetapa = 'Primeira reclamação da etapa - Em elaboração'
+    LIMIT 1
+  );
+END`
+			log.Println("[migrate] Criando trigger trg_ft_processos_before_insert_defaults ...")
+			if _, err := db.Exec(triggerSQL); err != nil {
+				log.Printf("[migrate] Aviso: falha ao criar trigger defaults FT_PROCESSOS (ignorado): %v", err)
+			}
+		}
+	}
+
+	// 16) Trigger para sincronizar FT_PROCESSO_SNAPSHOT após INSERT em FT_PROCESSOS (se SP existir)
+	{
+		var hasSyncSP int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.ROUTINES
+			WHERE ROUTINE_SCHEMA = DATABASE()
+			  AND ROUTINE_NAME = 'sp_sync_from_original_tables'
+			  AND ROUTINE_TYPE = 'PROCEDURE'`,
+		).Scan(&hasSyncSP)
+
+		if hasSyncSP > 0 {
+			var triggerCount int
+			_ = db.QueryRow(`
+				SELECT COUNT(1)
+				FROM INFORMATION_SCHEMA.TRIGGERS
+				WHERE TRIGGER_SCHEMA = DATABASE()
+				  AND TRIGGER_NAME = 'trg_ft_processos_after_insert_snapshot'`,
+			).Scan(&triggerCount)
+
+			if triggerCount == 0 {
+				hasCreatedAt := 0
+				hasUpdatedAt := 0
+				_ = db.QueryRow(`
+					SELECT COUNT(1)
+					FROM INFORMATION_SCHEMA.COLUMNS
+					WHERE TABLE_SCHEMA = DATABASE()
+					  AND TABLE_NAME = 'FT_PROCESSO_SNAPSHOT'
+					  AND COLUMN_NAME = 'created_at'`,
+				).Scan(&hasCreatedAt)
+				_ = db.QueryRow(`
+					SELECT COUNT(1)
+					FROM INFORMATION_SCHEMA.COLUMNS
+					WHERE TABLE_SCHEMA = DATABASE()
+					  AND TABLE_NAME = 'FT_PROCESSO_SNAPSHOT'
+					  AND COLUMN_NAME = 'updated_at'`,
+				).Scan(&hasUpdatedAt)
+
+				insertCols := []string{"id_processo"}
+				insertVals := []string{"NEW.id_processo"}
+				if hasCreatedAt > 0 {
+					insertCols = append(insertCols, "created_at")
+					insertVals = append(insertVals, "NOW()")
+				}
+				if hasUpdatedAt > 0 {
+					insertCols = append(insertCols, "updated_at")
+					insertVals = append(insertVals, "NOW()")
+				}
+
+				triggerSQL := fmt.Sprintf(`
+CREATE TRIGGER trg_ft_processos_after_insert_snapshot
+AFTER INSERT ON FT_PROCESSOS
+FOR EACH ROW
+BEGIN
+  INSERT IGNORE INTO FT_PROCESSO_SNAPSHOT (%s) VALUES (%s);
+  CALL sp_sync_from_original_tables(NEW.id_processo, 0);
+END`, strings.Join(insertCols, ", "), strings.Join(insertVals, ", "))
+
+				log.Println("[migrate] Criando trigger trg_ft_processos_after_insert_snapshot ...")
+				if _, err := db.Exec(triggerSQL); err != nil {
+					log.Printf("[migrate] Aviso: falha ao criar trigger snapshot (ignorado): %v", err)
+				}
+			}
+		}
+	}
+
+    log.Println("-----------------------------------------------")
+	// 7) Mailbox: mail_messages
+	var hasMailMessages int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME='mail_messages'`,
+	).Scan(&hasMailMessages)
+	if hasMailMessages == 0 {
+		log.Println("[migrate] Criando tabela mail_messages ...")
+		if _, err := db.Exec(`
+			CREATE TABLE mail_messages (
+			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			  graph_message_id VARCHAR(200) NOT NULL,
+			  internet_message_id VARCHAR(255) NULL,
+			  subject TEXT NULL,
+			  from_email VARCHAR(255) NULL,
+			  from_name VARCHAR(255) NULL,
+			  to_json JSON NULL,
+			  cc_json JSON NULL,
+			  received_at DATETIME NULL,
+			  snippet TEXT NULL,
+			  has_attachments TINYINT(1) NOT NULL DEFAULT 0,
+			  thread_id VARCHAR(255) NULL,
+			  folder_id VARCHAR(200) NULL,
+			  raw_meta_json JSON NULL,
+			  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			  PRIMARY KEY (id),
+			  UNIQUE KEY uq_mail_graph_id (graph_message_id),
+			  KEY idx_mail_received (received_at),
+			  KEY idx_mail_folder (folder_id)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
+			return fmt.Errorf("criando mail_messages: %w", err)
+		}
+	}
+
+	// 8) Mailbox: mail_message_attachments
+	var hasMailAtt int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME='mail_message_attachments'`,
+	).Scan(&hasMailAtt)
+	if hasMailAtt == 0 {
+		log.Println("[migrate] Criando tabela mail_message_attachments ...")
+		if _, err := db.Exec(`
+			CREATE TABLE mail_message_attachments (
+			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			  mail_message_id BIGINT UNSIGNED NOT NULL,
+			  graph_attachment_id VARCHAR(200) NULL,
+			  filename VARCHAR(255) NULL,
+			  content_type VARCHAR(255) NULL,
+			  size BIGINT NULL,
+			  storage_key VARCHAR(512) NULL,
+			  sha256 CHAR(64) NULL,
+			  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			  PRIMARY KEY (id),
+			  UNIQUE KEY uq_mail_attach_sha (mail_message_id, sha256),
+			  KEY idx_mail_attach_msg (mail_message_id),
+			  CONSTRAINT fk_mail_attach_message FOREIGN KEY (mail_message_id) REFERENCES mail_messages(id)
+			    ON DELETE CASCADE ON UPDATE CASCADE
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
+			return fmt.Errorf("criando mail_message_attachments: %w", err)
+		}
+	}
+
+	// 9) Mailbox: process_mail_links
+	var hasProcessMail int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME='process_mail_links'`,
+	).Scan(&hasProcessMail)
+	if hasProcessMail == 0 {
+		log.Println("[migrate] Criando tabela process_mail_links ...")
+		if _, err := db.Exec(`
+			CREATE TABLE process_mail_links (
+			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			  processo_id BIGINT UNSIGNED NOT NULL,
+			  mail_message_id BIGINT UNSIGNED NOT NULL,
+			  created_by BIGINT UNSIGNED NULL,
+			  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			  note TEXT NULL,
+			  PRIMARY KEY (id),
+			  UNIQUE KEY uq_process_mail (processo_id, mail_message_id),
+			  KEY idx_pml_processo (processo_id),
+			  KEY idx_pml_msg (mail_message_id),
+			  CONSTRAINT fk_pml_mail_message FOREIGN KEY (mail_message_id) REFERENCES mail_messages(id)
+			    ON DELETE CASCADE ON UPDATE CASCADE
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
+			return fmt.Errorf("criando process_mail_links: %w", err)
+		}
+	}
+	// 10) Flags para vw_processos_desvio_media_kwh_fponta (tabela)
+	var hasDesvioTable int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME='vw_processos_desvio_media_kwh_fponta'`,
+	).Scan(&hasDesvioTable)
+	if hasDesvioTable > 0 {
+		type colDef struct {
+			Name string
+			DDL  string
+		}
+		cols := []colDef{
+			{"verificado", "ALTER TABLE vw_processos_desvio_media_kwh_fponta ADD COLUMN verificado TINYINT(1) NOT NULL DEFAULT 0"},
+			{"processo_criado", "ALTER TABLE vw_processos_desvio_media_kwh_fponta ADD COLUMN processo_criado TINYINT(1) NOT NULL DEFAULT 0"},
+			{"analise", "ALTER TABLE vw_processos_desvio_media_kwh_fponta ADD COLUMN analise TINYINT(1) NOT NULL DEFAULT 0"},
+			{"descartar", "ALTER TABLE vw_processos_desvio_media_kwh_fponta ADD COLUMN descartar TINYINT(1) NOT NULL DEFAULT 0"},
+			{"processo_id", "ALTER TABLE vw_processos_desvio_media_kwh_fponta ADD COLUMN processo_id INT NULL"},
+			{"updated_at", "ALTER TABLE vw_processos_desvio_media_kwh_fponta ADD COLUMN updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"},
+		}
+		for _, col := range cols {
+			var colCount int
+			_ = db.QueryRow(`
+				SELECT COUNT(1)
+				FROM INFORMATION_SCHEMA.COLUMNS
+				WHERE TABLE_SCHEMA = DATABASE()
+				  AND TABLE_NAME = 'vw_processos_desvio_media_kwh_fponta'
+				  AND COLUMN_NAME = ?`, col.Name).Scan(&colCount)
+			if colCount == 0 {
+				log.Printf("[migrate] Adicionando coluna %s em vw_processos_desvio_media_kwh_fponta ...", col.Name)
+				if _, err := db.Exec(col.DDL); err != nil {
+					return fmt.Errorf("criando coluna %s: %w", col.Name, err)
+				}
+			}
+		}
+
+		type idxDef struct {
+			Name string
+			DDL  string
+		}
+		indexes := []idxDef{
+			{"idx_desvio_status", "CREATE INDEX idx_desvio_status ON vw_processos_desvio_media_kwh_fponta (status_desvio)"},
+			{"idx_desvio_uc", "CREATE INDEX idx_desvio_uc ON vw_processos_desvio_media_kwh_fponta (UC)"},
+			{"idx_desvio_concessionaria", "CREATE INDEX idx_desvio_concessionaria ON vw_processos_desvio_media_kwh_fponta (Concessionaria)"},
+			{"idx_desvio_mes_ref", "CREATE INDEX idx_desvio_mes_ref ON vw_processos_desvio_media_kwh_fponta (Mes_Ref)"},
+			{"idx_desvio_flags", "CREATE INDEX idx_desvio_flags ON vw_processos_desvio_media_kwh_fponta (verificado, analise, descartar, processo_criado)"},
+			{"idx_desvio_processo_id", "CREATE INDEX idx_desvio_processo_id ON vw_processos_desvio_media_kwh_fponta (processo_id)"},
+			{"idx_desvio_updated_at", "CREATE INDEX idx_desvio_updated_at ON vw_processos_desvio_media_kwh_fponta (updated_at)"},
+			{"idx_desvio_uc_conc_mes", "CREATE INDEX idx_desvio_uc_conc_mes ON vw_processos_desvio_media_kwh_fponta (UC, Concessionaria, Mes_Ref)"},
+		}
+		for _, idx := range indexes {
+			var idxCount int
+			_ = db.QueryRow(`
+				SELECT COUNT(1)
+				FROM INFORMATION_SCHEMA.STATISTICS
+				WHERE TABLE_SCHEMA = DATABASE()
+				  AND TABLE_NAME='vw_processos_desvio_media_kwh_fponta'
+				  AND INDEX_NAME=?`, idx.Name).Scan(&idxCount)
+			if idxCount == 0 {
+				log.Printf("[migrate] Criando indice %s ...", idx.Name)
+				if _, err := db.Exec(idx.DDL); err != nil {
+					if !strings.Contains(strings.ToLower(err.Error()), "exists") {
+						return fmt.Errorf("criando indice %s: %w", idx.Name, err)
+					}
+				}
+			}
+		}
+	}
+
+	// 6e) Leitura de e-mails por usuário (FT_EMAILS_PROCESSO)
+	var hasEmailReads int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME='FT_EMAILS_LEITURAS'`,
+	).Scan(&hasEmailReads)
+
+	if hasEmailReads == 0 {
+		log.Println("[migrate] Criando tabela FT_EMAILS_LEITURAS ...")
+		if _, err := db.Exec(`
+			CREATE TABLE FT_EMAILS_LEITURAS (
+			  id_email INT NOT NULL,
+			  id_usuario INT NOT NULL,
+			  data_leitura DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			  PRIMARY KEY (id_email, id_usuario),
+			  KEY idx_email_leitura (id_email),
+			  KEY idx_usuario_leitura (id_usuario),
+			  CONSTRAINT fk_email_leitura_email FOREIGN KEY (id_email) REFERENCES FT_EMAILS_PROCESSO(id_email)
+			    ON DELETE CASCADE ON UPDATE CASCADE,
+			  CONSTRAINT fk_email_leitura_usuario FOREIGN KEY (id_usuario) REFERENCES DM_USUARIO(id_usuario)
+			    ON DELETE CASCADE ON UPDATE CASCADE
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
+			return fmt.Errorf("criando FT_EMAILS_LEITURAS: %w", err)
+		}
+	}
+
+	// 9.1) Mailbox: mail_message_reads (read per user)
+	var hasMailReads int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME='mail_message_reads'`,
+	).Scan(&hasMailReads)
+	if hasMailReads == 0 {
+		log.Println("[migrate] Criando tabela mail_message_reads ...")
+		if _, err := db.Exec(`
+			CREATE TABLE mail_message_reads (
+			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			  user_id BIGINT UNSIGNED NOT NULL,
+			  graph_message_id VARCHAR(200) NOT NULL,
+			  read_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			  PRIMARY KEY (id),
+			  UNIQUE KEY uq_mail_read_user_msg (user_id, graph_message_id),
+			  KEY idx_mail_read_msg (graph_message_id),
+			  KEY idx_mail_read_user (user_id)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
+			return fmt.Errorf("criando mail_message_reads: %w", err)
+		}
+	}
+
+    log.Println("✅ Todas as migrações concluídas com sucesso")
 	return nil
 }

@@ -38,14 +38,14 @@ package handlers
 			status_analise = VALUES(status_analise), data_procedencia = VALUES(data_procedencia), credito_simples = VALUES(credito_simples),
 			credito_dobro = VALUES(credito_dobro), precisa_contestacao = VALUES(precisa_contestacao), observacoes = VALUES(observacoes)
 		`
-		_, err = database.DB_App.Exec(query, processoID, input.StatusAnalise, input.DataProcedencia, input.CreditoSimples, input.CreditoDobro, input.PrecisaContestacao, input.Observacoes)
+		_, err = execGorm(database.GormDB_App, query, processoID, input.StatusAnalise, input.DataProcedencia, input.CreditoSimples, input.CreditoDobro, input.PrecisaContestacao, input.Observacoes)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar o deferimento: " + err.Error()})
 			return
 		}
 
 		gestorNome, _ := c.Get("userName")
-		_, err = database.DB_App.Exec(`
+		_, err = execGorm(database.GormDB_App, `
 			INSERT INTO Historico_Movimentacoes (requisicao_id, nome_gestor, comentario)
 			VALUES (?, ?, ?)`,
 			processoID, gestorNome, "Detalhes do deferimento foram salvos/atualizados.",
@@ -58,5 +58,6 @@ package handlers
 		c.JSON(http.StatusOK, gin.H{"message": "Deferimento salvo com sucesso!"})
 	}
 */
+
 
 

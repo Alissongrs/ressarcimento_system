@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"database/sql"
@@ -18,6 +18,14 @@ type usuarioMencao struct {
 }
 
 // GET /api/usuarios/mencoes?q=termo
+// GetUsuariosMencoes godoc
+// @Summary      Lista usuários para menÃ§ões
+// @Tags         Usuarios
+// @Param        q  query  string  false  "Busca"
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/usuarios/mencoes [get]
 func GetUsuariosMencoes(c *gin.Context) {
 	q := strings.TrimSpace(c.Query("q"))
 	like := "%" + q + "%"
@@ -26,14 +34,14 @@ func GetUsuariosMencoes(c *gin.Context) {
 	var rows *sql.Rows
 	var err error
 	if q == "" {
-		rows, err = database.DB_App.Query(`
+		rows, err = queryGorm(database.GormDB_App, `
 			SELECT id_usuario, nome_usuario, email
 			FROM DM_USUARIO
 			WHERE usuario_ativo = 1
 			ORDER BY nome_usuario ASC
 			LIMIT 20`)
 	} else {
-		rows, err = database.DB_App.Query(`
+		rows, err = queryGorm(database.GormDB_App, `
 			SELECT id_usuario, nome_usuario, email
 			FROM DM_USUARIO
 			WHERE usuario_ativo = 1
@@ -63,3 +71,4 @@ func GetUsuariosMencoes(c *gin.Context) {
 
 	c.JSON(http.StatusOK, lista)
 }
+

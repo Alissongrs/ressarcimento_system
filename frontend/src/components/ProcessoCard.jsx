@@ -10,6 +10,8 @@ import {
   buscarFaturasPorUnidadeMeses,
 } from '../services/requisicaoService';
 import api from '../services/api';
+import { withAuthToken } from '../services/apiClient';
+import { confirmAction } from '../utils/confirm.js';
 
 /* ===================== HELPERS ===================== */
 
@@ -390,6 +392,7 @@ const ultimaDataISO = useMemo(() => {
     const novo = !fav; setFav(novo);
     try {
       const fd = new FormData(); fd.append('relevancia', String(novo));
+      if (!(await confirmAction(`Deseja mover o processo #${pid}?`))) return;
       await movimentarProcesso(pid, fd);
     } catch {
       setFav(!novo);
@@ -404,6 +407,7 @@ const ultimaDataISO = useMemo(() => {
     if (!pid) return;
     if (!confirm('Confirmar suspensão do processo?')) return;
     try {
+      if (!(await confirmAction('Deseja suspender este processo?'))) return;
       await suspenderProcesso(pid, 'Suspenso via card');
       setSuspLocal(true);
     } catch {
@@ -416,6 +420,7 @@ const ultimaDataISO = useMemo(() => {
     if (!pid) return;
     if (!confirm('Confirmar retomada do processo?')) return;
     try {
+      if (!(await confirmAction('Deseja retomar este processo?'))) return;
       await retomarProcesso(pid, 'Retomado via card');
       setSuspLocal(false);
     } catch {
@@ -647,8 +652,8 @@ const ultimaDataISO = useMemo(() => {
                           <div className="text-xs opacity-70">{a.enviado_por || a.EnviadoPor} {a.data_upload ? `· ${a.data_upload}` : ''}</div>
                         </div>
                       </div>
-                      {(a.caminho_arquivo || a.CaminhoArquivo) && (
-                        <a className="inline-flex items-center gap-1 text-sm underline" href={a.caminho_arquivo || a.CaminhoArquivo} target="_blank" rel="noreferrer">
+                      {(a.url || a.caminho_arquivo || a.CaminhoArquivo) && (
+                        <a className="inline-flex items-center gap-1 text-sm underline" href={withAuthToken(a.url || a.caminho_arquivo || a.CaminhoArquivo)} target="_blank" rel="noreferrer">
                           <LinkIcon size={14} /> Abrir
                         </a>
                       )}
@@ -687,20 +692,3 @@ const ultimaDataISO = useMemo(() => {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

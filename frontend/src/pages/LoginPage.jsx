@@ -29,7 +29,7 @@ const Login = () => {
     try {
       const { token } = await loginService(formData.email, formData.password);
       login(token);
-      navigate('/');
+      window.location.href = `/?v=${Date.now()}`;
     } catch (err) {
       console.error('Erro detalhado no login:', err);
       setError(err?.response?.data?.error || 'Falha no login. Verifique seu e-mail e senha.');
@@ -39,7 +39,9 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background text-foreground p-4">
+    <div
+      className="fixed inset-0 flex items-center justify-center text-foreground p-4 overflow-auto bg-[radial-gradient(900px_circle_at_20%_10%,rgba(120,180,255,0.35),transparent_55%),radial-gradient(700px_circle_at_80%_20%,rgba(255,210,120,0.35),transparent_55%),linear-gradient(135deg,#f7f4ea_0%,#e9f0fb_45%,#f6efe9_100%)]"
+    >
       <Card className="w-full max-w-md gradient-card shadow-medium backdrop-blur-sm border border-[var(--border)] text-[var(--fg)]">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold text-[var(--fg)]">

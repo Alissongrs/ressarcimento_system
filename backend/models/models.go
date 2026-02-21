@@ -82,6 +82,8 @@ type Deferimento struct {
 	CreditoSimples   decimal.NullDecimal `json:"credito_simples"`
 	CreditoDobro     decimal.NullDecimal `json:"credito_dobro"`
 	DataCreditoDobro sql.NullTime        `json:"data_credito_dobro"`
+	RepasseSimples   decimal.NullDecimal `json:"repasse_simples"`
+	RepasseDobro     decimal.NullDecimal `json:"repasse_dobro"`
 }
 
 // DeferimentoInput é usada para receber os dados do JSON do frontend ao salvar.
@@ -91,6 +93,8 @@ type DeferimentoInput struct {
 	CreditoSimples   string `json:"credito_simples"`   // Recebe como string, converte no handler
 	CreditoDobro     string `json:"credito_dobro"`     // Recebe como string, converte no handler
 	DataCreditoDobro string `json:"data_credito_dobro"`
+	RepasseSimples   string `json:"repasse_simples"`
+	RepasseDobro     string `json:"repasse_dobro"`
 }
 
 // FluxoRessarcimento representa os campos do fluxo no banco de dados.
@@ -177,7 +181,7 @@ type Tag struct {
 // Alerta representa uma notificação para um usuário.
 type Alerta struct {
 	ID          int64         `json:"id"`
-	ProcessoID  sql.NullInt64 `json:"processo_id"`
+	ProcessoID  sql.NullInt64 `json:"processo_id" swaggertype:"integer"`
 	Mensagem    string        `json:"mensagem"`
 	Lido        bool          `json:"lido"`
 	DataCriacao time.Time     `json:"data_criacao"`
@@ -214,12 +218,12 @@ type ConcessionariaFiltro struct {
 // UCDetalhes fornece detalhes da consulta de UC.
 type UCDetalhes struct {
 	UC                   string         `json:"uc"`
-	Cliente              sql.NullString `json:"cliente"`
-	RazaoSocialFatura    sql.NullString `json:"razao_social_fatura"`
-	Concessionaria       sql.NullString `json:"concessionaria"`
-	CNPJ                 sql.NullString `json:"cnpj"`
-	EnderecoCompleto     sql.NullString `json:"endereco_completo"`
-	LinkFatura           sql.NullString `json:"link_fatura"`
+	Cliente              sql.NullString `json:"cliente" swaggertype:"string"`
+	RazaoSocialFatura    sql.NullString `json:"razao_social_fatura" swaggertype:"string"`
+	Concessionaria       sql.NullString `json:"concessionaria" swaggertype:"string"`
+	CNPJ                 sql.NullString `json:"cnpj" swaggertype:"string"`
+	EnderecoCompleto     sql.NullString `json:"endereco_completo" swaggertype:"string"`
+	LinkFatura           sql.NullString `json:"link_fatura" swaggertype:"string"`
 	IDUC                 *int64         `json:"id_uc,omitempty"`
 	IDEmpresa            *int64         `json:"id_empresa,omitempty"`
 	IDConcessionaria     *int64         `json:"id_concessionaria,omitempty"`
@@ -238,6 +242,7 @@ type EmailProcesso struct {
 	ID                 int64          `json:"id_email"`
 	ProcessoID         int64          `json:"id_processo"`
 	UsuarioRemetenteID sql.NullInt64  `json:"id_usuario_remetente"`
+	UsuarioRemetente   sql.NullString `json:"usuario_remetente,omitempty"`
 	DeEmail            string         `json:"de_email"`
 	ParaEmail          string         `json:"para_email"`
 	CcEmail            sql.NullString `json:"cc_email"`
@@ -246,6 +251,7 @@ type EmailProcesso struct {
 	Corpo              sql.NullString `json:"corpo"`
 	DataEnvio          time.Time      `json:"data_envio"`
 	Tipo               string         `json:"tipo"`
+	ReadBy             []string       `json:"read_by,omitempty"`
 }
 
 // Departamento representa a estrutura da tabela DM_DEPARTAMENTO.

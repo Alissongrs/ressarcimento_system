@@ -1,4 +1,4 @@
-// backend/handlers/alertas_stream.go
+﻿// backend/handlers/alertas_stream.go
 package handlers
 
 import (
@@ -15,6 +15,13 @@ import (
 )
 
 // GET /api/alertas/stream  (aceita ?token=JWT para facilitar EventSource)
+// @Summary SSE de alertas
+// @Tags SSE
+// @Produce text/event-stream
+// @Param token query string false "JWT"
+// @Success 200 {string} string "stream"
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/alertas/stream [get]
 func StreamAlertas(c *gin.Context) {
 	var userID int64
 
@@ -58,7 +65,7 @@ func StreamAlertas(c *gin.Context) {
 
 	// Envia um boot com contagem de não lidos (mesmo nome de evento do notifyUnread)
 	var unread int
-	_ = database.DB_App.QueryRow(
+	_ = queryRowGorm(database.GormDB_App, 
 		"SELECT COUNT(*) FROM FT_ALERTAS WHERE id_usuario=? AND lido=0",
 		userID,
 	).Scan(&unread)
@@ -92,3 +99,4 @@ func StreamAlertas(c *gin.Context) {
 		}
 	}
 }
+

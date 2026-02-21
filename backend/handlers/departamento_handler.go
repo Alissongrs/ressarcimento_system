@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"log"
@@ -17,9 +17,15 @@ type Departamento struct {
 }
 
 // GetDepartamentos busca e retorna a lista de todos os departamentos.
+// @Summary Listar departamentos
+// @Tags Departamentos
+// @Produce json
+// @Success 200 {array} models.Departamento
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/departamentos [get]
 func GetDepartamentos(c *gin.Context) {
 	var departamentos []models.Departamento
-	rows, err := database.DB_App.Query("SELECT id_departamento, nome FROM DM_DEPARTAMENTO ORDER BY nome ASC")
+	rows, err := queryGorm(database.GormDB_App, "SELECT id_departamento, nome FROM DM_DEPARTAMENTO ORDER BY nome ASC")
 	if err != nil {
 		log.Printf("Erro ao buscar departamentos: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar departamentos"})
@@ -44,3 +50,4 @@ func GetDepartamentos(c *gin.Context) {
 
 	c.JSON(http.StatusOK, departamentos)
 }
+

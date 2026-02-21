@@ -10,6 +10,15 @@ import (
 )
 
 // PerguntaIAHandler chama a API do agente de IA rodando no Docker.
+// PerguntaIAHandler godoc
+// @Summary      Perguntar IA
+// @Tags         AI
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/perguntar-ia [post]
 func PerguntaIAHandler(c *gin.Context) {
 	// 1. O struct agora espera receber um JSON com a chave "question".
 	var input struct {

@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"database/sql"
@@ -23,7 +23,17 @@ type SearchHit struct {
 }
 
 // GET /api/v1/search/global?q=texto&limit=100&offset=0
-// Busca texto em todo o histórico de movimentações e retorna hits com id do processo.
+// Busca texto em todo o histórico de movimentaÃ§ões e retorna hits com id do processo.
+// @Summary Busca global no historico
+// @Tags Search
+// @Produce json
+// @Param q query string true "Termo"
+// @Param limit query int false "Limite"
+// @Param offset query int false "Offset"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/search/global [get]
 func SearchGlobal(c *gin.Context) {
 	q := strings.TrimSpace(c.Query("q"))
 	if q == "" {
@@ -66,7 +76,7 @@ func SearchGlobal(c *gin.Context) {
 	}
 	whereSQL := "WHERE " + strings.Join(whereParts, " OR ")
 
-	rows, err := database.DB_App.Query(`
+	rows, err := queryGorm(database.GormDB_App, `
         SELECT
             COALESCE(h.id_historico, 0) AS id_historico,
             r.id_requisicao AS processo_id,
@@ -109,7 +119,7 @@ func SearchGlobal(c *gin.Context) {
 			fallbackArgs = append(fallbackArgs, processID)
 		}
 		fallbackWhereSQL := "WHERE " + strings.Join(fallbackWhereParts, " OR ")
-		rows, err = database.DB_App.Query(`
+		rows, err = queryGorm(database.GormDB_App, `
             SELECT
                 COALESCE(h.id_historico, 0) AS id_historico,
                 r.id_requisicao AS processo_id,
@@ -149,3 +159,4 @@ func SearchGlobal(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"results": results, "count": len(results)})
 }
+

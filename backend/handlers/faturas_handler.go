@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"database/sql"
@@ -13,13 +13,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetFaturas busca faturas com base em filtros, agora com paginação.
+// GetFaturas busca faturas com base em filtros, agora com paginaÃÂ§ÃÂ£o.
+// @Summary Listar faturas
+// @Tags Faturas
+// @Produce json
+// @Param unidade query string false "Unidade"
+// @Param mes query []string false "Meses"
+// @Param page query int false "Pagina"
+// @Param pageSize query int false "Tamanho da pagina"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/faturas [get]
 func GetFaturas(c *gin.Context) {
 	// Branch: quando informado ?unidade=&mes=..., consulta Amee_Serving.Unidade + Faturas_Implantadas
 	if unidade := strings.TrimSpace(c.Query("unidade")); unidade != "" {
 		meses := c.QueryArray("mes")
 		if len(meses) == 0 {
-			// Sem meses: retornar últimas 12 faturas da unidade
+			// Sem meses: retornar ÃÂºltimas 12 faturas da unidade
 			q := "SELECT fi.id_fatura, fi.Mes_Ref, fi.Dt_Vencimento, fi.Link, fi.Valor_Total\n" +
 				"FROM Amee_Serving.Unidade u\n" +
 				"JOIN Amee_Serving.Faturas_Implantadas fi ON fi.id_uc = u.id_uc AND fi.id_empresa = u.id_empresa\n" +
@@ -112,12 +123,12 @@ func GetFaturas(c *gin.Context) {
 		for _, m := range meses {
 			rawm := strings.TrimSpace(m)
 			low := strings.ToLower(rawm)
-			low = strings.ReplaceAll(low, "até", "a")
+			low = strings.ReplaceAll(low, "atÃÂ©", "a")
 			low = strings.ReplaceAll(low, "ate", "a")
 			if strings.Contains(low, " a ") {
 				parts := strings.SplitN(rawm, " a ", 2)
 				if len(parts) != 2 {
-					tmp := strings.SplitN(strings.ReplaceAll(strings.ReplaceAll(rawm, "até", " a "), "ate", " a "), " a ", 2)
+					tmp := strings.SplitN(strings.ReplaceAll(strings.ReplaceAll(rawm, "atÃÂ©", " a "), "ate", " a "), " a ", 2)
 					if len(tmp) == 2 {
 						parts = tmp
 					}
@@ -126,7 +137,7 @@ func GetFaturas(c *gin.Context) {
 					start, err1 := normalize(parts[0])
 					end, err2 := normalize(parts[1])
 					if err1 != nil || err2 != nil {
-						c.JSON(http.StatusBadRequest, gin.H{"error": "intervalo de meses inválido"})
+						c.JSON(http.StatusBadRequest, gin.H{"error": "intervalo de meses invÃÂ¡lido"})
 						return
 					}
 					conds = append(conds, "(fi.Mes_Ref >= ? AND fi.Mes_Ref < DATE_ADD(?, INTERVAL 1 MONTH))")
@@ -202,9 +213,9 @@ func GetFaturas(c *gin.Context) {
 		return
 	}
 
-	// ====== FILTRO PADRÃO COM PAGINAÇÃO ======
+	// ====== FILTRO PADRÃÆ’O COM PAGINAÃâ€¡ÃÆ’O ======
 
-	// Padrões de paginação
+	// PadrÃÂµes de paginaÃÂ§ÃÂ£o
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	if page < 1 {
 		page = 1
@@ -229,7 +240,7 @@ func GetFaturas(c *gin.Context) {
 	var conditions []string
 	var args []interface{}
 
-	// Construção das condições de filtro (WHERE)
+	// ConstruÃÂ§ÃÂ£o das condiÃÂ§ÃÂµes de filtro (WHERE)
 	if empresaID := c.Query("empresaId"); empresaID != "" {
 		conditions = append(conditions, "f.Cod_Empresa = ?")
 		args = append(args, empresaID)
@@ -268,8 +279,8 @@ func GetFaturas(c *gin.Context) {
 	var totalRecords int
 	countQuery := "SELECT COUNT(DISTINCT f.Cod_Fatura)" + queryBase + whereClause
 	if database.DB_Consulta == nil {
-		fmt.Println("[GetFaturas] DB_Consulta está nil (verifique DB_CONSULTA_URL)")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB_Consulta não inicializado"})
+		fmt.Println("[GetFaturas] DB_Consulta estÃÂ¡ nil (verifique DB_CONSULTA_URL)")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB_Consulta nÃÂ£o inicializado"})
 		return
 	}
 	err := database.DB_Consulta.QueryRow(countQuery, args...).Scan(&totalRecords)
@@ -279,7 +290,7 @@ func GetFaturas(c *gin.Context) {
 		return
 	}
 
-	// 2. Query Principal para buscar os dados da página atual
+	// 2. Query Principal para buscar os dados da pÃÂ¡gina atual
 	dataQuery := `
         SELECT DISTINCT
             f.Cod_Fatura,
@@ -290,7 +301,7 @@ func GetFaturas(c *gin.Context) {
             uc.Tensao
     ` + queryBase + whereClause + " ORDER BY f.Data_Vencimento DESC LIMIT ? OFFSET ?"
 
-	// Adiciona os argumentos de paginação
+	// Adiciona os argumentos de paginaÃÂ§ÃÂ£o
 	pagedArgs := append(args, pageSize, offset)
 
 	rows, err := database.DB_Consulta.Query(dataQuery, pagedArgs...)
@@ -323,16 +334,22 @@ func GetFaturas(c *gin.Context) {
 }
 
 // GetEmpresasParaFiltro busca todas as empresas para preencher a caixa suspensa.
+// @Summary Listar empresas para filtro
+// @Tags Filtros
+// @Produce json
+// @Success 200 {array} models.EmpresaFiltro
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/filtros/empresas [get]
 func GetEmpresasParaFiltro(c *gin.Context) {
 	if database.DB_Consulta == nil {
-		fmt.Println("[GetEmpresasParaFiltro] DB_Consulta está nil (verifique DB_CONSULTA_URL)")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB_Consulta não inicializado"})
+		fmt.Println("[GetEmpresasParaFiltro] DB_Consulta estÃÂ¡ nil (verifique DB_CONSULTA_URL)")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB_Consulta nÃÂ£o inicializado"})
 		return
 	}
 
 	var empresas []models.EmpresaFiltro
 
-	// Se sua DM_Empresa não tiver coluna Status, remova o WHERE.
+	// Se sua DM_Empresa nÃÂ£o tiver coluna Status, remova o WHERE.
 	query := "SELECT Cod_Empresa, Rz_Social FROM DM_Empresa WHERE Status = 'A' ORDER BY Rz_Social ASC"
 
 	rows, err := database.DB_Consulta.Query(query)
@@ -354,41 +371,59 @@ func GetEmpresasParaFiltro(c *gin.Context) {
 	c.JSON(http.StatusOK, empresas)
 }
 
-// GetConcessionariasParaFiltro busca todas as concessionárias para preencher a caixa suspensa.
+// GetConcessionariasParaFiltro busca todas as concessionÃÂ¡rias para preencher a caixa suspensa.
+// @Summary Listar concessionarias para filtro
+// @Tags Filtros
+// @Produce json
+// @Success 200 {array} models.ConcessionariaFiltro
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/filtros/concessionarias [get]
 func GetConcessionariasParaFiltro(c *gin.Context) {
-	if database.DB_Consulta == nil {
-		fmt.Println("[GetConcessionariasParaFiltro] DB_Consulta está nil (verifique DB_CONSULTA_URL)")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB_Consulta não inicializado"})
+	var concessionarias []models.ConcessionariaFiltro
+
+	// Preferir GormDB_App (db_ressarcimento)
+	if database.GormDB_App == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "GormDB_App nao inicializado"})
 		return
 	}
 
-	var concessionarias []models.ConcessionariaFiltro
-	query := "SELECT Cod_Concess, Sigla FROM DM_Concessionaria ORDER BY Sigla ASC"
-
-	rows, err := database.DB_Consulta.Query(query)
+	rows, err := queryGorm(database.GormDB_App, `
+		SELECT DISTINCT COALESCE(Concessionaria,'') AS sigla
+		  FROM VW_POWERBI_PROCESSOS
+		 WHERE COALESCE(Concessionaria,'') <> ''
+		 ORDER BY Concessionaria ASC`)
 	if err != nil {
-		fmt.Printf("[GetConcessionariasParaFiltro] erro ao buscar concessionárias: %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar concessionárias: " + err.Error()})
+		fmt.Printf("[GetConcessionariasParaFiltro] erro ao buscar concessionarias (GormDB_App): %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar concessionarias: " + err.Error()})
 		return
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var co models.ConcessionariaFiltro
-		if err := rows.Scan(&co.CodConcess, &co.Sigla); err != nil {
-			fmt.Printf("[GetConcessionariasParaFiltro] erro ao escanear concessionária: %v\n", err)
+		var sigla string
+		if err := rows.Scan(&sigla); err != nil {
+			fmt.Printf("[GetConcessionariasParaFiltro] erro ao escanear fallback: %v\n", err)
 			continue
 		}
-		concessionarias = append(concessionarias, co)
+		concessionarias = append(concessionarias, models.ConcessionariaFiltro{
+			CodConcess: 0,
+			Sigla:      sigla,
+		})
 	}
 	c.JSON(http.StatusOK, concessionarias)
 }
 
-// GetTensaoParaFiltro busca os tipos de tensão distintos para o filtro.
+// GetTensaoParaFiltro busca os tipos de tensÃÂ£o distintos para o filtro.
+// @Summary Listar tensoes para filtro
+// @Tags Filtros
+// @Produce json
+// @Success 200 {array} string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/filtros/tensao [get]
 func GetTensaoParaFiltro(c *gin.Context) {
 	if database.DB_Consulta == nil {
-		fmt.Println("[GetTensaoParaFiltro] DB_Consulta está nil (verifique DB_CONSULTA_URL)")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB_Consulta não inicializado"})
+		fmt.Println("[GetTensaoParaFiltro] DB_Consulta estÃÂ¡ nil (verifique DB_CONSULTA_URL)")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB_Consulta nÃÂ£o inicializado"})
 		return
 	}
 
@@ -397,8 +432,8 @@ func GetTensaoParaFiltro(c *gin.Context) {
 
 	rows, err := database.DB_Consulta.Query(query)
 	if err != nil {
-		fmt.Printf("[GetTensaoParaFiltro] erro ao buscar tensões: %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar tipos de tensão: " + err.Error()})
+		fmt.Printf("[GetTensaoParaFiltro] erro ao buscar tensÃÂµes: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar tipos de tensÃÂ£o: " + err.Error()})
 		return
 	}
 	defer rows.Close()
@@ -406,7 +441,7 @@ func GetTensaoParaFiltro(c *gin.Context) {
 	for rows.Next() {
 		var t sql.NullString
 		if err := rows.Scan(&t); err != nil {
-			fmt.Printf("[GetTensaoParaFiltro] erro ao escanear tensão: %v\n", err)
+			fmt.Printf("[GetTensaoParaFiltro] erro ao escanear tensÃÂ£o: %v\n", err)
 			continue
 		}
 		if t.Valid {
@@ -418,9 +453,18 @@ func GetTensaoParaFiltro(c *gin.Context) {
 
 // GET /api/v1/faturas-anos?id_uc=&id_empresa=&id_concessionaria=
 // Retorna anos distintos (YYYY) existentes em Faturas_Implantadas conforme filtros informados.
+// @Summary Listar anos de faturas
+// @Tags Faturas
+// @Produce json
+// @Param id_uc query string false "ID UC"
+// @Param id_empresa query string false "ID empresa"
+// @Param id_concessionaria query string false "ID concessionaria"
+// @Success 200 {object} map[string][]int
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/faturas-anos [get]
 func GetFaturasAnos(c *gin.Context) {
 	if database.DB_Consulta == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB_Consulta não inicializado"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB_Consulta nÃÂ£o inicializado"})
 		return
 	}
 
@@ -462,3 +506,4 @@ func GetFaturasAnos(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"anos": out})
 }
+

@@ -81,6 +81,11 @@ func init() {
 }
 
 // GET /api/v1/rules
+// @Summary Listar regras
+// @Tags Regras
+// @Produce json
+// @Success 200 {object} map[string][]Rule
+// @Router /api/v1/rules [get]
 func GetRules(c *gin.Context) {
 	rulesMu.Lock()
 	defer rulesMu.Unlock()
@@ -88,6 +93,11 @@ func GetRules(c *gin.Context) {
 }
 
 // GET /api/v1/rules/active
+// @Summary Listar regras ativas
+// @Tags Regras
+// @Produce json
+// @Success 200 {object} map[string][]Rule
+// @Router /api/v1/rules/active [get]
 func GetActiveRules(c *gin.Context) {
 	rulesMu.Lock()
 	defer rulesMu.Unlock()
@@ -101,6 +111,14 @@ func GetActiveRules(c *gin.Context) {
 }
 
 // POST /api/v1/rules
+// @Summary Criar regra
+// @Tags Regras
+// @Accept json
+// @Produce json
+// @Param body body Rule true "Regra"
+// @Success 201 {object} Rule
+// @Failure 400 {object} map[string]string
+// @Router /api/v1/rules [post]
 func CreateRule(c *gin.Context) {
 	var r Rule
 	if err := c.ShouldBindJSON(&r); err != nil {
@@ -121,6 +139,16 @@ func CreateRule(c *gin.Context) {
 }
 
 // PUT /api/v1/rules/:id
+// @Summary Atualizar regra
+// @Tags Regras
+// @Accept json
+// @Produce json
+// @Param id path int true "ID da regra"
+// @Param body body Rule true "Regra"
+// @Success 200 {object} Rule
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /api/v1/rules/{id} [put]
 func UpdateRule(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	var in Rule
@@ -146,6 +174,13 @@ func UpdateRule(c *gin.Context) {
 }
 
 // DELETE /api/v1/rules/:id
+// @Summary Excluir regra
+// @Tags Regras
+// @Produce json
+// @Param id path int true "ID da regra"
+// @Success 200 {object} map[string]bool
+// @Failure 404 {object} map[string]string
+// @Router /api/v1/rules/{id} [delete]
 func DeleteRule(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	rulesMu.Lock()
@@ -170,6 +205,14 @@ func DeleteRule(c *gin.Context) {
 
 // POST /api/v1/rules/interpret { text: string }
 // Usa OpenAI (OCRChat) para sugerir campos estruturados.
+// @Summary Interpretar regra (IA)
+// @Tags Regras
+// @Accept json
+// @Produce json
+// @Param body body map[string]string true "Texto"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]string
+// @Router /api/v1/rules/interpret [post]
 func InterpretRule(c *gin.Context) {
 	var body struct {
 		Text string `json:"text"`

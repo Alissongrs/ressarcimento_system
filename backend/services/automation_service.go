@@ -1,30 +1,55 @@
-package services
+﻿package services
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"ressarcimento-backend/models"
 	"strconv"
 	"strings"
 	"time"
 
-	"ressarcimento-backend/database"
-	"ressarcimento-backend/models"
-
 	"gopkg.in/gomail.v2"
 )
 
-// SendEmail envia um e-mail usando as configurações do .env.
+// SendEmail envia um e-mail com destinatário simples.
 func SendEmail(to, subject, body string) error {
+	return SendEmailDetailed(to, "", "", subject, body)
+}
+
+// SendEmailDetailed envia e-mail com To/CC/BCC.
+func SendEmailDetailed(to, cc, bcc, subject, body string) error {
+	return SendEmailDetailedWithAttachments(to, cc, bcc, subject, body, nil)
+}
+
+// EmailAttachment representa um anexo (memória).
+type EmailAttachment struct {
+	Name        string
+	ContentType string
+	Data        []byte
+}
+
+// SendEmailDetailedWithAttachments envia e-mail com anexos.
+func SendEmailDetailedWithAttachments(to, cc, bcc, subject, body string, attachments []EmailAttachment) error {
+	// Preferir Microsoft Graph se estiver configurado
+	if graphEnabled() {
+		return sendEmailGraph(to, cc, bcc, subject, body, attachments)
+	}
+	return sendEmailSMTP(to, cc, bcc, subject, body, attachments)
+}
+
+func sendEmailSMTP(to, cc, bcc, subject, body string, attachments []EmailAttachment) error {
 	smtpHost := os.Getenv("SMTP_HOST")
 	smtpPortStr := os.Getenv("SMTP_PORT")
 	smtpUser := os.Getenv("SMTP_USER")
 	smtpPass := os.Getenv("SMTP_PASS")
 
 	if smtpHost == "" || smtpPortStr == "" || smtpUser == "" || smtpPass == "" {
-		log.Println("Aviso: Configurações de SMTP incompletas. E-mail não será enviado.")
-		return fmt.Errorf("configurações de SMTP não encontradas nas variáveis de ambiente")
+		log.Println("Aviso: ConfiguraÃ§ões de SMTP incompletas. E-mail não será enviado.")
+		return fmt.Errorf("configuraÃ§ões de SMTP não encontradas nas variáveis de ambiente")
 	}
 
 	smtpPort, err := strconv.Atoi(smtpPortStr)
@@ -34,21 +59,51 @@ func SendEmail(to, subject, body string) error {
 
 	m := gomail.NewMessage()
 	m.SetHeader("From", smtpUser)
-	m.SetHeader("To", to)
+	m.SetHeader("To", splitEmails(to)...)
+	if strings.TrimSpace(cc) != "" {
+		m.SetHeader("Cc", splitEmails(cc)...)
+	}
+	if strings.TrimSpace(bcc) != "" {
+		m.SetHeader("Bcc", splitEmails(bcc)...)
+	}
 	m.SetHeader("Subject", subject)
 	m.SetBody("text/html", body)
 
-	d := gomail.NewDialer(smtpHost, smtpPort, smtpUser, smtpPass)
-
-	if err := d.DialAndSend(m); err != nil {
-		return err
+	for _, a := range attachments {
+		if len(a.Data) == 0 || strings.TrimSpace(a.Name) == "" {
+			continue
+		}
+		m.Attach(a.Name, gomail.SetHeader(map[string][]string{
+			"Content-Type":              {a.ContentType},
+			"Content-Disposition":       {fmt.Sprintf(`attachment; filename="%s"`, a.Name)},
+			"Content-Transfer-Encoding": {"base64"},
+		}), gomail.SetCopyFunc(func(w io.Writer) error {
+			_, err := io.Copy(w, bytes.NewReader(a.Data))
+			return err
+		}))
 	}
-	return nil
+
+	d := gomail.NewDialer(smtpHost, smtpPort, smtpUser, smtpPass)
+	return d.DialAndSend(m)
 }
 
-// EnviarEmailMovimentacoesDiarias busca as movimentações de processos e envia o relatório.
+func splitEmails(raw string) []string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';'
+	})
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		s := strings.TrimSpace(p)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// EnviarEmailMovimentacoesDiarias busca as movimentaÃ§ões de processos e envia o relatório.
 func EnviarEmailMovimentacoesDiarias() {
-	log.Println("Executando tarefa: Enviar e-mails de movimentação de processos...")
+	log.Println("Executando tarefa: Enviar e-mails de movimentaÃ§ão de processos...")
 
 	// Últimas 12h
 	periodo := time.Now().Add(-12 * time.Hour)
@@ -68,9 +123,9 @@ func EnviarEmailMovimentacoesDiarias() {
         ORDER BY h.data_movimentacao DESC;
     `
 
-	rows, err := database.DB_App.Query(query, periodo)
+	rows, err := getAppDB().Query(query, periodo)
 	if err != nil {
-		log.Printf("Erro ao buscar histórico de movimentações: %v", err)
+		log.Printf("Erro ao buscar histórico de movimentaÃ§ões: %v", err)
 		return
 	}
 	defer rows.Close()
@@ -87,14 +142,14 @@ func EnviarEmailMovimentacoesDiarias() {
 			&hist.Comentario,
 			&hist.DataMovimentacao,
 		); err != nil {
-			log.Printf("Erro ao escanear movimentação: %v", err)
+			log.Printf("Erro ao escanear movimentaÃ§ão: %v", err)
 			continue
 		}
 		movimentacoes = append(movimentacoes, hist)
 	}
 
 	if len(movimentacoes) == 0 {
-		log.Println("Nenhuma movimentação de processo nas últimas 12 horas.")
+		log.Println("Nenhuma movimentaÃ§ão de processo nas últimas 12 horas.")
 		return
 	}
 
@@ -102,14 +157,14 @@ func EnviarEmailMovimentacoesDiarias() {
 	bodyBuilder.WriteString(`
         <html>
         <body>
-            <h1 style="color: #333;">Relatório de Movimentação de Processos</h1>
+            <h1 style="color: #333;">Relatório de MovimentaÃ§ão de Processos</h1>
             <p>Resumo das atividades nas últimas 12 horas.</p>
             <table style="width: 100%; border-collapse: collapse; font-family: sans-serif;">
                 <thead style="background-color: #f2f2f2;">
                     <tr>
                         <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Processo ID</th>
                         <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Gestor</th>
-                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Movimentação de Etapa</th>
+                        <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">MovimentaÃ§ão de Etapa</th>
                         <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Comentário</th>
                         <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Data</th>
                     </tr>
@@ -142,10 +197,10 @@ func EnviarEmailMovimentacoesDiarias() {
     `)
 
 	// Envia para os gestores ativos
-	rowsGestores, err := database.DB_App.Query(`
+	rowsGestores, err := getAppDB().Query(`
         SELECT email
         FROM DM_USUARIO
-        WHERE tipo_conta = 'gestor' AND ativo = 1
+        WHERE perfil = 'gestor' AND ativo = 1
     `)
 	if err != nil {
 		log.Printf("Erro ao buscar e-mails dos gestores: %v", err)
@@ -162,10 +217,10 @@ func EnviarEmailMovimentacoesDiarias() {
 		if emailGestor == "" {
 			continue
 		}
-		if err := SendEmail(emailGestor, "Relatório Diário de Movimentação de Processos", bodyBuilder.String()); err != nil {
+		if err := SendEmail(emailGestor, "Relatório Diário de MovimentaÃ§ão de Processos", bodyBuilder.String()); err != nil {
 			log.Printf("Erro ao enviar e-mail para %s: %v", emailGestor, err)
 		} else {
-			log.Printf("Relatório de movimentação enviado para %s", emailGestor)
+			log.Printf("Relatório de movimentaÃ§ão enviado para %s", emailGestor)
 		}
 	}
 }
@@ -181,7 +236,7 @@ func VerificarPendenciasDeFluxo() {
 
 	// etapa \"Enviado ao Financeiro\" no seu dicionário de etapas
 	var etapaFluxoID int
-	err := database.DB_App.QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = 'Enviado ao Financeiro'").Scan(&etapaFluxoID)
+	err := getAppDB().QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = 'Enviado ao Financeiro'").Scan(&etapaFluxoID)
 	if err != nil {
 		log.Printf("Erro ao buscar ID da etapa 'Enviado ao Financeiro': %v", err)
 		return
@@ -201,7 +256,7 @@ func VerificarPendenciasDeFluxo() {
      LEFT JOIN VW_ULTIMO_HISTORICO vh ON vh.id_requisicao = p.id_processo
          WHERE COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) IS NOT NULL;
     `
-	rows, err := database.DB_App.Query(query)
+	rows, err := getAppDB().Query(query)
 	if err != nil {
 		log.Printf("Erro ao checar prazos de processos: %v", err)
 		return
@@ -229,7 +284,7 @@ func VerificarPendenciasDeFluxo() {
 
 		// Evita duplicar alerta no dia
 		var exists int
-		_ = database.DB_App.QueryRow(
+		_ = getAppDB().QueryRow(
 			"SELECT COUNT(1) FROM FT_ALERTAS WHERE id_processo=? AND DATE(data_criacao)=CURRENT_DATE AND mensagem LIKE ?",
 			procID, "%Prazo do processo%",
 		).Scan(&exists)
@@ -243,7 +298,7 @@ func VerificarPendenciasDeFluxo() {
 		} else {
 			msg = fmt.Sprintf("Prazo do processo #%d vencido.", procID)
 		}
-		if _, err := database.DB_App.Exec(
+		if _, err := getAppDB().Exec(
 			"INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta) VALUES (?, ?, ?, 0, 0, NOW(), DATE(?))",
 			userID.Int64, procID, msg, deadline.Time,
 		); err != nil {
@@ -255,32 +310,32 @@ func VerificarPendenciasDeFluxo() {
 // ChecarPrazosRequisicoes cria alertas quando faltar <= 24h para o prazo de triagem/analise
 func ChecarPrazosRequisicoes() {
 	log.Println("Executando tarefa: Checar prazos de Requisições (<=24h)...")
-	if database.DB_App == nil {
+	if getAppDB() == nil {
 		return
 	}
 	q := `
         SELECT r.id_requisicao, r.id_usuario,
                TIMESTAMPDIFF(HOUR, NOW(),
                  DATE_ADD(r.data_mudanca_status,
-        INTERVAL CASE WHEN s.status = 'Nova Requisição' THEN 5
+        INTERVAL CASE WHEN s.status = 'Nova RequisiÃ§ão' THEN 5
                                         WHEN s.status IN ('Em Análise','Em Analise') THEN 10
                                         ELSE 0 END DAY)) AS horas_restantes,
                DATE_ADD(r.data_mudanca_status,
-        INTERVAL CASE WHEN s.status = 'Nova Requisição' THEN 5
+        INTERVAL CASE WHEN s.status = 'Nova RequisiÃ§ão' THEN 5
                                         WHEN s.status IN ('Em Análise','Em Analise') THEN 10
                                         ELSE 0 END DAY) AS deadline_dt
           FROM FT_REQUISICOES r
           LEFT JOIN DM_STATUS s ON s.id_status = r.id_status
-        WHERE s.status IN ('Nova Requisição','Em Análise','Em Analise')
+        WHERE s.status IN ('Nova RequisiÃ§ão','Em Análise','Em Analise')
            AND TIMESTAMPDIFF(HOUR, NOW(),
                  DATE_ADD(r.data_mudanca_status,
-        INTERVAL CASE WHEN s.status = 'Nova Requisição' THEN 5
+        INTERVAL CASE WHEN s.status = 'Nova RequisiÃ§ão' THEN 5
                                         WHEN s.status IN ('Em Análise','Em Analise') THEN 10
                                         ELSE 0 END DAY)) BETWEEN 0 AND 24;
     `
-	rows, err := database.DB_App.Query(q)
+	rows, err := getAppDB().Query(q)
 	if err != nil {
-		log.Printf("Erro ao checar prazos de requisições: %v", err)
+		log.Printf("Erro ao checar prazos de requisiÃ§ões: %v", err)
 		return
 	}
 	defer rows.Close()
@@ -296,7 +351,7 @@ func ChecarPrazosRequisicoes() {
 			continue
 		}
 		var exists int
-		_ = database.DB_App.QueryRow(
+		_ = getAppDB().QueryRow(
 			"SELECT COUNT(1) FROM FT_ALERTAS WHERE id_processo IS NULL AND id_usuario=? AND DATE(data_criacao)=CURRENT_DATE AND mensagem LIKE ?",
 			userID.Int64, fmt.Sprintf("%%Req #%d%%", reqID),
 		).Scan(&exists)
@@ -304,11 +359,11 @@ func ChecarPrazosRequisicoes() {
 			continue
 		}
 		msg := fmt.Sprintf("Prazo da triagem/análise da Req #%d vence em %d hora(s).", reqID, horas.Int64)
-		if _, err := database.DB_App.Exec(
+		if _, err := getAppDB().Exec(
 			"INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta) VALUES (?, NULL, ?, 0, 0, NOW(), DATE(?))",
 			userID.Int64, msg, deadline.Time,
 		); err != nil {
-			log.Printf("Erro ao inserir alerta de prazo para requisição %d: %v", reqID, err)
+			log.Printf("Erro ao inserir alerta de prazo para requisiÃ§ão %d: %v", reqID, err)
 		}
 	}
 }
@@ -316,7 +371,7 @@ func ChecarPrazosRequisicoes() {
 // ChecarPrazosProcessos cria alertas quando faltar <=24h para vencer o prazo do processo
 func ChecarPrazosProcessos() {
 	log.Println("Executando tarefa: Checar prazos de Processos (<=24h/vencidos)...")
-	if database.DB_App == nil {
+	if getAppDB() == nil {
 		return
 	}
 	query := `
@@ -332,7 +387,7 @@ func ChecarPrazosProcessos() {
      LEFT JOIN VW_ULTIMO_HISTORICO vh ON vh.id_requisicao = p.id_processo
          WHERE COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) IS NOT NULL;
     `
-	rows, err := database.DB_App.Query(query)
+	rows, err := getAppDB().Query(query)
 	if err != nil {
 		log.Printf("Erro ao checar prazos de processos: %v", err)
 		return
@@ -353,7 +408,7 @@ func ChecarPrazosProcessos() {
 			continue
 		}
 		var exists int
-		_ = database.DB_App.QueryRow(
+		_ = getAppDB().QueryRow(
 			"SELECT COUNT(1) FROM FT_ALERTAS WHERE id_processo=? AND DATE(data_criacao)=CURRENT_DATE AND mensagem LIKE ?",
 			procID, "%Prazo do processo%",
 		).Scan(&exists)
@@ -366,7 +421,7 @@ func ChecarPrazosProcessos() {
 		} else {
 			msg = fmt.Sprintf("Prazo do processo #%d vencido.", procID)
 		}
-		if _, err := database.DB_App.Exec(
+		if _, err := getAppDB().Exec(
 			"INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta) VALUES (?, ?, ?, 0, 0, NOW(), DATE(?))",
 			userID.Int64, procID, msg, deadline.Time,
 		); err != nil {

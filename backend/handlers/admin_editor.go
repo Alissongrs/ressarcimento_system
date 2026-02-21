@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"database/sql"
@@ -18,6 +18,7 @@ type AdminEditPayload struct {
 	// Identificação
 	ProcessoID *int `json:"processo_id,omitempty"`
 	CriarNovo  bool `json:"criar_novo"`
+	Coluna     *string `json:"coluna,omitempty"`
 
 	// Requisição (FT_REQUISICOES)
 	UC                    *string  `json:"uc,omitempty"`
@@ -65,6 +66,15 @@ type AdminEditPayload struct {
 }
 
 // AdminEditProcesso: cria ou edita um processo e seus Módulos. Acesso: admin.
+// AdminEditProcesso godoc
+// @Summary      Edita processo (admin)
+// @Tags         Admin
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/admin/editor/processo [post]
 func AdminEditProcesso(c *gin.Context) {
 	var body AdminEditPayload
 	// Log do corpo bruto para depuração de 400/500
@@ -87,23 +97,38 @@ func AdminEditProcesso(c *gin.Context) {
 		}
 	}
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	
+	userIDVal, _ := c.Get("userID")
+	var userIDNull sql.NullInt64
+	switch v := userIDVal.(type) {
+	case int64:
+		if v > 0 {
+			userIDNull = sql.NullInt64{Int64: v, Valid: true}
+		}
+	case float64:
+		if v > 0 {
+			userIDNull = sql.NullInt64{Int64: int64(v), Valid: true}
+		}
+	}
+	var err error
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
 		return
 	}
 	defer func() {
 		if err != nil {
-			_ = tx.Rollback()
+			_ = tx.Rollback().Error
 		}
 	}()
 
 	var pid int
+	createdProcess := false
 
 	// Criação ou validação do processo
 	if body.CriarNovo {
 		// Inserir FT_REQUISICOES (mínimo: cliente/uc opcional)
-		res, err2 := tx.Exec(`INSERT INTO FT_REQUISICOES (cliente, uc, concessionaria, cnpj, endereco_completo, razao_social_fatura, ressarcimento_estimado, link_fatura, data_criacao, data_mudanca_status)
+		res, err2 := execGorm(tx, `INSERT INTO FT_REQUISICOES (cliente, uc, concessionaria, cnpj, endereco_completo, razao_social_fatura, ressarcimento_estimado, link_fatura, data_criacao, data_mudanca_status)
                                VALUES (?,?,?,?,?,?,?,?, COALESCE(?, NOW()), COALESCE(?, NOW()))`,
 			valOrNull(body.Cliente), valOrNull(body.UC), valOrNull(body.Concessionaria), valOrNull(body.CNPJ), valOrNull(body.EnderecoCompleto), valOrNull(body.RazaoSocialFatura), valOrNull(body.RessarcimentoEstimado), valOrNull(body.LinkFatura), valOrNull(body.DataCriacaoReq), valOrNull(body.DataMudancaStatus))
 		if err2 != nil {
@@ -113,21 +138,27 @@ func AdminEditProcesso(c *gin.Context) {
 		}
 		lastID, _ := res.LastInsertId()
 		pid = int(lastID)
-		// Criar FT_PROCESSOS
-		var etapaID sql.NullInt64
-		if body.Etapa != nil && strings.TrimSpace(*body.Etapa) != "" {
-			_ = tx.QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", strings.TrimSpace(*body.Etapa)).Scan(&etapaID)
-		}
-		if !etapaID.Valid {
-			etapaID = sql.NullInt64{Int64: 1, Valid: true}
-		}
-		_, err = tx.Exec(`INSERT INTO FT_PROCESSOS (id_processo, id_etapa_processo, sub_etapa, relevancia, data_alerta, ultima_atualizacao)
-                          VALUES (?, ?, ?, COALESCE(?,0), NULLIF(?, ''), COALESCE(NULLIF(?, ''), NOW()))`,
-			pid, etapaID.Int64, valOrEmpty(body.SubEtapa), boolToTiny(body.Relevancia), valOrEmpty(body.DataAlerta), valOrEmpty(body.UltimaAtual))
+		// Criar FT_PROCESSOS (etapa id=1, sub_etapa "Primeira reclamação da etapa - Em elaboração")
+		etapaID := sql.NullInt64{Int64: 1, Valid: true}
+		subEtapa := "Primeira reclamação da etapa - Em elaboração"
+		subEtapaID, _ := resolveSubEtapaIDGorm(tx, subEtapa)
+		var colID sql.NullInt64
+		var colNome sql.NullString
+		_ = queryRowGorm(tx, `
+			SELECT k.id_coluna, k.nome_coluna
+			  FROM DM_ETAPAS_PROCESSO e
+			  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
+			 WHERE e.id_etapa_processo = ?`,
+			etapaID.Int64,
+		).Scan(&colID, &colNome)
+		_, err = execGorm(tx, `INSERT INTO FT_PROCESSOS (id_processo, id_etapa_processo, sub_etapa, id_sub_etapa_processo, id_coluna, nome_coluna, relevancia, data_alerta, ultima_atualizacao)
+                          VALUES (?, ?, ?, ?, ?, ?, COALESCE(?,0), NULLIF(?, ''), COALESCE(NULLIF(?, ''), NOW()))`,
+			pid, etapaID.Int64, subEtapa, nullIntToIface(subEtapaID), nullIntToIface(colID), func() interface{} { if colNome.Valid { return colNome.String }; return nil }(), boolToTiny(body.Relevancia), valOrEmpty(body.DataAlerta), valOrEmpty(body.UltimaAtual))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao criar processo: " + err.Error()})
 			return
 		}
+		createdProcess = true
 	} else {
 		if body.ProcessoID == nil || *body.ProcessoID <= 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "processo_id obrigatório ou use criar_novo"})
@@ -165,7 +196,7 @@ func AdminEditProcesso(c *gin.Context) {
 		if len(set) > 0 {
 			q := "UPDATE FT_REQUISICOES SET " + strings.Join(set, ", ") + " WHERE id_requisicao = ?"
 			args = append(args, pid)
-			if _, err = tx.Exec(q, args...); err != nil {
+			if _, err = execGorm(tx, q, args...); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao atualizar requisição: " + err.Error()})
 				return
 			}
@@ -173,19 +204,73 @@ func AdminEditProcesso(c *gin.Context) {
 	}
 
 	// Atualizar FT_PROCESSOS
-	if body.Etapa != nil || body.SubEtapa != nil || body.Relevancia != nil || body.DataAlerta != nil || body.UltimaAtual != nil {
+	if body.Coluna != nil || body.Etapa != nil || body.SubEtapa != nil || body.Relevancia != nil || body.DataAlerta != nil || body.UltimaAtual != nil {
 		set := make([]string, 0, 6)
 		args := make([]interface{}, 0, 6)
+		colunaLabel := ""
+		if body.Coluna != nil {
+			colunaLabel = strings.TrimSpace(*body.Coluna)
+		}
+		isSuspensos := strings.EqualFold(colunaLabel, "Suspensos") || strings.EqualFold(colunaLabel, "Suspenso")
+
+		if body.Coluna != nil && strings.TrimSpace(*body.Coluna) != "" {
+			colLabel := strings.TrimSpace(*body.Coluna)
+			var colID sql.NullInt64
+			var colNome sql.NullString
+			_ = queryRowGorm(tx, `SELECT id_coluna, nome_coluna FROM DM_KANBAN_COLUNAS WHERE nome_coluna = ? LIMIT 1`, colLabel).Scan(&colID, &colNome)
+			if colID.Valid {
+				set = append(set, "id_coluna = ?")
+				args = append(args, colID.Int64)
+				set = append(set, "nome_coluna = ?")
+				if colNome.Valid {
+					args = append(args, colNome.String)
+				} else {
+					args = append(args, colLabel)
+				}
+			}
+		}
 		if body.Etapa != nil {
 			var etapaID int
-			if err = tx.QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", strings.TrimSpace(*body.Etapa)).Scan(&etapaID); err == nil {
+			if err = queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", strings.TrimSpace(*body.Etapa)).Scan(&etapaID); err == nil {
 				set = append(set, "id_etapa_processo = ?")
 				args = append(args, etapaID)
+				// Só sobrescreve a coluna quando o usuário NÃO definiu explicitamente a coluna
+				if body.Coluna == nil || strings.TrimSpace(*body.Coluna) == "" {
+					var colID sql.NullInt64
+					var colNome sql.NullString
+					_ = queryRowGorm(tx, `
+						SELECT k.id_coluna, k.nome_coluna
+						  FROM DM_ETAPAS_PROCESSO e
+						  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
+						 WHERE e.id_etapa_processo = ?`,
+						etapaID,
+					).Scan(&colID, &colNome)
+					set = append(set, "id_coluna = ?")
+					args = append(args, nullIntToIface(colID))
+					set = append(set, "nome_coluna = ?")
+					if colNome.Valid {
+						args = append(args, colNome.String)
+					} else {
+						args = append(args, nil)
+					}
+				}
 			}
 		}
 		if body.SubEtapa != nil {
 			set = append(set, "sub_etapa = ?")
 			args = append(args, strings.TrimSpace(*body.SubEtapa))
+			subID, _ := resolveSubEtapaIDGorm(tx, strings.TrimSpace(*body.SubEtapa))
+			set = append(set, "id_sub_etapa_processo = ?")
+			args = append(args, nullIntToIface(subID))
+		}
+		// Suspensos: força flag/coluna/sub_etapa mesmo que sub_etapa venha vazio
+		if isSuspensos {
+			set = append(set, "suspenso = 1")
+			// garante coluna Suspensos
+			set = append(set, "id_coluna = 99")
+			set = append(set, "nome_coluna = 'Suspensos'")
+			set = append(set, "sub_etapa = 'Suspenso'")
+			set = append(set, "id_sub_etapa_processo = NULL")
 		}
 		if body.Relevancia != nil {
 			set = append(set, "relevancia = ?")
@@ -202,7 +287,7 @@ func AdminEditProcesso(c *gin.Context) {
 		if len(set) > 0 {
 			q := "UPDATE FT_PROCESSOS SET " + strings.Join(set, ", ") + " WHERE id_processo = ?"
 			args = append(args, pid)
-			if _, err = tx.Exec(q, args...); err != nil {
+			if _, err = execGorm(tx, q, args...); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao atualizar processo: " + err.Error()})
 				return
 			}
@@ -216,24 +301,35 @@ func AdminEditProcesso(c *gin.Context) {
 			CreditoSimples   *decimal.Decimal  `json:"credito_simples"`
 			CreditoDobro     *decimal.Decimal  `json:"credito_dobro"`
 			DataCreditoDobro *string           `json:"data_credito_dobro"`
+			RepasseSimples   *decimal.Decimal  `json:"repasse_simples"`
+			RepasseDobro     *decimal.Decimal  `json:"repasse_dobro"`
 		}
 		if err2 := json.Unmarshal(body.Deferimento, &input); err2 == nil {
 			hasData := (input.DataProcedencia != nil && strings.TrimSpace(*input.DataProcedencia) != "") ||
 				(input.DataCreditoDobro != nil && strings.TrimSpace(*input.DataCreditoDobro) != "") ||
 				(input.CreditoSimples != nil && input.CreditoSimples.Sign() != 0) ||
-				(input.CreditoDobro != nil && input.CreditoDobro.Sign() != 0)
+				(input.CreditoDobro != nil && input.CreditoDobro.Sign() != 0) ||
+				(input.RepasseSimples != nil && input.RepasseSimples.Sign() != 0) ||
+				(input.RepasseDobro != nil && input.RepasseDobro.Sign() != 0)
 			if hasData {
-				_, err = tx.Exec(`INSERT INTO FT_DEFERIMENTOS (id_processo, data_procedencia, credito_simples, credito_dobro, data_credito_dobro)
-				   VALUES (?, NULLIF(?, ''), ?, ?, NULLIF(?, ''))
-                                   ON DUPLICATE KEY UPDATE data_procedencia=VALUES(data_procedencia), credito_simples=VALUES(credito_simples), credito_dobro=VALUES(credito_dobro), data_credito_dobro=VALUES(data_credito_dobro)`,
-					pid, valOrEmpty(input.DataProcedencia), decimalOrNull(input.CreditoSimples), decimalOrNull(input.CreditoDobro), valOrEmpty(input.DataCreditoDobro))
+				_, err = execGorm(tx, `INSERT INTO FT_DEFERIMENTOS (id_processo, data_procedencia, credito_simples, credito_dobro, data_credito_dobro, repasse_simples, repasse_dobro)
+				   VALUES (?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?)
+                                   ON DUPLICATE KEY UPDATE data_procedencia=VALUES(data_procedencia), credito_simples=VALUES(credito_simples), credito_dobro=VALUES(credito_dobro), data_credito_dobro=VALUES(data_credito_dobro), repasse_simples=VALUES(repasse_simples), repasse_dobro=VALUES(repasse_dobro)`,
+					pid,
+					valOrEmpty(input.DataProcedencia),
+					decimalOrNull(input.CreditoSimples),
+					decimalOrNull(input.CreditoDobro),
+					valOrEmpty(input.DataCreditoDobro),
+					decimalOrNull(input.RepasseSimples),
+					decimalOrNull(input.RepasseDobro),
+				)
 				if err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao salvar deferimento: " + err.Error()})
 					return
 				}
 			} else {
-				// Se veio vazio e já existia um registro somente com nulos/zeros, podemos optar por limpar
-				// (comportamento seguro: não cria registro vazio)
+				// Se veio vazio e j? existia um registro somente com nulos/zeros, podemos optar por limpar
+				// (comportamento seguro: n?o cria registro vazio)
 			}
 		}
 	}
@@ -252,9 +348,9 @@ func AdminEditProcesso(c *gin.Context) {
 		}
 	}
 
-	// Histórico: delete específicos
+	// Hist?rico: delete espec?ficos
 	if len(body.HistoricoDeleteIDs) > 0 {
-		// constrói placeholders
+		// constr?i placeholders
 		qs := make([]string, 0, len(body.HistoricoDeleteIDs))
 		args := make([]interface{}, 0, len(body.HistoricoDeleteIDs)+1)
 		for range body.HistoricoDeleteIDs {
@@ -266,18 +362,18 @@ func AdminEditProcesso(c *gin.Context) {
 			args = append(args, id)
 		}
 		args = append(args, pid)
-		if _, err = tx.Exec(q, args...); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao deletar histórico: " + err.Error()})
+		if _, err = execGorm(tx, q, args...); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao deletar hist?rico: " + err.Error()})
 			return
 		}
 	}
 
-	// Histórico: upsert básico (update se vier id, senão insert)
+	// Hist?rico: upsert b?sico (update se vier id, sen?o insert)
 	if len(body.Historico) > 0 {
 		for _, h := range body.Historico {
 			if h.IDHistorico > 0 {
 				// Update
-				_, err = tx.Exec(`UPDATE FT_HISTORICO_MOVIMENTACOES SET 
+				_, err = execGorm(tx, `UPDATE FT_HISTORICO_MOVIMENTACOES SET 
                                     status_anterior = ?, status_novo = ?, etapa_anterior = ?, etapa_nova = ?, sub_etapa = ?,
                                     relevancia_anterior = ?, relevancia_nova = ?, comentario = ?, justificativa_atraso = ?, tipo_movimentacao = ?, data_movimentacao = ?
                                   WHERE id_historico = ? AND id_requisicao = ?`,
@@ -286,40 +382,55 @@ func AdminEditProcesso(c *gin.Context) {
 					h.IDHistorico, pid,
 				)
 				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao atualizar histórico: " + err.Error()})
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao atualizar hist?rico: " + err.Error()})
 					return
 				}
 			} else {
 				// Insert
-				_, err = tx.Exec(`INSERT INTO FT_HISTORICO_MOVIMENTACOES (
+				_, err = execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES (
                                     id_requisicao, id_usuario_gestor, status_anterior, status_novo,
                                     etapa_anterior, etapa_nova, sub_etapa,
                                     relevancia_anterior, relevancia_nova,
                                     comentario, justificativa_atraso, tipo_movimentacao, data_movimentacao)
-                                  VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-					pid, adminNullIfEmpty(h.StatusAnterior), adminNullIfEmpty(h.StatusNovo), adminNullIfEmpty(h.EtapaAnterior), adminNullIfEmpty(h.EtapaNova), adminNullIfEmpty(h.SubEtapa),
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					pid, userIDNull, adminNullIfEmpty(h.StatusAnterior), adminNullIfEmpty(h.StatusNovo), adminNullIfEmpty(h.EtapaAnterior), adminNullIfEmpty(h.EtapaNova), adminNullIfEmpty(h.SubEtapa),
 					adminBoolStrOrNull(h.RelevanciaAnterior), adminBoolStrOrNull(h.RelevanciaNova), strings.TrimSpace(h.Comentario), adminNullIfEmpty(h.JustificativaAtraso), adminNullIfEmpty(h.TipoMovimentacao), h.Data)
 				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao inserir histórico: " + err.Error()})
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao inserir hist?rico: " + err.Error()})
 					return
 				}
 			}
 		}
 	}
 
-	if err = tx.Commit(); err != nil {
+	if err = updateColunaByData(tx, pid); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao atualizar coluna do processo: " + err.Error()})
+		return
+	}
+
+	if err = tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if createdProcess {
+		syncSnapshotFromOriginal(pid, 0)
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "processo_id": pid})
 }
 
 // AdminNextProcessID retorna o próximo ID sugerido para criação de processo
 // Regra: usa MAX(id_requisicao)+1 de FT_REQUISICOES (id_processo = id_requisicao)
+// AdminNextProcessID godoc
+// @Summary      Pr?ximo ID de processo
+// @Tags         Admin
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/admin/editor/next-id [get]
 func AdminNextProcessID(c *gin.Context) {
 	var next int
-	if err := database.DB_App.QueryRow("SELECT COALESCE(MAX(id_requisicao),0)+1 FROM FT_REQUISICOES").Scan(&next); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao obter próximo ID: " + err.Error()})
+	if err := queryRowGorm(database.GormDB_App, "SELECT COALESCE(MAX(id_requisicao),0)+1 FROM FT_REQUISICOES").Scan(&next); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao obter pr?ximo ID: " + err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"next_id": next})
@@ -372,3 +483,9 @@ func adminBoolStrOrNull(p *bool) interface{} {
 	}
 	return "false"
 }
+
+
+
+
+
+

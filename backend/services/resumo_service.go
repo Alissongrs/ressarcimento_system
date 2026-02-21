@@ -1,4 +1,4 @@
-﻿package services
+package services
 
 import (
 	"bytes"
@@ -115,7 +115,7 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 		tipoIrregularidade, subtipoIrregularidade string
 		etapaAtual, subEtapaAtual string
 	)
-	_ = s.DBRepo.DB.QueryRowContext(ctx, `
+	_ = s.DBRepo.DB.WithContext(ctx).Raw(`
 		SELECT
 			COALESCE(r.uc, ''),
 			COALESCE(r.cliente, ''),
@@ -135,10 +135,10 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 		LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
 		LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
 		LEFT JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo
-		LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo_irregularidade = r.id_tipo_irregularidade
-		LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo_irregularidade = r.id_subtipo_irregularidade
+		LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo = r.id_tipo_irregularidade
+		LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo = r.id_subtipo_irregularidade
 		WHERE r.id_requisicao = ?
-	`, processoID).Scan(
+	`, processoID).Row().Scan(
 		&uc,
 		&cliente,
 		&concessionaria,
@@ -163,7 +163,7 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 		Coment string `json:"comentario"`
 		Tipo   string `json:"tipo"`
 	}
-	rows, _ := s.DBRepo.DB.QueryContext(ctx, `
+	rows, _ := s.DBRepo.DB.WithContext(ctx).Raw(`
 		SELECT DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') as d,
 			   COALESCE(h.etapa_nova,''),
 			   COALESCE(h.sub_etapa,''),
@@ -172,7 +172,7 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 		FROM FT_HISTORICO_MOVIMENTACOES h
 		WHERE h.id_requisicao = ?
 		ORDER BY h.data_movimentacao DESC
-		LIMIT 20`, processoID)
+		LIMIT 20`, processoID).Rows()
 	defer func() {
 		if rows != nil {
 			rows.Close()
@@ -219,7 +219,7 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 func (s *ResumoService) callOpenAI(ctx context.Context, system, user string) (string, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return "", Err("OPENAI_API_KEY nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o definido")
+		return "", Err("OPENAI_API_KEY nÃÆ’Ã†â€™Ãâ€šÂÂ£o definido")
 	}
 	body := map[string]any{
 		"model": openAIModel(),
@@ -275,7 +275,7 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 			tipoIrregularidade, subtipoIrregularidade string
 			etapaAtual, subEtapaAtual string
 		)
-		_ = s.DBRepo.DB.QueryRowContext(ctx, `
+		_ = s.DBRepo.DB.WithContext(ctx).Raw(`
 			SELECT
 				COALESCE(r.uc, ''),
 				COALESCE(r.cliente, ''),
@@ -295,10 +295,10 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
 			LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
 			LEFT JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo
-			LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo_irregularidade = r.id_tipo_irregularidade
-			LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo_irregularidade = r.id_subtipo_irregularidade
+			LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo = r.id_tipo_irregularidade
+			LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo = r.id_subtipo_irregularidade
 			WHERE r.id_requisicao = ?
-		`, pid).Scan(
+		`, pid).Row().Scan(
 			&uc,
 			&cliente,
 			&concessionaria,
@@ -314,8 +314,8 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 			&etapaAtual,
 			&subEtapaAtual,
 		)
-		rows, _ := s.DBRepo.DB.QueryContext(ctx, `SELECT DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') as d, COALESCE(h.etapa_nova,''), COALESCE(h.sub_etapa,''), COALESCE(h.comentario,''), COALESCE(h.tipo_movimentacao,'')
-          FROM FT_HISTORICO_MOVIMENTACOES h WHERE h.id_requisicao = ? ORDER BY h.data_movimentacao DESC LIMIT 20`, pid)
+		rows, _ := s.DBRepo.DB.WithContext(ctx).Raw(`SELECT DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') as d, COALESCE(h.etapa_nova,''), COALESCE(h.sub_etapa,''), COALESCE(h.comentario,''), COALESCE(h.tipo_movimentacao,'')
+          FROM FT_HISTORICO_MOVIMENTACOES h WHERE h.id_requisicao = ? ORDER BY h.data_movimentacao DESC LIMIT 20`, pid).Rows()
 		arr := make([]hist, 0, 20)
 		for rows != nil && rows.Next() {
 			var it hist
@@ -365,7 +365,7 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 func (s *ResumoService) callOpenAIJSON(ctx context.Context, system, user string) (map[string]any, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return nil, Err("OPENAI_API_KEY nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o definido")
+		return nil, Err("OPENAI_API_KEY nÃÆ’Ã†â€™Ãâ€šÂÂ£o definido")
 	}
 	body := map[string]any{
 		"model": openAIModel(),
@@ -426,15 +426,12 @@ func (s *ResumoService) GerarResumoAgora(ctx context.Context, processoID int64) 
 }
 // ProcessarResumos busca pendentes e gera texto
 func (s *ResumoService) ProcessarResumos(ctx context.Context, limit int) error {
-	if err := s.Repo.EnsureTable(ctx); err != nil {
-		return err
-	}
 	ids, err := s.Repo.ListPending(ctx, limit)
 	if err != nil {
 		return err
 	}
 	if len(ids) == 0 {
-		// silencioso quando nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o hÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ pendentes
+		// silencioso quando nÃÆ’Ã†â€™Ãâ€šÂÂ£o hÃÆ’Ã†â€™Ãâ€šÂÂ¡ pendentes
 		resumoStats.updateCycleStart(0, 0, limit)
 		return nil
 	}
@@ -504,7 +501,7 @@ func (s *ResumoService) ProcessarResumos(ctx context.Context, limit int) error {
 			seen[pid] = true
 			okIDs = append(okIDs, pid)
 		}
-		// os que nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o vieram na resposta, marcam erro
+		// os que nÃÆ’Ã†â€™Ãâ€šÂÂ£o vieram na resposta, marcam erro
 		for _, id := range batch {
 			if !seen[id] {
 				_ = s.Repo.SaveError(ctx, id, "sem retorno no batch")

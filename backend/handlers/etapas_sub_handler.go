@@ -10,82 +10,70 @@ import (
 
 // GetEtapaSubCombinacoes retorna combinações válidas etapa -> sub_etapas.
 // Preferência: DM_ETAPA_SUBETAPAS_VALIDAS; fallback: pares observados em FT_PROCESSOS.
+// @Summary Listar combinacoes etapa/subetapa
+// @Tags Filtros
+// @Produce json
+// @Success 200 {object} map[string]any
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/filtros/etapas-subetapas [get]
 func GetEtapaSubCombinacoes(c *gin.Context) {
-	db := database.DB_App
+	db := database.GormDB_App
 	if db == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB not initialized"})
 		return
 	}
 
-	// Tenta via tabelas de domínio (se existirem)
-	rows, err := db.Query(`
-        SELECT e.etapa AS nome_etapa, s.sub_etapa AS nome_subetapa
-          FROM DM_ETAPA_SUBETAPAS_VALIDAS v
-          JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = v.id_etapa_processo
-          JOIN DM_SUBETAPA_PROCESSOS s ON s.id_subetapa = v.id_subetapa
-         ORDER BY e.etapa, s.sub_etapa`)
+	// Fonte única: DM_SUBETAPA_PROCESSOS + regras por etapa
+	rows, err := queryGorm(db, `SELECT id_subetapa, nome_subetapa FROM DM_SUBETAPA_PROCESSOS ORDER BY id_subetapa`)
 	if err != nil {
-		rows = nil
+		c.JSON(http.StatusOK, gin.H{"map": gin.H{}})
+		return
 	}
-	type pair struct{ etapa, sub string }
-	pairs := make([]pair, 0, 128)
-	if rows != nil {
-		defer rows.Close()
-		for rows.Next() {
-			var e, s string
-			if err := rows.Scan(&e, &s); err == nil && e != "" && s != "" {
-				pairs = append(pairs, pair{e, s})
+	defer rows.Close()
+
+	subByID := make(map[int]string)
+	for rows.Next() {
+		var id int
+		var s string
+		if err := rows.Scan(&id, &s); err == nil && id > 0 && strings.TrimSpace(s) != "" {
+			subByID[id] = strings.TrimSpace(s)
+		}
+	}
+
+	contains := func(list []string, sub string) bool {
+		for _, x := range list {
+			if strings.EqualFold(strings.TrimSpace(x), strings.TrimSpace(sub)) {
+				return true
 			}
 		}
+		return false
 	}
-	if len(pairs) == 0 {
-		// Fallback: observar pares existentes em processos
-		rows2, err2 := db.Query(`
-            SELECT DISTINCT e.etapa AS nome_etapa, p.sub_etapa AS nome_subetapa
-              FROM FT_PROCESSOS p
-              JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-             WHERE p.sub_etapa IS NOT NULL AND TRIM(p.sub_etapa) <> ''
-             ORDER BY e.etapa, p.sub_etapa`)
-		if err2 != nil {
-			c.JSON(http.StatusOK, gin.H{"map": gin.H{}})
-			return
-		}
-		defer rows2.Close()
-		for rows2.Next() {
-			var e, s string
-			if err := rows2.Scan(&e, &s); err == nil && e != "" && s != "" {
-				pairs = append(pairs, pair{e, s})
-			}
-		}
+	pick := func(id int) string {
+		return strings.TrimSpace(subByID[id])
 	}
 
 	out := make(map[string][]string)
-	for _, p := range pairs {
-		out[p.etapa] = append(out[p.etapa], p.sub)
+	addIDs := func(etapa string, ids ...int) {
+		for _, id := range ids {
+			if s := pick(id); s != "" && !contains(out[etapa], s) {
+				out[etapa] = append(out[etapa], s)
+			}
+		}
 	}
 
-	// Regras de negócio: garantir subetapas do Fluxo de Ressarcimento
-	ensure := func(m map[string][]string, etapa string, subs ...string) {
-		cur := m[etapa]
-		exists := func(s string) bool {
-			for _, x := range cur {
-				if strings.EqualFold(strings.TrimSpace(x), strings.TrimSpace(s)) {
-					return true
-				}
-			}
-			return false
-		}
-		for _, s := range subs {
-			if s == "" {
-				continue
-			}
-			if !exists(s) {
-				cur = append(cur, s)
-			}
-		}
-		m[etapa] = cur
-	}
-	ensure(out, "Fluxo de Ressarcimento", "Enviado ao Financeiro", "Enviado")
+	// Distribuidora (não exibir id 1 "Primeira reclamação - Em elaboração")
+	addIDs("Distribuidora", 2, 4, 6)
+	// Ouvidoria
+	addIDs("Ouvidoria", 3, 7, 8, 9, 10, 11, 12, 13)
+	// ANEEL
+	addIDs("ANEEL", 3, 7, 8, 9)
+	// SMA
+	addIDs("SMA", 3, 7, 8, 9)
+
+	// Fluxo de Ressarcimento
+	addIDs("Enviado ao Financeiro", 14, 5)
+	// Faturamento
+	addIDs("Repasse Amee", 15)
 	c.JSON(http.StatusOK, gin.H{"map": out})
 }
 

@@ -3,7 +3,16 @@
 const ThemeContext = createContext({ theme: 'light-4', setTheme: () => {} });
 
 // Temas disponíveis: Padrão (Claro D), Rosa e Azul
-const THEMES = ['light-4', 'pink', 'azul'];
+const THEMES = [
+  'light-4',
+  'pink',
+  'azul',
+  'sap',
+  'navy',
+  'orange-gray',
+  'green-orange',
+  'orange-purple-green',
+];
 
 export function ThemeProvider({ children }) {
   const [theme, setThemeState] = useState('light-4');
@@ -26,5 +35,4 @@ export function ThemeProvider({ children }) {
 export function useTheme() {
   return useContext(ThemeContext);
 }
-
 

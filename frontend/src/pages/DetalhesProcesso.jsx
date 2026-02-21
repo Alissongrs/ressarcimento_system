@@ -44,6 +44,7 @@ import {
   X,
 } from 'lucide-react';
 import ModuloDeferimento from '../components/ModuloDeferimento';
+import { confirmAction } from '../utils/confirm.js';
 
 // ===== FUNÇÕES AUXILIARES PARA TRATAMENTO SEGURO DE DADOS =====
 
@@ -797,6 +798,7 @@ const DetalhesProcesso = () => {
       alert('Por favor, preencha todos os campos obrigatórios.');
       return;
     }
+    if (!(await confirmAction('Deseja salvar as alteracoes deste processo?'))) return;
 
     setLoading(true);
     try {

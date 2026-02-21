@@ -21,12 +21,12 @@ type AlarmeRow struct {
 }
 
 func GetAlarmes(c *gin.Context) {
-	db := database.DB_App
+	db := database.GormDB_App
 	if db == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB not initialized"})
 		return
 	}
-	rows, err := db.Query(`SELECT id, nome, ativo, tipo, id_coluna_kanban, id_etapa_processo, sub_etapa, prazo_dias, severity FROM DM_ALARMES ORDER BY id DESC`)
+	rows, err := db.Raw(`SELECT id, nome, ativo, tipo, id_coluna_kanban, id_etapa_processo, sub_etapa, prazo_dias, severity FROM DM_ALARMES ORDER BY id DESC`).Rows()
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"alarmes": []AlarmeRow{}})
 		return
@@ -59,7 +59,7 @@ type SaveAlarmePayload struct {
 }
 
 func SaveAlarme(c *gin.Context) {
-	db := database.DB_App
+	db := database.GormDB_App
 	if db == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB not initialized"})
 		return
@@ -83,9 +83,9 @@ func SaveAlarme(c *gin.Context) {
 
 	if p.ID != nil && *p.ID > 0 {
 		// update
-		_, err := db.Exec(`UPDATE DM_ALARMES SET nome=?, ativo=?, tipo=?, id_coluna_kanban=?, id_etapa_processo=?, sub_etapa=?, prazo_dias=?, severity=? WHERE id=?`,
+		err := db.Exec(`UPDATE DM_ALARMES SET nome=?, ativo=?, tipo=?, id_coluna_kanban=?, id_etapa_processo=?, sub_etapa=?, prazo_dias=?, severity=? WHERE id=?`,
 			p.Nome, ativo, p.Tipo, p.IDColunaKanban, p.IDEtapaProcesso, nullIfEmpty(p.SubEtapa), p.PrazoDias, p.Severity, *p.ID,
-		)
+		).Error
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -94,19 +94,24 @@ func SaveAlarme(c *gin.Context) {
 		return
 	}
 	// insert
-	res, err := db.Exec(`INSERT INTO DM_ALARMES (nome, ativo, tipo, id_coluna_kanban, id_etapa_processo, sub_etapa, prazo_dias, severity) VALUES (?,?,?,?,?,?,?,?)`,
+	tx := db.Exec(`INSERT INTO DM_ALARMES (nome, ativo, tipo, id_coluna_kanban, id_etapa_processo, sub_etapa, prazo_dias, severity) VALUES (?,?,?,?,?,?,?,?)`,
 		p.Nome, ativo, p.Tipo, p.IDColunaKanban, p.IDEtapaProcesso, nullIfEmpty(p.SubEtapa), p.PrazoDias, p.Severity,
 	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
 		return
 	}
-	id, _ := res.LastInsertId()
-	c.JSON(http.StatusOK, gin.H{"ok": true, "id": id})
+	var lastID sql.NullInt64
+	_ = db.Raw(`SELECT LAST_INSERT_ID()`).Row().Scan(&lastID)
+	if lastID.Valid {
+		c.JSON(http.StatusOK, gin.H{"ok": true, "id": lastID.Int64})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func DeleteAlarme(c *gin.Context) {
-	db := database.DB_App
+	db := database.GormDB_App
 	if db == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB not initialized"})
 		return
@@ -116,7 +121,7 @@ func DeleteAlarme(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id ausente"})
 		return
 	}
-	if _, err := db.Exec(`DELETE FROM DM_ALARMES WHERE id = ?`, id); err != nil {
+	if err := db.Exec(`DELETE FROM DM_ALARMES WHERE id = ?`, id).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

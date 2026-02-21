@@ -1,0 +1,4838 @@
+definitions:
+  handlers.CreateRequisicaoPayload:
+    properties:
+      cliente:
+        example: CLARO S.A.
+        type: string
+      cnpj:
+        example: 00.000.000/0000-00
+        type: string
+      concessionaria:
+        example: CEMIG
+        type: string
+      descricaoIrregularidade:
+        example: Cobrança indevida...
+        type: string
+      enderecoCompleto:
+        example: Rua X, 123 - Cidade/UF
+        type: string
+      gostariaAnexarFatura:
+        example: false
+        type: boolean
+      id_concessionaria:
+        example: "22"
+        type: string
+      id_empresa:
+        example: "10"
+        type: string
+      id_uc:
+        example: "12345"
+        type: string
+      linkFatura:
+        example: https://...
+        type: string
+      periodosIrregularidade:
+        example: '[{"mes":"01","ano":"2026"}]'
+        type: string
+      problemaIdentificado:
+        example: Descrição adicional
+        type: string
+      razaoSocialFatura:
+        example: CLARO S.A.
+        type: string
+      ressarcimentoEstimado:
+        example: 12500,00
+        type: string
+      uc:
+        example: "48341497"
+        type: string
+    type: object
+  handlers.DesvioKwhFlagsReq:
+    properties:
+      criar_processo:
+        type: integer
+      descarte:
+        type: integer
+      para_analise:
+        type: integer
+      verificado:
+        type: integer
+    type: object
+  handlers.DesvioKwhListResp:
+    properties:
+      filtered:
+        type: integer
+      limit:
+        type: integer
+      offset:
+        type: integer
+      rows:
+        items:
+          $ref: '#/definitions/handlers.DesvioKwhRow'
+        type: array
+      total:
+        type: integer
+    type: object
+  handlers.DesvioKwhRow:
+    properties:
+      cliente:
+        type: string
+      concessionaria:
+        type: string
+      created_at:
+        type: string
+      criar_processo:
+        type: integer
+      descarte:
+        type: integer
+      id:
+        type: integer
+      link:
+        type: string
+      mes_ref:
+        type: string
+      para_analise:
+        type: integer
+      status_desvio:
+        type: string
+      tp_tensao:
+        type: string
+      uc:
+        type: string
+      updated_at:
+        type: string
+      verificado:
+        type: integer
+    type: object
+  handlers.Health:
+    properties:
+      latency:
+        type: string
+      message:
+        type: string
+      status:
+        type: string
+    type: object
+  handlers.HealthResponse:
+    properties:
+      checks:
+        additionalProperties:
+          $ref: '#/definitions/handlers.Health'
+        type: object
+      status:
+        type: string
+      timestamp:
+        type: string
+      version:
+        type: string
+    type: object
+  handlers.HistoricoItemDTO:
+    properties:
+      comentario:
+        type: string
+      data_movimentacao:
+        type: string
+      etapa_anterior:
+        type: string
+      etapa_nova:
+        type: string
+      id_historico:
+        type: integer
+      id_processo:
+        type: integer
+      id_usuario:
+        type: integer
+      status_anterior:
+        type: string
+      status_novo:
+        type: string
+      sub_etapa:
+        type: string
+      tipo_movimentacao:
+        type: string
+      usuario_nome:
+        type: string
+    type: object
+  handlers.KanbanComposicaoResp:
+    properties:
+      items:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      total:
+        type: integer
+      warnings:
+        items:
+          type: string
+        type: array
+    type: object
+  handlers.RelatoriosMetricasResp:
+    properties:
+      aging_buckets:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      canais_dist_30d:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      creditos:
+        properties:
+          dobro_total:
+            type: number
+          simples_total:
+            type: number
+          total_procedente:
+            type: number
+        type: object
+      processos_counts:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      repasse_por_concessionaria:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      repasse_total:
+        type: number
+      ressarcimento_envio_financeiro_total:
+        type: number
+      sla_30d:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      status_counts:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      tempo_medio_conclusao_concessionaria:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      tempo_medio_dias_por_etapa:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      tendencia_30d:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      throughput_mes:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      throughput_semana:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      top_clientes:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      top_concessionarias:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      total_processos:
+        type: integer
+      total_requisicoes:
+        type: integer
+      valor_histogram:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      valor_por_coluna:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      valor_total_ressarcimento:
+        type: number
+      warnings:
+        items:
+          type: string
+        type: array
+      wip_gestores:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+    type: object
+  handlers.Rule:
+    properties:
+      active:
+        type: boolean
+      created_at:
+        type: string
+      distribuidoras:
+        items:
+          type: string
+        type: array
+      grupo:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      natural_text:
+        type: string
+      periodo:
+        type: string
+      tipo:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  handlers.alertaDTO:
+    properties:
+      acknowledged:
+        type: boolean
+      data_alerta:
+        type: string
+      data_criacao:
+        type: string
+      id_alerta:
+        type: integer
+      id_processo:
+        type: integer
+      lido:
+        type: boolean
+      mensagem:
+        type: string
+    type: object
+  models.Alerta:
+    properties:
+      data_criacao:
+        type: string
+      id:
+        type: integer
+      lido:
+        type: boolean
+      mensagem:
+        type: string
+      processo_id:
+        $ref: '#/definitions/sql.NullInt64'
+    type: object
+  models.ConcessionariaFiltro:
+    properties:
+      cod_concess:
+        type: integer
+      sigla:
+        type: string
+    type: object
+  models.Departamento:
+    properties:
+      id_departamento:
+        type: integer
+      nome:
+        type: string
+    type: object
+  models.EmpresaFiltro:
+    properties:
+      cod_empresa:
+        type: integer
+      rz_social:
+        type: string
+    type: object
+  models.FaturaLink:
+    properties:
+      link:
+        type: string
+      mes_ref:
+        type: string
+    type: object
+  models.UCDetalhes:
+    properties:
+      cliente:
+        $ref: '#/definitions/sql.NullString'
+      cnpj:
+        $ref: '#/definitions/sql.NullString'
+      concessionaria:
+        $ref: '#/definitions/sql.NullString'
+      endereco_completo:
+        $ref: '#/definitions/sql.NullString'
+      id_concessionaria:
+        type: integer
+      id_empresa:
+        type: integer
+      id_uc:
+        type: integer
+      link_fatura:
+        $ref: '#/definitions/sql.NullString'
+      links_faturas:
+        items:
+          type: string
+        type: array
+      links_faturas_detalhes:
+        items:
+          $ref: '#/definitions/models.FaturaLink'
+        type: array
+      razao_social_fatura:
+        $ref: '#/definitions/sql.NullString'
+      uc:
+        type: string
+    type: object
+  models.User:
+    properties:
+      email:
+        type: string
+      id:
+        type: integer
+      id_departamento:
+        type: integer
+      nome:
+        type: string
+      senha:
+        type: string
+      tipo_conta:
+        type: string
+    type: object
+  sql.NullInt64:
+    properties:
+      int64:
+        format: int64
+        type: integer
+      valid:
+        description: Valid is true if Int64 is not NULL
+        type: boolean
+    type: object
+  sql.NullString:
+    properties:
+      string:
+        type: string
+      valid:
+        description: Valid is true if String is not NULL
+        type: boolean
+    type: object
+info:
+  contact: {}
+paths:
+  /api/v1/admin/editor/next-id:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Próximo ID de processo
+      tags:
+      - Admin
+  /api/v1/admin/editor/processo:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Edita processo (admin)
+      tags:
+      - Admin
+  /api/v1/admin/planilha:
+    get:
+      parameters:
+      - description: Busca
+        in: query
+        name: q
+        type: string
+      - description: Etapa
+        in: query
+        name: etapa
+        type: string
+      - description: Subetapa
+        in: query
+        name: sub
+        type: string
+      - description: Coluna kanban
+        in: query
+        name: kanban
+        type: string
+      - description: Data inicial
+        in: query
+        name: ini
+        type: string
+      - description: Data final
+        in: query
+        name: fim
+        type: string
+      - description: Status análise
+        in: query
+        name: analise
+        type: string
+      - description: Status
+        in: query
+        name: status
+        type: string
+      - description: Pendências
+        in: query
+        name: pendencias
+        type: string
+      - description: Histórico
+        in: query
+        name: historico
+        type: string
+      - description: Tags
+        in: query
+        name: tags
+        type: string
+      - description: Data criação inicial
+        in: query
+        name: data_criacao_ini
+        type: string
+      - description: Data criação final
+        in: query
+        name: data_criacao_fim
+        type: string
+      - description: Gestores
+        in: query
+        name: gestores
+        type: string
+      - description: Limite
+        in: query
+        name: limit
+        type: integer
+      - description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista planilha admin
+      tags:
+      - Admin
+  /api/v1/admin/planilha/bulk-comentario-replace:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Substitui comentários em lote
+      tags:
+      - Admin
+  /api/v1/admin/planilha/bulk-mover:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Move processos em lote (planilha)
+      tags:
+      - Admin
+  /api/v1/admin/planilha/export:
+    get:
+      parameters:
+      - description: Busca
+        in: query
+        name: q
+        type: string
+      - description: Etapa
+        in: query
+        name: etapa
+        type: string
+      - description: Subetapa
+        in: query
+        name: sub
+        type: string
+      - description: Coluna kanban
+        in: query
+        name: kanban
+        type: string
+      - description: Data inicial
+        in: query
+        name: ini
+        type: string
+      - description: Data final
+        in: query
+        name: fim
+        type: string
+      - description: Status análise
+        in: query
+        name: analise
+        type: string
+      - description: Status
+        in: query
+        name: status
+        type: string
+      - description: Pendências
+        in: query
+        name: pendencias
+        type: string
+      - description: Histórico
+        in: query
+        name: historico
+        type: string
+      - description: Tags
+        in: query
+        name: tags
+        type: string
+      - description: Data criação inicial
+        in: query
+        name: data_criacao_ini
+        type: string
+      - description: Data criação final
+        in: query
+        name: data_criacao_fim
+        type: string
+      - description: Gestores
+        in: query
+        name: gestores
+        type: string
+      produces:
+      - text/csv
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Exporta planilha admin (CSV)
+      tags:
+      - Admin
+  /api/v1/admin/planilha/import:
+    post:
+      consumes:
+      - multipart/form-data
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Importa planilha admin
+      tags:
+      - Admin
+  /api/v1/admin/prazos:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista configuração de prazos
+      tags:
+      - Admin
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Salva configuração de prazos
+      tags:
+      - Admin
+  /api/v1/ai/resumo/feedback:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Feedback de resumo IA
+      tags:
+      - AI
+  /api/v1/alertas:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Alerta'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar alertas do usuario
+      tags:
+      - Alertas
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Dados do alerta
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Criar alerta
+      tags:
+      - Alertas
+  /api/v1/alertas/{id}:
+    delete:
+      parameters:
+      - description: ID do alerta
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Excluir alerta
+      tags:
+      - Alertas
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do alerta
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Campos do alerta
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Atualizar alerta
+      tags:
+      - Alertas
+  /api/v1/alertas/ack:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: IDs dos alertas
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties:
+            items:
+              type: integer
+            type: array
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Confirmar alertas
+      tags:
+      - Alertas
+  /api/v1/alertas/marcar-lido:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: IDs dos alertas
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties:
+            items:
+              type: integer
+            type: array
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Marcar alertas como lidos
+      tags:
+      - Alertas
+  /api/v1/alertas/stream:
+    get:
+      parameters:
+      - description: JWT
+        in: query
+        name: token
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: stream
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: SSE de alertas
+      tags:
+      - SSE
+  /api/v1/anexos/{anexoId}/download:
+    get:
+      parameters:
+      - description: ID do anexo
+        in: path
+        name: anexoId
+        required: true
+        type: integer
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Download de anexo
+      tags:
+      - Anexos
+  /api/v1/chat/feedback:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Feedback do chat
+      tags:
+      - Chat
+  /api/v1/chat/learn:
+    post:
+      consumes:
+      - multipart/form-data
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Treina/ensina no chat
+      tags:
+      - Chat
+  /api/v1/chat/rag:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Chat RAG
+      tags:
+      - Chat
+  /api/v1/chat/sessions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista sessões de chat
+      tags:
+      - Chat
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Cria sessão de chat
+      tags:
+      - Chat
+  /api/v1/chat/sessions/{id}:
+    delete:
+      parameters:
+      - description: ID da sessão
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Remove sessão de chat
+      tags:
+      - Chat
+  /api/v1/chat/sessions/{id}/messages:
+    get:
+      parameters:
+      - description: ID da sessão
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista mensagens da sessão
+      tags:
+      - Chat
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID da sessão
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Adiciona mensagem na sessão
+      tags:
+      - Chat
+  /api/v1/chat/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Upload de arquivos para chat
+      tags:
+      - Chat
+  /api/v1/dashboard/changes-24h:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Movimentações das últimas 24h
+      tags:
+      - Dashboard
+  /api/v1/dashboard/deferidos:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Deferidos do dashboard
+      tags:
+      - Dashboard
+  /api/v1/dashboard/movimentacoes:
+    get:
+      parameters:
+      - description: Data inicial (YYYY-MM-DD)
+        in: query
+        name: ini
+        required: true
+        type: string
+      - description: Data final (YYYY-MM-DD)
+        in: query
+        name: fim
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Movimentações por período
+      tags:
+      - Dashboard
+  /api/v1/dashboard/stats:
+    get:
+      parameters:
+      - description: Debug
+        in: query
+        name: debug
+        type: boolean
+      - description: Incluir suspensos (1/0)
+        in: query
+        name: incluir_suspensos
+        type: boolean
+      - description: Apenas relevantes (1/0)
+        in: query
+        name: apenas_relevantes
+        type: boolean
+      - description: Data inicial (YYYY-MM-DD)
+        in: query
+        name: ini
+        type: string
+      - description: Data final (YYYY-MM-DD)
+        in: query
+        name: fim
+        type: string
+      - description: Filtro por cliente
+        in: query
+        name: cliente
+        type: string
+      - description: Filtro por concessionária
+        in: query
+        name: concessionaria
+        type: string
+      - description: ID do gestor
+        in: query
+        name: gestor_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Estatísticas do dashboard
+      tags:
+      - Dashboard
+  /api/v1/departamentos:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Departamento'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar departamentos
+      tags:
+      - Departamentos
+  /api/v1/desvio-kwh-fponta:
+    get:
+      parameters:
+      - description: Limite
+        in: query
+        name: limit
+        type: integer
+      - description: Offset
+        in: query
+        name: offset
+        type: integer
+      - description: Status
+        in: query
+        name: status
+        type: string
+      - description: Tipos (csv)
+        in: query
+        name: tp_tensao
+        type: string
+      - description: Concessionarias (csv)
+        in: query
+        name: concessionaria
+        type: string
+      - description: Clientes (csv)
+        in: query
+        name: cliente
+        type: string
+      - description: Busca
+        in: query
+        name: q
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DesvioKwhListResp'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar desvio KWH FPonta
+      tags:
+      - DesvioKwh
+  /api/v1/desvio-kwh-fponta/{id}/create-processo:
+    post:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Criar processo a partir do desvio KWH
+      tags:
+      - DesvioKwh
+  /api/v1/desvio-kwh-fponta/{id}/flags:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Flags
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.DesvioKwhFlagsReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Atualizar flags desvio KWH
+      tags:
+      - DesvioKwh
+  /api/v1/desvio-kwh-fponta/options:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                type: string
+              type: array
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Opcoes de filtro desvio KWH FPonta
+      tags:
+      - DesvioKwh
+  /api/v1/events:
+    get:
+      parameters:
+      - description: JWT
+        in: query
+        name: token
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: stream
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: SSE global
+      tags:
+      - SSE
+  /api/v1/faturamento/{id}:
+    get:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Busca faturamento do processo
+      tags:
+      - Faturamento
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Salva faturamento do processo
+      tags:
+      - Faturamento
+  /api/v1/faturamento/{id}/stats:
+    get:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Estatísticas de faturamento
+      tags:
+      - Faturamento
+  /api/v1/faturamento/item/{itemId}:
+    delete:
+      parameters:
+      - description: ID do item
+        in: path
+        name: itemId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Deleta item do faturamento
+      tags:
+      - Faturamento
+  /api/v1/faturas:
+    get:
+      parameters:
+      - description: Unidade
+        in: query
+        name: unidade
+        type: string
+      - collectionFormat: csv
+        description: Meses
+        in: query
+        items:
+          type: string
+        name: mes
+        type: array
+      - description: Pagina
+        in: query
+        name: page
+        type: integer
+      - description: Tamanho da pagina
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar faturas
+      tags:
+      - Faturas
+  /api/v1/faturas-anos:
+    get:
+      parameters:
+      - description: ID UC
+        in: query
+        name: id_uc
+        type: string
+      - description: ID empresa
+        in: query
+        name: id_empresa
+        type: string
+      - description: ID concessionaria
+        in: query
+        name: id_concessionaria
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                type: integer
+              type: array
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar anos de faturas
+      tags:
+      - Faturas
+  /api/v1/faturas-implantadas:
+    get:
+      parameters:
+      - description: ID UC
+        in: query
+        name: id_uc
+        type: string
+      - description: Unidade
+        in: query
+        name: unidade
+        type: string
+      - collectionFormat: csv
+        description: Meses
+        in: query
+        items:
+          type: string
+        name: mes
+        type: array
+      - description: Meses (csv)
+        in: query
+        name: meses
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar faturas implantadas por UC
+      tags:
+      - Faturas
+  /api/v1/faturas-implantadas/count:
+    get:
+      parameters:
+      - description: ID UC
+        in: query
+        name: id_uc
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: integer
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Contar faturas implantadas por UC
+      tags:
+      - Faturas
+  /api/v1/faturas-implantadas/meses:
+    get:
+      parameters:
+      - description: ID UC
+        in: query
+        name: id_uc
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                type: string
+              type: array
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar meses de faturas implantadas
+      tags:
+      - Faturas
+  /api/v1/faturas-implantadas/todas:
+    get:
+      parameters:
+      - description: ID UC
+        in: query
+        name: id_uc
+        required: true
+        type: string
+      - description: ID empresa
+        in: query
+        name: id_empresa
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar todas faturas implantadas
+      tags:
+      - Faturas
+  /api/v1/feedback:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista feedbacks
+      tags:
+      - Feedback
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Envia feedback
+      tags:
+      - Feedback
+  /api/v1/filtros/concessionarias:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.ConcessionariaFiltro'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar concessionarias para filtro
+      tags:
+      - Filtros
+  /api/v1/filtros/empresas:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.EmpresaFiltro'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar empresas para filtro
+      tags:
+      - Filtros
+  /api/v1/filtros/etapas:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+      summary: Listar etapas para filtro
+      tags:
+      - Filtros
+  /api/v1/filtros/etapas-subetapas:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar combinacoes etapa/subetapa
+      tags:
+      - Filtros
+  /api/v1/filtros/subetapas:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+      summary: Listar subetapas para filtro
+      tags:
+      - Filtros
+  /api/v1/filtros/tensao:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar tensoes para filtro
+      tags:
+      - Filtros
+  /api/v1/fluxo-ressarcimento/{id}:
+    get:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Busca fluxo de ressarcimento
+      tags:
+      - FluxoRessarcimento
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Salva fluxo de ressarcimento
+      tags:
+      - FluxoRessarcimento
+  /api/v1/fluxo-ressarcimento/item/{itemId}:
+    delete:
+      parameters:
+      - description: ID do item
+        in: path
+        name: itemId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Deleta item do fluxo de ressarcimento
+      tags:
+      - FluxoRessarcimento
+  /api/v1/health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.HealthResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.HealthResponse'
+      summary: Healthcheck avancado
+      tags:
+      - Health
+  /api/v1/health/live:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+      summary: Liveness check
+      tags:
+      - Health
+  /api/v1/health/ready:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Readiness check
+      tags:
+      - Health
+  /api/v1/healthz:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+      summary: Healthcheck simples
+      tags:
+      - Health
+  /api/v1/historico:
+    get:
+      parameters:
+      - description: Limite
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handlers.HistoricoItemDTO'
+            type: array
+      summary: Historico recente
+      tags:
+      - Historico
+  /api/v1/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Credenciais
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties:
+            type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Login
+      tags:
+      - Auth
+  /api/v1/mail/folders:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista pastas de e-mail
+      tags:
+      - Mail
+  /api/v1/mail/messages:
+    get:
+      parameters:
+      - description: ID da pasta
+        in: query
+        name: folderId
+        type: string
+      - description: Busca
+        in: query
+        name: q
+        type: string
+      - description: Somente não lidos
+        in: query
+        name: unread
+        type: boolean
+      - description: Limite
+        in: query
+        name: limit
+        type: integer
+      - description: Offset
+        in: query
+        name: skip
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista mensagens de e-mail
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}:
+    get:
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Detalhe de mensagem
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}/analisar-ia:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Analisar e-mail com IA
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}/attachments:
+    get:
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista anexos
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}/attachments/{attId}/download:
+    get:
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: ID do anexo
+        in: path
+        name: attId
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Baixa anexo
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}/forward:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Encaminhar e-mail
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}/link-process:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Vincula e-mail a processo
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}/mime:
+    get:
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Baixa MIME (.eml)
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}/move:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Destinatários (separar por ';')
+        in: formData
+        name: to
+        required: true
+        type: string
+      - description: Cópia (separar por ';')
+        in: formData
+        name: cc
+        type: string
+      - description: Cópia oculta (separar por ';')
+        in: formData
+        name: bcc
+        type: string
+      - description: Assunto
+        in: formData
+        name: subject
+        required: true
+        type: string
+      - description: Corpo
+        in: formData
+        name: body
+        required: true
+        type: string
+      - description: Tipo do corpo (text|html)
+        in: formData
+        name: body_type
+        type: string
+      - description: Anexos
+        in: formData
+        name: attachments
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Move mensagem de pasta
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}/read:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Marca mensagem como lida/não lida (Graph)
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}/read-local:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Marca mensagem como lida/não lida (local)
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}/reply:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Responder e-mail
+      tags:
+      - Mail
+  /api/v1/mail/messages/{id}/reply-all:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID da mensagem
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Responder a todos
+      tags:
+      - Mail
+  /api/v1/mail/processes/search:
+    get:
+      parameters:
+      - description: Busca
+        in: query
+        name: q
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Busca processos para vínculo
+      tags:
+      - Mail
+  /api/v1/mail/send:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Enviar e-mail
+      tags:
+      - Mail
+  /api/v1/ocr/analyze:
+    post:
+      consumes:
+      - multipart/form-data
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: OCR analyze
+      tags:
+      - OCR
+  /api/v1/ocr/chat:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Chat OCR
+      tags:
+      - OCR
+  /api/v1/ocr/desvio-media:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: Arquivo
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Coluna UC
+        in: formData
+        name: unit_col
+        type: string
+      - description: Coluna Concessionaria
+        in: formData
+        name: concessionaria_col
+        type: string
+      - description: Coluna valor
+        in: formData
+        name: value_col
+        type: string
+      - description: Placeholders
+        in: formData
+        name: placeholder
+        type: string
+      - description: Min base
+        in: formData
+        name: min_base
+        type: string
+      - description: Score threshold
+        in: formData
+        name: score_threshold
+        type: string
+      - description: Pct high
+        in: formData
+        name: pct_high
+        type: string
+      - description: Pct low
+        in: formData
+        name: pct_low
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Analisar desvio de media (Excel)
+      tags:
+      - OCR
+  /api/v1/ocr/excel:
+    post:
+      consumes:
+      - multipart/form-data
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Importa planilha Ilttio
+      tags:
+      - OCR
+  /api/v1/ocr/excel/analyze:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: Arquivo
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Instrucao
+        in: formData
+        name: instruction
+        type: string
+      - description: Campo unidade
+        in: formData
+        name: unit_field
+        type: string
+      - description: Campo valor
+        in: formData
+        name: value_field
+        type: string
+      - description: Metodo
+        in: formData
+        name: outlier_method
+        type: string
+      - description: Threshold
+        in: formData
+        name: zscore_threshold
+        type: number
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Analise simples de Excel
+      tags:
+      - OCR
+  /api/v1/ocr/interpret:
+    post:
+      consumes:
+      - multipart/form-data
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: OCR interpretar
+      tags:
+      - OCR
+  /api/v1/ocr/interpret_json:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: OCR interpretar (JSON)
+      tags:
+      - OCR
+  /api/v1/ocr/quick:
+    post:
+      consumes:
+      - multipart/form-data
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: OCR quick
+      tags:
+      - OCR
+  /api/v1/perguntar-ia:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Perguntar IA
+      tags:
+      - AI
+  /api/v1/processo-snapshot/{id_processo}:
+    get:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id_processo
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Busca snapshot do processo
+      tags:
+      - ProcessoSnapshot
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id_processo
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Atualiza snapshot do processo
+      tags:
+      - ProcessoSnapshot
+  /api/v1/processo-snapshot/{id_processo}/sync:
+    post:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id_processo
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Sincroniza snapshot do processo
+      tags:
+      - ProcessoSnapshot
+  /api/v1/processos/{id}:
+    delete:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Exclui processo permanentemente
+      tags:
+      - Processos
+  /api/v1/processos/{id}/alerta:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Salva data de alerta
+      tags:
+      - Processos
+  /api/v1/processos/{id}/alertas:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Dados do alerta
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Criar alerta manual para processo
+      tags:
+      - Alertas
+  /api/v1/processos/{id}/backlog-check:
+    post:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Marca/desmarca backlog check
+      tags:
+      - Processos
+  /api/v1/processos/{id}/comentar:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Comenta processo
+      tags:
+      - Processos
+  /api/v1/processos/{id}/deferimento:
+    get:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Busca deferimento do processo
+      tags:
+      - Processos
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Salva deferimento
+      tags:
+      - Processos
+  /api/v1/processos/{id}/descartar:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Descarta processo
+      tags:
+      - Processos
+  /api/v1/processos/{id}/emails:
+    get:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista e-mails do processo
+      tags:
+      - EmailProcesso
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Envia e-mail do processo
+      tags:
+      - EmailProcesso
+  /api/v1/processos/{id}/events:
+    get:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: JWT
+        in: query
+        name: token
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: SSE de eventos por processo
+      tags:
+      - SSE
+  /api/v1/processos/{id}/historico:
+    get:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Histórico de movimentações
+      tags:
+      - Processos
+  /api/v1/processos/{id}/historico/{hid}/anexos:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: ID do histórico
+        in: path
+        name: hid
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Anexa arquivo ao histórico
+      tags:
+      - Processos
+  /api/v1/processos/{id}/movimentar:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Movimenta processo
+      tags:
+      - Processos
+  /api/v1/processos/{id}/retomar:
+    post:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Retoma processo suspenso
+      tags:
+      - Processos
+  /api/v1/processos/{id}/summary:
+    get:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Resumo do processo
+      tags:
+      - ResumoProcesso
+  /api/v1/processos/{id}/summary/refresh:
+    post:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Atualiza resumo do processo
+      tags:
+      - ResumoProcesso
+  /api/v1/processos/{id}/suspender:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Suspende processo
+      tags:
+      - Processos
+  /api/v1/processos/{id}/tags:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Atualiza tags do processo
+      tags:
+      - Tags
+  /api/v1/processos/backlog:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista processos em backlog
+      tags:
+      - Processos
+  /api/v1/processos/cards-meta:
+    get:
+      parameters:
+      - description: IDs separados por vírgula
+        in: query
+        name: ids
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Metadados de cards de processos
+      tags:
+      - Processos
+  /api/v1/processos/kanban:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista processos no kanban
+      tags:
+      - Processos
+  /api/v1/processos/kanban-fast:
+    get:
+      parameters:
+      - description: Limite
+        in: query
+        name: limit
+        type: integer
+      - description: Coluna
+        in: query
+        name: coluna
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Kanban rápido
+      tags:
+      - Processos
+  /api/v1/processos/prazos:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Processos com prazo
+      tags:
+      - Processos
+  /api/v1/processos/suspensos:
+    get:
+      parameters:
+      - description: Limite
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista processos suspensos
+      tags:
+      - Processos
+  /api/v1/register:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Usuario
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.User'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Registrar usuario
+      tags:
+      - Auth
+  /api/v1/relatorios/kanban-composicao:
+    get:
+      parameters:
+      - description: Data inicial (DD/MM/YYYY)
+        in: query
+        name: data_ini
+        type: string
+      - description: Data final (DD/MM/YYYY)
+        in: query
+        name: data_fim
+        type: string
+      - description: Lista separada por vírgula
+        in: query
+        name: concessionarias
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.KanbanComposicaoResp'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Composição do Kanban
+      tags:
+      - Relatorios
+  /api/v1/relatorios/metricas:
+    get:
+      parameters:
+      - description: Data inicial (DD/MM/YYYY)
+        in: query
+        name: data_ini
+        type: string
+      - description: Data final (DD/MM/YYYY)
+        in: query
+        name: data_fim
+        type: string
+      - description: Lista separada por vírgula
+        in: query
+        name: concessionarias
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.RelatoriosMetricasResp'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Métricas de relatórios
+      tags:
+      - Relatorios
+  /api/v1/requisicoes:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar requisicoes
+      tags:
+      - Requisicoes
+    post:
+      consumes:
+      - application/json
+      - multipart/form-data
+      parameters:
+      - description: Dados da requisicao
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreateRequisicaoPayload'
+      - description: Anexos (multipart/form-data)
+        in: formData
+        name: anexos
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Criar requisicao (persistente)
+      tags:
+      - Requisicoes
+  /api/v1/requisicoes/{id}:
+    get:
+      parameters:
+      - description: ID da requisicao
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Buscar requisicao por ID
+      tags:
+      - Requisicoes
+  /api/v1/requisicoes/{id}/anexos:
+    get:
+      parameters:
+      - description: ID da requisicao
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar anexos da requisicao
+      tags:
+      - Requisicoes
+  /api/v1/requisicoes/{id}/anexos/{anexoId}:
+    delete:
+      parameters:
+      - description: ID da requisicao
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: ID do anexo
+        in: path
+        name: anexoId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Remover anexo de requisicao
+      tags:
+      - Anexos
+  /api/v1/requisicoes/{id}/faturas:
+    get:
+      parameters:
+      - description: ID da requisicao
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Faturas selecionadas da requisicao
+      tags:
+      - Requisicoes
+  /api/v1/requisicoes/{id}/historico:
+    get:
+      parameters:
+      - description: ID da requisicao
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Historico da requisicao
+      tags:
+      - Requisicoes
+  /api/v1/requisicoes/{id}/update:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID da requisicao
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Dados
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Atualizar requisicao
+      tags:
+      - Requisicoes
+  /api/v1/requisicoes/departamento:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar requisicoes por departamento
+      tags:
+      - Requisicoes
+  /api/v1/resumos/enqueue:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Enfileira resumos
+      tags:
+      - ResumoProcesso
+  /api/v1/resumos/pending:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Resumos pendentes
+      tags:
+      - ResumoProcesso
+  /api/v1/resumos/status:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Status de resumos
+      tags:
+      - ResumoProcesso
+  /api/v1/rules:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                $ref: '#/definitions/handlers.Rule'
+              type: array
+            type: object
+      summary: Listar regras
+      tags:
+      - Regras
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Regra
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.Rule'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.Rule'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Criar regra
+      tags:
+      - Regras
+  /api/v1/rules/{id}:
+    delete:
+      parameters:
+      - description: ID da regra
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Excluir regra
+      tags:
+      - Regras
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID da regra
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Regra
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.Rule'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.Rule'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Atualizar regra
+      tags:
+      - Regras
+  /api/v1/rules/active:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                $ref: '#/definitions/handlers.Rule'
+              type: array
+            type: object
+      summary: Listar regras ativas
+      tags:
+      - Regras
+  /api/v1/rules/interpret:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Texto
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties:
+            type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Interpretar regra (IA)
+      tags:
+      - Regras
+  /api/v1/search/global:
+    get:
+      parameters:
+      - description: Termo
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: Limite
+        in: query
+        name: limit
+        type: integer
+      - description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Busca global no historico
+      tags:
+      - Search
+  /api/v1/tags:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista tags
+      tags:
+      - Tags
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Cria tag
+      tags:
+      - Tags
+  /api/v1/tipos-irregularidade:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista tipos de irregularidade
+      tags:
+      - Irregularidades
+  /api/v1/tipos-irregularidade/{tipoID}/subtipos:
+    get:
+      parameters:
+      - description: ID do tipo
+        in: path
+        name: tipoID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista subtipos de irregularidade
+      tags:
+      - Irregularidades
+  /api/v1/uc/{numero}:
+    get:
+      parameters:
+      - description: Numero da UC
+        in: path
+        name: numero
+        required: true
+        type: string
+      - collectionFormat: csv
+        description: Meses (YYYY-MM)
+        in: query
+        items:
+          type: string
+        name: mes_ref
+        type: array
+      - collectionFormat: csv
+        description: Meses (YYYY-MM)
+        in: query
+        items:
+          type: string
+        name: mes
+        type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.UCDetalhes'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Buscar UC por numero
+      tags:
+      - UC
+  /api/v1/uc/{numero}/faturas:
+    get:
+      parameters:
+      - description: Numero da UC
+        in: path
+        name: numero
+        required: true
+        type: string
+      - collectionFormat: csv
+        description: Meses (YYYY-MM)
+        in: query
+        items:
+          type: string
+        name: mes
+        type: array
+      - collectionFormat: csv
+        description: Meses (YYYY-MM)
+        in: query
+        items:
+          type: string
+        name: mes_ref
+        type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Listar faturas por UC
+      tags:
+      - Faturas
+  /api/v1/uc/{numero}/opcoes:
+    get:
+      parameters:
+      - description: Numero da UC
+        in: path
+        name: numero
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items: {}
+              type: array
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Opcoes de UC (empresa/concessionaria)
+      tags:
+      - UC
+  /api/v1/usuarios/mencoes:
+    get:
+      parameters:
+      - description: Busca
+        in: query
+        name: q
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista usuários para menções
+      tags:
+      - Usuarios
+swagger: "2.0"

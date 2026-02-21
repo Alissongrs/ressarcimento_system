@@ -1,4 +1,4 @@
-// ressarcimento-backend/handlers/auth.go
+﻿// ressarcimento-backend/handlers/auth.go
 package handlers
 
 import (
@@ -20,7 +20,7 @@ import (
 )
 
 // Sal legado para compatibilidade com hashes SHA256 antigos
-// DEPRECATED: usado apenas para migração de senhas antigas
+// DEPRECATED: usado apenas para migraÃ§ão de senhas antigas
 var salt = "um-sal-secreto-para-aumentar-a-seguranca"
 
 // hashPasswordBcrypt cria um hash seguro usando bcrypt (custo 12)
@@ -46,7 +46,7 @@ func hashPasswordSHA256Legacy(password string) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-// isBcryptHash verifica se o hash é bcrypt (começa com $2a$, $2b$ ou $2y$)
+// isBcryptHash verifica se o hash é bcrypt (comeÃ§a com $2a$, $2b$ ou $2y$)
 func isBcryptHash(hash string) bool {
 	return strings.HasPrefix(hash, "$2a$") ||
 	       strings.HasPrefix(hash, "$2b$") ||
@@ -69,21 +69,21 @@ func verifyPassword(password, hash string, userID int64) (bool, error) {
 		// Gera novo hash bcrypt
 		newHash, err := hashPasswordBcrypt(password)
 		if err != nil {
-			log.Printf("ERRO ao gerar hash bcrypt na migração para usuário ID %d: %v", userID, err)
-			return true, nil // Senha está correta, mas falhou migração
+			log.Printf("ERRO ao gerar hash bcrypt na migraÃ§ão para usuário ID %d: %v", userID, err)
+			return true, nil // Senha está correta, mas falhou migraÃ§ão
 		}
 
 		// Atualiza no banco
-		_, err = database.DB_App.Exec(
+		_, err = execGorm(database.GormDB_App, 
 			"UPDATE DM_USUARIO SET senha_hash = ? WHERE id_usuario = ?",
 			newHash, userID,
 		)
 		if err != nil {
 			log.Printf("ERRO ao atualizar hash no banco para usuário ID %d: %v", userID, err)
-			return true, nil // Senha está correta, mas falhou migração
+			return true, nil // Senha está correta, mas falhou migraÃ§ão
 		}
 
-		log.Printf("✓ Senha migrada com sucesso para usuário ID %d", userID)
+		log.Printf("âœ“ Senha migrada com sucesso para usuário ID %d", userID)
 		return true, nil
 	}
 
@@ -91,6 +91,15 @@ func verifyPassword(password, hash string, userID int64) (bool, error) {
 }
 
 // Register cria um novo usuário na tabela DM_USUARIO.
+// @Summary Registrar usuario
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param body body models.User true "Usuario"
+// @Success 201 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/register [post]
 func Register(c *gin.Context) {
 	var user models.User
 	if err := c.ShouldBindJSON(&user); err != nil {
@@ -98,7 +107,7 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	// Validação: departamento é obrigatório
+	// ValidaÃ§ão: departamento é obrigatório
 	if user.IDDepartamento == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "O departamento é obrigatório"})
 		return
@@ -113,7 +122,7 @@ func Register(c *gin.Context) {
 	}
 
 	// Insert incluindo id_departamento e perfil padrão 'solicitante'
-	_, err = database.DB_App.Exec(
+	_, err = execGorm(database.GormDB_App, 
 		"INSERT INTO DM_USUARIO (nome_usuario, email, senha_hash, id_departamento, perfil) VALUES (?, ?, ?, ?, ?)",
 		user.Nome, user.Email, hashedPassword, user.IDDepartamento, "solicitante",
 	)
@@ -127,6 +136,16 @@ func Register(c *gin.Context) {
 }
 
 // Login autentica um usuário e gera um token JWT.
+// @Summary Login
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param body body map[string]string true "Credenciais"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/login [post]
 func Login(c *gin.Context) {
 	var input struct {
 		Email    string `json:"email"`
@@ -143,7 +162,7 @@ func Login(c *gin.Context) {
 	var hashedPasswordFromDB string
 
 	// Busca usuário ativo por email
-	err := database.DB_App.QueryRow(
+	err := queryRowGorm(database.GormDB_App, 
 		"SELECT id_usuario, nome_usuario, email, senha_hash, perfil FROM DM_USUARIO WHERE email = ? AND usuario_ativo = TRUE",
 		input.Email,
 	).Scan(&user.ID, &user.Nome, &user.Email, &hashedPasswordFromDB, &user.TipoConta)
@@ -158,7 +177,7 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// Verifica senha com suporte a migração automática de SHA256 para bcrypt
+	// Verifica senha com suporte a migraÃ§ão automática de SHA256 para bcrypt
 	passwordValid, err := verifyPassword(input.Password, hashedPasswordFromDB, user.ID)
 	if err != nil {
 		log.Printf("Erro ao verificar senha para '%s': %v", input.Email, err)
@@ -167,7 +186,7 @@ func Login(c *gin.Context) {
 	}
 
 	if !passwordValid {
-		log.Printf("Falha na verificação da senha para '%s'", input.Email)
+		log.Printf("Falha na verificaÃ§ão da senha para '%s'", input.Email)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email ou senha inválidos"})
 		return
 	}
@@ -207,3 +226,4 @@ func Login(c *gin.Context) {
 		"token":   tokenString,
 	})
 }
+

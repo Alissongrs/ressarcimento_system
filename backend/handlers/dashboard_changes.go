@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"net/http"
@@ -24,10 +24,17 @@ type changeDTO struct {
 	Comentario     string    `json:"comentario"`
 }
 
-// MovimentacoesUltimas24h retorna as movimentações das últimas 24h.
+// MovimentacoesUltimas24h retorna as movimentaÃ§ões das últimas 24h.
 // Em ambiente de desenvolvimento, se a consulta falhar (ex.: tabela ausente), retorna lista vazia.
+// MovimentacoesUltimas24h godoc
+// @Summary      MovimentaÃ§ões das últimas 24h
+// @Tags         Dashboard
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/dashboard/changes-24h [get]
 func MovimentacoesUltimas24h(c *gin.Context) {
-	rows, err := database.DB_App.Query(`
+	rows, err := queryGorm(database.GormDB_App, `
         SELECT
           h.id_historico,
           h.id_requisicao,
@@ -67,3 +74,4 @@ func MovimentacoesUltimas24h(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, out)
 }
+

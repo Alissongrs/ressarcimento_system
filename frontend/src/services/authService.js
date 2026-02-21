@@ -3,7 +3,7 @@ import api from './apiClient';
 // Login
 export const login = async (email, password) => {
   try {
-    const response = await api.post('/login', { email, password });
+    const response = await api.post('/login', { email, password }, { skipAuthExpired: true });
     return response.data;
   } catch (error) {
     console.error('Erro detalhado no serviço de login:', error);
@@ -22,7 +22,7 @@ export const login = async (email, password) => {
 // Registro
 export const register = async (userData) => {
   try {
-    const response = await api.post('/register', userData);
+    const response = await api.post('/register', userData, { skipAuthExpired: true });
     return response.data;
   } catch (error) {
     console.error('Erro no serviço de registro:', error.response?.data?.error || error.message);

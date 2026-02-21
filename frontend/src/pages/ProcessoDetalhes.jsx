@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
-  // Menções removidas: mencione usuários via comentário padrão
+  // MenÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes removidas: mencione usuÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rios via comentÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rio padrÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o
 import { useProcessoSSE } from '../hooks/useProcessoSSE';
 import {
   ArrowLeft,
@@ -28,13 +28,15 @@ import {
 } from 'lucide-react';
 import { criarAlertaProcesso } from '../services/requisicaoService';
 import api from '../services/api';
+import { confirmAction } from '../utils/confirm.js';
+import ModalEmail from '../components/ModalEmail';
 
 const kanbanSteps = [
   { id: 1, label: 'ATIVOS' },
   { id: 2, label: 'DEFERIDOS' },
   { id: 3, label: 'FLUXO DE RESSARCIMENTO' },
   { id: 4, label: 'FATURAMENTO' },
-  { id: 5, label: 'CONCLUÍDOS' },
+  { id: 5, label: 'CONCLUÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂDOS' },
   { id: 6, label: 'INDEFERIDOS' },
 ];
 
@@ -53,18 +55,18 @@ const asDateInput = (val) => {
   }
 };
 
-// Converte valores formatados em português para decimal (1.234,56 → 1234.56)
+// Converte valores formatados em portuguÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂªs para decimal (1.234,56 ÃÆ’Ã†â€™Ãâ€šÂÂ¢ÃÆ’ÂÂ¢ÃÂ¢ââ‚¬Å¡ÂÂ¬Ãâ€šÂÂ ÃÆ’ÂÂ¢ÃÂ¢ââ‚¬Å¡ÂÂ¬ÃÂ¢ââ‚¬Å¾ÂÂ¢ 1234.56)
 const normalizeDecimalValue = (val) => {
   if (!val) return '';
   const s = String(val).trim();
   if (!s) return '';
-  // Se já está em formato decimal (com ponto): 1234.56
+  // Se jÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡ estÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡ em formato decimal (com ponto): 1234.56
   if (/^\d+\.\d{2}$/.test(s)) return s;
-  // Se é formato português (com ponto de milhar e vírgula): 1.234,56
+  // Se ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ© formato portuguÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂªs (com ponto de milhar e vÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­rgula): 1.234,56
   if (/^\d{1,3}(\.\d{3})*,\d{2}$/.test(s)) {
     return s.replace(/\./g, '').replace(',', '.');
   }
-  // Se é formato simples com vírgula: 1234,56
+  // Se ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ© formato simples com vÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­rgula: 1234,56
   if (/^\d+,\d{2}$/.test(s)) {
     return s.replace(',', '.');
   }
@@ -73,17 +75,17 @@ const normalizeDecimalValue = (val) => {
   return Number.isFinite(num) ? String(num) : '';
 };
 
-// Normaliza valores de crédito que foram salvos errados (multiplicados por 100)
+// Normaliza valores de crÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ©dito que foram salvos errados (multiplicados por 100)
 // Exemplo: 853243 deveria ser 8532.43
-// Se o valor é > 500000, assume que foi salvo errado e divide por 100
+// Se o valor ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ© > 500000, assume que foi salvo errado e divide por 100
 const normalizeCreditoValue = (val) => {
   if (!val) return '';
   const num = parseFloat(String(val));
 
-  // Se é um número muito grande, provavelmente foi salvo sem as casas decimais
+  // Se ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ© um nÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂºmero muito grande, provavelmente foi salvo sem as casas decimais
   if (num > 500000) {
     const corrigido = (num / 100).toFixed(2);
-    console.warn(`[Crédito] Valor anormalmente grande detectado: ${num} → Corrigido para: ${corrigido}`);
+    console.warn(`[CrÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ©dito] Valor anormalmente grande detectado: ${num} ÃÆ’Ã†â€™Ãâ€šÂÂ¢ÃÆ’ÂÂ¢ÃÂ¢ââ‚¬Å¡ÂÂ¬Ãâ€šÂÂ ÃÆ’ÂÂ¢ÃÂ¢ââ‚¬Å¡ÂÂ¬ÃÂ¢ââ‚¬Å¾ÂÂ¢ Corrigido para: ${corrigido}`);
     return corrigido;
   }
 
@@ -164,29 +166,30 @@ const ProcessoDetalhes = () => {
     id,
     numero_processo: `PROC-${id}`,
     etapa: 'Distribuidora',
-    sub_etapa: 'Em elaboração',
+    sub_etapa: 'Em elaboraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o',
     data_alerta: '',
     relevancia: false,
-    descricao: 'Processo de ressarcimento em análise',
+    descricao: 'Processo de ressarcimento em anÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡lise',
     status: 'Ativo',
-    // 1=Ativos, 2=Deferidos, 3=Fluxo, 4=Faturamento, 5=Concluídos, 6=Indeferidos
+    // 1=Ativos, 2=Deferidos, 3=Fluxo, 4=Faturamento, 5=ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­dos, 6=Indeferidos
     coluna_kanban: 1,
 
-    // suspensão
+    // suspensÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o
     suspenso: false,
     suspenso_motivo: '',
     suspenso_ate: '',
   });
 
   const [etapa, setEtapa] = useState('Distribuidora');
-  const [subEtapa, setSubEtapa] = useState('Em elaboração');
+  const [subEtapa, setSubEtapa] = useState('Em elaboraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o');
   const [dataAlerta, setDataAlerta] = useState('');
   const [relevancia, setRelevancia] = useState(false);
   const [comentario, setComentario] = useState('');
   const [showFaturas, setShowFaturas] = useState(false);
   const [faturas, setFaturas] = useState([]);
   const [anexos, setAnexos] = useState([]);
-  // Estados de menções removidos
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  // Estados de menÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes removidos
   const [novaMensagemAlerta, setNovaMensagemAlerta] = useState('');
 
   // Deferimento
@@ -212,7 +215,7 @@ const ProcessoDetalhes = () => {
     },
   ]);
 
-  // Concluído
+  // ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­do
   const [modulosAprovados, setModulosAprovados] = useState({
     ativos: false,
     deferidos: false,
@@ -236,7 +239,7 @@ const ProcessoDetalhes = () => {
   const [loadingHistorico, setLoadingHistorico] = useState(false);
   const comentarioRef = useRef(null);
 
-  // Suspensão (toggle)
+  // SuspensÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o (toggle)
   const [suspenso, setSuspenso] = useState(false);
   const [suspensoMotivo, setSuspensoMotivo] = useState('');
   const [suspensoAte, setSuspensoAte] = useState('');
@@ -248,7 +251,7 @@ const ProcessoDetalhes = () => {
 
   const salvarValorEstimadoReal = useCallback(
     async (valor) => {
-      if (processo.coluna_kanban !== 1) return; // só salva em "Ativos"
+      if (processo.coluna_kanban !== 1) return; // sÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³ salva em "Ativos"
       const v = String(valor ?? '');
       if (v === lastSavedRef.current) return; // evita POST duplicado
       try {
@@ -316,12 +319,12 @@ const ProcessoDetalhes = () => {
     { id: 1, nome: 'Distribuidora', descricao: 'Processo em tratativa com a Distribuidora.', coluna: 1 },
     { id: 2, nome: 'Ouvidoria', descricao: 'Processo escalado para a Ouvidoria.', coluna: 1 },
     { id: 3, nome: 'ANEEL', descricao: 'Processo escalado para a ANEEL.', coluna: 1 },
-    { id: 4, nome: 'SMA', descricao: 'Processo em análise no SMA.', coluna: 1 },
+    { id: 4, nome: 'SMA', descricao: 'Processo em anÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡lise no SMA.', coluna: 1 },
 
     // Coluna 2: Deferidos
-    { id: 5, nome: 'Pendente', descricao: 'Deferido, aguardando início da conciliação.', coluna: 2 },
-    { id: 6, nome: 'Em conciliação', descricao: 'Valores do deferimento sendo conciliados.', coluna: 2 },
-    { id: 7, nome: 'Em Contestação', descricao: 'Valores do deferimento em contestação.', coluna: 2 },
+    { id: 5, nome: 'Pendente', descricao: 'Deferido, aguardando inÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­cio da conciliaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o.', coluna: 2 },
+    { id: 6, nome: 'Em conciliaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o', descricao: 'Valores do deferimento sendo conciliados.', coluna: 2 },
+    { id: 7, nome: 'Em ContestaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o', descricao: 'Valores do deferimento em contestaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o.', coluna: 2 },
 
     // Coluna 3: Fluxo de Ressarcimento
     { id: 8, nome: 'Enviado ao Financeiro', descricao: 'Processo a caminho do setor financeiro.', coluna: 3 },
@@ -329,17 +332,17 @@ const ProcessoDetalhes = () => {
     // Coluna 4: Faturamento
     { id: 9, nome: 'Faturamento', descricao: 'Aguardando faturamento e pagamento.', coluna: 4 },
 
-    // Coluna 5: Concluídos
-    { id: 10, nome: 'Concluído', descricao: 'Processo finalizado e pago.', coluna: 5 },
+    // Coluna 5: ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­dos
+    { id: 10, nome: 'ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­do', descricao: 'Processo finalizado e pago.', coluna: 5 },
 
     // Coluna 6: Indeferidos
     { id: 11, nome: 'Indeferido', descricao: 'Processo descartado ou rejeitado.', coluna: 6 },
   ];
 
   const getSubEtapasDisponiveis = () => [
-    { id: 1, nome: 'Em elaboração' },
+    { id: 1, nome: 'Em elaboraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o' },
     { id: 2, nome: 'Aguardando retorno' },
-    { id: 3, nome: 'Em Contestação' },
+    { id: 3, nome: 'Em ContestaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o' },
     // { id: 4, nome: 'Suspenso' },
   ];
 
@@ -353,7 +356,7 @@ const ProcessoDetalhes = () => {
         return processo.coluna_kanban >= 3;
       case 'faturamento':
         return processo.coluna_kanban >= 4;
-      case 'Concluído':
+      case 'ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­do':
         return processo.coluna_kanban >= 5;
       default:
         return false;
@@ -395,7 +398,7 @@ const ProcessoDetalhes = () => {
   // Alias para compatibilidade com chamadas antigas
   const getEtapaColor = getEtapaColorSafe;
 
-  /* ===================== Histórico ===================== */
+  /* ===================== HistÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³rico ===================== */
   const getItemDate = (h) => {
     const raw = h?.data_movimentacao || h?.data || h?.created_at || h?.dt || '';
     if (!raw) return 0;
@@ -420,14 +423,14 @@ const ProcessoDetalhes = () => {
       let response = [];
 
       try {
-        // 1ª opção: service dedicado
+        // 1ÃÆ’Ã†â€™ÃÂ¢ââ€šÂ¬Ã…Â¡ÃÆ’ââ‚¬Å¡Ãâ€šÂÂª opÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o: service dedicado
         const { getHistoricoById } = await import('../services/requisicaoService');
         response = await getHistoricoById(id);
       } catch (error) {
-        console.warn('Serviço de histórico indisponível:', error);
+        console.warn('ServiÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§o de histÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³rico indisponÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­vel:', error);
 
         try {
-          // 2ª opção: endpoint direto (fallback)
+          // 2ÃÆ’Ã†â€™ÃÂ¢ââ€šÂ¬Ã…Â¡ÃÆ’ââ‚¬Å¡Ãâ€šÂÂª opÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o: endpoint direto (fallback)
           const token = localStorage.getItem('userToken');
           const res = await fetch(`/api/v1/fluxo-ressarcimento/${id}`, {
             headers: {
@@ -441,11 +444,11 @@ const ProcessoDetalhes = () => {
           }
         } catch (error2) {
           console.warn('Endpoint direto (fallback) falhou:', error2);
-          // 3ª opção: mock mínimo
+          // 3ÃÆ’Ã†â€™ÃÂ¢ââ€šÂ¬Ã…Â¡ÃÆ’ââ‚¬Å¡Ãâ€šÂÂª opÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o: mock mÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­nimo
           response = [
             {
               etapa_destino: 'Distribuidora',
-              sub_etapa: 'Em elaboração',
+              sub_etapa: 'Em elaboraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o',
               comentario: 'Processo iniciado na distribuidora',
               usuario_nome: 'Sistema',
               data_movimentacao: new Date().toISOString(),
@@ -458,7 +461,7 @@ const ProcessoDetalhes = () => {
       lista.sort((a, b) => getItemDate(b) - getItemDate(a));
       setHistorico(lista);
     } catch (error) {
-      console.error('Erro ao carregar histórico:', error);
+      console.error('Erro ao carregar histÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³rico:', error);
       setHistorico([]);
     } finally {
       setLoadingHistorico(false);
@@ -496,7 +499,7 @@ const ProcessoDetalhes = () => {
     })();
   }, [id]);
 
-  // Fonte primária: Requisição
+  // Fonte primÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡ria: RequisiÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o
   useEffect(() => {
     (async () => {
       if (!id) return;
@@ -637,12 +640,12 @@ const ProcessoDetalhes = () => {
     await salvarValorEstimadoReal(valorEstimado);
   };
 
-  // Abrir faturas recentes (Últimos 6 meses)
+  // Abrir faturas recentes (ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Â¦Ãâ€šÂÂ¡ltimos 6 meses)
   const abrirFaturas = async () => {
     try {
       const numero = extrairTextoSeguro(processo.uc || processo.unidade_consumidora);
       if (!numero) {
-        alert('UC não disponível para buscar faturas');
+        alert('UC nÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o disponÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­vel para buscar faturas');
         return;
       }
       const toYM = (d) =>
@@ -660,17 +663,17 @@ const ProcessoDetalhes = () => {
       setShowFaturas(true);
     } catch (e) {
       console.error('Falha ao carregar faturas:', e);
-      alert('Não foi possível carregar faturas agora.');
+      alert('NÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o foi possÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­vel carregar faturas agora.');
     }
   };
 
-  // Revela o título após montar
+  // Revela o tÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­tulo apÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³s montar
   useEffect(() => {
     const t = setTimeout(() => setTitleVisible(true), 0);
     return () => clearTimeout(t);
   }, []);
 
-  // SSE — atualiza subetapa/status ao vivo e recarrega Histórico
+  // SSE ÃÆ’Ã†â€™Ãâ€šÂÂ¢ÃÆ’ÂÂ¢ÃÂ¢ââ€šÂ¬Ã…Â¡Ãâ€šÂÂ¬ÃÆ’ÂÂ¢ÃÂ¢ââ‚¬Å¡ÂÂ¬Ãâ€šÂÂ atualiza subetapa/status ao vivo e recarrega HistÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³rico
   const sseToken = (localStorage.getItem('userToken') || '').replace(
     /^Bearer\s+/i,
     '',
@@ -689,7 +692,7 @@ const ProcessoDetalhes = () => {
     }
   });
 
-  // Colar imagem no comentário
+  // Colar imagem no comentÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rio
   const handlePasteComentario = (e) => {
     const items = e.clipboardData?.items || [];
     for (let i = 0; i < items.length; i++) {
@@ -714,9 +717,11 @@ const ProcessoDetalhes = () => {
         '../services/requisicaoService'
       );
       if (!suspenso) {
+        if (!(await confirmAction('Deseja suspender este processo?'))) return;
         await suspenderProcesso(id, suspensoMotivo || 'Suspenso via detalhes');
         setSuspenso(true);
       } else {
+        if (!(await confirmAction('Deseja retomar este processo?'))) return;
         await retomarProcesso(id, 'Retomado via detalhes');
         setSuspenso(false);
         setSuspensoMotivo('');
@@ -732,6 +737,7 @@ const ProcessoDetalhes = () => {
   /* ===================== Submit principal ===================== */
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!(await confirmAction('Deseja salvar as alteraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes deste processo?'))) return;
     setIsSubmitting(true);
     try {
       const { movimentarProcesso, salvarDataAlerta } = await import(
@@ -744,7 +750,7 @@ const ProcessoDetalhes = () => {
       fd.append('sub_etapa', subEtapa);
       fd.append('relevancia', String(relevancia));
 
-      // Suspensão
+      // SuspensÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o
       fd.append('suspenso', String(suspenso));
       if (suspensoMotivo) fd.append('suspenso_motivo', suspensoMotivo);
       if (suspensoAte) fd.append('suspenso_ate', suspensoAte);
@@ -757,7 +763,7 @@ const ProcessoDetalhes = () => {
         anexos.forEach((f) => fd.append('anexos', f));
       }
 
-      // Menções específicas removidas; comentários concentram @mentions
+      // MenÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes especÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­ficas removidas; comentÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rios concentram @mentions
 
       // Canais
       let canais = Object.entries(canaisSelecionados)
@@ -792,7 +798,7 @@ const ProcessoDetalhes = () => {
         fd.append('faturamento', JSON.stringify({ itens: faturamentoPayload }));
       }
 
-      // Valor estimado (só em Ativos)
+      // Valor estimado (sÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³ em Ativos)
       if (valorEstimado && processo.coluna_kanban === 1) {
         fd.append('valor_estimado', String(valorEstimado));
       }
@@ -806,34 +812,34 @@ const ProcessoDetalhes = () => {
         await salvarDataAlerta(id, { data_alerta: dataAlerta });
       }
 
-      alert('Alterações salvas com sucesso!');
+      alert('AlteraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes salvas com sucesso!');
       setComentario('');
       await carregarHistorico();
     } catch (error) {
-      console.error('Erro ao salvar alterações:', error?.response || error);
+      console.error('Erro ao salvar alteraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes:', error?.response || error);
       const msg =
         error?.response?.data?.error ||
         error?.response?.data?.message ||
         error?.message ||
-        'Falha ao salvar as alterações.';
-      alert(`Falha ao salvar as alterações: ${msg}`);
+        'Falha ao salvar as alteraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes.';
+      alert(`Falha ao salvar as alteraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes: ${msg}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  /* ===================== Ações: indeferir / avançar ===================== */
+  /* ===================== AÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes: indeferir / avanÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ar ===================== */
   const indeferirProcesso = async () => {
     if (!(comentario || '').trim()) {
       alert(
-        'Por favor, adicione um comentário no campo "Comentário da Movimentação" para justificar o indeferimento.',
+        'Por favor, adicione um comentÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rio no campo "ComentÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rio da MovimentaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o" para justificar o indeferimento.',
       );
       comentarioRef.current?.focus?.();
       return;
     }
     if (
       !window.confirm(
-        'Tem certeza que deseja indeferir este processo? Esta ação não pode ser desfeita.',
+        'Tem certeza que deseja indeferir este processo? Esta aÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o nÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o pode ser desfeita.',
       )
     )
       return;
@@ -853,7 +859,7 @@ const ProcessoDetalhes = () => {
           etapa_destino: 'Indeferido',
           sub_etapa: '',
           comentario: (comentario || '').trim(),
-          usuario_nome: 'Você',
+          usuario_nome: 'VocÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂª',
           data_movimentacao: new Date().toISOString(),
         },
         ...prev,
@@ -907,21 +913,22 @@ const ProcessoDetalhes = () => {
       2: 'Deferidos',
       3: 'Fluxo de Ressarcimento',
       4: 'Faturamento',
-      5: 'Concluídos',
+      5: 'ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­dos',
     };
     const proxima = nextMap[col];
     if (!proxima) {
       alert(
-        'O processo já está na etapa final ou não pode ser avançado.',
+        'O processo jÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡ estÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡ na etapa final ou nÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o pode ser avanÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ado.',
       );
       return;
     }
     if (!validarModuloAtual()) {
       alert(
-        'Preencha os dados obrigatórios do módulo atual antes de avançar.',
+        'Preencha os dados obrigatÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³rios do mÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulo atual antes de avanÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ar.',
       );
       return;
     }
+    if (!(await confirmAction('Deseja avanÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ar o processo para a prÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³xima etapa?'))) return;
 
     try {
       setLoading(true);
@@ -954,7 +961,7 @@ const ProcessoDetalhes = () => {
 
       setComentario('');
       alert(
-        `Processo avançado com sucesso para ${colNome[proxima]}!`,
+        `Processo avanÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ado com sucesso para ${colNome[proxima]}!`,
       );
       setProcesso((prev) => ({
         ...prev,
@@ -963,10 +970,10 @@ const ProcessoDetalhes = () => {
 
       await carregarHistorico();
     } catch (e) {
-      console.error('Erro ao avançar etapa:', e);
+      console.error('Erro ao avanÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ar etapa:', e);
       alert(
         e?.response?.data?.error ||
-          'Erro ao avançar a etapa do processo',
+          'Erro ao avanÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ar a etapa do processo',
       );
     } finally {
       setLoading(false);
@@ -979,13 +986,13 @@ const ProcessoDetalhes = () => {
     );
     if (!todosAprovados) {
       alert(
-        'Todos os módulos devem ser aprovados antes de finalizar o processo.',
+        'Todos os mÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulos devem ser aprovados antes de finalizar o processo.',
       );
       return;
     }
     setLoading(true);
     try {
-      // aqui você pode chamar o endpoint real de finalização, se existir
+      // aqui vocÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂª pode chamar o endpoint real de finalizaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o, se existir
       await new Promise((r) => setTimeout(r, 800));
       alert('Processo finalizado com sucesso!');
       navigate('/processos');
@@ -1012,7 +1019,7 @@ const ProcessoDetalhes = () => {
             </button>
           </div>
 
-          {/* Título */}
+          {/* TÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­tulo */}
           <h1
             className={
               'text-xl sm:text-2xl md:text-3xl font-bold text-[var(--fg)] text-center leading-tight transition-opacity duration-500 ' +
@@ -1027,7 +1034,7 @@ const ProcessoDetalhes = () => {
             </span>
           </h1>
 
-          {/* Ações — direita */}
+          {/* AÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes ÃÆ’Ã†â€™Ãâ€šÂÂ¢ÃÆ’ÂÂ¢ÃÂ¢ââ€šÂ¬Ã…Â¡Ãâ€šÂÂ¬ÃÆ’ÂÂ¢ÃÂ¢ââ‚¬Å¡ÂÂ¬Ãâ€šÂÂ direita */}
           <div className="absolute right-0 flex items-center gap-3 max-w-[48vw] flex-wrap justify-end">
             {/* Toggle Suspenso */}
             <div className="flex items-center gap-2">
@@ -1057,10 +1064,20 @@ const ProcessoDetalhes = () => {
               </button>
             </div>
 
-            {/* relevância */}
+            
+            <button
+              type="button"
+              onClick={() => setShowEmailModal(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border panel-border panel-bg-60 hover:opacity-90 text-[var(--header-fg)] transition-smooth"
+              title="Novo e-mail"
+            >
+              <Mail size={16} /> Novo e-mail
+            </button>
+            {/* relevÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¢ncia */}
             <button
               onClick={async () => {
                 const nova = !relevancia;
+                if (!(await confirmAction(nova ? 'Deseja marcar este processo como relevante?' : 'Deseja remover a relevÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¢ncia deste processo?'))) return;
                 setRelevancia(nova);
                 try {
                   const { movimentarProcesso } = await import(
@@ -1072,7 +1089,7 @@ const ProcessoDetalhes = () => {
                 } catch (e) {
                   setRelevancia(!nova);
                   alert(
-                    'Não foi possível atualizar a relevância',
+                    'NÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o foi possÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­vel atualizar a relevÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¢ncia',
                   );
                 }
               }}
@@ -1084,7 +1101,7 @@ const ProcessoDetalhes = () => {
               }
               title={
                 relevancia
-                  ? 'Remover relevância'
+                  ? 'Remover relevÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¢ncia'
                   : 'Marcar como relevante'
               }
             >
@@ -1094,14 +1111,14 @@ const ProcessoDetalhes = () => {
               />
             </button>
 
-            {/* Alerta rápido */}
+            {/* Alerta rÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡pido */}
             <input
               type="text"
               value={novaMensagemAlerta}
               onChange={(e) =>
                 setNovaMensagemAlerta(e.target.value)
               }
-              placeholder="Mensagem rápida de alerta"
+              placeholder="Mensagem rÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡pida de alerta"
               className="px-2 py-2 rounded border border-[var(--border)] bg-[var(--card)] text-[var(--fg)] w-60"
             />
             <input
@@ -1178,11 +1195,11 @@ const ProcessoDetalhes = () => {
         </div>
       </div>
 
-      {/* Conteúdo */}
+      {/* ConteÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂºdo */}
       <div className="flex gap-6 p-6">
-        {/* Esquerda: Formulário + Módulos */}
+        {/* Esquerda: FormulÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rio + MÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulos */}
         <div className="flex-1 space-y-6 relative">
-          {/* Aviso de Suspensão */}
+          {/* Aviso de SuspensÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o */}
           {suspenso && (
             <div className="glass-card border border-amber-500/60 text-amber-200 rounded-lg p-3 flex items-center gap-2">
               <AlertTriangle
@@ -1190,11 +1207,11 @@ const ProcessoDetalhes = () => {
                 className="shrink-0"
               />
               <div className="text-sm">
-                Este processo está <strong>Suspenso</strong>.
+                Este processo estÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡ <strong>Suspenso</strong>.
                 {suspensoAte && (
                   <>
                     {' '}
-                    Retomar está marcado para{' '}
+                    Retomar estÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡ marcado para{' '}
                     <strong>
                       {new Date(
                         suspensoAte,
@@ -1207,7 +1224,7 @@ const ProcessoDetalhes = () => {
             </div>
           )}
 
-          {/* Bloco de informações rápidas */}
+          {/* Bloco de informaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes rÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡pidas */}
           <div className="glass-card rounded-lg p-4 border border-[var(--border)]">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-[11px] sm:text-xs text-[var(--fg)]">
               <div className="rounded px-2 py-1 border border-[var(--border)] bg-[var(--panel)]">
@@ -1234,7 +1251,7 @@ const ProcessoDetalhes = () => {
               </div>
               <div className="rounded px-2 py-1 border border-[var(--border)] bg-[var(--panel)]">
                 <span className="opacity-70">
-                  Concessionária:{' '}
+                  ConcessionÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡ria:{' '}
                 </span>
                 <span>
                   {extrairTextoSeguro(
@@ -1268,7 +1285,7 @@ const ProcessoDetalhes = () => {
                 </span>
               </div>
               <div className="rounded px-2 py-1 border border-[var(--border)] bg-[var(--panel)]">
-                <span className="opacity-70">Última mov.: </span>
+                <span className="opacity-70">ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Â¦Ãâ€šÂÂ¡ltima mov.: </span>
                 <span>
                   {historico.length
                     ? new Date(
@@ -1304,23 +1321,23 @@ const ProcessoDetalhes = () => {
             </div>
           </div>
 
-          {/* Módulo: Movimentação */}
+          {/* MÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulo: MovimentaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o */}
           <div className="glass-card rounded-lg p-6">
             <h3 className="text-lg font-semibold text-[var(--fg)] mb-4 flex items-center gap-2">
               <Tag size={20} />
-              Movimentação do Processo
+              MovimentaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o do Processo
             </h3>
 
             <form
               onSubmit={handleSubmit}
               className="space-y-4"
             >
-              {/* Metadados de Suspensão */}
+              {/* Metadados de SuspensÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o */}
               {suspenso && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3 border border-amber-600/40 rounded glass-card">
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-[var(--fg)] mb-2">
-                      Motivo da Suspensão
+                      Motivo da SuspensÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o
                     </label>
                     <input
                       type="text"
@@ -1334,7 +1351,7 @@ const ProcessoDetalhes = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-[var(--fg)] mb-2">
-                      Suspenso até
+                      Suspenso atÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ©
                     </label>
                     <input
                       type="date"
@@ -1346,9 +1363,9 @@ const ProcessoDetalhes = () => {
                     />
                   </div>
                   <p className="text-xs opacity-70 md:col-span-3">
-                    Dica: o botão no topo liga/desliga a
-                    suspensão; estes campos são salvos junto ao
-                    "Salvar alterações".
+                    Dica: o botÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o no topo liga/desliga a
+                    suspensÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o; estes campos sÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o salvos junto ao
+                    "Salvar alteraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes".
                   </p>
                 </div>
               )}
@@ -1417,7 +1434,7 @@ const ProcessoDetalhes = () => {
 
               <div>
                 <label className="block text-sm font-medium text-[var(--fg)] mb-2">
-                  Comentário (Opcional para salvar, obrigatório para criar histórico)
+                  ComentÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rio (Opcional para salvar, obrigatÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³rio para criar histÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³rico)
                 </label>
                 <textarea
                   ref={comentarioRef}
@@ -1428,10 +1445,10 @@ const ProcessoDetalhes = () => {
                   onPaste={handlePasteComentario}
                   rows={4}
                   className="w-full p-3 border border-[var(--border)] glass-card text-[var(--fg)] rounded-lg focus:border-[var(--accent)] focus:outline-none resize-none"
-                  placeholder="Adicione um comentário para registrar uma movimentação no histórico..."
+                  placeholder="Adicione um comentÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rio para registrar uma movimentaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o no histÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³rico..."
                 />
                 <p className="text-xs opacity-70 mt-1">
-                  Dica: você pode colar prints diretamente no campo (Ctrl+V)
+                  Dica: vocÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂª pode colar prints diretamente no campo (Ctrl+V)
                 </p>
                 <div className="mt-2 flex items-center gap-3">
                   <label className="inline-flex items-center gap-2 cursor-pointer text-[var(--fg)]">
@@ -1462,20 +1479,20 @@ const ProcessoDetalhes = () => {
                 </div>
 
                 <div className="mt-3 flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                  {/* Menções */}
+                  {/* MenÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes */}
                   <div className="text-xs w-full md:max-w-[420px]" style={{ display: 'none' }}>
                     <label className="block text-sm font-medium text-[var(--fg)] mb-2">
-                      Menções (@)
+                      MenÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes (@)
                     </label>
                     <div className="glass-card border border-[var(--border)] rounded p-2">
-                      {/* menções removidas */}
+                      {/* menÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes removidas */}
                     </div>
                   </div>
 
                   {/* Canais */}
                   <div className="w-full md:w-auto md:min-w-[260px] shrink-0">
                     <label className="block text-sm font-medium text-[var(--fg)] mb-2">
-                      Canais de Comunicação
+                      Canais de ComunicaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o
                     </label>
                     <div className="flex flex-wrap gap-2 items-center justify-center w-full text-[12px]">
                       <button
@@ -1505,7 +1522,7 @@ const ProcessoDetalhes = () => {
 
                       <button
                         type="button"
-                        title="Ligação"
+                        title="LigaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o"
                         onClick={() =>
                           setCanaisSelecionados(
                             (v) => ({
@@ -1523,7 +1540,7 @@ const ProcessoDetalhes = () => {
                         }
                       >
                         <Phone size={12} />{' '}
-                        <span>Ligação</span>
+                        <span>LigaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o</span>
                       </button>
 
                       <button
@@ -1656,7 +1673,7 @@ const ProcessoDetalhes = () => {
                   type="submit"
                   disabled={isSubmitting}
                   className="flex items-center justify-center gap-2 px-6 py-3 btn-accent hover:opacity-90 disabled:opacity-60 rounded-lg transition-opacity w-full"
-                  title='Salva todas as alterações. Se houver um comentário, cria um novo registro no histórico.'
+                  title='Salva todas as alteraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes. Se houver um comentÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rio, cria um novo registro no histÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³rico.'
                 >
                   {isSubmitting ? (
                     <>
@@ -1669,7 +1686,7 @@ const ProcessoDetalhes = () => {
                   ) : (
                     <>
                       <Save size={16} />
-                      Salvar alterações
+                      Salvar alteraÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes
                     </>
                   )}
                 </button>
@@ -1680,15 +1697,15 @@ const ProcessoDetalhes = () => {
                   type="button"
                   onClick={avancarEtapa}
                   className="px-4 py-2 btn-neutral rounded-lg"
-                  title="Avançar para a próxima etapa (requer módulo atual preenchido)"
+                  title="AvanÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ar para a prÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³xima etapa (requer mÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulo atual preenchido)"
                 >
-                  Avançar Etapa
+                  AvanÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ar Etapa
                 </button>
               </div>
             </form>
           </div>
 
-          {/* Módulo: Deferimento */}
+          {/* MÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulo: Deferimento */}
           <div
             className={
               'glass-card rounded-lg p-6 ' +
@@ -1726,7 +1743,7 @@ const ProcessoDetalhes = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-[var(--fg)] mb-2">
-                    Crédito Simples
+                    CrÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ©dito Simples
                   </label>
                   <div className="relative">
                     <DollarSign
@@ -1761,7 +1778,7 @@ const ProcessoDetalhes = () => {
                       disabled={!isModuloAtivo('deferidos')}
                     />
                     <label className="text-sm font-medium text-[var(--fg)]">
-                      Habilitar Crédito em Dobro
+                      Habilitar CrÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ©dito em Dobro
                     </label>
                   </div>
                   <div className="relative">
@@ -1787,7 +1804,7 @@ const ProcessoDetalhes = () => {
 
                   <div className="mt-2">
                     <label className="block text-xs opacity-80 mb-1">
-                      Data do Crédito em Dobro
+                      Data do CrÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ©dito em Dobro
                     </label>
                     <input
                       type="date"
@@ -1809,7 +1826,7 @@ const ProcessoDetalhes = () => {
             </div>
           </div>
 
-          {/* Módulo: Fluxo de Ressarcimento */}
+          {/* MÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulo: Fluxo de Ressarcimento */}
           <div
             className={
               'glass-card rounded-lg p-6 ' +
@@ -1865,7 +1882,7 @@ const ProcessoDetalhes = () => {
                   >
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="font-medium text-[var(--fg)]">
-                        Devolução #{index + 1}
+                        DevoluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o #{index + 1}
                       </h4>
                       {fluxoRessarcimento.length >
                         1 && (
@@ -1893,13 +1910,13 @@ const ProcessoDetalhes = () => {
                     <div className="space-y-3">
                       <div>
                         <label className="block text-sm font-medium text-[var(--fg)] mb-2">
-                          Forma de Devolução
+                          Forma de DevoluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o
                         </label>
                         <div className="flex gap-4">
                           {[
                             'Fatura',
                             'GD',
-                            'Depósito',
+                            'DepÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³sito',
                           ].map((forma) => (
                             <label
                               key={forma}
@@ -2036,7 +2053,7 @@ const ProcessoDetalhes = () => {
             </div>
           </div>
 
-          {/* Módulo: Faturamento */}
+          {/* MÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulo: Faturamento */}
           <div
             className={
               'glass-card rounded-lg p-6 ' +
@@ -2085,7 +2102,7 @@ const ProcessoDetalhes = () => {
                   <PlusCircle size={16} />
                   Adicionar NF
                 </button>
-                {/* Botão removido conforme solicitado: Abrir Últimas faturas */}
+                {/* BotÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o removido conforme solicitado: Abrir ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Â¦Ãâ€šÂÂ¡ltimas faturas */}
               </div>
             </div>
 
@@ -2122,7 +2139,7 @@ const ProcessoDetalhes = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-sm font-medium text-[var(--fg)] mb-2">
-                        Nº da NF
+                        NÃÆ’Ã†â€™ÃÂ¢ââ€šÂ¬Ã…Â¡ÃÆ’ââ‚¬Å¡Ãâ€šÂÂº da NF
                       </label>
                       <input
                         type="text"
@@ -2152,7 +2169,7 @@ const ProcessoDetalhes = () => {
 
                     <div>
                       <label className="block text-sm font-medium text-[var(--fg)] mb-2">
-                        Data de Emissão
+                        Data de EmissÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o
                       </label>
                       <input
                         type="date"
@@ -2324,19 +2341,19 @@ const ProcessoDetalhes = () => {
             </div>
           </div>
 
-          {/* Módulo: Conclusão */}
+          {/* MÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulo: ConclusÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o */}
           <div
             className={
               'glass-card rounded-lg p-6 ' +
-              (!isModuloAtivo('Concluído')
+              (!isModuloAtivo('ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­do')
                 ? 'opacity-50 pointer-events-none'
                 : '')
             }
           >
             <h3 className="text-lg font-semibold text-[var(--fg)] mb-4 flex items-center gap-2">
               <CheckCircle size={20} />
-              Finalização do Processo
-              {!isModuloAtivo('Concluído') && (
+              FinalizaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o do Processo
+              {!isModuloAtivo('ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­do') && (
                 <span className="text-xs bg-gray-600 px-2 py-1 rounded">
                   Bloqueado
                 </span>
@@ -2360,10 +2377,10 @@ const ProcessoDetalhes = () => {
                       )
                     }
                     className="w-4 h-4 text-green-600 glass-card border-[var(--border)] rounded focus:ring-green-500"
-                    disabled={!isModuloAtivo('Concluído')}
+                    disabled={!isModuloAtivo('ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­do')}
                   />
                   <span className="text-[var(--fg)]">
-                    Módulo Ativos Aprovado
+                    MÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulo Ativos Aprovado
                   </span>
                 </label>
 
@@ -2384,10 +2401,10 @@ const ProcessoDetalhes = () => {
                       )
                     }
                     className="w-4 h-4 text-green-600 glass-card border-[var(--border)] rounded focus:ring-green-500"
-                    disabled={!isModuloAtivo('Concluído')}
+                    disabled={!isModuloAtivo('ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­do')}
                   />
                   <span className="text-[var(--fg)]">
-                    Módulo Deferidos Aprovado
+                    MÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulo Deferidos Aprovado
                   </span>
                 </label>
 
@@ -2408,7 +2425,7 @@ const ProcessoDetalhes = () => {
                       )
                     }
                     className="w-4 h-4 text-green-600 glass-card border-[var(--border)] rounded focus:ring-green-500"
-                    disabled={!isModuloAtivo('Concluído')}
+                    disabled={!isModuloAtivo('ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­do')}
                   />
                   <span className="text-[var(--fg)]">
                     Fluxo de Ressarcimento
@@ -2433,10 +2450,10 @@ const ProcessoDetalhes = () => {
                       )
                     }
                     className="w-4 h-4 text-green-600 glass-card border-[var(--border)] rounded focus:ring-green-500"
-                    disabled={!isModuloAtivo('Concluído')}
+                    disabled={!isModuloAtivo('ConcluÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ­do')}
                   />
                   <span className="text-[var(--fg)]">
-                    Módulo Faturamento Aprovado
+                    MÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³dulo Faturamento Aprovado
                   </span>
                 </label>
               </div>
@@ -2481,12 +2498,12 @@ const ProcessoDetalhes = () => {
           </div>
         </div>
 
-        {/* Direita: Histórico */}
+        {/* Direita: HistÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³rico */}
         <div className="w-96 glass-card rounded-lg flex flex-col">
           <div className="p-4 border-b border-[var(--border)]">
             <h3 className="font-semibold text-[var(--fg)] flex items-center gap-2">
               <Clock size={16} />
-              Histórico de Movimentações
+              HistÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ³rico de MovimentaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes
             </h3>
           </div>
 
@@ -2556,7 +2573,7 @@ const ProcessoDetalhes = () => {
                       <p className="text-sm text-[var(--fg)] mb-2">
                         {extrairTextoSeguro(
                           item.comentario,
-                        ) || 'Sem comentário'}
+                        ) || 'Sem comentÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rio'}
                       </p>
 
                       <div className="text-xs opacity-70">
@@ -2638,7 +2655,7 @@ const ProcessoDetalhes = () => {
                   className="mx-auto mb-2 opacity-50"
                 />
                 <p>
-                  Nenhuma Movimentação
+                  Nenhuma MovimentaÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o
                   encontrada
                 </p>
               </div>
@@ -2700,7 +2717,7 @@ const ProcessoDetalhes = () => {
                           <div className="flex flex-col">
                             <span className="text-sm">
                               {mes ||
-                                'Mês não informado'}
+                                'MÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂªs nÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ£o informado'}
                             </span>
                             <span className="text-xs opacity-70">
                               {venc
@@ -2753,12 +2770,15 @@ const ProcessoDetalhes = () => {
               ) : (
                 <div className="text-center py-8 opacity-70">
                   Nenhuma fatura encontrada
-                  para os últimos meses.
+                  para os ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂºltimos meses.
                 </div>
               )}
             </div>
           </div>
         </div>
+      )}
+      {showEmailModal && (
+        <ModalEmail processo={processo} onClose={() => setShowEmailModal(false)} />
       )}
     </div>
   );

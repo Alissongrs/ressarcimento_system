@@ -16,6 +16,15 @@ import (
 
 // StreamProcessoEvents expõe um endpoint SSE por processo: /api/processos/:id/events?token=...
 // Valida o token JWT via query param (EventSource não envia headers customizados) e transmite eventos.
+// @Summary SSE de eventos por processo
+// @Tags SSE
+// @Produce text/event-stream
+// @Param id path int true "ID do processo"
+// @Param token query string true "JWT"
+// @Success 200 {string} string "stream"
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/processos/{id}/events [get]
 func StreamProcessoEvents(c *gin.Context) {
 	pidStr := c.Param("id")
 	pid, err := strconv.Atoi(pidStr)
@@ -81,6 +90,13 @@ func StreamProcessoEvents(c *gin.Context) {
 
 // StreamGlobalEvents: SSE global (processoID = 0) para eventos gerais
 // Endpoint: GET /api/events?token=...
+// @Summary SSE global
+// @Tags SSE
+// @Produce text/event-stream
+// @Param token query string true "JWT"
+// @Success 200 {string} string "stream"
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/events [get]
 func StreamGlobalEvents(c *gin.Context) {
 	tokenStr := c.Query("token")
 	if tokenStr == "" {

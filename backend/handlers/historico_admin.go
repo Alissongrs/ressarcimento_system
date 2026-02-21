@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"net/http"
@@ -19,29 +19,30 @@ func AdminDeleteHistorico(c *gin.Context) {
 		return
 	}
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
 		return
 	}
 	defer func() {
 		if err != nil {
-			_ = tx.Rollback()
+			_ = tx.Rollback().Error
 		}
 	}()
 
-	if _, err = tx.Exec(`DELETE FROM FT_HISTORICO_CANAIS WHERE id_historico = ?`, id); err != nil {
+	if _, err = execGorm(tx, `DELETE FROM FT_HISTORICO_CANAIS WHERE id_historico = ?`, id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao remover canais do histórico"})
 		return
 	}
-	if _, err = tx.Exec(`DELETE FROM FT_HISTORICO_MOVIMENTACOES WHERE id_historico = ?`, id); err != nil {
+	if _, err = execGorm(tx, `DELETE FROM FT_HISTORICO_MOVIMENTACOES WHERE id_historico = ?`, id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao remover registro de histórico"})
 		return
 	}
 
-	if err = tx.Commit(); err != nil {
+	if err = tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao confirmar exclusão"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "deleted_id": id})
 }
+

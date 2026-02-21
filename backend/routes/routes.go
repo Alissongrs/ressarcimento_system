@@ -1,42 +1,90 @@
-﻿// routes/routes.go
+// routes/routes.go
 package routes
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"ressarcimento-backend/database"
 	"ressarcimento-backend/handlers"
 	"ressarcimento-backend/middleware"
 	"ressarcimento-backend/repositories"
 	"ressarcimento-backend/services"
+
+	"gorm.io/gorm"
 )
 
-func SetupRouter(db *sql.DB) *gin.Engine {
-	r := gin.Default()
+func maskTokenQuery(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	vals, err := url.ParseQuery(raw)
+	if err == nil {
+		if _, ok := vals["token"]; ok {
+			vals.Set("token", "***")
+		}
+		return vals.Encode()
+	}
+	if idx := strings.Index(raw, "token="); idx >= 0 {
+		rest := raw[idx+len("token="):]
+		if end := strings.Index(rest, "&"); end >= 0 {
+			return raw[:idx] + "token=***" + rest[end:]
+		}
+		return raw[:idx] + "token=***"
+	}
+	return raw
+}
 
-	// NÃ£o confiar em proxies por padrÃ£o
+func SetupRouter(gdb *gorm.DB) *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+		path := param.Path
+		if param.Request != nil && param.Request.URL != nil && param.Request.URL.RawQuery != "" {
+			raw := maskTokenQuery(param.Request.URL.RawQuery)
+			if raw != "" {
+				path = path + "?" + raw
+			}
+		}
+		return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %s\n",
+			param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+			param.StatusCode,
+			param.Latency,
+			param.ClientIP,
+			param.Method,
+			path,
+		)
+	}))
+	// Não confiar em proxies por padrão
 	if err := r.SetTrustedProxies(nil); err != nil {
 		println("[routes] aviso: falha ao definir trusted proxies:", err.Error())
 	}
 
-	// MemÃ³ria p/ multipart (uploads)
+	// Memória p/ multipart (uploads)
 	r.MaxMultipartMemory = 512 << 20 // 512MB
 
-	// MigraÃ§Ãµes bÃ¡sicas
+	// Migrações básicas
 	if err := database.RunMigrations(); err != nil {
-		println("[routes] migraÃ§Ãµes falharam:", err.Error())
+		println("[routes] migrações falharam:", err.Error())
+	}
+	sqlDB, _ := gdb.DB()
+	if sqlDB != nil {
+		database.LogSnapshotSyncStatus(sqlDB)
+		database.BackfillSnapshotIfEnabled(sqlDB)
 	}
 
 	// VIEW usada no Kanban Fast
-	if db != nil {
-		if err := repositories.NewHistoricoRepo(db).EnsureViewUltimoHistorico(context.Background()); err != nil {
+	if gdb != nil {
+		if err := repositories.NewHistoricoRepo(gdb).EnsureViewUltimoHistorico(context.Background()); err != nil {
 			println("[routes] aviso: falha ao garantir VIEW VW_ULTIMO_HISTORICO:", err.Error())
 		}
 	}
@@ -55,13 +103,13 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			"X-Auth-Token", "X-Session-Token", "Accept", "Cache-Control",
 		},
 		AllowCredentials: true,
-		// Expor cabeÃ§alhos Ãºteis ao front (rate limit / auth)
+		// Expor cabeçalhos úteis ao front (rate limit / auth)
 		ExposeHeaders: []string{
 			"Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "WWW-Authenticate",
 		},
 	}
 
-	// Permite override de origens via env CORS_ALLOW_ORIGINS (lista separada por vÃ­rgulas)
+	// Permite override de origens via env CORS_ALLOW_ORIGINS (lista separada por vírgulas)
 	if env := strings.TrimSpace(os.Getenv("CORS_ALLOW_ORIGINS")); env != "" {
 		parts := strings.Split(env, ",")
 		cfg.AllowOrigins = make([]string, 0, len(parts))
@@ -74,7 +122,10 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	}
 	r.Use(cors.New(cfg))
 
-	// Liberar OPTIONS (preflight) antes de autenticaÃ§Ã£o para evitar 403 em CORS
+	// Swagger (OpenAPI) UI
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	// Liberar OPTIONS (preflight) antes de autenticação para evitar 403 em CORS
 	r.Use(func(c *gin.Context) {
 		if c.Request.Method == http.MethodOptions {
 			c.Status(http.StatusOK)
@@ -87,25 +138,25 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	// Aplica a todas as rotas exceto health checks
 	r.Use(middleware.GlobalRateLimit())
 
-	// ===== COMPRESSÃƒO GZIP =====
+	// ===== COMPRESSÃO GZIP =====
 	// Comprime respostas JSON e HTML automaticamente
 	r.Use(middleware.Gzip())
 
-	// Arquivos estÃ¡ticos
+	// Arquivos estáticos
 	r.Static("/uploads", "./uploads")
 
-	// ===== SSE pÃºblicas (aliases DEV) =====
-	// Aceitam ?token= porque EventSource nÃ£o envia Authorization
+	// ===== SSE públicas (aliases DEV) =====
+	// Aceitam ?token= porque EventSource não envia Authorization
 	r.GET("/apialertasstream", middleware.AuthOrQueryToken(), handlers.StreamAlertas)
 	r.GET("/apievents", middleware.AuthOrQueryToken(), handlers.StreamGlobalEvents)
 
 	// ====== DI: processos fast (repo -> service -> handler) ======
-	procRepo := repositories.NewProcessosRepo(db)
+	procRepo := repositories.NewProcessosRepo(gdb)
 	procSvc := services.NewProcessosService(procRepo)
 	procHandler := handlers.NewProcessosHandler(procSvc)
 
 	// ====== DI: dashboard ======
-	dashRepo := repositories.NewDashboardRepo(db)
+	dashRepo := repositories.NewDashboardRepo(gdb)
 	dashSvc := services.NewDashboardService(dashRepo)
 	dashHandler := handlers.NewDashboardHandler(dashSvc)
 
@@ -114,18 +165,19 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	// ============================================================
 	apiV1 := r.Group("/api/v1")
 	{
-		// Health checks (mÃºltiplas versÃµes para diferentes necessidades)
-		apiV1.GET("/healthz", handlers.SimpleHealthCheck)           // Simples (ok: true)
-		apiV1.GET("/health", handlers.AdvancedHealthCheck)          // AvanÃ§ado (verifica dependÃªncias)
-		apiV1.GET("/health/live", handlers.LivenessCheck)           // Kubernetes liveness
-		apiV1.GET("/health/ready", handlers.ReadinessCheck)         // Kubernetes readiness
+		// Health checks (múltiplas versões para diferentes necessidades)
+		apiV1.GET("/healthz", handlers.SimpleHealthCheck)   // Simples (ok: true)
+		apiV1.GET("/health", handlers.AdvancedHealthCheck)  // Avançado (verifica dependências)
+		apiV1.GET("/health/live", handlers.LivenessCheck)   // Kubernetes liveness
+		apiV1.GET("/health/ready", handlers.ReadinessCheck) // Kubernetes readiness
 
 		// ===== SSE oficiais =====
 		apiV1.GET("/alertas/stream", middleware.AuthOrQueryToken(), handlers.StreamAlertas)
 		apiV1.GET("/events", middleware.AuthOrQueryToken(), handlers.StreamGlobalEvents)
 		apiV1.GET("/processos/:id/events", middleware.AuthOrQueryToken(), handlers.StreamProcessoEvents)
+		apiV1.GET("/anexos/:anexoId/download", middleware.AuthOrQueryToken(), handlers.DownloadAnexoByID)
 
-		// ===== OCR CHAT (fora do grupo autenticado padrÃ£o)
+		// ===== OCR CHAT (fora do grupo autenticado padrão)
 		// Aceita Authorization: Bearer <jwt> OU ?token=<jwt> / cookies
 		apiV1.POST("/ocr/chat",
 			middleware.AuthOrQueryToken(),
@@ -133,7 +185,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			handlers.OCRChat,
 		)
 
-		// ===== DiagnÃ³stico simples (quem sou? / exp / role)
+		// ===== Diagnóstico simples (quem sou? / exp / role)
 		apiV1.GET("/whoami", middleware.AuthOrQueryToken(), func(c *gin.Context) {
 			uid, _ := c.Get("userID")
 			userName, _ := c.Get("userName")
@@ -147,13 +199,13 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			})
 		})
 
-		// PÃºblico com rate limiting restrito para autenticaÃ§Ã£o
+		// Público com rate limiting restrito para autenticação
 		apiV1.POST("/register", middleware.AuthRateLimit(), handlers.Register)
 		apiV1.POST("/login", middleware.AuthRateLimit(), handlers.Login)
 		apiV1.GET("/uc/:numero", handlers.GetUCByNumero)
 		apiV1.GET("/uc/:numero/faturas", handlers.GetFaturasByUC)
 
-		// Alias pÃºblico para faturas por unidade (Amee_Serving)
+		// Alias público para faturas por unidade (Amee_Serving)
 		apiV1.GET("/faturas-uc", handlers.GetFaturas)
 
 		// Faturas Implantadas (por id_uc)
@@ -164,11 +216,11 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 		apiV1.GET("/departamentos", handlers.GetDepartamentos)
 
-		// Rotas que podem alterar alertas por ID sem sessÃ£o (casos especÃ­ficos)
+		// Rotas que podem alterar alertas por ID sem sessão (casos específicos)
 		apiV1.PUT("/alertas/:id", handlers.UpdateAlerta)
 		apiV1.DELETE("/alertas/:id", handlers.DeleteAlerta)
 
-		// ------------------- Autenticado (qualquer usuÃ¡rio) -------------------
+		// ------------------- Autenticado (qualquer usuário) -------------------
 		authRequired := apiV1.Group("/")
 		authRequired.Use(middleware.AuthMiddleware())
 		{
@@ -187,7 +239,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			// Batch meta para cards do Kanban
 			authRequired.GET("/processos/cards-meta", handlers.GetProcessosCardsMeta)
 
-			// UC: opÃ§Ãµes (unidade/empresa/concessionÃ¡ria)
+			// UC: opções (unidade/empresa/concessionária)
 			authRequired.GET("/uc/:numero/opcoes", handlers.GetUCOpcoesByNumero)
 
 			// Resumos de processo (persistidos)
@@ -200,7 +252,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			// Enfileirar em massa (ids, mode=changed|all, limit)
 			authRequired.POST("/resumos/enqueue", handlers.EnqueueResumos)
 
-			// RequisiÃ§Ãµes
+			// Requisições
 			authRequired.POST("/requisicoes", handlers.CreateRequisicaoPersist)
 			authRequired.GET("/requisicoes/departamento", handlers.GetRequisicoesDepartamento)
 
@@ -217,6 +269,15 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			// Feedback
 			authRequired.POST("/feedback", handlers.CreateFeedback)
 			authRequired.POST("/ai/resumo/feedback", handlers.CreateResumoFeedback)
+			authRequired.POST("/chat/rag", handlers.ChatRAGHandler)
+			authRequired.POST("/chat/feedback", handlers.CreateChatFeedback)
+			authRequired.POST("/chat/upload", handlers.ChatUploadHandler)
+			authRequired.POST("/chat/learn", handlers.ChatLearnHandler)
+			authRequired.POST("/chat/sessions", handlers.CreateChatSession)
+			authRequired.GET("/chat/sessions", handlers.ListChatSessions)
+			authRequired.GET("/chat/sessions/:id/messages", handlers.ListChatMessages)
+			authRequired.POST("/chat/sessions/:id/messages", handlers.AddChatMessage)
+			authRequired.DELETE("/chat/sessions/:id", handlers.DeleteChatSession)
 
 			// Irregularidades
 			authRequired.GET("/tipos-irregularidade", handlers.GetTiposIrregularidade)
@@ -224,25 +285,28 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 			// Dashboard de deferidos (autenticado)
 			authRequired.GET("/dashboard/deferidos", handlers.GetDashboardDeferidos)
+
+			// Histórico (qualquer usuário autenticado)
+			authRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
+			authRequired.GET("/requisicoes/:id", handlers.GetRequisicaoByID)
+			authRequired.GET("/processos/:id/historico", handlers.GetHistoricoMovimentacoes)
 		}
 
 		// ------------------------- Gestor -------------------------
 		gestorRequired := apiV1.Group("/")
 		gestorRequired.Use(middleware.AuthMiddleware(), middleware.GestorMiddleware())
 		{
-			// RequisiÃ§Ãµes (triagem)
+			// Requisições (triagem)
 			gestorRequired.GET("/requisicoes", handlers.GetAllRequisicoes)
-			gestorRequired.GET("/requisicoes/:id", handlers.GetRequisicaoByID)
 			gestorRequired.GET("/requisicoes/:id/faturas", handlers.GetFaturasSelecionadasByRequisicaoID)
 			gestorRequired.POST("/requisicoes/:id/update", handlers.UpdateRequisicaoCompleta)
-			gestorRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
 			gestorRequired.GET("/requisicoes/:id/anexos", handlers.GetAnexosByRequisicaoID)
+			gestorRequired.POST("/requisicoes/:id/anexos", handlers.AddAnexoByRequisicaoID)
 			gestorRequired.DELETE("/requisicoes/:id/anexos/:anexoId", handlers.DeleteAnexoByRequisicaoID)
 
 			// Processos (fluxo)
 			gestorRequired.GET("/processos/kanban", handlers.GetProcessosKanban) // legado
 			gestorRequired.GET("/processos/kanban-fast", procHandler.KanbanFast) // fast
-			gestorRequired.GET("/processos/:id/historico", handlers.GetHistoricoMovimentacoes)
 			gestorRequired.POST("/processos/:id/historico/:hid/anexos", handlers.AddHistoricoAnexo)
 			gestorRequired.GET("/processos/:id/deferimento", handlers.GetDeferimentoByProcesso)
 			gestorRequired.POST("/processos/:id/movimentar", handlers.MovimentarProcesso)
@@ -258,6 +322,12 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.POST("/processos/:id/backlog-check", handlers.ToggleBacklogCheck)
 			gestorRequired.GET("/processos/suspensos", handlers.GetProcessosSuspensos)
 			gestorRequired.DELETE("/processos/:id", handlers.ExcluirProcessoPermanentemente)
+			gestorRequired.POST("/ocr/excel/analyze", handlers.AnalyzeExcelMetric)
+			gestorRequired.POST("/ocr/desvio-media", handlers.DesvioMedia)
+			gestorRequired.GET("/desvio-kwh-fponta", handlers.ListDesvioKwhFponta)
+			gestorRequired.GET("/desvio-kwh-fponta/options", handlers.ListDesvioKwhOptions)
+			gestorRequired.POST("/desvio-kwh-fponta/:id/flags", handlers.UpdateDesvioKwhFlags)
+			gestorRequired.POST("/desvio-kwh-fponta/:id/create-processo", handlers.CreateProcessoFromDesvioKwh)
 
 			// Fluxo de Ressarcimento
 			gestorRequired.POST("/fluxo-ressarcimento/:id", handlers.SalvarFluxoRessarcimento)
@@ -273,6 +343,28 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			// E-mails
 			gestorRequired.POST("/processos/:id/emails", handlers.EnviarEmailProcesso)
 			gestorRequired.GET("/processos/:id/emails", handlers.GetEmailsByProcessoID)
+			gestorRequired.POST("/processos/:id/emails/:emailId/read", handlers.MarkEmailProcessoRead)
+
+			// Mailbox (Microsoft Graph)
+			gestorRequired.GET("/mail/folders", handlers.MailFolders)
+			gestorRequired.GET("/mail/messages", handlers.MailMessages)
+			gestorRequired.GET("/mail/messages/:id", handlers.MailMessageByID)
+			gestorRequired.GET("/mail/messages/:id/mime", handlers.MailMessageMime)
+			gestorRequired.GET("/mail/messages/:id/attachments", handlers.MailMessageAttachments)
+			gestorRequired.GET("/mail/messages/:id/attachments/:attId/download", handlers.MailMessageAttachmentDownload)
+			gestorRequired.POST("/mail/messages/:id/move", handlers.MailMessageMove)
+			gestorRequired.POST("/mail/messages/:id/read", handlers.MailMessageSetRead)
+			gestorRequired.POST("/mail/messages/:id/read-local", handlers.MailMessageSetReadLocal)
+			gestorRequired.POST("/mail/messages/:id/analisar-ia", handlers.MailMessageAnalyzeIA)
+			gestorRequired.POST("/mail/messages/:id/reply", handlers.MailMessageReply)
+			gestorRequired.POST("/mail/messages/:id/reply-all", handlers.MailMessageReplyAll)
+			gestorRequired.POST("/mail/messages/:id/forward", handlers.MailMessageForward)
+			gestorRequired.POST("/mail/send", handlers.MailSend)
+			gestorRequired.POST("/mail/messages/:id/link-process", handlers.MailMessageLinkProcess)
+			gestorRequired.GET("/mail/processes/search", handlers.MailProcessSearch)
+
+			// Auditoria Ilttio (Excel)
+			gestorRequired.POST("/ocr/excel", handlers.ImportIlttioExcel)
 
 			// Faturas e filtros
 			gestorRequired.GET("/faturas", handlers.GetFaturas)
@@ -280,7 +372,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.GET("/filtros/concessionarias", handlers.GetConcessionariasParaFiltro)
 			gestorRequired.GET("/filtros/tensao", handlers.GetTensaoParaFiltro)
 
-			// Admin - Planilha (lista e operaÃ§Ãµes em massa)
+			// Admin - Planilha (lista e operações em massa)
 			gestorRequired.GET("/admin/planilha", handlers.AdminPlanilhaList)
 			gestorRequired.GET("/admin/planilha/export", handlers.AdminPlanilhaExport)
 			gestorRequired.POST("/admin/planilha/import", handlers.AdminPlanilhaImport)
@@ -288,7 +380,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.POST("/admin/planilha/bulk-comentario-replace", handlers.AdminPlanilhaBulkComentarioReplace)
 			gestorRequired.DELETE("/admin/historico/:id", handlers.AdminDeleteHistorico)
 
-			// Admin - Prazos (configuraÃ§Ãµes de prazos por kanban/etapa)
+			// Admin - Prazos (configurações de prazos por kanban/etapa)
 			gestorRequired.GET("/admin/prazos", handlers.GetPrazosConfig)
 			gestorRequired.POST("/admin/prazos", handlers.SavePrazosConfig)
 
@@ -297,11 +389,11 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.POST("/admin/alarmes", handlers.SaveAlarme)
 			gestorRequired.DELETE("/admin/alarmes/:id", handlers.DeleteAlarme)
 
-			// Admin - Editor completo (processo + mÃ³dulos)
+			// Admin - Editor completo (processo + módulos)
 			gestorRequired.POST("/admin/editor/processo", handlers.AdminEditProcesso)
 			gestorRequired.GET("/admin/editor/next-id", handlers.AdminNextProcessID)
 
-			// Snapshot - SincronizaÃ§Ã£o com tabelas originais
+			// Snapshot - Sincronização com tabelas originais
 			gestorRequired.GET("/processo-snapshot/:id_processo", handlers.GetProcessoSnapshot)
 			gestorRequired.POST("/processo-snapshot/:id_processo", handlers.UpdateProcessoSnapshot)
 			gestorRequired.POST("/processo-snapshot/:id_processo/sync", handlers.SyncProcessoSnapshot)
@@ -310,11 +402,13 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.GET("/dashboard/stats", dashHandler.Stats)
 			gestorRequired.GET("/dashboard/movimentacoes", dashHandler.MovimentacoesPeriodo)
 			gestorRequired.GET("/dashboard/changes-24h", dashHandler.MovimentacoesUltimas24h)
+			gestorRequired.GET("/relatorios/metricas", handlers.GetRelatoriosMetricas)
+			gestorRequired.GET("/relatorios/kanban-composicao", handlers.GetKanbanComposicao)
 
 			// IA
 			gestorRequired.POST("/perguntar-ia", handlers.PerguntaIAHandler)
 
-			// MenÃ§Ãµes
+			// Menções
 			gestorRequired.GET("/usuarios/mencoes", handlers.GetUsuariosMencoes)
 
 			// Tags
@@ -324,8 +418,9 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 			// OCR (somente gestor/admin)
 			gestorRequired.POST("/ocr/analyze", handlers.OCRAnalyze)
-			gestorRequired.POST("/ocr/quick", handlers.OCRQuick)       // Two-stage OCR: Stage 1 (fast extraction)
+			gestorRequired.POST("/ocr/quick", handlers.OCRQuick)         // Two-stage OCR: Stage 1 (fast extraction)
 			gestorRequired.POST("/ocr/interpret", handlers.OCRInterpret) // Two-stage OCR: Stage 2 (interpretation)
+			gestorRequired.POST("/ocr/interpret_json", handlers.OCRInterpretJson)
 
 			// Regras de auditoria (CRUD)
 			gestorRequired.POST("/rules", handlers.CreateRule)
@@ -344,6 +439,25 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 		api.GET("/alertas/stream", middleware.AuthOrQueryToken(), handlers.StreamAlertas)
 		api.GET("/events", middleware.AuthOrQueryToken(), handlers.StreamGlobalEvents)
 		api.GET("/processos/:id/events", middleware.AuthOrQueryToken(), handlers.StreamProcessoEvents)
+		api.GET("/anexos/:anexoId/download", middleware.AuthOrQueryToken(), handlers.DownloadAnexoByID)
+
+		// Mailbox (Microsoft Graph) - legado /api
+		api.GET("/mail/folders", middleware.AuthOrQueryToken(), handlers.MailFolders)
+		api.GET("/mail/messages", middleware.AuthOrQueryToken(), handlers.MailMessages)
+		api.GET("/mail/messages/:id", middleware.AuthOrQueryToken(), handlers.MailMessageByID)
+		api.GET("/mail/messages/:id/mime", middleware.AuthOrQueryToken(), handlers.MailMessageMime)
+		api.GET("/mail/messages/:id/attachments", middleware.AuthOrQueryToken(), handlers.MailMessageAttachments)
+		api.GET("/mail/messages/:id/attachments/:attId/download", middleware.AuthOrQueryToken(), handlers.MailMessageAttachmentDownload)
+		api.POST("/mail/messages/:id/move", middleware.AuthOrQueryToken(), handlers.MailMessageMove)
+		api.POST("/mail/messages/:id/read", middleware.AuthOrQueryToken(), handlers.MailMessageSetRead)
+		api.POST("/mail/messages/:id/read-local", middleware.AuthOrQueryToken(), handlers.MailMessageSetReadLocal)
+		api.POST("/mail/messages/:id/analisar-ia", middleware.AuthOrQueryToken(), handlers.MailMessageAnalyzeIA)
+		api.POST("/mail/messages/:id/reply", middleware.AuthOrQueryToken(), handlers.MailMessageReply)
+		api.POST("/mail/messages/:id/reply-all", middleware.AuthOrQueryToken(), handlers.MailMessageReplyAll)
+		api.POST("/mail/messages/:id/forward", middleware.AuthOrQueryToken(), handlers.MailMessageForward)
+		api.POST("/mail/send", middleware.AuthOrQueryToken(), handlers.MailSend)
+		api.POST("/mail/messages/:id/link-process", middleware.AuthOrQueryToken(), handlers.MailMessageLinkProcess)
+		api.GET("/mail/processes/search", middleware.AuthOrQueryToken(), handlers.MailProcessSearch)
 
 		// OCR CHAT legado (mesmo comportamento de /api/v1)
 		api.POST("/ocr/chat",
@@ -352,7 +466,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			handlers.OCRChat,
 		)
 
-		// DiagnÃ³stico legado
+		// Diagnóstico legado
 		api.GET("/whoami", middleware.AuthOrQueryToken(), func(c *gin.Context) {
 			uid, _ := c.Get("userID")
 			userName, _ := c.Get("userName")
@@ -392,6 +506,10 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 			// Dashboard de deferidos (legado, autenticado)
 			authRequired.GET("/dashboard/deferidos", handlers.GetDashboardDeferidos)
+
+			// Histórico (legado, qualquer usuário autenticado)
+			authRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
+			authRequired.GET("/processos/:id/historico", handlers.GetHistoricoMovimentacoes)
 		}
 
 		gestorRequired := api.Group("/")
@@ -401,13 +519,12 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			gestorRequired.GET("/requisicoes/:id", handlers.GetRequisicaoByID)
 			gestorRequired.GET("/requisicoes/:id/faturas", handlers.GetFaturasSelecionadasByRequisicaoID)
 			gestorRequired.POST("/requisicoes/:id/update", handlers.UpdateRequisicaoCompleta)
-			gestorRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
 			gestorRequired.GET("/requisicoes/:id/anexos", handlers.GetAnexosByRequisicaoID)
+			gestorRequired.POST("/requisicoes/:id/anexos", handlers.AddAnexoByRequisicaoID)
 			gestorRequired.DELETE("/requisicoes/:id/anexos/:anexoId", handlers.DeleteAnexoByRequisicaoID)
 
 			gestorRequired.GET("/processos/kanban", handlers.GetProcessosKanban)
 			gestorRequired.GET("/processos/kanban-fast", procHandler.KanbanFast)
-			gestorRequired.GET("/processos/:id/historico", handlers.GetHistoricoMovimentacoes)
 			gestorRequired.POST("/processos/:id/historico/:hid/anexos", handlers.AddHistoricoAnexo)
 			gestorRequired.GET("/processos/:id/deferimento", handlers.GetDeferimentoByProcesso)
 			gestorRequired.POST("/processos/:id/movimentar", handlers.MovimentarProcesso)
@@ -434,6 +551,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 			gestorRequired.POST("/processos/:id/emails", handlers.EnviarEmailProcesso)
 			gestorRequired.GET("/processos/:id/emails", handlers.GetEmailsByProcessoID)
+			gestorRequired.POST("/processos/:id/emails/:emailId/read", handlers.MarkEmailProcessoRead)
 
 			gestorRequired.GET("/faturas", handlers.GetFaturas)
 

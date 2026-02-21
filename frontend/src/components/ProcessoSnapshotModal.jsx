@@ -12,8 +12,9 @@ import {
   prepareSnapshotData,
   getChangedFields,
 } from '../services/processoSnapshotService';
-import api from '../services/apiClient';
+import api, { withAuthToken } from '../services/apiClient';
 import { saveProcessoFull } from '../services/adminEditorService';
+import { confirmAction } from '../utils/confirm.js';
 import './processo-snapshot-modal.css';
 
 export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onSuccess }) {
@@ -300,6 +301,7 @@ export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onS
     setHistSaving(true);
     setHistMessage({ type: '', text: '' });
     try {
+      if (!(await confirmAction('Deseja salvar as alteracoes deste processo?'))) return;
       await saveProcessoFull({
         processo_id: idProcesso,
         historico: updates,
@@ -707,7 +709,7 @@ export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onS
                   ) : (
                     <div className="space-y-2">
                       {anexos.map((a, idx) => {
-                        const path = String(a.caminho_arquivo || '').trim();
+                        const path = String(a.url || a.caminho_arquivo || '').trim();
                         const href = path.startsWith('http') ? path : path ? `/${path.replace(/^\/+/, '')}` : '';
                         return (
                           <div key={`${a.id ?? 'anexo'}-${idx}`} className="flex items-center justify-between text-sm border border-gray-200 rounded p-2">
@@ -716,7 +718,7 @@ export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onS
                               <div className="text-xs opacity-70">{a.data_upload || ''}</div>
                             </div>
                             {href ? (
-                              <a className="text-blue-600 underline" href={href} target="_blank" rel="noreferrer">
+                              <a className="text-blue-600 underline" href={withAuthToken(href)} target="_blank" rel="noreferrer">
                                 Abrir
                               </a>
                             ) : (

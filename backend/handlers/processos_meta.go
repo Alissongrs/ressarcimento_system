@@ -1,7 +1,6 @@
-package handlers
+﻿package handlers
 
 import (
-	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,6 +26,14 @@ type UltMovDTO struct {
 
 // GetProcessosCardsMeta retorna metadados em lote para uma lista de processos (ids separados por vírgula)
 // GET /api/v1/processos/cards-meta?ids=1,2,3
+// GetProcessosCardsMeta godoc
+// @Summary      Metadados de cards de processos
+// @Tags         Processos
+// @Param        ids  query  string  false  "IDs separados por vírgula"
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/processos/cards-meta [get]
 func GetProcessosCardsMeta(c *gin.Context) {
 	idsParam := strings.TrimSpace(c.Query("ids"))
 	if idsParam == "" {
@@ -50,8 +57,7 @@ func GetProcessosCardsMeta(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
-	db := database.DB_App
+	db := database.GormDB_App
 
 	// Construir placeholders
 	ph := make([]string, len(ids))
@@ -77,7 +83,7 @@ func GetProcessosCardsMeta(c *gin.Context) {
                  WHERE id_requisicao IN (` + inClause + `)
                  GROUP BY id_requisicao
                ) m ON m.id_requisicao = h.id_requisicao AND h.data_movimentacao = m.max_dt`
-	if rows, err := db.QueryContext(ctx, qUlt, args...); err == nil {
+	if rows, err := queryGorm(db, qUlt, args...); err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var id int64
@@ -91,7 +97,7 @@ func GetProcessosCardsMeta(c *gin.Context) {
 	// Contagem de anexos por id
 	anexMap := make(map[int64]int, len(ids))
 	qAn := `SELECT id_requisicao, COUNT(*) FROM FT_ANEXOS WHERE id_requisicao IN (` + inClause + `) GROUP BY id_requisicao`
-	if rows, err := db.QueryContext(ctx, qAn, args...); err == nil {
+	if rows, err := queryGorm(db, qAn, args...); err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var id int64
@@ -110,7 +116,7 @@ func GetProcessosCardsMeta(c *gin.Context) {
           FROM FT_PROCESSOS p
           JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
          WHERE p.id_processo IN (` + inClause + `)`
-	if rows, err := db.QueryContext(ctx, qInd, args...); err == nil {
+	if rows, err := queryGorm(db, qInd, args...); err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var id int64
@@ -126,12 +132,12 @@ func GetProcessosCardsMeta(c *gin.Context) {
 	// Detecta tabela existente
 	hasTable := func(name string) bool {
 		var cnt int
-		_ = db.QueryRowContext(ctx, `SELECT COUNT(1) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`, name).Scan(&cnt)
+		_ = queryRowGorm(db, `SELECT COUNT(1) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`, name).Scan(&cnt)
 		return cnt > 0
 	}
 	if hasTable("FT_FATURAS_CACHE") {
 		qF := `SELECT id_processo, COUNT(*) FROM FT_FATURAS_CACHE WHERE id_processo IN (` + inClause + `) GROUP BY id_processo`
-		if rows, err := db.QueryContext(ctx, qF, args...); err == nil {
+		if rows, err := queryGorm(db, qF, args...); err == nil {
 			defer rows.Close()
 			for rows.Next() {
 				var id int64
@@ -143,7 +149,7 @@ func GetProcessosCardsMeta(c *gin.Context) {
 		}
 	} else if hasTable("FT_FATURAS") {
 		qF := `SELECT id_processo, COUNT(*) FROM FT_FATURAS WHERE id_processo IN (` + inClause + `) GROUP BY id_processo`
-		if rows, err := db.QueryContext(ctx, qF, args...); err == nil {
+		if rows, err := queryGorm(db, qF, args...); err == nil {
 			defer rows.Close()
 			for rows.Next() {
 				var id int64
@@ -174,3 +180,6 @@ func GetProcessosCardsMeta(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, out)
 }
+
+
+

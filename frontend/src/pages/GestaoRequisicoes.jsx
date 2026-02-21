@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { DndContext, PointerSensor, useSensor, useSensors, useDraggable, useDroppable } from '@dnd-kit/core';
 import { getAllRequisicoes, atualizarRequisicaoCompleta, getDashboardStatsBI, movimentarProcesso } from '../services/requisicaoService';
 import { getEtapas, getEtapaSubMap } from '../services/filtersService';
 import { Clock, Check, X, ArrowRight } from 'lucide-react';
+import { confirmAction } from '../utils/confirm.js';
 
 // Util: normaliza strings (tira acentos e baixa)
 const normalize = (s) => {
@@ -308,6 +309,7 @@ const GestaoRequisicoes = () => {
       if (extra?.etapa) formData.append('etapa', extra.etapa);
       if (extra?.sub_etapa) formData.append('sub_etapa', extra.sub_etapa);
     }
+    if (!(await confirmAction(`Deseja atualizar a requisição #${id}?`))) return;
     try {
       await atualizarRequisicaoCompleta(id, formData);
       if (isApproved && (extra?.etapa || extra?.sub_etapa) && processoId) {

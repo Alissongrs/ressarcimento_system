@@ -13,6 +13,18 @@ import (
 
 // GET /api/v1/faturas-implantadas?id_uc=...&mes=...&mes=...&meses=csv
 // Se nenhum mês for informado, retorna as últimas 12 faturas do id_uc.
+// @Summary Listar faturas implantadas por UC
+// @Tags Faturas
+// @Produce json
+// @Param id_uc query string false "ID UC"
+// @Param unidade query string false "Unidade"
+// @Param mes query []string false "Meses"
+// @Param meses query string false "Meses (csv)"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/faturas-implantadas [get]
 func GetFaturasImplantadasByIdUC(c *gin.Context) {
 	idUcParam := strings.TrimSpace(c.Query("id_uc"))
 	unidadeParam := strings.TrimSpace(c.Query("unidade"))
@@ -224,6 +236,14 @@ func GetFaturasImplantadasByIdUC(c *gin.Context) {
 }
 
 // GET /api/v1/faturas-implantadas/count?id_uc=...
+// @Summary Contar faturas implantadas por UC
+// @Tags Faturas
+// @Produce json
+// @Param id_uc query string true "ID UC"
+// @Success 200 {object} map[string]int
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/faturas-implantadas/count [get]
 func CountFaturasImplantadasByIdUC(c *gin.Context) {
 	idUc := strings.TrimSpace(c.Query("id_uc"))
 	if idUc == "" {
@@ -240,6 +260,14 @@ func CountFaturasImplantadasByIdUC(c *gin.Context) {
 
 // GET /api/v1/faturas-implantadas/meses?id_uc=...
 // Retorna meses distintos (YYYY-MM) baseados em Mes_Ref para o id_uc informado, em ordem crescente.
+// @Summary Listar meses de faturas implantadas
+// @Tags Faturas
+// @Produce json
+// @Param id_uc query string true "ID UC"
+// @Success 200 {object} map[string][]string
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/faturas-implantadas/meses [get]
 func GetFaturasImplantadasMeses(c *gin.Context) {
 	idUc := strings.TrimSpace(c.Query("id_uc"))
 	if idUc == "" {
@@ -271,6 +299,15 @@ func GetFaturasImplantadasMeses(c *gin.Context) {
 
 // GET /api/v1/faturas-implantadas/todas?id_uc=...
 // Lista todas as faturas do id_uc informado (sem LIMIT), ordenadas por Mes_Ref ASC, incluindo total_faturas via window function.
+// @Summary Listar todas faturas implantadas
+// @Tags Faturas
+// @Produce json
+// @Param id_uc query string true "ID UC"
+// @Param id_empresa query string false "ID empresa"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/faturas-implantadas/todas [get]
 func GetFaturasImplantadasAllByIdUC(c *gin.Context) {
 	idUc := strings.TrimSpace(c.Query("id_uc"))
 	idEmp := strings.TrimSpace(c.Query("id_empresa"))

@@ -1,4 +1,4 @@
-// handlers/faturamento_handler.go
+﻿// handlers/faturamento_handler.go
 package handlers
 
 import (
@@ -30,7 +30,7 @@ type FaturamentoItem struct {
 	CreatedAt      string `json:"created_at" db:"created_at"`
 }
 
-// FaturamentoRequest representa a requisição para salvar dados do faturamento
+// FaturamentoRequest representa a requisiÃ§ão para salvar dados do faturamento
 type FaturamentoRequest struct {
 	Itens      []FaturamentoItem `json:"itens"`
 	Comentario string            `json:"comentario"`
@@ -38,6 +38,16 @@ type FaturamentoRequest struct {
 }
 
 // SalvarFaturamento salva os dados do faturamento para um processo
+// SalvarFaturamento godoc
+// @Summary      Salva faturamento do processo
+// @Tags         Faturamento
+// @Param        id    path   int  true  "ID do processo"
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/faturamento/{id} [post]
 func SalvarFaturamento(c *gin.Context) {
 	processoID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -57,8 +67,8 @@ func SalvarFaturamento(c *gin.Context) {
 		return
 	}
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transação"})
 		return
 	}
@@ -66,7 +76,7 @@ func SalvarFaturamento(c *gin.Context) {
 
 	// Upsert: carregar IDs existentes, atualizar/inserir e remover os ausentes
 	existing := make(map[int]bool)
-	rows, err := tx.Query("SELECT id_faturamento FROM FT_FATURAMENTO WHERE id_processo = ?", processoID)
+	rows, err := queryGorm(tx, "SELECT id_faturamento FROM FT_FATURAMENTO WHERE id_processo = ?", processoID)
 	if err != nil {
 		log.Printf("Erro ao buscar IDs existentes do faturamento: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro interno"})
@@ -102,7 +112,7 @@ func SalvarFaturamento(c *gin.Context) {
 		}
 
 		if item.ID == 0 {
-			if _, err := tx.Exec(`
+			if _, err := execGorm(tx, `
                 INSERT INTO FT_FATURAMENTO
                 (id_processo, numero_nf, data_emissao, data_vencimento, data_pagamento, valor)
                 VALUES (?, ?, ?, ?, ?, ?)`,
@@ -114,7 +124,7 @@ func SalvarFaturamento(c *gin.Context) {
 			}
 		} else {
 			delete(existing, item.ID)
-			if _, err := tx.Exec(`
+			if _, err := execGorm(tx, `
                 UPDATE FT_FATURAMENTO SET
                 numero_nf = ?, data_emissao = ?, data_vencimento = ?, data_pagamento = ?, valor = ?
                 WHERE id_faturamento = ? AND id_processo = ?`,
@@ -129,14 +139,14 @@ func SalvarFaturamento(c *gin.Context) {
 
 	// Excluir itens não enviados
 	for idFat := range existing {
-		if _, err := tx.Exec("DELETE FROM FT_FATURAMENTO WHERE id_faturamento = ?", idFat); err != nil {
+		if _, err := execGorm(tx, "DELETE FROM FT_FATURAMENTO WHERE id_faturamento = ?", idFat); err != nil {
 			log.Printf("Erro ao excluir item do faturamento %d: %v", idFat, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao excluir item do faturamento"})
 			return
 		}
 	}
 
-	// Registrar no histórico (inclui status e etapas, mesmo sem mudança de etapa)
+	// Registrar no histórico (inclui status e etapas, mesmo sem mudanÃ§a de etapa)
 	gestorIDValue, _ := c.Get("userID")
 	gestorID, _ := gestorIDValue.(int64)
 
@@ -147,16 +157,21 @@ func SalvarFaturamento(c *gin.Context) {
 
 	// Resolve sub_etapa: aceita override vindo do JSON e persiste no processo
 	var subAtual sql.NullString
-	_ = tx.QueryRow("SELECT sub_etapa FROM FT_PROCESSOS WHERE id_processo = ?", processoID).Scan(&subAtual)
+	_ = queryRowGorm(tx, "SELECT sub_etapa FROM FT_PROCESSOS WHERE id_processo = ?", processoID).Scan(&subAtual)
 	subTxt := strings.TrimSpace(subAtual.String)
 	if s := strings.TrimSpace(request.SubEtapa); s != "" {
 		subTxt = s
-		if _, err := tx.Exec("UPDATE FT_PROCESSOS SET sub_etapa = ?, ultima_atualizacao = NOW() WHERE id_processo = ?", subTxt, processoID); err != nil {
+		subID, _ := resolveSubEtapaIDGorm(tx, subTxt)
+		if _, err := execGorm(tx, "UPDATE FT_PROCESSOS SET sub_etapa = ?, id_sub_etapa_processo = ?, ultima_atualizacao = NOW() WHERE id_processo = ?", subTxt, nullIntToIface(subID), processoID); err != nil {
 			log.Printf("Erro ao atualizar sub_etapa do processo %d no faturamento: %v", processoID, err)
 		}
 	}
 
-	_, err = tx.Exec(`
+	statusNome := strings.TrimSpace(getStatusNomeByRequisicaoGorm(tx, int64(processoID)))
+	if statusNome == "" {
+		statusNome = "Em andamento"
+	}
+	_, err = execGorm(tx, `
         INSERT INTO FT_HISTORICO_MOVIMENTACOES 
         (id_requisicao, id_usuario_gestor,
          status_anterior, status_novo,
@@ -164,13 +179,13 @@ func SalvarFaturamento(c *gin.Context) {
          comentario, data_movimentacao) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		processoID, gestorID,
-		"Faturamento", "Faturamento",
+		statusNome, statusNome,
 		"Faturamento", "Faturamento", subTxt,
 		histComment, time.Now())
 
 	if err != nil {
 		log.Printf("Erro ao registrar no histórico: %v", err)
-		// Não falha a operação por causa do histórico
+		// Não falha a operaÃ§ão por causa do histórico
 	}
 
 	// Notificar imediato para atualizar histórico na UI
@@ -180,7 +195,12 @@ func SalvarFaturamento(c *gin.Context) {
 		sse.Broadcast(pid, sse.Event{Type: "processo_update", ProcessoID: pid, Payload: payload})
 	}(processoID, subTxt)
 
-	if err := tx.Commit(); err != nil {
+	if err := updateColunaByData(tx, processoID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar coluna do processo"})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar a transacao"})
 		return
 	}
@@ -195,6 +215,15 @@ func SalvarFaturamento(c *gin.Context) {
 }
 
 // BuscarFaturamento busca os dados do faturamento para um processo
+// BuscarFaturamento godoc
+// @Summary      Busca faturamento do processo
+// @Tags         Faturamento
+// @Param        id   path   int  true  "ID do processo"
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/faturamento/{id} [get]
 func BuscarFaturamento(c *gin.Context) {
 	processoID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -202,7 +231,7 @@ func BuscarFaturamento(c *gin.Context) {
 		return
 	}
 
-	rows, err := database.DB_App.Query(`
+	rows, err := queryGorm(database.GormDB_App, `
 		SELECT id_faturamento, id_processo, 
 		       COALESCE(numero_nf, '') as numero_nf,
 		       COALESCE(data_emissao, '') as data_emissao,
@@ -250,7 +279,16 @@ func BuscarFaturamento(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"itens": itens})
 }
 
-// DeletarItemFaturamento deleta um item especÀ­fico do faturamento
+// DeletarItemFaturamento deleta um item especÀÂ­fico do faturamento
+// DeletarItemFaturamento godoc
+// @Summary      Deleta item do faturamento
+// @Tags         Faturamento
+// @Param        itemId  path   int  true  "ID do item"
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/faturamento/item/{itemId} [delete]
 func DeletarItemFaturamento(c *gin.Context) {
 	itemID, err := strconv.Atoi(c.Param("itemId"))
 	if err != nil {
@@ -258,7 +296,7 @@ func DeletarItemFaturamento(c *gin.Context) {
 		return
 	}
 
-	_, err = database.DB_App.Exec("DELETE FROM FT_FATURAMENTO WHERE id_faturamento = ?", itemID)
+	_, err = execGorm(database.GormDB_App, "DELETE FROM FT_FATURAMENTO WHERE id_faturamento = ?", itemID)
 	if err != nil {
 		log.Printf("Erro ao deletar item do faturamento: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao deletar item"})
@@ -269,6 +307,15 @@ func DeletarItemFaturamento(c *gin.Context) {
 }
 
 // GetFaturamentoStats retorna estatísticas do faturamento para um processo
+// GetFaturamentoStats godoc
+// @Summary      Estatísticas de faturamento
+// @Tags         Faturamento
+// @Param        id   path   int  true  "ID do processo"
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/faturamento/{id}/stats [get]
 func GetFaturamentoStats(c *gin.Context) {
 	processoID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -286,7 +333,7 @@ func GetFaturamentoStats(c *gin.Context) {
 	var valorTotalDec decimal.Decimal
 
 	// Buscar estatísticas
-	err = database.DB_App.QueryRow(`
+	err = queryRowGorm(database.GormDB_App, `
 		SELECT
 			COUNT(*) as total_itens,
 			COALESCE(SUM(valor), 0) as valor_total,
@@ -306,3 +353,12 @@ func GetFaturamentoStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, stats)
 }
+
+
+
+
+
+
+
+
+

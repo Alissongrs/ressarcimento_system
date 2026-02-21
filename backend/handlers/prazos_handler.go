@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"database/sql"
@@ -29,15 +29,22 @@ type prazoEtapaRow struct {
 	Prazo    sql.NullInt64  `json:"prazo_dias"`
 }
 
+// GetPrazosConfig godoc
+// @Summary      Lista configuraÃ§ão de prazos
+// @Tags         Admin
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/admin/prazos [get]
 func GetPrazosConfig(c *gin.Context) {
-	db := database.DB_App
+	db := database.GormDB_App
 	if db == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB not initialized"})
 		return
 	}
 
 	kanban := make([]prazoKanbanRow, 0, 8)
-	rows, err := db.Query(`
+	rows, err := queryGorm(db, `
         SELECT kc.id_coluna, kc.nome_coluna, pk.prazo_dias
         FROM DM_KANBAN_COLUNAS kc
         LEFT JOIN DM_PRAZOS_KANBAN pk ON pk.id_coluna_kanban = kc.id_coluna
@@ -58,7 +65,7 @@ func GetPrazosConfig(c *gin.Context) {
 	}
 
 	etapas := make([]prazoEtapaRow, 0, 64)
-	rows2, err := db.Query(`
+	rows2, err := queryGorm(db, `
         SELECT e.id_etapa_processo, e.etapa, e.id_coluna_kanban, pe.sub_etapa, pe.prazo_dias
         FROM DM_ETAPAS_PROCESSO e
         LEFT JOIN DM_PRAZOS_ETAPA pe ON pe.id_etapa_processo = e.id_etapa_processo
@@ -96,8 +103,17 @@ type savePrazosPayload struct {
 	} `json:"overrides"`
 }
 
+// SavePrazosConfig godoc
+// @Summary      Salva configuraÃ§ão de prazos
+// @Tags         Admin
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/admin/prazos [post]
 func SavePrazosConfig(c *gin.Context) {
-	db := database.DB_App
+	db := database.GormDB_App
 	if db == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB not initialized"})
 		return
@@ -109,9 +125,9 @@ func SavePrazosConfig(c *gin.Context) {
 		return
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	tx := db.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
 		return
 	}
 	defer tx.Rollback()
@@ -119,7 +135,7 @@ func SavePrazosConfig(c *gin.Context) {
 	if len(p.Kanban) > 0 {
 		stmt := "INSERT INTO DM_PRAZOS_KANBAN (id_coluna_kanban, prazo_dias) VALUES (?, ?) ON DUPLICATE KEY UPDATE prazo_dias=VALUES(prazo_dias)"
 		for _, k := range p.Kanban {
-			if _, err := tx.Exec(stmt, k.IDColuna, k.PrazoDias); err != nil {
+			if _, err := execGorm(tx, stmt, k.IDColuna, k.PrazoDias); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
@@ -135,23 +151,30 @@ func SavePrazosConfig(c *gin.Context) {
 			} else {
 				sub = *o.SubEtapa
 			}
-			if _, err := tx.Exec(stmt, o.IDEtapa, sub, o.PrazoDias); err != nil {
+			if _, err := execGorm(tx, stmt, o.IDEtapa, sub, o.PrazoDias); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// GetProcessosComPrazo retorna apenas as combinações fixas solicitadas (Distribuidora/Ouvidoria/ANEEL + Aguardando retorno).
+// GetProcessosComPrazo retorna apenas as combinaÃ§ões fixas solicitadas (Distribuidora/Ouvidoria/ANEEL + Aguardando retorno).
+// GetProcessosComPrazo godoc
+// @Summary      Processos com prazo
+// @Tags         Processos
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/processos/prazos [get]
 func GetProcessosComPrazo(c *gin.Context) {
-	db := database.DB_App
+	db := database.GormDB_App
 	if db == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB not initialized"})
 		return
@@ -192,7 +215,7 @@ LEFT JOIN hist h ON h.id_requisicao = p.id_processo
 WHERE COALESCE(h.data_movimentacao, p.ultima_atualizacao) IS NOT NULL
 LIMIT ?`
 
-	rows, err := db.Query(q, limit)
+	rows, err := queryGorm(db, q, limit)
 	if err != nil {
 		log.Printf("GetProcessosComPrazo query error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro na consulta de prazos"})
@@ -260,7 +283,7 @@ LIMIT ?`
 	// Cria alerta para gestores quando houver atrasados (1 por dia/proc/gestor)
 	if len(atrasados) > 0 {
 		idsGestores := make([]int64, 0)
-		if rows, err := db.Query(`SELECT id_usuario FROM DM_USUARIO WHERE tipo_conta='gestor' AND ativo=1`); err == nil {
+		if rows, err := queryGorm(db, `SELECT id_usuario FROM DM_USUARIO WHERE perfil='gestor' AND ativo=1`); err == nil {
 			defer rows.Close()
 			for rows.Next() {
 				var uid int64
@@ -274,12 +297,12 @@ LIMIT ?`
 			msg := "Prazo limite expirou para o processo #" + strconv.Itoa(a.ID) + " (" + strings.TrimSpace(a.Etapa) + " / " + strings.TrimSpace(a.SubEtapa) + ")"
 			for _, uid := range idsGestores {
 				var cnt int
-				_ = db.QueryRow(
+				_ = queryRowGorm(db, 
 					"SELECT COUNT(1) FROM FT_ALERTAS WHERE id_usuario=? AND id_processo=? AND DATE(data_criacao)=CURRENT_DATE AND mensagem LIKE 'Prazo limite expirou%'",
 					uid, a.ID,
 				).Scan(&cnt)
 				if cnt == 0 {
-					_, _ = db.Exec(
+					_, _ = execGorm(db,
 						"INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta) VALUES (?, ?, ?, 0, 0, NOW(), CURRENT_DATE)",
 						uid, a.ID, msg,
 					)
@@ -290,3 +313,4 @@ LIMIT ?`
 
 	c.JSON(http.StatusOK, gin.H{"rows": out, "count": len(out)})
 }
+

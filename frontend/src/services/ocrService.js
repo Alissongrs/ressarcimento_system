@@ -79,17 +79,60 @@ export async function ocrQuick(files, opts = {}) {
  * @param {string[]} rules - Lista de regras a aplicar (ex: ['BANDEIRA_ENEL_SP_GB', 'ICMS'])
  * @param {boolean} useLLM - Se true, também chama LLM para interpretação adicional
  */
-export async function ocrInterpret(requestId, filename, rules = [], useLLM = false) {
+export async function ocrInterpret(requestId, filename, rules = [], useLLM = false, llmProvider) {
   try {
-    const { data } = await api.post('/ocr/interpret', {
+    const payload = {
       request_id: requestId,
       filename: filename,
       rules: rules,
       use_llm: useLLM,
-    });
+    };
+    if (useLLM && llmProvider) {
+      payload.llm_provider = llmProvider;
+    }
+    const { data } = await api.post('/ocr/interpret', payload);
     return data;
   } catch (err) {
     throw wrapAxiosError(err, 'Falha ao interpretar OCR com IA');
+  }
+}
+
+// Desvio de media (robo python)
+export async function desvioMediaAnalyze(file, opts = {}) {
+  if (!file) throw new Error('Selecione um arquivo.');
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  const put = (k, v) => {
+    if (v === undefined || v === null) return;
+    const s = typeof v === 'string' ? v : String(v);
+    fd.append(k, s);
+  };
+
+  put('instruction', opts.instruction);
+  put('unit_col', opts.unit_col);
+  put('concessionaria_col', opts.concessionaria_col);
+  put('value_col', opts.value_col);
+  put('placeholder', opts.placeholder);
+  put('min_base', opts.min_base);
+  put('score_threshold', opts.score_threshold);
+  put('pct_high', opts.pct_high);
+  put('pct_low', opts.pct_low);
+  put('mes_col', opts.mes_col);
+  put('k', opts.k);
+  put('placeholder_repeat_threshold', opts.placeholder_repeat_threshold);
+  put('max_anom', opts.max_anom);
+  put('sheet', opts.sheet);
+  put('header_row', opts.header_row);
+
+  try {
+    const { data } = await api.post('/ocr/desvio-media', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  } catch (err) {
+    throw wrapAxiosError(err, 'Falha ao analisar desvio de media');
   }
 }
 

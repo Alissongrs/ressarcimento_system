@@ -6,8 +6,9 @@ import "time"
 type ProcessoKanban struct {
 	ColunaKanban           string     `db:"coluna_kanban"            json:"-"` // usado só para agrupar no handler
 	ID                     int        `db:"id"                       json:"id"`
-	IdColunaKanban         int        `db:"id_coluna_kanban"         json:"id_coluna_kanban"`
+	IdColuna               *int       `db:"id_coluna"               json:"id_coluna,omitempty"`
 	IdEtapaProcesso        int        `db:"id_etapa_processo"        json:"id_etapa_processo"`
+	NomeColuna             *string    `db:"nome_coluna"             json:"nome_coluna,omitempty"`
 	Etapa                  *string    `db:"etapa_nome"               json:"etapa,omitempty"`
 	UC                     *string    `db:"uc"                       json:"uc,omitempty"`
 	Cliente                *string    `db:"cliente"                  json:"cliente,omitempty"`
@@ -15,6 +16,10 @@ type ProcessoKanban struct {
 	ValorEstimado          *float64   `db:"valor_estimado"           json:"valor_estimado,omitempty"`
 	CreditoSimples         *float64   `db:"credito_simples"          json:"credito_simples,omitempty"`
 	CreditoDobro           *float64   `db:"credito_dobro"            json:"credito_dobro,omitempty"`
+	DataSimples            *string    `db:"data_simples"             json:"data_simples,omitempty"`
+	DataDobro              *string    `db:"data_dobro"               json:"data_dobro,omitempty"`
+	RepasseSimples         *float64   `db:"repasse_simples"          json:"repasse_simples,omitempty"`
+	RepasseDobro           *float64   `db:"repasse_dobro"            json:"repasse_dobro,omitempty"`
 	AlertasCount           *int       `db:"alertas_count"            json:"alertas_count,omitempty"`
 	SubEtapa               *string    `db:"sub_etapa"                json:"sub_etapa,omitempty"`
 	Relevancia             bool       `db:"relevancia"               json:"relevancia"`
@@ -27,8 +32,9 @@ type ProcessoKanban struct {
 // DTO enviado ao front (sem coluna_kanban dentro do item)
 type ProcessoKanbanDTO struct {
 	ID                     int        `json:"id"`
-	IdColunaKanban         int        `json:"id_coluna_kanban"`
+	IdColuna               *int       `json:"id_coluna,omitempty"`
 	IdEtapaProcesso        int        `json:"id_etapa_processo"`
+	NomeColuna             *string    `json:"nome_coluna,omitempty"`
 	Etapa                  *string    `json:"etapa,omitempty"`
 	UC                     *string    `json:"uc,omitempty"`
 	Cliente                *string    `json:"cliente,omitempty"`
@@ -36,6 +42,10 @@ type ProcessoKanbanDTO struct {
 	ValorEstimado          *float64   `json:"valor_estimado,omitempty"`
 	CreditoSimples         *float64   `json:"credito_simples,omitempty"`
 	CreditoDobro           *float64   `json:"credito_dobro,omitempty"`
+	DataSimples            *string    `json:"data_simples,omitempty"`
+	DataDobro              *string    `json:"data_dobro,omitempty"`
+	RepasseSimples         *float64   `json:"repasse_simples,omitempty"`
+	RepasseDobro           *float64   `json:"repasse_dobro,omitempty"`
 	AlertasCount           *int       `json:"alertas_count,omitempty"`
 	SubEtapa               *string    `json:"sub_etapa,omitempty"`
 	Relevancia             bool       `json:"relevancia"`
@@ -48,8 +58,9 @@ type ProcessoKanbanDTO struct {
 func (p ProcessoKanban) ToDTO() ProcessoKanbanDTO {
 	return ProcessoKanbanDTO{
 		ID:                     p.ID,
-		IdColunaKanban:         p.IdColunaKanban,
+		IdColuna:               p.IdColuna,
 		IdEtapaProcesso:        p.IdEtapaProcesso,
+		NomeColuna:             p.NomeColuna,
 		Etapa:                  p.Etapa,
 		UC:                     p.UC,
 		Cliente:                p.Cliente,
@@ -57,6 +68,10 @@ func (p ProcessoKanban) ToDTO() ProcessoKanbanDTO {
 		ValorEstimado:          p.ValorEstimado,
 		CreditoSimples:         p.CreditoSimples,
 		CreditoDobro:           p.CreditoDobro,
+		DataSimples:            p.DataSimples,
+		DataDobro:              p.DataDobro,
+		RepasseSimples:         p.RepasseSimples,
+		RepasseDobro:           p.RepasseDobro,
 		AlertasCount:           p.AlertasCount,
 		SubEtapa:               p.SubEtapa,
 		Relevancia:             p.Relevancia,

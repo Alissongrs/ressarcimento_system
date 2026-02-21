@@ -1,4 +1,4 @@
-// src/pages/ControleProcessos.jsx
+﻿// src/pages/ControleProcessos.jsx
 import React, {
   useState,
   useEffect,
@@ -52,6 +52,7 @@ import {
 import { getEtapas, getEtapaSubMap } from '../services/filtersService';
 import { getPrazos } from '../services/prazosService';
 import { getAlarmes } from '../services/alarmesService';
+import { confirmAction } from '../utils/confirm.js';
 
 import ProcessoCard from '@components/ProcessoCard.jsx';
 import { SkeletonLine } from '../components/Skeleton.jsx';
@@ -1069,11 +1070,14 @@ const ControleProcessos = () => {
 
     try {
       if (colunaDestino === 'Suspensos') {
+        if (!(await confirmAction('Deseja suspender este processo?'))) return;
         await suspenderProcesso(processoMovido.id, 'Suspenso via kanban');
       } else {
         if (colunaOrigem === 'Suspensos') {
+          if (!(await confirmAction('Deseja retomar este processo?'))) return;
           await retomarProcesso(processoMovido.id, 'Retomado via kanban');
         }
+        if (!(await confirmAction(`Deseja mover o processo #${processoMovido.id} para "${colunaDestino}"?`))) return;
         const fd = new FormData();
         fd.append('etapa_atual', novaEtapa);
         const subEtapaAtual = extrair(processoMovido.sub_etapa);
@@ -1112,6 +1116,7 @@ Deixe em branco para não registrar.`
     // formData.append('deferimento', JSON.stringify(dadosDeferimento));
 
     try {
+      if (!(await confirmAction(`Deseja salvar a movimentação do processo #${processo.id}?`))) return;
       await movimentarProcesso(processo.id, formData);
       setIsModalDeferimentoAberto(false);
       setMovimentacaoPendente(null);
@@ -1513,6 +1518,7 @@ Deixe em branco para não registrar.`
                       if (canais.length > 0) fd.append('canais', JSON.stringify(canais));
                     }
                     try {
+                      if (!(await confirmAction(`Deseja mover o processo #${pendingMove.id}?`))) return;
                       await movimentarProcesso(pendingMove.id, fd);
                       setMoveOpen(false);
                       setPendingMove({ id: null, destino: '', etapa: '' });
@@ -1804,6 +1810,7 @@ Deixe em branco para não registrar.`
                           className="px-3 py-1 text-sm rounded border border-[var(--panel-border)] hover:bg-[var(--panel-border)]/20 bg-white text-amber-900"
                           onClick={async () => {
                             try {
+                              if (!(await confirmAction('Deseja retomar este processo?'))) return;
                               await retomarProcesso(p.id, 'Restaurado via suspensos');
                               setToast({ open: true, type: 'success', text: 'Processo restaurado.' });
                               carregarDados();

@@ -1,25 +1,46 @@
 ﻿/* src/index.css */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Fundo com imagem e integraÀ§ão de tema */
+/* Garante que o fundo do tema preencha 100% da altura (evita “faixa branca” embaixo) */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html {
+  background-color: var(--bg);
+}
+
+/* Fundo com imagem e integração de tema */
 body {
+  margin: 0;
+  min-height: 100vh;
+
   background-image: var(--bg-image);
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   background-attachment: fixed;
   background-color: var(--bg);
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+
+  font-family: var(--font-sans);
   color: var(--fg);
+
   zoom: 80%;
+
+  /* opcional, mas ajuda a evitar “scroll lateral fantasma” */
+  overflow-x: hidden;
 }
 
 #root {
   width: 100%;
   max-width: 100%;
+  min-height: 100vh; /* garante que o app ocupe a tela toda */
   padding: 0;
   margin: 0;
   text-align: left;
@@ -71,3 +92,22 @@ select option {
 .shadow-elevated { box-shadow: var(--shadow-elevated); }
 .transition-smooth { transition: var(--transition-smooth); }
 .transition-bounce { transition: var(--transition-bounce); }
+
+/* Email HTML rendering helpers */
+.email-body img { max-width: 100%; height: auto; }
+.email-body table { max-width: 100%; overflow-x: auto; display: block; }
+.email-body a { text-decoration: underline; }
+.email-body pre, .email-body code { white-space: pre-wrap; word-break: break-word; }
+.email-body blockquote { border-left: 3px solid var(--border); padding-left: 10px; opacity: .9; }
+
+@keyframes toastFloat {
+  0% { opacity: 0; transform: translateY(10px) scale(0.98); }
+  15% { opacity: 1; transform: translateY(0) scale(1); }
+  85% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-10px) scale(0.98); }
+}
+
+.animate-toast {
+  animation: toastFloat 3s ease-in-out both;
+}
+

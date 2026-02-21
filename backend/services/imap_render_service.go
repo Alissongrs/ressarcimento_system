@@ -1,4 +1,4 @@
-// backend/services/imap_service.go
+﻿// backend/services/imap_service.go
 
 package services
 
@@ -10,17 +10,40 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"ressarcimento-backend/database"
+	"sync"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-message/mail"
 )
 
+var emailReadMu sync.Mutex
+var emailReadRunning bool
+
 // LerEmailsRecebidos conecta ao servidor IMAP, lê e-mails não lidos e os salva no banco.
 func LerEmailsRecebidos() {
-	log.Println("Executando tarefa: Lendo e-mails recebidos via IMAP...")
+	log.Println("Executando tarefa: Lendo e-mails recebidos...")
+	emailReadMu.Lock()
+	if emailReadRunning {
+		emailReadMu.Unlock()
+		log.Println("Leitura de e-mails já em execução. Ignorando nova chamada.")
+		return
+	}
+	emailReadRunning = true
+	emailReadMu.Unlock()
+	defer func() {
+		emailReadMu.Lock()
+		emailReadRunning = false
+		emailReadMu.Unlock()
+	}()
+
+	if graphEnabled() {
+		if err := lerEmailsRecebidosGraph(); err != nil {
+			log.Printf("Erro ao ler e-mails via Graph: %v", err)
+		}
+		return
+	}
+	log.Println("Usando IMAP (Graph não configurado).")
 
 	imapHost := os.Getenv("IMAP_HOST")
 	imapPort := os.Getenv("IMAP_PORT")
@@ -28,7 +51,7 @@ func LerEmailsRecebidos() {
 	imapPass := os.Getenv("SMTP_PASS")
 
 	if imapHost == "" {
-		log.Println("Aviso: Configurações de IMAP não encontradas. Tarefa de leitura de e-mail abortada.")
+		log.Println("Aviso: ConfiguraÃ§ões de IMAP não encontradas. Tarefa de leitura de e-mail abortada.")
 		return
 	}
 
@@ -93,7 +116,7 @@ func LerEmailsRecebidos() {
 			continue
 		}
 
-		// Extrai as informações do e-mail
+		// Extrai as informaÃ§ões do e-mail
 		header := mr.Header
 		from, _ := header.AddressList("From")
 		to, _ := header.AddressList("To")
@@ -116,7 +139,7 @@ func LerEmailsRecebidos() {
 		processoID := extrairProcessoIDDoAssunto(subject)
 
 		// Salva o e-mail recebido no banco
-		_, dbErr := database.DB_App.Exec(`
+		_, dbErr := getAppDB().Exec(`
             INSERT INTO FT_EMAILS_PROCESSO 
             (id_processo, de_email, para_email, assunto, corpo, tipo)
             VALUES (?, ?, ?, ?, ?, 'recebido')`,
@@ -143,3 +166,6 @@ func extrairProcessoIDDoAssunto(subject string) sql.NullInt64 {
 	}
 	return sql.NullInt64{Valid: false}
 }
+
+
+

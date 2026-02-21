@@ -1,0 +1,98 @@
+﻿1) Payload completo do endpoint de métricas
+
+Endpoint: GET /api/v1/relatorios/metricas
+Query params suportados:
+- data_ini (dd/mm/aaaa)
+- data_fim (dd/mm/aaaa)
+- concessionarias (csv, ex: ENEL,NEOENERGIA)
+
+Resposta (campos):
+- total_requisicoes (int)
+- total_processos (int)
+- valor_total_ressarcimento (float)
+- processos_counts { ativos, deferidos, fluxo_ressarcimento, faturamento, concluidos, indeferidos }
+- status_counts { pendente, em_analise, aprovado, rejeitado }
+ troubled? -> creditos { simples_total, dobro_total, total_procedente }
+- tempo_medio_dias_por_etapa: [{ etapa, dias }]
+- tendencia_30d: [{ dia, total }]
+- aging_buckets { 0_7, 8_15, 16_30, 31_mais }
+- top_concessionarias: [{ label, total }]
+- top_clientes: [{ label, total }]
+- throughput_semana: [{ label, total }]
+- throughput_mes: [{ label, total }]
+- canais_dist_30d: [{ label, total }]
+- wip_gestores: [{ label, total }]
+- valor_histogram: [{ label, total }]
+- sla_30d { limite_dias, on_time, late }
+- tempo_medio_conclusao_concessionaria: [{ label, dias }]
+- repasse_total (float)
+- repasse_por_concessionaria: [{ label, total }]
+- warnings: [string]
+
+Fonte do payload:
+- backend/handlers/relatorios_handler.go
+- backend/repositories/dashboard_repo.go
+- backend/routes/routes.go (rota /relatorios/metricas)
+
+
+2) Esquema das tabelas envolvidas
+
+NAO DISPONIVEL VIA CODIGO LOCAL.
+Precisa rodar no DB remoto:
+- DESCRIBE FT_PROCESSOS
+- DESCRIBE FT_REQUISICOES
+- DESCRIBE FT_HISTORICO_MOVIMENTACOES
+- DESCRIBE FT_DEFERIMENTOS
+- DESCRIBE FT_FLUXO_RESSARCIMENTO (se existir)
+- DESCRIBE FT_FATURAMENTO (se existir)
+- DESCRIBE DM_USUARIO (gestores)
+- DESCRIBE DM_CONCESSIONARIAS (se existir) / coluna concessionaria em FT_REQUISICOES
+
+
+3) Dicionário Kanban/Etapas/Status
+
+Pelo codigo (backend/repositories/dashboard_repo.go):
+- colunas derivadas por heuristica:
+  - concluidos: etapa/status/passo REGEXP 'conclu|finaliz|encerr|pago|credit'
+  - indeferidos: etapa/status REGEXP 'indefer|improced'
+  - faturamento: etapa/status REGEXP 'fatur'
+  - fluxo_ressarcimento: etapa/status REGEXP 'fluxo|ressarc'
+  - deferidos: etapa/status REGEXP 'deferid|proced|aprov'
+  - ativos: default
+
+Status de requisicao (backend/repositories/dashboard_repo.go):
+- pendente: status REGEXP 'nova requis'
+- em_analise: status REGEXP 'analis|triag'
+- aprovado: status REGEXP 'aprov|proced'
+- rejeitado: status REGEXP 'rejeit|improced'
+
+Origem real do Kanban (se existir coluna_kanban):
+- FT_PROCESSOS.coluna_kanban (quando preenchida, tem prioridade)
+
+
+4) Páginas/Telas a medir (referencias no codigo atual)
+
+Frontend:
+- frontend/src/pages/RelatoriosMetricas.jsx (metrics + filtros + graficos)
+- frontend/src/pages/AdminPlanilha.jsx (kanban/cards + detalhes)
+- frontend/src/pages/ControleProcessos.jsx (kanban principal)
+- frontend/src/pages/ProcessoDetalhes.jsx (historico e dados)
+- frontend/src/pages/Requisicoes.jsx (lista requisicoes)
+- frontend/src/pages/GestaoRequisicoes.jsx (usa getDashboardStatsBI)
+
+Backend:
+- backend/handlers/relatorios_handler.go
+- backend/repositories/dashboard_repo.go (queries SQL)
+- backend/services/dashboard_service.go (stats default)
+
+
+5) Regras de negocio (o que o codigo assume hoje)
+
+- Processo vs Requisicao: 1:1 por id (FT_PROCESSOS.id_processo = FT_REQUISICOES.id_requisicao)
+- Deferido: detectado via etapa/status contendo 'deferid|proced|aprov'
+- Repasse: soma de FT_DEFERIMENTOS.repasse_simples + repasse_dobro (join por processo)
+- Tempo medio: baseado em histórico (dwell time por etapa, dif entre movimentacoes)
+- SLA: janela padrão 7 dias (dias entre movimentacoes), ultimos 30 dias se sem filtro
+
+Observacao:
+- Para garantir dicionario correto e colunas reais, precisa executar DESCRIBE/SHOW CREATE TABLE no DB remoto.

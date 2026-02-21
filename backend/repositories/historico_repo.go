@@ -1,9 +1,11 @@
-package repositories
+﻿package repositories
 
 import (
 	"context"
 	"database/sql"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // HistoricoRow representa uma linha de histórico já com o CSV de canais agregado.
@@ -26,14 +28,14 @@ type HistoricoRow struct {
 }
 
 type HistoricoRepo struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewHistoricoRepo(db *sql.DB) *HistoricoRepo {
+func NewHistoricoRepo(db *gorm.DB) *HistoricoRepo {
 	return &HistoricoRepo{db: db}
 }
 
-// GetByRequisicaoID retorna o histórico completo (com canais agregados) de uma requisição/processo.
+// GetByRequisicaoID retorna o histórico completo (com canais agregados) de uma requisiÃ§ão/processo.
 func (r *HistoricoRepo) GetByRequisicaoID(ctx context.Context, idRequisicao int64) ([]HistoricoRow, error) {
 	const q = `
 SELECT
@@ -65,7 +67,7 @@ GROUP BY
   h.comentario, h.justificativa_atraso, h.data_movimentacao
 ORDER BY h.data_movimentacao DESC, h.id_historico DESC;
 `
-	rows, err := r.db.QueryContext(ctx, q, idRequisicao)
+	rows, err := r.db.Raw( q, idRequisicao).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +111,7 @@ SELECT id_requisicao, MAX(data_movimentacao) AS dt
 FROM FT_HISTORICO_MOVIMENTACOES
 GROUP BY id_requisicao;
 `
-	rows, err := r.db.QueryContext(ctx, q)
+	rows, err := r.db.Raw( q).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +131,7 @@ GROUP BY id_requisicao;
 	return out, rows.Err()
 }
 
-// EnsureViewUltimoHistorico cria (ou recria) a VIEW VW_ULTIMO_HISTORICO, que traz a última data por requisição.
+// EnsureViewUltimoHistorico cria (ou recria) a VIEW VW_ULTIMO_HISTORICO, que traz a última data por requisiÃ§ão.
 // Se preferir não usar VIEW, troque no seu SELECT pelo subselect equivalente (veja comentário no topo do arquivo).
 func (r *HistoricoRepo) EnsureViewUltimoHistorico(ctx context.Context) error {
 	const createView = `
@@ -140,6 +142,8 @@ SELECT
 FROM FT_HISTORICO_MOVIMENTACOES h
 GROUP BY h.id_requisicao;
 `
-	_, err := r.db.ExecContext(ctx, createView)
-	return err
+	res := r.db.Exec(createView)
+	return res.Error
 }
+
+

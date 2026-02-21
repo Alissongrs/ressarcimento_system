@@ -1,6 +1,6 @@
-// src/services/requisicaoService.js (cleaned)
+﻿// src/services/requisicaoService.js (cleaned)
 
-import api from './apiClient';
+import api, { withAuthToken } from './apiClient';
 import { normalizeCreditoValue } from '../utils/brl';
 
 // ======================= Auth & usuario =======================
@@ -214,7 +214,27 @@ export const getHistoricoById = async (id) => {
     if (!exists) merged.push(h);
   });
 
-  return merged.map((h) => {
+  const sorted = merged.slice().sort((a, b) => {
+    const getDate = (x) =>
+      x?.data_movimentacao ||
+      x?.dataMovimentacao ||
+      x?.quando ||
+      x?.data ||
+      x?.data_criacao ||
+      x?.dataCriacao ||
+      '';
+    const da = Date.parse(getDate(a));
+    const db = Date.parse(getDate(b));
+    if (!Number.isNaN(da) && !Number.isNaN(db)) return db - da;
+    if (!Number.isNaN(db)) return 1;
+    if (!Number.isNaN(da)) return -1;
+    const ida = Number(getKey(a) ?? 0);
+    const idb = Number(getKey(b) ?? 0);
+    if (!Number.isNaN(ida) && !Number.isNaN(idb)) return idb - ida;
+    return 0;
+  });
+
+  return sorted.map((h) => {
     const arr = Array.isArray(h.canais)
       ? h.canais
       : h.canal_comunicacao
@@ -265,8 +285,8 @@ export async function getUltimasMovimentacoesBulk(ids) {
 export const getProcessosKanban = async () =>
   (await api.get('/processos/kanban')).data;
 
-export async function getProcessosKanbanFast() {
-  return (await api.get('/processos/kanban-fast')).data;
+export async function getProcessosKanbanFast(params = {}) {
+  return (await api.get('/processos/kanban-fast', { params })).data;
 }
 
 export const getProcessoById = async (id) => getRequisicaoById(id);
@@ -284,12 +304,11 @@ export const getFaturamento = async (processoId) => {
 };
 
 export const movimentarProcesso = (id, data) => {
+  const url = withAuthToken(`/processos/${id}/movimentar`);
   if (typeof FormData !== 'undefined' && data instanceof FormData) {
-    return api.post(`/processos/${id}/movimentar`, data, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    return api.post(url, data);
   }
-  return api.post(`/processos/${id}/movimentar`, data);
+  return api.post(url, data);
 };
 
 export const descartarProcesso = (id, payload) =>
@@ -381,34 +400,6 @@ export const buscarFaturasUC = async (numero, meses = []) => {
   return (await api.get(`/uc/${numero}/faturas${qs ? `?${qs}` : ''}`)).data;
 };
 
-export const getDashboardDeferidos = async () => {
-  const { data } = await api.get('/dashboard/deferidos');
-  return data;
-};
-
-const pythonDashboardBase =
-  (import.meta.env.VITE_PYTHON_DASHBOARD_BASE_URL || '').replace(/\/$/, '') ||
-  'http://localhost:5200/api/dashboard';
-
-const pythonFetch = async (path) => {
-  const url = `${pythonDashboardBase}${path}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${path} → ${res.status}`);
-  return res.json();
-};
-
-export const getPythonDashboardOverview = () =>
-  pythonFetch('/overview');
-
-export const getPythonClassification = () =>
-  pythonFetch('/classificacao-erros');
-
-export const getPythonKanbanProcesses = () =>
-  pythonFetch('/kanban-processos');
-
-export const getPythonConcluded = () =>
-  pythonFetch('/concluidos');
-
 // Busca faturas por unidade (UC) e meses usando o alias publico /faturas-uc
 export const buscarFaturasPorUnidadeMeses = async (unidade, meses = []) => {
   const params = new URLSearchParams();
@@ -436,10 +427,16 @@ export const marcarAlertasComoLidos = (alertaIds) =>
   api.post('/alertas/marcar-lido', { alerta_ids: alertaIds });
 
 // ======================= E-mails =======================
-export const enviarEmailProcesso = (processoId, emailData) =>
-  api.post(`/processos/${processoId}/emails`, emailData);
+export const enviarEmailProcesso = (processoId, emailData) => {
+  const isForm = typeof FormData !== 'undefined' && emailData instanceof FormData;
+  return api.post(`/processos/${processoId}/emails`, emailData, {
+    headers: isForm ? { 'Content-Type': 'multipart/form-data' } : undefined,
+  });
+};
 export const getEmailsByProcessoID = async (processoId) =>
   (await api.get(`/processos/${processoId}/emails`)).data;
+export const marcarEmailProcessoLido = async (processoId, emailId) =>
+  (await api.post(`/processos/${processoId}/emails/${emailId}/read`)).data;
 
 // ======================= Tags =======================
 export const getAllTags = async () => (await api.get('/tags')).data;
@@ -660,20 +657,7 @@ export const getBacklog = async (limit) => {
 export const toggleBacklogCheck = async (id, checked) =>
   api.post(`/processos/${id}/backlog-check`, { checked });
 
-export const checkDashboardConnectivity = async () => {
-  try {
-    const { data, status } = await api.get('/dashboard/stats');
-    return { ok: true, status, hasData: !!data, keys: data ? Object.keys(data) : [] };
-  } catch (e) {
-    return {
-      ok: false,
-      status: e?.response?.status ?? null,
-      url: e?.config?.url ?? null,
-      message: e?.message ?? 'erro',
-      backend: e?.response?.data ?? null,
-    };
-  }
-};
+
 
 // Garantir exportacoes explicitas (evita problemas em builds case-sensitive)
 
@@ -956,3 +940,6 @@ export async function getMesesPorIdUc(idUcOrParams) {
     return { meses: [] };
   }
 }
+
+
+

@@ -12,8 +12,15 @@ import (
 
 // GET /api/v1/admin/resumos/status
 // Query params: minutes (default 30), limit (default 20)
+// GetResumosStatus godoc
+// @Summary      Status de resumos
+// @Tags         ResumoProcesso
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/resumos/status [get]
 func GetResumosStatus(c *gin.Context) {
-    repo := repositories.NewResumoRepo(database.DB_App)
+    repo := repositories.NewResumoRepo(database.GormDB_App)
     minutes := 30
     if v := c.Query("minutes"); v != "" {
         if n, err := strconv.Atoi(v); err == nil && n > 0 { minutes = n }

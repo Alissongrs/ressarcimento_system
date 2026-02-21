@@ -1,4 +1,4 @@
-// src/pages/AdminEditor.jsx
+﻿// src/pages/AdminEditor.jsx
 
 import React, { useEffect, useState, useRef } from 'react';
 
@@ -19,6 +19,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 
 import { getEtapas, getSubEtapas, getEtapaSubMap } from '../services/filtersService';
 import { normalizeDecimalValue, normalizeCreditoValue, toNumberBR } from '../utils/brl';
+import { confirmAction } from '../utils/confirm.js';
 
 import './admin-editor.css';
 
@@ -76,7 +77,7 @@ export default function AdminEditor() {
 
   const colToEtapa = {
     Ativos: 'Distribuidora',
-    Deferidos: 'Pendente',
+    Deferidos: 'Distribuidora',
     'Fluxo de Ressarcimento': 'Enviado ao Financeiro',
     Faturamento: 'Repasse Amee',
     Concluídos: 'Concluído',
@@ -437,6 +438,10 @@ const normalizeDateInput = (s) => {
     try {
       setSaving(true);
       setMsg('');
+      if (!(await confirmAction('Deseja salvar as alteracoes deste processo?'))) {
+        setSaving(false);
+        return;
+      }
 
       // Aviso de UC duplicada antes de salvar (não bloqueia)
       try {
@@ -474,6 +479,7 @@ const normalizeDateInput = (s) => {
       const payload = {
         criar_novo: !!criarNovo,
         processo_id: criarNovo ? undefined : Number(processoId),
+        coluna: selectedColuna || null,
 
         uc: emptyToNull(req.uc),
         cliente: emptyToNull(req.cliente),
@@ -939,12 +945,12 @@ const normalizeDateInput = (s) => {
             {fat.map((it, idx) => (
               <div key={idx} className="grid grid-cols-1 md:grid-cols-8 gap-2 mb-2">
                 <div>
-                  <label className="block text-xs mb-1">N° da NF</label>
+                  <label className="block text-xs mb-1">Nº da NF</label>
                   <input
                     className="input-themed text-xs"
                     value={it.numero_nf}
                     onChange={(e) => updateAt(setFat, idx, { ...it, numero_nf: e.target.value })}
-                    placeholder="N° da NF"
+                    placeholder="Nº da NF"
                   />
                 </div>
 
@@ -1370,6 +1376,9 @@ const normalizeDateInput = (s) => {
                       setToast({ open: true, type: 'error', text: 'Nenhuma UC resolvida para aplicar.' });
                       return;
                     }
+                    if (!(await confirmAction('Deseja aplicar essas alterações para todos os processos selecionados?'))) {
+                      return;
+                    }
 
                     setBulkApplying(true);
                     let ok = 0;
@@ -1381,12 +1390,13 @@ const normalizeDateInput = (s) => {
                       const etapaDestino = colToEtapa[bulkEtapa] || String(bulkEtapa || '').trim() || 'Ativos';
                       const payload = {
                         processo_id: r.selectedId,
+                        coluna: bulkEtapa || null,
                         etapa: etapaDestino,
                         sub_etapa: '',
                         relevancia: false,
                       };
 
-                      // Deferimento opcional por índice/único
+                      // Deferimento opcional por Índice/Único
                       const cs = arrCS[i] ?? arrCS[0];
                       const ds = arrDS[i] ?? arrDS[0];
                       const cd = arrCD[i] ?? arrCD[0];
@@ -1424,7 +1434,7 @@ const normalizeDateInput = (s) => {
                     const msg =
                       fail === 0
                         ? `Aplicado com sucesso em ${ok} UCs.`
-                        : `Sucesso: ${ok}. Falhas: ${fail} → ${errors.join(', ')}`;
+                        : `Sucesso: ${ok}. Falhas: ${fail} ??' ${errors.join(', ')}`;
                     setToast({ open: true, type: fail ? 'error' : 'success', text: msg });
                   } finally {
                     setBulkApplying(false);
@@ -1487,6 +1497,7 @@ function parseBoolLoose(v) {
   if (['0', 'false', 'f', 'nao', 'não', 'no', 'n'].includes(s)) return false;
   return null;
 }
+
 
 
 

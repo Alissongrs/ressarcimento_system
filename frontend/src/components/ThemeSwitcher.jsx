@@ -7,7 +7,7 @@ export default function ThemeSwitcher({ inline = false }) {
 
   const Option = ({ name, value, sample }) => (
     <button
-      onClick={() => { setTheme(value); setOpen(false); }}
+      onClick={() => { setTheme(value); }}
       className={`flex items-center gap-2 px-3 py-2 rounded text-sm w-full justify-start hover:opacity-90`}
     >
       <span className="inline-flex w-4 h-4 rounded" style={{ background: sample }} />
@@ -20,6 +20,11 @@ export default function ThemeSwitcher({ inline = false }) {
       <Option name="Padrão (Claro D)" value="light-4" sample="linear-gradient(45deg,#ffffff,#e5e7eb)" />
       <Option name="Rosa" value="pink" sample="linear-gradient(45deg,#ffffff,#fbcfe8)" />
       <Option name="Azul" value="azul" sample="linear-gradient(45deg,#ffffff,#bfdbfe)" />
+      <Option name="SAP" value="sap" sample="linear-gradient(45deg,#f2f3f5,#c6cbd3)" />
+      <Option name="Marinho" value="navy" sample="linear-gradient(45deg,#eef2f6,#3b82f6)" />
+      <Option name="Laranja + Cinza" value="orange-gray" sample="linear-gradient(45deg,#f5f3ef,#d97706)" />
+      <Option name="Verde + Laranja" value="green-orange" sample="linear-gradient(45deg,#ffffff,#2f7d32)" />
+      <Option name="Laranja + Roxo + Verde" value="orange-purple-green" sample="linear-gradient(45deg,#f6f4f2,#8b5cf6)" />
     </div>
   );
 
@@ -44,12 +49,9 @@ export default function ThemeSwitcher({ inline = false }) {
 
   return (
     <div className="fixed z-50 bottom-4 right-4">
-      <div
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-        className="relative"
-      >
+      <div className="relative">
         <button
+          onClick={() => setOpen((v) => !v)}
           className="px-3 py-2 rounded-full shadow-lg bg-[var(--card)] text-[var(--fg)] border border-[var(--border)] hover:text-[var(--accent)]"
           title="Tema"
         >

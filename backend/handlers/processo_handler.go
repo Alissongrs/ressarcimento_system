@@ -1,4 +1,4 @@
-// backend/handlers/processo_handler.go
+﻿// backend/handlers/processo_handler.go
 package handlers
 
 import (
@@ -26,10 +26,37 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 	"github.com/spf13/cast"
+	"gorm.io/gorm"
 )
 
 // helper: allocate *string from value
 func strPtr(s string) *string { return &s }
+
+type gormResult struct {
+	rowsAffected int64
+	lastInsertID int64
+}
+
+func (r gormResult) LastInsertId() (int64, error) { return r.lastInsertID, nil }
+func (r gormResult) RowsAffected() (int64, error) { return r.rowsAffected, nil }
+
+func execGorm(tx *gorm.DB, query string, args ...interface{}) (sql.Result, error) {
+	res := tx.Exec(query, args...)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	var lastID sql.NullInt64
+	_ = tx.Raw("SELECT LAST_INSERT_ID()").Row().Scan(&lastID)
+	return gormResult{rowsAffected: res.RowsAffected, lastInsertID: lastID.Int64}, nil
+}
+
+func queryRowGorm(tx *gorm.DB, query string, args ...interface{}) *sql.Row {
+	return tx.Raw(query, args...).Row()
+}
+
+func queryGorm(tx *gorm.DB, query string, args ...interface{}) (*sql.Rows, error) {
+	return tx.Raw(query, args...).Rows()
+}
 
 /* ======================================================================
    Tipos e utilitários
@@ -48,7 +75,7 @@ func mapColunaID(etapa string) int {
 		return 1
 	case "deferidos", "deferido", "pendente", "em conciliao", "em conciliacao", "em contestao", "em contestacao":
 		return 2
-	case "fluxo de ressarcimento", "fluxo ressarcimento", "ressarcimento", "validacao", "validação", "validaã§ã£o", "enviado ao financeiro", "envio ao financeiro":
+	case "fluxo de ressarcimento", "fluxo ressarcimento", "ressarcimento", "validacao", "validação", "enviado ao financeiro", "envio ao financeiro":
 		return 3
 	case "faturamento":
 		return 4
@@ -162,11 +189,18 @@ func NewProcessosHandler(svc services.ProcessosService) *ProcessosHandler {
 func (h *ProcessosHandler) KanbanFast(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	itens, err := h.svc.ListarKanbanFast(ctx)
+	limit := 0
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			limit = n
+		}
+	}
+	coluna := strings.TrimSpace(c.Query("coluna"))
+
+	itens, err := h.svc.ListarKanbanFast(ctx, limit, coluna)
 	if err != nil {
 		log.Printf("[kanban-fast] erro na listagem: %v", err)
-		// Fallback em dev: retorna colunas vazias para não quebrar a UI
-		c.JSON(http.StatusOK, gin.H{"colunas": map[string][]models.ProcessoKanbanDTO{}})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -187,7 +221,6 @@ func (h *ProcessosHandler) KanbanFast(c *gin.Context) {
 	for _, it := range itens {
 		if it.Suspenso != nil && *it.Suspenso {
 			it.ColunaKanban = "Suspensos"
-			it.IdColunaKanban = 99
 		}
 		col := normalizeCol(it.ColunaKanban)
 		resp[col] = append(resp[col], it.ToDTO())
@@ -232,7 +265,7 @@ func GetProcessosKanban(c *gin.Context) {
         ORDER BY
             p.ultima_atualizacao DESC`
 
-	rows, err := database.DB_App.Query(query)
+	rows, err := database.GormDB_App.Raw(query).Rows()
 	if err != nil {
 		log.Printf("ERRO NA CONSULTA DO KANBAN: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar processos"})
@@ -243,7 +276,7 @@ func GetProcessosKanban(c *gin.Context) {
 	processosAgrupados := make(map[string][]models.Processo)
 	totaisPorColuna := make(map[string]float64)
 
-	colunasRows, _ := database.DB_App.Query("SELECT nome_coluna FROM DM_KANBAN_COLUNAS ORDER BY ordem ASC")
+	colunasRows, _ := database.GormDB_App.Raw("SELECT nome_coluna FROM DM_KANBAN_COLUNAS ORDER BY ordem ASC").Rows()
 	if colunasRows != nil {
 		defer colunasRows.Close()
 		for colunasRows.Next() {
@@ -420,7 +453,7 @@ func MovimentarProcesso(c *gin.Context) {
 		}
 
 		var etapaNomeDB string
-		if err := database.DB_App.QueryRow("SELECT etapa FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", novaEtapaNome).Scan(&etapaNomeDB); err == nil {
+		if err := database.GormDB_App.Raw("SELECT etapa FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", novaEtapaNome).Row().Scan(&etapaNomeDB); err == nil {
 			novaEtapaNome = etapaNomeDB
 		} else {
 			colTry := novaEtapaNome
@@ -430,13 +463,13 @@ func MovimentarProcesso(c *gin.Context) {
 			if strings.EqualFold(colTry, "Concluídos") || strings.EqualFold(colTry, "concluidos") {
 				colTry = "Concluídos"
 			}
-			if err2 := database.DB_App.QueryRow(`
+			if err2 := database.GormDB_App.Raw(`
 				SELECT e.etapa
 				  FROM DM_ETAPAS_PROCESSO e
 				  JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban
 				 WHERE kc.nome_coluna = ?
 			  ORDER BY e.id_etapa_processo ASC
-			     LIMIT 1`, colTry).Scan(&etapaNomeDB); err2 == nil {
+			     LIMIT 1`, colTry).Row().Scan(&etapaNomeDB); err2 == nil {
 				novaEtapaNome = etapaNomeDB
 			}
 		}
@@ -479,8 +512,8 @@ func MovimentarProcesso(c *gin.Context) {
 		mencoesJSON = getForm("mencoes")
 	}
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transação"})
 		return
 	}
@@ -489,7 +522,7 @@ func MovimentarProcesso(c *gin.Context) {
 	// Estado atual
 	var etapaAnteriorNome, subEtapaAnterior sql.NullString
 	var relevanciaAnterior sql.NullBool
-	if err := tx.QueryRow(`
+	if err := queryRowGorm(tx, `
 		SELECT etapa.etapa, p.sub_etapa, p.relevancia
 		  FROM FT_PROCESSOS p
 		  JOIN DM_ETAPAS_PROCESSO etapa ON p.id_etapa_processo = etapa.id_etapa_processo
@@ -510,7 +543,7 @@ func MovimentarProcesso(c *gin.Context) {
 
 	// Atualiza relevância, se enviada
 	if relProvided {
-		if _, err = tx.Exec("UPDATE FT_PROCESSOS SET relevancia = ? WHERE id_processo = ?", relNovo, processoID); err != nil {
+		if _, err = execGorm(tx, "UPDATE FT_PROCESSOS SET relevancia = ? WHERE id_processo = ?", relNovo, processoID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar relevância do processo"})
 			return
 		}
@@ -523,23 +556,50 @@ func MovimentarProcesso(c *gin.Context) {
 
 		if etapaMudou {
 			var novaEtapaID int
-			if err = tx.QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", novaEtapaNome).Scan(&novaEtapaID); err != nil {
+			if err = queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", novaEtapaNome).Scan(&novaEtapaID); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "O nome da etapa fornecida é inválido: " + novaEtapaNome})
 				return
 			}
 			setClauses = append(setClauses, "id_etapa_processo = ?")
 			args = append(args, novaEtapaID)
+			setClauses = append(setClauses, "etapa = ?")
+			args = append(args, novaEtapaNome)
+
+			var colID sql.NullInt64
+			var colNome sql.NullString
+			_ = queryRowGorm(tx, `
+				SELECT k.id_coluna, k.nome_coluna
+				  FROM DM_ETAPAS_PROCESSO e
+				  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
+				 WHERE e.id_etapa_processo = ?`,
+				novaEtapaID,
+			).Scan(&colID, &colNome)
+			setClauses = append(setClauses, "id_coluna = ?")
+			if colID.Valid {
+				args = append(args, colID.Int64)
+			} else {
+				args = append(args, nil)
+			}
+			setClauses = append(setClauses, "nome_coluna = ?")
+			if colNome.Valid {
+				args = append(args, colNome.String)
+			} else {
+				args = append(args, nil)
+			}
 		}
 		if subMudou {
 			setClauses = append(setClauses, "sub_etapa = ?")
 			args = append(args, novaSubEtapaNome)
+			subID, _ := resolveSubEtapaIDGorm(tx, novaSubEtapaNome)
+			setClauses = append(setClauses, "id_sub_etapa_processo = ?")
+			args = append(args, nullIntToIface(subID))
 		}
 		setClauses = append(setClauses, "ultima_atualizacao = NOW()")
 
 		if len(setClauses) > 0 {
 			query := fmt.Sprintf("UPDATE FT_PROCESSOS SET %s WHERE id_processo = ?", strings.Join(setClauses, ", "))
 			args = append(args, processoID)
-			if _, err2 := tx.Exec(query, args...); err2 != nil {
+			if _, err2 := execGorm(tx, query, args...); err2 != nil {
 				log.Printf("[DEBUG-MOV] proc=%d falha UPDATE: %v | query=%s | args=%v", processoID, err2, query, args)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar etapa/sub-etapa do processo"})
 				return
@@ -549,7 +609,7 @@ func MovimentarProcesso(c *gin.Context) {
 
 	if valorEstimadoNum.Valid {
 		// Coluna existe em FT_REQUISICOES (id_requisicao = id_processo)
-		if _, err2 := tx.Exec(
+		if _, err2 := execGorm(tx, 
 			"UPDATE FT_REQUISICOES SET ressarcimento_estimado = ? WHERE id_requisicao = ?",
 			valorEstimadoNum.Float64, processoID,
 		); err2 != nil {
@@ -596,11 +656,30 @@ func MovimentarProcesso(c *gin.Context) {
                       credito_simples    = VALUES(credito_simples), 
                       credito_dobro      = VALUES(credito_dobro),
                       data_credito_dobro = VALUES(data_credito_dobro)`
-				if _, err = tx.Exec(q, processoID, dataProcedencia, cs, cd, dataCreditoDobro); err != nil {
+				if _, err = execGorm(tx, q, processoID, dataProcedencia, cs, cd, dataCreditoDobro); err != nil {
 					log.Printf("Erro ao salvar deferimento no processo %d: %v", processoID, err)
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar dados de deferimento."})
 					return
 				}
+			}
+		}
+	}
+	// Se houve deferimento e nenhuma sub-etapa foi informada, força a sub-etapa inicial de conciliação.
+	if hasDeferimentoUpdate && !subProvided {
+		desiredSub := "Em conciliação - Em elaboração"
+		if strings.TrimSpace(subEtapaAnterior.String) != desiredSub {
+			novaSubEtapaNome = desiredSub
+			subProvided = true
+			subMudou = true
+			subID, _ := resolveSubEtapaIDGorm(tx, novaSubEtapaNome)
+			if _, err = execGorm(tx, 
+				`UPDATE FT_PROCESSOS
+				 SET sub_etapa = ?, id_sub_etapa_processo = ?, ultima_atualizacao = NOW()
+				 WHERE id_processo = ?`,
+				novaSubEtapaNome, nullIntToIface(subID), processoID,
+			); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar sub-etapa do processo"})
+				return
 			}
 		}
 	}
@@ -623,6 +702,14 @@ func MovimentarProcesso(c *gin.Context) {
 			return
 		}
 		hasFaturamentoUpdate = true
+	}
+
+	// Recalcula coluna/etapa automática pela regra (prioriza estágio mais avançado)
+	if hasDeferimentoUpdate || hasFluxoUpdate || hasFaturamentoUpdate {
+		if err := updateColunaByData(tx, processoID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar coluna do processo"})
+			return
+		}
 	}
 
 	// =====================================================================
@@ -685,7 +772,7 @@ func MovimentarProcesso(c *gin.Context) {
 	}
 
 	if willInsertHist {
-		res, err2 := tx.Exec(`
+		res, err2 := execGorm(tx, `
 			INSERT INTO FT_HISTORICO_MOVIMENTACOES
 			  (id_requisicao, id_usuario_gestor, status_anterior, status_novo,
 			   etapa_anterior, etapa_nova, sub_etapa,
@@ -708,7 +795,7 @@ func MovimentarProcesso(c *gin.Context) {
 		if len(canaisSelecionados) > 0 {
 			if lastID, e2 := res.LastInsertId(); e2 == nil {
 				for _, nome := range canaisSelecionados {
-					if _, e3 := tx.Exec(
+					if _, e3 := execGorm(tx, 
 						`INSERT INTO FT_HISTORICO_CANAIS (id_historico, id_canal)
 								SELECT ?, id_canal FROM DM_CANAIS_COMUNICACAO WHERE nome = ?`,
 						lastID, nome,
@@ -738,7 +825,7 @@ func MovimentarProcesso(c *gin.Context) {
 
 			// Descobre etapa destino na coluna Faturamento
 			var nextEtapaNome string
-			_ = tx.QueryRow(`
+			_ = queryRowGorm(tx, `
 					SELECT e.etapa
 					  FROM DM_ETAPAS_PROCESSO e
 					  JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban
@@ -749,10 +836,28 @@ func MovimentarProcesso(c *gin.Context) {
 				nextEtapaNome = "Faturamento"
 			}
 			var nextEtapaID int
-			if err2 := tx.QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ? LIMIT 1", nextEtapaNome).Scan(&nextEtapaID); err2 == nil && nextEtapaID > 0 {
-				_, _ = tx.Exec("UPDATE FT_PROCESSOS SET id_etapa_processo = ?, sub_etapa = NULL, ultima_atualizacao = NOW() WHERE id_processo = ?", nextEtapaID, processoID)
+			if err2 := queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ? LIMIT 1", nextEtapaNome).Scan(&nextEtapaID); err2 == nil && nextEtapaID > 0 {
+				var colID sql.NullInt64
+				var colNome sql.NullString
+				_ = queryRowGorm(tx, `
+					SELECT k.id_coluna, k.nome_coluna
+					  FROM DM_ETAPAS_PROCESSO e
+					  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
+					 WHERE e.id_etapa_processo = ?`,
+					nextEtapaID,
+				).Scan(&colID, &colNome)
+				_, _ = execGorm(tx, 
+					`UPDATE FT_PROCESSOS
+					 SET id_etapa_processo = ?, sub_etapa = NULL, id_sub_etapa_processo = NULL,
+					     id_coluna = ?, nome_coluna = ?, ultima_atualizacao = NOW()
+					 WHERE id_processo = ?`,
+					nextEtapaID,
+					func() interface{} { if colID.Valid { return colID.Int64 }; return nil }(),
+					func() interface{} { if colNome.Valid { return colNome.String }; return nil }(),
+					processoID,
+				)
 				// Insere histórico de avanço automático
-				_, _ = tx.Exec(`
+				_, _ = execGorm(tx, `
 						INSERT INTO FT_HISTORICO_MOVIMENTACOES (
 						  id_requisicao, id_usuario_gestor, status_anterior, status_novo,
 						  etapa_anterior, etapa_nova, sub_etapa,
@@ -795,7 +900,7 @@ func MovimentarProcesso(c *gin.Context) {
 				alertaMsg := fmt.Sprintf("Você foi mencionado no processo PROC-%d por %s. comentário: %s", processoID, gestorNome, msgComent)
 
 				for _, uid := range mencoesIDs {
-					if _, err := tx.Exec(`
+					if _, err := execGorm(tx, `
 					INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, data_criacao)
 					VALUES (?, ?, ?, 0, NOW())`,
 						uid, processoID, alertaMsg,
@@ -829,7 +934,7 @@ func MovimentarProcesso(c *gin.Context) {
 						c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar anexo do gestor"})
 						return
 					}
-					if _, err := tx.Exec(
+					if _, err := execGorm(tx,
 						"INSERT INTO FT_ANEXOS (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por) VALUES (?, ?, ?, 'gestor')",
 						processoID, filename, filePath,
 					); err != nil {
@@ -843,7 +948,7 @@ func MovimentarProcesso(c *gin.Context) {
 	}
 
 	// Commit (mesmo se não tiver histórico — evita handler sem resposta)
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
     log.Printf("[DEBUG-MOV] commit error (proc=%d): %v", processoID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar a transação"})
 		return
@@ -852,12 +957,12 @@ func MovimentarProcesso(c *gin.Context) {
 	// Descobre coluna Kanban (robusto com fallback)
 	var colID int
 	var colNome string
-	if err := database.DB_App.QueryRow(`
+	if err := database.GormDB_App.Raw(`
 		SELECT kc.id_coluna, kc.nome_coluna
 		  FROM FT_PROCESSOS p
 		  JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
 		  JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban
-		 WHERE p.id_processo = ?`, processoID).Scan(&colID, &colNome); err != nil {
+		 WHERE p.id_processo = ?`, processoID).Row().Scan(&colID, &colNome); err != nil {
 
 		colunaID := mapColunaID(func() string {
 			if strings.TrimSpace(novaEtapaNome) != "" {
@@ -946,7 +1051,7 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 	}
 
 
-	rows, err := database.DB_App.Query(`
+	rows, err := queryGorm(database.GormDB_App, `
         SELECT
             h.id_historico,
             h.id_usuario_gestor,
@@ -1098,7 +1203,7 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 		Data   sql.NullTime
 	}
 	anexosDB := make([]anexoDB, 0)
-	if rowsA, errA := database.DB_App.Query(`
+	if rowsA, errA := queryGorm(database.GormDB_App, `
 		SELECT nome_arquivo, caminho_arquivo, data_upload
 		  FROM FT_ANEXOS
 		 WHERE id_requisicao = ?
@@ -1111,7 +1216,7 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 				anexosDB = append(anexosDB, a)
 			}
 		}
-	} else if rowsA, errA := database.DB_App.Query(`
+	} else if rowsA, errA := queryGorm(database.GormDB_App, `
 		SELECT nome_arquivo, caminho_arquivo, NULL
 		  FROM FT_ANEXOS
 		 WHERE id_requisicao = ?`, id); errA == nil {
@@ -1183,7 +1288,7 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 	// Busca data_criacao e, opcionalmente, nome do criador
 	var createdAt time.Time
 	var creator sql.NullString
-	if err := database.DB_App.QueryRow(`
+	if err := queryRowGorm(database.GormDB_App, `
         SELECT r.data_criacao, COALESCE(u.nome_usuario,'')
           FROM FT_REQUISICOES r
           LEFT JOIN DM_USUARIO u ON u.id_usuario = r.id_usuario
@@ -1236,17 +1341,17 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 func AddHistoricoAnexo(c *gin.Context) {
 	processoID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do processo invÇ­lido"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do processo inválido"})
 		return
 	}
 	histID, err := strconv.Atoi(c.Param("hid"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do histÇürico invÇ­lido"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do histórico inválido"})
 		return
 	}
 
 	var histTime sql.NullTime
-	_ = database.DB_App.QueryRow(
+	_ = queryRowGorm(database.GormDB_App,
 		"SELECT data_movimentacao FROM FT_HISTORICO_MOVIMENTACOES WHERE id_historico = ? AND id_requisicao = ?",
 		histID, processoID,
 	).Scan(&histTime)
@@ -1271,9 +1376,9 @@ func AddHistoricoAnexo(c *gin.Context) {
 		return
 	}
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transaÇõÇœo"})
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transação"})
 		return
 	}
 	defer tx.Rollback()
@@ -1289,14 +1394,14 @@ func AddHistoricoAnexo(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar anexo"})
 			return
 		}
-		_, err := tx.Exec(
+		_, err := execGorm(tx, 
 			"INSERT INTO FT_ANEXOS (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload) VALUES (?, ?, ?, 'gestor', ?)",
 			processoID, filename, filePath, histTime.Time,
 		)
 		if err != nil {
 			log.Printf("[HIST-ANEXO] insert error (proc=%d hist=%d file=%s): %v", processoID, histID, filename, err)
 			// Fallback: coluna data_upload pode não existir
-			if _, err2 := tx.Exec(
+			if _, err2 := execGorm(tx, 
 				"INSERT INTO FT_ANEXOS (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por) VALUES (?, ?, ?, 'gestor')",
 				processoID, filename, filePath,
 			); err2 != nil {
@@ -1307,9 +1412,9 @@ func AddHistoricoAnexo(c *gin.Context) {
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
 		log.Printf("[HIST-ANEXO] commit error (proc=%d hist=%d): %v", processoID, histID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar a transaÇõÇœo"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar a transação"})
 		return
 	}
 
@@ -1389,8 +1494,8 @@ func ComentarProcesso(c *gin.Context) {
 		return
 	}
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transação"})
 		return
 	}
@@ -1398,7 +1503,7 @@ func ComentarProcesso(c *gin.Context) {
 
 	// Etapa/Subetapa atuais do processo
 	var etapaAtual, subAtual sql.NullString
-	_ = tx.QueryRow(`
+	_ = queryRowGorm(tx, `
         SELECT e.etapa, p.sub_etapa
           FROM FT_PROCESSOS p
           JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
@@ -1427,7 +1532,7 @@ func ComentarProcesso(c *gin.Context) {
 		statusTxt = statusTxt + " - " + subTxt
 	}
 
-	res, err := tx.Exec(`
+	res, err := execGorm(tx, `
 		INSERT INTO FT_HISTORICO_MOVIMENTACOES 
 		   (id_requisicao, id_usuario_gestor,
 			status_anterior, status_novo,
@@ -1454,7 +1559,7 @@ func ComentarProcesso(c *gin.Context) {
 				if !allowed[n] {
 					continue
 				}
-				if _, e3 := tx.Exec(
+				if _, e3 := execGorm(tx, 
 					`INSERT INTO FT_HISTORICO_CANAIS (id_historico, id_canal)
                      SELECT ?, id_canal FROM DM_CANAIS_COMUNICACAO WHERE nome = ?`,
 					lastID, n); e3 != nil {
@@ -1469,7 +1574,7 @@ func ComentarProcesso(c *gin.Context) {
 		var lista []string
 		if err := json.Unmarshal([]byte(raw), &lista); err == nil && len(lista) > 0 {
 			var lastID int64
-			_ = tx.QueryRow("SELECT id_historico FROM FT_HISTORICO_MOVIMENTACOES WHERE id_requisicao = ? ORDER BY id_historico DESC LIMIT 1", processoID).Scan(&lastID)
+			_ = queryRowGorm(tx, "SELECT id_historico FROM FT_HISTORICO_MOVIMENTACOES WHERE id_requisicao = ? ORDER BY id_historico DESC LIMIT 1", processoID).Scan(&lastID)
 			if lastID > 0 {
 				allowed := map[string]bool{"whatsapp": true, "ligacao": true, "email": true, "sms": true, "site": true, "pessoal": true}
 				for _, rawNome := range lista {
@@ -1477,7 +1582,7 @@ func ComentarProcesso(c *gin.Context) {
 					if !allowed[n] {
 						continue
 					}
-					if _, e3 := tx.Exec(
+					if _, e3 := execGorm(tx, 
 						`INSERT INTO FT_HISTORICO_CANAIS (id_historico, id_canal)
                          SELECT ?, id_canal FROM DM_CANAIS_COMUNICACAO WHERE nome = ?`,
 						lastID, n); e3 != nil {
@@ -1488,7 +1593,7 @@ func ComentarProcesso(c *gin.Context) {
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar transação"})
 		return
 	}
@@ -1502,7 +1607,7 @@ func ComentarProcesso(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "comentário registrado no histórico."})
 }
 
-func salvarFluxoRessarcimentoInterno(processoID int, fluxoJSON string, tx *sql.Tx) error {
+func salvarFluxoRessarcimentoInterno(processoID int, fluxoJSON string, tx *gorm.DB) error {
 	if fluxoJSON == "" {
 		return nil
 	}
@@ -1527,7 +1632,7 @@ func salvarFluxoRessarcimentoInterno(processoID int, fluxoJSON string, tx *sql.T
 
 	log.Printf("[DEBUG-FLUXO-ITENS] proc=%d itens_count=%d", processoID, len(request.Itens))
 
-	if _, err := tx.Exec("DELETE FROM FT_FLUXO_RESSARCIMENTO WHERE id_processo = ?", processoID); err != nil {
+	if _, err := execGorm(tx, "DELETE FROM FT_FLUXO_RESSARCIMENTO WHERE id_processo = ?", processoID); err != nil {
 		log.Printf("[ERROR-FLUXO-DELETE] proc=%d err=%v", processoID, err)
 		return err
 	}
@@ -1575,7 +1680,7 @@ func salvarFluxoRessarcimentoInterno(processoID int, fluxoJSON string, tx *sql.T
 		valorFloat, _ := valorDec.Float64()
 		log.Printf("[DEBUG-FLUXO-INSERT] proc=%d idx=%d forma=%s valor=%.2f", processoID, idx, forma, valorFloat)
 
-		if _, err := tx.Exec(`
+		if _, err := execGorm(tx, `
             INSERT INTO FT_FLUXO_RESSARCIMENTO
                 (id_processo, forma_devolucao, valor, data_devolucao, data_envio_financeiro)
             VALUES (?, ?, ?, ?, ?)`,
@@ -1589,7 +1694,7 @@ func salvarFluxoRessarcimentoInterno(processoID int, fluxoJSON string, tx *sql.T
 	return nil
 }
 
-func salvarFaturamentoInterno(processoID int, faturamentoJSON string, tx *sql.Tx) error {
+func salvarFaturamentoInterno(processoID int, faturamentoJSON string, tx *gorm.DB) error {
 	if faturamentoJSON == "" {
 		return nil
 	}
@@ -1614,7 +1719,7 @@ func salvarFaturamentoInterno(processoID int, faturamentoJSON string, tx *sql.Tx
 
 	log.Printf("[DEBUG-FATURA-ITENS] proc=%d itens_count=%d", processoID, len(request.Itens))
 
-	if _, err := tx.Exec("DELETE FROM FT_FATURAMENTO WHERE id_processo = ?", processoID); err != nil {
+	if _, err := execGorm(tx, "DELETE FROM FT_FATURAMENTO WHERE id_processo = ?", processoID); err != nil {
 		log.Printf("[ERROR-FATURA-DELETE] proc=%d err=%v", processoID, err)
 		return err
 	}
@@ -1651,7 +1756,7 @@ func salvarFaturamentoInterno(processoID int, faturamentoJSON string, tx *sql.Tx
 		valorFloat, _ := valorDec.Float64()
 		log.Printf("[DEBUG-FATURA-INSERT] proc=%d idx=%d nf=%s valor=%.2f", processoID, idx, numeroNF, valorFloat)
 
-		if _, err := tx.Exec(`
+		if _, err := execGorm(tx, `
 			INSERT INTO FT_FATURAMENTO
 			(id_processo, numero_nf, data_emissao, data_vencimento, data_pagamento, valor)
 			VALUES (?, ?, ?, ?, ?, ?)`,
@@ -1701,8 +1806,8 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 		return
 	}
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao iniciar transação"})
 		return
 	}
@@ -1710,10 +1815,10 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 
 	var prevCS, prevCD decimal.NullDecimal
 	var prevDP, prevDD sql.NullString
-	_ = tx.QueryRow(`SELECT credito_simples, credito_dobro, data_procedencia, data_credito_dobro FROM FT_DEFERIMENTOS WHERE id_processo = ?`, processoID).
+	_ = queryRowGorm(tx, `SELECT credito_simples, credito_dobro, data_procedencia, data_credito_dobro FROM FT_DEFERIMENTOS WHERE id_processo = ?`, processoID).
 		Scan(&prevCS, &prevCD, &prevDP, &prevDD)
 
-	if _, err := tx.Exec(`
+	if _, err := execGorm(tx, `
         INSERT INTO FT_DEFERIMENTOS (id_processo, data_procedencia, credito_simples, credito_dobro, data_credito_dobro)
         VALUES (?, NULLIF(?, ''), ?, ?, NULLIF(?, ''))
         ON DUPLICATE KEY UPDATE data_procedencia=VALUES(data_procedencia), credito_simples=VALUES(credito_simples), credito_dobro=VALUES(credito_dobro), data_credito_dobro=VALUES(data_credito_dobro)
@@ -1722,11 +1827,16 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 		return
 	}
 
+	if err := updateColunaByData(tx, processoID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao atualizar coluna do processo"})
+		return
+	}
+
 	gestorIDVal, _ := c.Get("userID")
 	gestorID, _ := gestorIDVal.(int64)
 	// etapa/sub-etapa atuais
 	var etapaNome, subEtapa sql.NullString
-	_ = tx.QueryRow(`SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo WHERE p.id_processo = ?`, processoID).
+	_ = queryRowGorm(tx, `SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo WHERE p.id_processo = ?`, processoID).
 		Scan(&etapaNome, &subEtapa)
 
 	msg := "Deferimento atualizado"
@@ -1741,11 +1851,11 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 		msg = msg + " na data " + payload.DataProcedencia
 	}
 
-	_, _ = tx.Exec(`INSERT INTO FT_HISTORICO_MOVIMENTACOES (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao)
+	_, _ = execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
 		processoID, gestorID, etapaNome.String, etapaNome.String, etapaNome.String, etapaNome.String, subEtapa.String, msg)
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao finalizar"})
 		return
 	}
@@ -1804,15 +1914,7 @@ func SalvarDataAlerta(c *gin.Context) {
 		}
 	}
 
-	stmt, err := database.DB_App.Prepare("UPDATE FT_PROCESSOS SET data_alerta = ? WHERE id_processo = ?")
-	if err != nil {
-		log.Printf("SalvarDataAlerta prepare error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro interno ao preparar a query de atualização"})
-		return
-	}
-	defer stmt.Close()
-
-	if _, err := stmt.Exec(driverVal, id); err != nil {
+	if _, err := execGorm(database.GormDB_App, "UPDATE FT_PROCESSOS SET data_alerta = ? WHERE id_processo = ?", driverVal, id); err != nil {
 		log.Printf("SalvarDataAlerta Exec error (id=%d, val=%v, bindErr=%v): %v", id, driverVal, bindErr, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "não foi possível salvar a data de alerta"})
 		return
@@ -1843,15 +1945,15 @@ func DescartarProcesso(c *gin.Context) {
 		return
 	}
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transação"})
 		return
 	}
 	defer tx.Rollback()
 
 	var etapaAnteriorNome, subAnterior sql.NullString
-	if err = tx.QueryRow(`
+	if err = queryRowGorm(tx, `
 		SELECT e.etapa, p.sub_etapa
 		  FROM FT_PROCESSOS p 
 		  JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo 
@@ -1861,14 +1963,14 @@ func DescartarProcesso(c *gin.Context) {
 	}
 
 	var novaEtapaID int
-	if err = tx.QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = 'Indeferido'").Scan(&novaEtapaID); err != nil {
+	if err = queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = 'Indeferido'").Scan(&novaEtapaID); err != nil {
 		log.Printf("Erro ao buscar ID da etapa Indeferido: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro interno ao descartar o processo"})
 		return
 	}
 
 	// mantemos ultima_atualizacao (mesmo para admin) por ser transição de status
-	if _, err = tx.Exec("UPDATE FT_PROCESSOS SET id_etapa_processo = ?, ultima_atualizacao = NOW() WHERE id_processo = ?", novaEtapaID, processoID); err != nil {
+	if _, err = execGorm(tx, "UPDATE FT_PROCESSOS SET id_etapa_processo = ?, ultima_atualizacao = NOW() WHERE id_processo = ?", novaEtapaID, processoID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao descartar o processo"})
 		return
 	}
@@ -1880,7 +1982,7 @@ func DescartarProcesso(c *gin.Context) {
 	}
 	statusNovo := "Indeferido"
 
-	if _, err = tx.Exec(
+	if _, err = execGorm(tx, 
 		`INSERT INTO FT_HISTORICO_MOVIMENTACOES 
            (id_requisicao, id_usuario_gestor, status_anterior, status_novo, 
             etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao) 
@@ -1891,7 +1993,7 @@ func DescartarProcesso(c *gin.Context) {
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar transação"})
 		return
 	}
@@ -1918,7 +2020,7 @@ func ExcluirProcessoPermanentemente(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do processo inválido"})
 		return
 	}
-	if _, err = database.DB_App.Exec("DELETE FROM FT_REQUISICOES WHERE id_requisicao = ?", processoID); err != nil {
+	if _, err = execGorm(database.GormDB_App, "DELETE FROM FT_REQUISICOES WHERE id_requisicao = ?", processoID); err != nil {
 		log.Printf("Erro ao excluir permanentemente o processo %d: %v", processoID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao excluir o processo do banco de dados."})
 		return
@@ -1944,34 +2046,34 @@ func SuspenderProcesso(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&body)
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transação"})
 		return
 	}
 	defer tx.Rollback()
 
 	var etapaAtual, subAtual sql.NullString
-	_ = tx.QueryRow(`SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo=p.id_etapa_processo WHERE p.id_processo=?`,
+	_ = queryRowGorm(tx, `SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo=p.id_etapa_processo WHERE p.id_processo=?`,
 		processoID).Scan(&etapaAtual, &subAtual)
 
 	// não mexe na sub_etapa; não altera ultima_atualizacao (opcional: pode alterar se desejar)
 	var etapaSuspID sql.NullInt64
-	_ = tx.QueryRow(`SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa IN ('Suspenso','Suspensos') LIMIT 1`).Scan(&etapaSuspID)
+	_ = queryRowGorm(tx, `SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa IN ('Suspenso','Suspensos') LIMIT 1`).Scan(&etapaSuspID)
 
 	if etapaSuspID.Valid {
-		if _, err := tx.Exec(`UPDATE FT_PROCESSOS SET suspenso=1, id_etapa_processo=?, sub_etapa='Suspenso', ultima_atualizacao=NOW() WHERE id_processo=?`, etapaSuspID.Int64, processoID); err != nil {
+		if _, err := execGorm(tx, `UPDATE FT_PROCESSOS SET suspenso=1, id_etapa_processo=?, sub_etapa='Suspenso', id_sub_etapa_processo=NULL, id_coluna=99, nome_coluna='Suspensos', ultima_atualizacao=NOW() WHERE id_processo=?`, etapaSuspID.Int64, processoID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao suspender processo"})
 			return
 		}
 	} else {
-		if _, err := tx.Exec(`UPDATE FT_PROCESSOS SET suspenso=1 WHERE id_processo=?`, processoID); err != nil {
+		if _, err := execGorm(tx, `UPDATE FT_PROCESSOS SET suspenso=1 WHERE id_processo=?`, processoID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao suspender processo"})
 			return
 		}
 	}
 
-	_, _ = tx.Exec(`INSERT INTO FT_HISTORICO_MOVIMENTACOES
+	_, _ = execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES
         (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
         VALUES (?,?,?,?,?,?,?,?,NOW(),'suspensao')`,
 		processoID,
@@ -1982,7 +2084,7 @@ func SuspenderProcesso(c *gin.Context) {
 		strings.TrimSpace(body.Comentario),
 	)
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar transação"})
 		return
 	}
@@ -2008,19 +2110,19 @@ func RetomarProcesso(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&body)
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transação"})
 		return
 	}
 	defer tx.Rollback()
 
 	var etapaAtual, subAtual sql.NullString
-	_ = tx.QueryRow(`SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo=p.id_etapa_processo WHERE p.id_processo=?`,
+	_ = queryRowGorm(tx, `SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo=p.id_etapa_processo WHERE p.id_processo=?`,
 		processoID).Scan(&etapaAtual, &subAtual)
 
 	var prevEtapa, prevSub sql.NullString
-	_ = tx.QueryRow(`
+	_ = queryRowGorm(tx, `
         SELECT etapa_anterior, sub_etapa
           FROM FT_HISTORICO_MOVIMENTACOES
          WHERE id_requisicao = ? AND tipo_movimentacao = 'suspensao'
@@ -2037,19 +2139,43 @@ func RetomarProcesso(c *gin.Context) {
 	args := []interface{}{}
 	if targetStage != "" {
 		var stageID sql.NullInt64
-		_ = tx.QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", targetStage).Scan(&stageID)
+		_ = queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", targetStage).Scan(&stageID)
 		if stageID.Valid {
 			setClauses = append(setClauses, "id_etapa_processo = ?")
 			args = append(args, stageID.Int64)
+			var colID sql.NullInt64
+			var colNome sql.NullString
+			_ = queryRowGorm(tx, `
+				SELECT k.id_coluna, k.nome_coluna
+				  FROM DM_ETAPAS_PROCESSO e
+				  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
+				 WHERE e.id_etapa_processo = ?`,
+				stageID.Int64,
+			).Scan(&colID, &colNome)
+			setClauses = append(setClauses, "id_coluna = ?")
+			if colID.Valid {
+				args = append(args, colID.Int64)
+			} else {
+				args = append(args, nil)
+			}
+			setClauses = append(setClauses, "nome_coluna = ?")
+			if colNome.Valid {
+				args = append(args, colNome.String)
+			} else {
+				args = append(args, nil)
+			}
 		}
 	}
 	if targetSub != "" {
 		setClauses = append(setClauses, "sub_etapa = ?")
 		args = append(args, targetSub)
+		subID, _ := resolveSubEtapaIDGorm(tx, targetSub)
+		setClauses = append(setClauses, "id_sub_etapa_processo = ?")
+		args = append(args, nullIntToIface(subID))
 	}
 	args = append(args, processoID)
 	query := fmt.Sprintf("UPDATE FT_PROCESSOS SET %s WHERE id_processo = ?", strings.Join(setClauses, ", "))
-	if _, err := tx.Exec(query, args...); err != nil {
+	if _, err := execGorm(tx, query, args...); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao retomar processo"})
 		return
 	}
@@ -2062,7 +2188,7 @@ func RetomarProcesso(c *gin.Context) {
 	if restoredSub == "" {
 		restoredSub = subAtual.String
 	}
-	_, _ = tx.Exec(`INSERT INTO FT_HISTORICO_MOVIMENTACOES
+	_, _ = execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES
         (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
         VALUES (?,?,?,?,?,?,?,?,NOW(),'retomada')`,
 		processoID,
@@ -2073,7 +2199,7 @@ func RetomarProcesso(c *gin.Context) {
 		strings.TrimSpace(body.Comentario),
 	)
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar transação"})
 		return
 	}
@@ -2105,7 +2231,7 @@ func GetAlertasByUser(c *gin.Context) {
 	}
 
 	var alertas []models.Alerta
-	rows, err := database.DB_App.Query(`
+	rows, err := queryGorm(database.GormDB_App, `
 		SELECT id_alerta, id_processo, mensagem, lido, data_criacao
 		  FROM FT_ALERTAS
 		 WHERE id_usuario = ?
@@ -2150,7 +2276,7 @@ func MarcarAlertaComoLido(c *gin.Context) {
 	}
 
 	query := "UPDATE FT_ALERTAS SET lido = TRUE WHERE id_alerta IN (?" + strings.Repeat(",?", len(input.AlertaIDs)-1) + ")"
-	if _, err := database.DB_App.Exec(query, args...); err != nil {
+	if _, err := execGorm(database.GormDB_App, query, args...); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao marcar alertas como lidos"})
 		return
 	}
@@ -2179,7 +2305,7 @@ func GetProcessosSuspensos(c *gin.Context) {
 		}
 	}
 
-	repo := repositories.NewProcessosRepo(database.DB_App)
+	repo := repositories.NewProcessosRepo(database.GormDB_App)
 	items, err := repo.ListarSuspensos(c.Request.Context(), limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar suspensos"})
@@ -2223,7 +2349,7 @@ func CreateAlertaManual(c *gin.Context) {
 		driverDate = val
 	}
 
-	if _, err := database.DB_App.Exec(
+	if _, err := execGorm(database.GormDB_App,
 		"INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, data_criacao, data_alerta) VALUES (?, ?, ?, 0, NOW(), ?)",
 		userID, procID, msg, driverDate,
 	); err != nil {
@@ -2252,7 +2378,7 @@ func GetDeferimentoByProcesso(c *gin.Context) {
 	}
 
 	var out models.Deferimento
-	err = database.DB_App.QueryRow(`
+	err = queryRowGorm(database.GormDB_App, `
         SELECT status_analise, data_procedencia, credito_simples, credito_dobro, data_credito_dobro
         FROM FT_DEFERIMENTOS
         WHERE id_processo = ?
@@ -2285,7 +2411,7 @@ func GetDeferimentoByProcesso(c *gin.Context) {
 // DELETE /api/alertas/:id
 func DeleteAlerta(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
-	if _, err := database.DB_App.Exec("DELETE FROM FT_ALERTAS WHERE id_alerta=?", id); err != nil {
+	if _, err := execGorm(database.GormDB_App, "DELETE FROM FT_ALERTAS WHERE id_alerta=?", id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao excluir"})
 		return
 	}
@@ -2295,7 +2421,7 @@ func DeleteAlerta(c *gin.Context) {
 // notifica ao Usuário a contagem de não lidos via SSE
 func notifyUnread(userID int64) {
 	var unread int
-	_ = database.DB_App.QueryRow(
+	_ = queryRowGorm(database.GormDB_App,
 		"SELECT COUNT(*) FROM FT_ALERTAS WHERE id_usuario=? AND lido=0",
 		userID,
 	).Scan(&unread)
@@ -2307,6 +2433,8 @@ func notifyUnread(userID int64) {
 		},
 	})
 }
+
+
 
 
 

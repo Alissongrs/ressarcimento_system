@@ -1,4 +1,4 @@
-// backend/repositories/dashboard_repo.go
+﻿// backend/repositories/dashboard_repo.go
 package repositories
 
 import (
@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // DashFilters controla filtros globais do Dashboard aplicados nas consultas.
@@ -21,10 +23,10 @@ type DashFilters struct {
 }
 
 type DashboardRepo struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewDashboardRepo(db *sql.DB) *DashboardRepo { return &DashboardRepo{db: db} }
+func NewDashboardRepo(db *gorm.DB) *DashboardRepo { return &DashboardRepo{db: db} }
 
 // === Tipos de retorno usados pelo service ===
 type ProcCounts struct {
@@ -52,6 +54,11 @@ type CreditosTotal struct {
 	Dobro   float64
 }
 
+type CarteiraTotals struct {
+	Valor     float64
+	Processos int64
+}
+
 // Auxiliares para novos blocos
 type SeriesRow struct {
 	Label string
@@ -61,28 +68,69 @@ type SeriesRowF struct {
 	Label string
 	Total float64
 }
+type ColunaValorRow struct {
+	ColID int64
+	Total float64
+}
 
 // ============== Totais simples =================
 
 func (r *DashboardRepo) TotalRequisicoes(ctx context.Context) (int64, error) {
+	return r.TotalRequisicoesFiltered(ctx, DashFilters{})
+}
+
+func (r *DashboardRepo) TotalRequisicoesFiltered(ctx context.Context, f DashFilters) (int64, error) {
+	q := `SELECT COUNT(*) FROM FT_REQUISICOES WHERE 1=1`
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	if strings.TrimSpace(f.Concessionaria) != "" {
+		q += " AND concessionaria LIKE ?"
+		args = append(args, "%"+strings.TrimSpace(f.Concessionaria)+"%")
+	}
+	if strings.TrimSpace(f.Cliente) != "" {
+		q += " AND COALESCE(NULLIF(cliente,''), NULLIF(razao_social_fatura,'')) LIKE ?"
+		args = append(args, "%"+strings.TrimSpace(f.Cliente)+"%")
+	}
 	var n sql.NullInt64
-	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM FT_REQUISICOES`).Scan(&n)
-	return n.Int64, err
+	res := r.db.Raw( q, args...).Scan(&n)
+	return n.Int64, res.Error
 }
 
 func (r *DashboardRepo) TotalProcessos(ctx context.Context) (int64, error) {
-	// Se não houver FT_PROCESSOS, mantém 1:1 com requisições
+	return r.TotalProcessosFiltered(ctx, DashFilters{})
+}
+
+func (r *DashboardRepo) TotalProcessosFiltered(ctx context.Context, f DashFilters) (int64, error) {
+	q := `
+    SELECT COUNT(*)
+      FROM FT_PROCESSOS p
+ LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+     WHERE 1=1`
+	args := []any{}
+	if !f.IncluirSuspensos {
+		q += " AND COALESCE(p.suspenso,0)=0"
+	}
+	if f.ApenasRelevantes {
+		q += " AND COALESCE(p.relevancia,0)=1"
+	}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
 	var n sql.NullInt64
-	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM FT_PROCESSOS`).Scan(&n)
-	if err == nil && n.Valid {
+	res := r.db.Raw( q, args...).Scan(&n)
+	if res.Error == nil && n.Valid {
 		return n.Int64, nil
 	}
-	return r.TotalRequisicoes(ctx)
+	return r.TotalRequisicoesFiltered(ctx, f)
 }
 
 func (r *DashboardRepo) ValorTotalEstimado(ctx context.Context, f DashFilters) (float64, error) {
 	// Soma valor estimado, com possibilidade de filtrar por suspenso/relevância via join com processos
-	// Regra de ligação: FT_REQUISICOES.id_requisicao = FT_PROCESSOS.id_processo
+	// Regra de ligaÃ§ão: FT_REQUISICOES.id_requisicao = FT_PROCESSOS.id_processo
 	q := `
         SELECT COALESCE(SUM(r.ressarcimento_estimado),0) AS tot
           FROM FT_REQUISICOES r
@@ -95,43 +143,88 @@ func (r *DashboardRepo) ValorTotalEstimado(ctx context.Context, f DashFilters) (
 	if f.ApenasRelevantes {
 		q += " AND COALESCE(p.relevancia,0)=1"
 	}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
 	var v sql.NullFloat64
-	err := r.db.QueryRowContext(ctx, q, args...).Scan(&v)
-	return v.Float64, err
+	res := r.db.Raw( q, args...).Scan(&v)
+	return v.Float64, res.Error
+}
+
+// Valor em carteira = Ativos (ressarcimento estimado) + Deferidos (credito simples+dobro), exclui suspensos por padrÃÂ£o.
+func (r *DashboardRepo) CarteiraTotals(ctx context.Context, f DashFilters) (CarteiraTotals, error) {
+	qValor := "WITH Base AS (\n" +
+		"  SELECT\n" +
+		"    TRIM(REPLACE(CONVERT(id_processo USING latin1), CHAR(160), ' ')) AS pid,\n" +
+		"    TRIM(`Coluna Kanban Atual`) AS kanban,\n" +
+		"    `Ressarcimento Estimado` AS ressarcimento_estimado,\n" +
+		"    `CREDITO SIMPLES` AS credito_simples,\n" +
+		"    `CREDITO DOBRO` AS credito_dobro\n" +
+		"  FROM db_ressarcimento.VW_POWERBI_PROCESSOS\n" +
+		"  WHERE id_processo IS NOT NULL\n" +
+		"    AND LOWER(TRIM(`Coluna Kanban Atual`)) IN ('ativos', 'deferidos')\n" +
+		"    AND `Suspenso` = 0\n" +
+		")\n" +
+		"SELECT\n" +
+		"  SUM(\n" +
+		"    CASE\n" +
+		"      WHEN col = 'ativos' THEN v_ativos\n" +
+		"      WHEN col = 'deferidos' THEN v_deferidos\n" +
+		"      ELSE 0\n" +
+		"    END\n" +
+		"  ) AS valor_em_carteira\n" +
+		"FROM (\n" +
+		"  SELECT\n" +
+		"    pid,\n" +
+		"    LOWER(MAX(kanban)) AS col,\n" +
+		"    COALESCE(MAX(ressarcimento_estimado), 0) AS v_ativos,\n" +
+		"    COALESCE(MAX(credito_simples), 0) + COALESCE(MAX(credito_dobro), 0) AS v_deferidos\n" +
+		"  FROM Base\n" +
+		"  GROUP BY pid\n" +
+		") t"
+	qCount := "SELECT COUNT(DISTINCT id_processo) AS qtd_processos_em_carteira\n" +
+		"FROM db_ressarcimento.VW_POWERBI_PROCESSOS\n" +
+		"WHERE id_processo IS NOT NULL\n" +
+		"  AND TRIM(id_processo) <> ''\n" +
+		"  AND LOWER(TRIM(`Coluna Kanban Atual`)) IN ('ativos', 'deferidos')\n" +
+		"  AND COALESCE(`Suspenso`, 0) = 0"
+
+	var valor sql.NullFloat64
+	if res := r.db.Raw( qValor).Scan(&valor); res.Error != nil {
+		return CarteiraTotals{}, res.Error
+	}
+	var processos sql.NullInt64
+	if res := r.db.Raw( qCount).Scan(&processos); res.Error != nil {
+		return CarteiraTotals{}, res.Error
+	}
+	return CarteiraTotals{Valor: valor.Float64, Processos: processos.Int64}, nil
 }
 
 // ============== Pipeline por coluna =================
 // Regra: usar coluna_kanban se presente; caso contrário,
-// derivar por etapa/status/passo (cobrindo “finalizado/encerrado/pago/creditado”).
+// derivar por etapa/status/passo (cobrindo â€œfinalizado/encerrado/pago/creditadoâ€).
+//
+// IMPORTANTE: se coluna_kanban for TEXTO ("Ativos", "Fluxo"...), mapeamos para IDs 1..6.
+// Se for numérico (ou string numérica), usamos o número.
 func (r *DashboardRepo) ProcessosCounts(ctx context.Context, f DashFilters) (ProcCounts, error) {
 	q := `
         WITH base AS (
           SELECT
-            COALESCE(
-              coluna_kanban,
-              CASE
-		        /* CONCLUÍDOS / FINALIZADOS / ENCERRADOS / PAGOS / CREDITADOS */
-		        WHEN LOWER(COALESCE(etapa,''))   REGEXP 'conclu|finaliz|encerr|pago|credit'
-		          OR LOWER(COALESCE(status,''))  REGEXP 'conclu|finaliz|encerr|pago|credit'
-		          OR LOWER(COALESCE(passo,''))   REGEXP 'conclu|finaliz|encerr|pago|credit' THEN 5
-		        /* INDEFERIDOS / IMPROCEDENTES */
-		        WHEN LOWER(COALESCE(etapa,''))   REGEXP 'indefer|improced'
-		          OR LOWER(COALESCE(status,''))  REGEXP 'indefer|improced' THEN 6
-		        /* FATURAMENTO */
-		        WHEN LOWER(COALESCE(etapa,''))   REGEXP 'fatur'
-		          OR LOWER(COALESCE(status,''))  REGEXP 'fatur' THEN 4
-		        /* FLUXO DE RESSARCIMENTO */
-		        WHEN LOWER(COALESCE(etapa,''))   REGEXP 'fluxo|ressarc'
-		          OR LOWER(COALESCE(status,''))  REGEXP 'fluxo|ressarc' THEN 3
-        /* DEFERIDOS / PROCEDENTES / APROVADOS */
-        WHEN LOWER(COALESCE(etapa,''))   REGEXP 'deferid|proced|aprov'
-          OR LOWER(COALESCE(status,''))  REGEXP 'deferid|proced|aprov' THEN 2
-		        /* DEFAULT → ATIVOS */
-		        ELSE 1
-		      END
-		    ) AS col_id
-          FROM FT_PROCESSOS
-          WHERE COALESCE(descartado,0)=0
+            CASE
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'ativo' THEN 1
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'defer' THEN 2
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fluxo|ressarc' THEN 3
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fatur' THEN 4
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'conclu|finaliz|encerr|pago|credit' THEN 5
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'indefer|improced|rejeit' THEN 6
+              ELSE 1
+            END AS col_id
+          FROM FT_PROCESSOS p
+          LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+          LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+          LEFT JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
+          WHERE 1=1
         )
         SELECT
           SUM(col_id=1) AS ativos,
@@ -142,32 +235,133 @@ func (r *DashboardRepo) ProcessosCounts(ctx context.Context, f DashFilters) (Pro
           SUM(col_id=6) AS indeferidos
         FROM base;
     `
-	// aplica filtros na CTE base
+	args := []any{}
+
 	if !f.IncluirSuspensos {
-		q = strings.Replace(q, "WHERE COALESCE(descartado,0)=0", "WHERE COALESCE(descartado,0)=0 AND COALESCE(suspenso,0)=0", 1)
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.suspenso,0)=0", 1)
 	}
 	if f.ApenasRelevantes {
-		q = strings.Replace(q, "FROM FT_PROCESSOS\n          WHERE", "FROM FT_PROCESSOS\n          WHERE COALESCE(relevancia,0)=1 AND", 1)
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.relevancia,0)=1", 1)
 	}
+	if f.Ini != nil && f.Fim != nil {
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND DATE(r.data_criacao) BETWEEN ? AND ?", 1)
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+
 	var out ProcCounts
-	err := r.db.QueryRowContext(ctx, q).Scan(
+	err := r.db.Raw( q, args...).Row().Scan(
 		&out.Ativos, &out.Deferidos, &out.Fluxo, &out.Faturamento, &out.Concluidos, &out.Indeferidos,
 	)
 	return out, err
 }
 
-// ============== Status counts (triagem da requisição) =================
+// Valor estimado por coluna de Kanban (com mesmas regras do ProcessosCounts)
+func (r *DashboardRepo) ValorEstimadoPorColuna(ctx context.Context, f DashFilters) ([]ColunaValorRow, error) {
+	q := `
+        WITH base AS (
+          SELECT
+            CASE
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'ativo' THEN 1
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'defer' THEN 2
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fluxo|ressarc' THEN 3
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fatur' THEN 4
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'conclu|finaliz|encerr|pago|credit' THEN 5
+              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'indefer|improced|rejeit' THEN 6
+              ELSE 1
+            END AS col_id,
+            COALESCE(r.ressarcimento_estimado, 0) AS valor
+          FROM FT_PROCESSOS p
+          LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+          LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+          LEFT JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
+          WHERE 1=1
+        )
+        SELECT col_id, COALESCE(SUM(valor),0) AS total
+        FROM base
+        GROUP BY col_id
+        ORDER BY col_id;
+    `
+	args := []any{}
+
+	if !f.IncluirSuspensos {
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.suspenso,0)=0", 1)
+	}
+	if f.ApenasRelevantes {
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.relevancia,0)=1", 1)
+	}
+	if f.Ini != nil && f.Fim != nil {
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND DATE(r.data_criacao) BETWEEN ? AND ?", 1)
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+
+	rows, err := r.db.Raw( q, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []ColunaValorRow{}
+	for rows.Next() {
+		var row ColunaValorRow
+		if err := rows.Scan(&row.ColID, &row.Total); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// Total de ressarcimento com base na data_envio_financeiro (apenas processos em Fluxo)
+func (r *DashboardRepo) RessarcimentoPorEnvioFinanceiro(ctx context.Context, f DashFilters) (float64, error) {
+	sub := `
+        SELECT DISTINCT fr.id_processo
+        FROM FT_FLUXO_RESSARCIMENTO fr
+        WHERE fr.data_envio_financeiro IS NOT NULL
+    `
+	q := `
+        SELECT COALESCE(SUM(COALESCE(d.repasse_simples,0) + COALESCE(d.repasse_dobro,0)),0) AS total
+        FROM FT_DEFERIMENTOS d
+        JOIN (` + sub + `) fx ON fx.id_processo = d.id_processo
+    `
+	args := []any{}
+
+	if f.Ini != nil && f.Fim != nil {
+		sub = strings.Replace(sub, "WHERE fr.data_envio_financeiro IS NOT NULL", "WHERE fr.data_envio_financeiro IS NOT NULL AND DATE(fr.data_envio_financeiro) BETWEEN ? AND ?", 1)
+		q = `
+        SELECT COALESCE(SUM(COALESCE(d.repasse_simples,0) + COALESCE(d.repasse_dobro,0)),0) AS total
+        FROM FT_DEFERIMENTOS d
+        JOIN (` + sub + `) fx ON fx.id_processo = d.id_processo
+    `
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+
+	var total sql.NullFloat64
+	res := r.db.Raw( q, args...).Scan(&total)
+	return total.Float64, res.Error
+}
+
+// ============== Status counts (triagem da requisiÃ§ão) =================
 func (r *DashboardRepo) StatusCounts(ctx context.Context) (StatusCounts, error) {
+	return r.StatusCountsFiltered(ctx, DashFilters{})
+}
+
+func (r *DashboardRepo) StatusCountsFiltered(ctx context.Context, f DashFilters) (StatusCounts, error) {
 	q := `
 	SELECT
-  SUM(LOWER(COALESCE(status,'')) REGEXP 'nova requis') AS pendente,
-	  SUM(LOWER(COALESCE(status,'')) REGEXP 'analis|triag') AS em_analise,
-	  SUM(LOWER(COALESCE(status,'')) REGEXP 'aprov|proced') AS aprovado,
-	  SUM(LOWER(COALESCE(status,'')) REGEXP 'rejeit|improced') AS rejeitado
-	FROM FT_REQUISICOES;
-	`
+	  SUM(LOWER(COALESCE(s.status,'')) REGEXP 'nova requis') AS pendente,
+	  SUM(LOWER(COALESCE(s.status,'')) REGEXP 'analis|triag') AS em_analise,
+	  SUM(LOWER(COALESCE(s.status,'')) REGEXP 'aprov|proced') AS aprovado,
+	  SUM(LOWER(COALESCE(s.status,'')) REGEXP 'rejeit|improced') AS rejeitado
+	FROM FT_REQUISICOES r
+	LEFT JOIN DM_STATUS s ON s.id_status = r.id_status
+	WHERE 1=1`
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
 	var out StatusCounts
-	err := r.db.QueryRowContext(ctx, q).Scan(
+	err := r.db.Raw( q, args...).Row().Scan(
 		&out.Pendente, &out.EmAnalise, &out.Aprovado, &out.Rejeitado,
 	)
 	return out, err
@@ -175,24 +369,40 @@ func (r *DashboardRepo) StatusCounts(ctx context.Context) (StatusCounts, error) 
 
 // ============== Créditos (simples/dobro) =================
 func (r *DashboardRepo) CreditosTotals(ctx context.Context) (CreditosTotal, error) {
+	return r.CreditosTotalsFiltered(ctx, DashFilters{})
+}
+
+func (r *DashboardRepo) CreditosTotalsFiltered(ctx context.Context, f DashFilters) (CreditosTotal, error) {
 	q := `
 	SELECT
-	  COALESCE(SUM(credito_simples),0) AS simples,
-	  COALESCE(SUM(credito_dobro),0)   AS dobro
-	FROM FT_DEFERIMENTOS;
+	  COALESCE(SUM(d.credito_simples),0) AS simples,
+	  COALESCE(SUM(d.credito_dobro),0)   AS dobro
+	FROM FT_DEFERIMENTOS d
+	LEFT JOIN FT_PROCESSOS p ON p.id_processo = d.id_processo
+	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+	WHERE 1=1
 	`
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
 	var out CreditosTotal
 	var s, d sql.NullFloat64
-	err := r.db.QueryRowContext(ctx, q).Scan(&s, &d)
+	err := r.db.Raw( q, args...).Row().Scan(&s, &d)
 	out.Simples = s.Float64
 	out.Dobro = d.Float64
 	return out, err
 }
 
 // ============== Tempo médio por etapa =================
-// Dwell time por etapa: tempo até a PRÓXIMA movimentação.
+// Dwell time por etapa: tempo até a PRÓXIMA movimentaÃ§ão.
 // Remove rótulos genéricos tipo "Histórico" para não poluir o ranking.
 func (r *DashboardRepo) TempoMedioPorEtapa(ctx context.Context) ([]TempoMedioEtapaRow, error) {
+	return r.TempoMedioPorEtapaFiltered(ctx, DashFilters{})
+}
+
+func (r *DashboardRepo) TempoMedioPorEtapaFiltered(ctx context.Context, f DashFilters) ([]TempoMedioEtapaRow, error) {
 	q := `
 	WITH movs AS (
 	  SELECT
@@ -206,18 +416,22 @@ func (r *DashboardRepo) TempoMedioPorEtapa(ctx context.Context) ([]TempoMedioEta
 	dwell AS (
 	  SELECT
 	    etapa,
+	    data_movimentacao,
 	    TIMESTAMPDIFF(HOUR, data_movimentacao, prox_data)/24.0 AS dias
 	  FROM movs
 	  WHERE prox_data IS NOT NULL AND etapa IS NOT NULL
 	)
 	SELECT etapa, AVG(dias) AS dias
 	FROM dwell
-	GROUP BY etapa
-	HAVING etapa <> '' AND LOWER(etapa) NOT REGEXP '^hist'
-	ORDER BY dias DESC
-	LIMIT 20;
+	WHERE 1=1
 	`
-	rows, err := r.db.QueryContext(ctx, q)
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(data_movimentacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	q += " GROUP BY etapa HAVING etapa <> '' AND LOWER(etapa) NOT REGEXP '^hist' ORDER BY dias DESC LIMIT 20;"
+	rows, err := r.db.Raw( q, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +449,10 @@ func (r *DashboardRepo) TempoMedioPorEtapa(ctx context.Context) ([]TempoMedioEta
 
 // ============== Aging por coluna (dias sem movimentar) =================
 func (r *DashboardRepo) Aging(ctx context.Context) (AgingBuckets, error) {
-	// pega última movimentação por processo e calcula dias parados
+	return r.AgingFiltered(ctx, DashFilters{})
+}
+
+func (r *DashboardRepo) AgingFiltered(ctx context.Context, f DashFilters) (AgingBuckets, error) {
 	q := `
 	WITH ult AS (
 	  SELECT id_requisicao,
@@ -245,7 +462,8 @@ func (r *DashboardRepo) Aging(ctx context.Context) (AgingBuckets, error) {
 	),
 	age AS (
 	  SELECT
-	    DATEDIFF(CURDATE(), DATE(ult)) AS dias
+	    DATEDIFF(CURDATE(), DATE(ult)) AS dias,
+	    ult
 	  FROM ult
 	)
 	SELECT
@@ -253,10 +471,16 @@ func (r *DashboardRepo) Aging(ctx context.Context) (AgingBuckets, error) {
 	  SUM(dias BETWEEN 8 AND 15)       AS b8_15,
 	  SUM(dias BETWEEN 16 AND 30)      AS b16_30,
 	  SUM(dias >= 31)                  AS b31mais
-	FROM age;
+	FROM age
+	WHERE 1=1
 	`
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(ult) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
 	var out AgingBuckets
-	err := r.db.QueryRowContext(ctx, q).Scan(
+	err := r.db.Raw( q, args...).Row().Scan(
 		&out.B0_7, &out.B8_15, &out.B16_30, &out.B31Mais,
 	)
 	return out, err
@@ -296,7 +520,7 @@ func (r *DashboardRepo) Tendencia30d(ctx context.Context, f DashFilters) ([]Tend
 		args = append(args, "%"+strings.TrimSpace(f.Cliente)+"%")
 	}
 	q += " GROUP BY DATE(h.data_movimentacao) ORDER BY d"
-	rows, err := r.db.QueryContext(ctx, q, args...)
+	rows, err := r.db.Raw( q, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +572,7 @@ func (r *DashboardRepo) HeatmapSemana(ctx context.Context, f DashFilters) ([]Hea
 		args = append(args, "%"+strings.TrimSpace(f.Cliente)+"%")
 	}
 	q += " GROUP BY WEEKDAY(h.data_movimentacao), HOUR(h.data_movimentacao) ORDER BY dow, hr"
-	rows, err := r.db.QueryContext(ctx, q, args...)
+	rows, err := r.db.Raw( q, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +588,7 @@ func (r *DashboardRepo) HeatmapSemana(ctx context.Context, f DashFilters) ([]Hea
 	return out, rows.Err()
 }
 
-// ============== Movimentações por período =================
+// ============== MovimentaÃ§ões por período =================
 type MovPeriodoRow struct {
 	DataMov       time.Time
 	IDRequisicao  int64
@@ -389,7 +613,7 @@ func (r *DashboardRepo) MovimentacoesPeriodo(ctx context.Context, ini, fim time.
     ORDER BY h.data_movimentacao DESC, h.id_requisicao DESC
     LIMIT 5000;
     `
-	rows, err := r.db.QueryContext(ctx, q, ini.Format("2006-01-02"), fim.Format("2006-01-02"))
+	rows, err := r.db.Raw( q, ini.Format("2006-01-02"), fim.Format("2006-01-02")).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -407,15 +631,25 @@ func (r *DashboardRepo) MovimentacoesPeriodo(ctx context.Context, ini, fim time.
 
 // ============== Throughput (semana / mês) =================
 func (r *DashboardRepo) ThroughputSemana(ctx context.Context, limit int) ([]SeriesRow, error) {
+	return r.ThroughputSemanaFiltered(ctx, limit, DashFilters{})
+}
+
+func (r *DashboardRepo) ThroughputSemanaFiltered(ctx context.Context, limit int, f DashFilters) ([]SeriesRow, error) {
 	q := `
       SELECT DATE_FORMAT(data_criacao, '%x-W%v') AS lbl, COUNT(*) AS tot
       FROM FT_REQUISICOES
-      WHERE data_criacao >= CURDATE() - INTERVAL 180 DAY
-      GROUP BY DATE_FORMAT(data_criacao, '%x-W%v')
-      ORDER BY MIN(data_criacao) DESC
-      LIMIT ?;
+      WHERE 1=1
     `
-	rows, err := r.db.QueryContext(ctx, q, limit)
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	} else {
+		q += " AND data_criacao >= CURDATE() - INTERVAL 180 DAY"
+	}
+	q += " GROUP BY DATE_FORMAT(data_criacao, '%x-W%v') ORDER BY MIN(data_criacao) DESC LIMIT ?;"
+	args = append(args, limit)
+	rows, err := r.db.Raw( q, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -432,15 +666,25 @@ func (r *DashboardRepo) ThroughputSemana(ctx context.Context, limit int) ([]Seri
 }
 
 func (r *DashboardRepo) ThroughputMes(ctx context.Context, limit int) ([]SeriesRow, error) {
+	return r.ThroughputMesFiltered(ctx, limit, DashFilters{})
+}
+
+func (r *DashboardRepo) ThroughputMesFiltered(ctx context.Context, limit int, f DashFilters) ([]SeriesRow, error) {
 	q := `
       SELECT DATE_FORMAT(data_criacao, '%Y-%m') AS lbl, COUNT(*) AS tot
       FROM FT_REQUISICOES
-      WHERE data_criacao >= CURDATE() - INTERVAL 365 DAY
-      GROUP BY DATE_FORMAT(data_criacao, '%Y-%m')
-      ORDER BY MIN(data_criacao) DESC
-      LIMIT ?;
+      WHERE 1=1
     `
-	rows, err := r.db.QueryContext(ctx, q, limit)
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	} else {
+		q += " AND data_criacao >= CURDATE() - INTERVAL 365 DAY"
+	}
+	q += " GROUP BY DATE_FORMAT(data_criacao, '%Y-%m') ORDER BY MIN(data_criacao) DESC LIMIT ?;"
+	args = append(args, limit)
+	rows, err := r.db.Raw( q, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -458,14 +702,23 @@ func (r *DashboardRepo) ThroughputMes(ctx context.Context, limit int) ([]SeriesR
 
 // ============== Top Concessionárias / Clientes por valor estimado =================
 func (r *DashboardRepo) TopConcessionariasValor(ctx context.Context, limit int) ([]SeriesRowF, error) {
+	return r.TopConcessionariasValorFiltered(ctx, limit, DashFilters{})
+}
+
+func (r *DashboardRepo) TopConcessionariasValorFiltered(ctx context.Context, limit int, f DashFilters) ([]SeriesRowF, error) {
 	q := `
       SELECT concessionaria AS lbl, COALESCE(SUM(ressarcimento_estimado),0) AS tot
       FROM FT_REQUISICOES
-      GROUP BY concessionaria
-      ORDER BY tot DESC
-      LIMIT ?;
+      WHERE 1=1
     `
-	rows, err := r.db.QueryContext(ctx, q, limit)
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	q += " GROUP BY concessionaria ORDER BY tot DESC LIMIT ?;"
+	args = append(args, limit)
+	rows, err := r.db.Raw( q, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -482,15 +735,24 @@ func (r *DashboardRepo) TopConcessionariasValor(ctx context.Context, limit int) 
 }
 
 func (r *DashboardRepo) TopClientesValor(ctx context.Context, limit int) ([]SeriesRowF, error) {
+	return r.TopClientesValorFiltered(ctx, limit, DashFilters{})
+}
+
+func (r *DashboardRepo) TopClientesValorFiltered(ctx context.Context, limit int, f DashFilters) ([]SeriesRowF, error) {
 	q := `
       SELECT COALESCE(NULLIF(cliente,''), NULLIF(razao_social_fatura,''), 'N/A') AS lbl,
              COALESCE(SUM(ressarcimento_estimado),0) AS tot
       FROM FT_REQUISICOES
-      GROUP BY COALESCE(NULLIF(cliente,''), NULLIF(razao_social_fatura,''), 'N/A')
-      ORDER BY tot DESC
-      LIMIT ?;
+      WHERE 1=1
     `
-	rows, err := r.db.QueryContext(ctx, q, limit)
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	q += " GROUP BY COALESCE(NULLIF(cliente,''), NULLIF(razao_social_fatura,''), 'N/A') ORDER BY tot DESC LIMIT ?;"
+	args = append(args, limit)
+	rows, err := r.db.Raw( q, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -508,16 +770,26 @@ func (r *DashboardRepo) TopClientesValor(ctx context.Context, limit int) ([]Seri
 
 // ============== Canais (últimos 30 dias) =================
 func (r *DashboardRepo) CanaisDistribuicao30d(ctx context.Context) ([]SeriesRow, error) {
+	return r.CanaisDistribuicao30dFiltered(ctx, DashFilters{})
+}
+
+func (r *DashboardRepo) CanaisDistribuicao30dFiltered(ctx context.Context, f DashFilters) ([]SeriesRow, error) {
 	q := `
       SELECT LOWER(TRIM(dc.nome)) AS lbl, COUNT(*) AS tot
       FROM FT_HISTORICO_CANAIS hc
       JOIN DM_CANAIS_COMUNICACAO dc ON dc.id_canal = hc.id_canal
       JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_historico = hc.id_historico
-      WHERE h.data_movimentacao >= NOW() - INTERVAL 30 DAY
-      GROUP BY LOWER(TRIM(dc.nome))
-      ORDER BY tot DESC;
+      WHERE 1=1
     `
-	rows, err := r.db.QueryContext(ctx, q)
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(h.data_movimentacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	} else {
+		q += " AND h.data_movimentacao >= NOW() - INTERVAL 30 DAY"
+	}
+	q += " GROUP BY LOWER(TRIM(dc.nome)) ORDER BY tot DESC;"
+	rows, err := r.db.Raw( q, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -539,19 +811,25 @@ func (r *DashboardRepo) WIPPorGestor(ctx context.Context, limit int, f DashFilte
       SELECT COALESCE(u.nome_usuario, CONCAT('ID ', p.id_responsavel)) AS lbl, COUNT(*) AS tot
       FROM FT_PROCESSOS p
       LEFT JOIN DM_USUARIO u ON u.id_usuario = p.id_responsavel
-      WHERE COALESCE(p.descartado,0)=0
-    GROUP BY COALESCE(u.nome_usuario, CONCAT('ID ', p.id_responsavel))
+      LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+      WHERE 1=1
+      GROUP BY COALESCE(u.nome_usuario, CONCAT('ID ', p.id_responsavel))
       ORDER BY tot DESC
       LIMIT ?;
     `
-	// filtros
+	args := []any{}
 	if !f.IncluirSuspensos {
-		q = strings.Replace(q, "WHERE COALESCE(p.descartado,0)=0", "WHERE COALESCE(p.descartado,0)=0 AND COALESCE(p.suspenso,0)=0", 1)
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.suspenso,0)=0", 1)
 	}
 	if f.ApenasRelevantes {
-		q = strings.Replace(q, "WHERE COALESCE(p.descartado,0)=0", "WHERE COALESCE(p.descartado,0)=0 AND COALESCE(p.relevancia,0)=1", 1)
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.relevancia,0)=1", 1)
 	}
-	rows, err := r.db.QueryContext(ctx, q, limit)
+	if f.Ini != nil && f.Fim != nil {
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND DATE(r.data_criacao) BETWEEN ? AND ?", 1)
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	args = append(args, limit)
+	rows, err := r.db.Raw( q, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -569,6 +847,10 @@ func (r *DashboardRepo) WIPPorGestor(ctx context.Context, limit int, f DashFilte
 
 // ============== Histograma de valor estimado (buckets) =================
 func (r *DashboardRepo) ValorHistogram(ctx context.Context) ([]SeriesRow, error) {
+	return r.ValorHistogramFiltered(ctx, DashFilters{})
+}
+
+func (r *DashboardRepo) ValorHistogramFiltered(ctx context.Context, f DashFilters) ([]SeriesRow, error) {
 	q := `
       SELECT bucket, COUNT(*) AS tot
       FROM (
@@ -581,6 +863,7 @@ func (r *DashboardRepo) ValorHistogram(ctx context.Context) ([]SeriesRow, error)
           ELSE '100k+'
         END AS bucket
         FROM FT_REQUISICOES
+        WHERE 1=1
       ) t
       GROUP BY bucket
       ORDER BY CASE bucket
@@ -592,7 +875,12 @@ func (r *DashboardRepo) ValorHistogram(ctx context.Context) ([]SeriesRow, error)
         ELSE 6
       END;
     `
-	rows, err := r.db.QueryContext(ctx, q)
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND DATE(data_criacao) BETWEEN ? AND ?", 1)
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	rows, err := r.db.Raw( q, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
@@ -656,9 +944,164 @@ func (r *DashboardRepo) SLAResumo30d(ctx context.Context, limiteDias int, f Dash
 		q = strings.Replace(q, "WHERE 1=1\n      ), dif", "WHERE 1=1 AND h.data_movimentacao >= NOW() - INTERVAL 30 DAY\n      ), dif", 1)
 	}
 	var on, lt sql.NullInt64
-	err = r.db.QueryRowContext(ctx, q, args...).Scan(&on, &lt)
-	if err != nil {
-		return 0, 0, err
+	scanErr := r.db.Raw( q, args...).Row().Scan(&on, &lt)
+	if scanErr != nil {
+		return 0, 0, scanErr
 	}
 	return on.Int64, lt.Int64, nil
 }
+
+// ============== Repasse por concessionária =================
+func (r *DashboardRepo) RepassePorConcessionaria(ctx context.Context, f DashFilters, concessionarias []string) ([]SeriesRowF, error) {
+	q := `
+      SELECT r.concessionaria AS lbl,
+             COALESCE(SUM(COALESCE(d.repasse_simples,0) + COALESCE(d.repasse_dobro,0)),0) AS tot
+      FROM FT_DEFERIMENTOS d
+      JOIN FT_PROCESSOS p ON p.id_processo = d.id_processo
+      JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+      WHERE 1=1
+    `
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	if len(concessionarias) > 0 {
+		placeholders := strings.Repeat("?,", len(concessionarias))
+		placeholders = strings.TrimRight(placeholders, ",")
+		q += " AND r.concessionaria IN (" + placeholders + ")"
+		for _, c := range concessionarias {
+			args = append(args, c)
+		}
+	}
+	q += " GROUP BY r.concessionaria ORDER BY tot DESC;"
+	rows, err := r.db.Raw( q, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SeriesRowF
+	for rows.Next() {
+		var s SeriesRowF
+		if err := rows.Scan(&s.Label, &s.Total); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// ============== Tempo médio de conclusão por concessionária =================
+func (r *DashboardRepo) TempoMedioConclusaoPorConcessionaria(ctx context.Context, f DashFilters, concessionarias []string) ([]SeriesRowF, error) {
+	q := `
+      WITH concl AS (
+        SELECT h.id_requisicao,
+               MAX(h.data_movimentacao) AS data_conc
+        FROM FT_HISTORICO_MOVIMENTACOES h
+        WHERE LOWER(COALESCE(h.etapa_nova, h.etapa_anterior, '')) REGEXP 'conclu|finaliz|encerr|pago|credit'
+        GROUP BY h.id_requisicao
+      )
+      SELECT r.concessionaria AS lbl,
+             AVG(DATEDIFF(concl.data_conc, r.data_criacao)) AS dias
+      FROM concl
+      JOIN FT_REQUISICOES r ON r.id_requisicao = concl.id_requisicao
+      WHERE r.concessionaria IS NOT NULL AND r.concessionaria <> ''
+    `
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(concl.data_conc) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	if len(concessionarias) > 0 {
+		placeholders := strings.Repeat("?,", len(concessionarias))
+		placeholders = strings.TrimRight(placeholders, ",")
+		q += " AND r.concessionaria IN (" + placeholders + ")"
+		for _, c := range concessionarias {
+			args = append(args, c)
+		}
+	}
+	q += " GROUP BY r.concessionaria ORDER BY dias DESC;"
+	rows, err := r.db.Raw( q, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SeriesRowF
+	for rows.Next() {
+		var s SeriesRowF
+		if err := rows.Scan(&s.Label, &s.Total); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// ============== Composicao do Kanban =================
+func (r *DashboardRepo) KanbanComposicao(ctx context.Context, f DashFilters, concessionarias []string) ([]SeriesRow, error) {
+	q := `
+      SELECT
+        CASE
+          WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'indefer' THEN 'Indeferidos'
+          WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'defer' THEN 'Deferidos'
+          WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fluxo|ressarc' THEN 'Fluxo'
+          WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fatur' THEN 'Faturamento'
+          WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'conclu|finaliz|encerr|pago|credit' THEN 'Concluidos'
+          ELSE 'Ativos'
+        END AS lbl,
+        COUNT(*) AS tot
+      FROM FT_PROCESSOS p
+      JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+      JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
+      LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+      WHERE COALESCE(p.descartado,0)=0
+    `
+	args := []any{}
+	if !f.IncluirSuspensos {
+		q = strings.Replace(q, "WHERE COALESCE(p.descartado,0)=0", "WHERE COALESCE(p.descartado,0)=0 AND COALESCE(p.suspenso,0)=0", 1)
+	}
+	if f.ApenasRelevantes {
+		q = strings.Replace(q, "WHERE COALESCE(p.descartado,0)=0", "WHERE COALESCE(p.descartado,0)=0 AND COALESCE(p.relevancia,0)=1", 1)
+	}
+	if f.Ini != nil && f.Fim != nil {
+		q = strings.Replace(q, "WHERE COALESCE(p.descartado,0)=0", "WHERE COALESCE(p.descartado,0)=0 AND DATE(r.data_criacao) BETWEEN ? AND ?", 1)
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	if len(concessionarias) > 0 {
+		placeholders := strings.Repeat("?,", len(concessionarias))
+		placeholders = strings.TrimRight(placeholders, ",")
+		q += " AND r.concessionaria IN (" + placeholders + ")"
+		for _, c := range concessionarias {
+			args = append(args, c)
+		}
+	}
+	q += " GROUP BY lbl ORDER BY tot DESC;"
+	rows, err := r.db.Raw( q, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SeriesRow
+	for rows.Next() {
+		var s SeriesRow
+		if err := rows.Scan(&s.Label, &s.Total); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+

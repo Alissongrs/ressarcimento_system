@@ -1,14 +1,15 @@
-// backend/handlers/requisicao_handler.go
+﻿// backend/handlers/requisicao_handler.go
 package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"math"
+	"mime/multipart"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,14 +20,30 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-/* ============================================================
-CREATE – compatibilidade
-============================================================ */
-
 // CreateRequisicao: mantida para compatibilidade com rotas legadas.
 // Hoje delega para CreateRequisicaoSimple (não persiste em banco).
 func CreateRequisicao(c *gin.Context) {
 	CreateRequisicaoSimple(c)
+}
+
+// CreateRequisicaoPayload representa o payload de criaÃ§ão de requisiÃ§ão.
+type CreateRequisicaoPayload struct {
+	UC                      string                  `json:"uc" form:"uc" example:"48341497"`
+	IDUC                    string                  `json:"id_uc" form:"id_uc" example:"12345"`
+	IDEmpresa               string                  `json:"id_empresa" form:"id_empresa" example:"10"`
+	IDConcessionaria        string                  `json:"id_concessionaria" form:"id_concessionaria" example:"22"`
+	Cliente                 string                  `json:"cliente" form:"cliente" example:"CLARO S.A."`
+	RazaoSocialFatura       string                  `json:"razaoSocialFatura" form:"razaoSocialFatura" example:"CLARO S.A."`
+	CNPJ                    string                  `json:"cnpj" form:"cnpj" example:"00.000.000/0000-00"`
+	Concessionaria          string                  `json:"concessionaria" form:"concessionaria" example:"CEMIG"`
+	EnderecoCompleto        string                  `json:"enderecoCompleto" form:"enderecoCompleto" example:"Rua X, 123 - Cidade/UF"`
+	RessarcimentoEstimado   string                  `json:"ressarcimentoEstimado" form:"ressarcimentoEstimado" example:"12500,00"`
+	DescricaoIrregularidade string                  `json:"descricaoIrregularidade" form:"descricaoIrregularidade" example:"CobranÃ§a indevida..."`
+	PeriodosIrregularidade  string                  `json:"periodosIrregularidade" form:"periodosIrregularidade" example:"[{\"mes\":\"01\",\"ano\":\"2026\"}]"`
+	LinkFatura              string                  `json:"linkFatura" form:"linkFatura" example:"https://..."`
+	ProblemaIdentificado    string                  `json:"problemaIdentificado" form:"problemaIdentificado" example:"DescriÃ§ão adicional"`
+	GostariaAnexarFatura    bool                    `json:"gostariaAnexarFatura" form:"gostariaAnexarFatura" example:"false"`
+	Anexos                  []*multipart.FileHeader `json:"-" form:"anexos"`
 }
 
 // createRequisicaoPersistente insere em FT_REQUISICOES e FT_PROCESSOS (fluxo básico).
@@ -36,10 +53,26 @@ func createRequisicaoPersistente(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuário não autenticado"})
 		return
 	}
-	_ = userIDVal // reservado para futura auditoria
+	var userIDNull sql.NullInt64
+	switch v := userIDVal.(type) {
+	case int64:
+		userIDNull = sql.NullInt64{Int64: v, Valid: true}
+	case int:
+		userIDNull = sql.NullInt64{Int64: int64(v), Valid: true}
+	case float64:
+		userIDNull = sql.NullInt64{Int64: int64(v), Valid: true}
+	}
 
 	if err := c.Request.ParseMultipartForm(20 << 20); err != nil && !strings.Contains(strings.ToLower(err.Error()), "eof") {
 		log.Printf("[CreateRequisicaoPersist] ParseMultipartForm aviso: %v", err)
+	}
+
+	var payload CreateRequisicaoPayload
+	if strings.HasPrefix(strings.ToLower(c.GetHeader("Content-Type")), "application/json") {
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Payload JSON inválido", "detail": err.Error()})
+			return
+		}
 	}
 
 	get := func(name string) string {
@@ -51,24 +84,74 @@ func createRequisicaoPersistente(c *gin.Context) {
 		return c.PostForm(name)
 	}
 
-	cliente := strings.TrimSpace(get("cliente"))
-	uc := strings.TrimSpace(get("uc"))
-	concessionaria := strings.TrimSpace(get("concessionaria"))
-	enderecoCompleto := strings.TrimSpace(get("enderecoCompleto"))
-	descricaoIrregularidade := strings.TrimSpace(get("descricaoIrregularidade"))
-	periodosIrregularidade := strings.TrimSpace(get("periodosIrregularidade"))
-	linkFatura := strings.TrimSpace(get("linkFatura"))
+	cliente := strings.TrimSpace(payload.Cliente)
+	if cliente == "" {
+		cliente = strings.TrimSpace(get("cliente"))
+	}
+	uc := strings.TrimSpace(payload.UC)
+	if uc == "" {
+		uc = strings.TrimSpace(get("uc"))
+	}
+	concessionaria := strings.TrimSpace(payload.Concessionaria)
+	if concessionaria == "" {
+		concessionaria = strings.TrimSpace(get("concessionaria"))
+	}
+	enderecoCompleto := strings.TrimSpace(payload.EnderecoCompleto)
+	if enderecoCompleto == "" {
+		enderecoCompleto = strings.TrimSpace(get("enderecoCompleto"))
+	}
+	descricaoIrregularidade := strings.TrimSpace(payload.DescricaoIrregularidade)
+	if descricaoIrregularidade == "" {
+		descricaoIrregularidade = strings.TrimSpace(get("descricaoIrregularidade"))
+	}
+	periodosIrregularidade := strings.TrimSpace(payload.PeriodosIrregularidade)
+	if periodosIrregularidade == "" {
+		periodosIrregularidade = strings.TrimSpace(get("periodosIrregularidade"))
+	}
+	if periodosIrregularidade == "" {
+		periodosIrregularidade = strings.TrimSpace(get("periodos"))
+	}
+	if periodosIrregularidade == "" {
+		periodosIrregularidade = strings.TrimSpace(get("periodos_irregularidade"))
+	}
+	linkFatura := strings.TrimSpace(payload.LinkFatura)
+	if linkFatura == "" {
+		linkFatura = strings.TrimSpace(get("linkFatura"))
+	}
+	cnpj := strings.TrimSpace(payload.CNPJ)
+	if cnpj == "" {
+		cnpj = strings.TrimSpace(get("cnpj"))
+	}
+	razaoSocialFatura := strings.TrimSpace(payload.RazaoSocialFatura)
+	if razaoSocialFatura == "" {
+		razaoSocialFatura = strings.TrimSpace(get("razaoSocialFatura"))
+	}
+	_ = razaoSocialFatura
+	_ = cnpj
+	tipoID := strings.TrimSpace(get("id_tipo_irregularidade"))
+	if tipoID == "" {
+		tipoID = strings.TrimSpace(get("idTipoIrregularidade"))
+	}
+	subtipoID := strings.TrimSpace(get("id_subtipo_irregularidade"))
+	if subtipoID == "" {
+		subtipoID = strings.TrimSpace(get("idSubtipoIrregularidade"))
+	}
 	var ressarc string
+	if strings.TrimSpace(payload.RessarcimentoEstimado) != "" {
+		ressarc = strings.TrimSpace(payload.RessarcimentoEstimado)
+	}
 	keysRessarc := []string{
 		"ressarcimento_estimado",
 		"valor_estimado",
 		"ressarcimentoEstimado",
 		"RessarcimentoEstimado",
 	}
-	for _, k := range keysRessarc {
-		ressarc = strings.TrimSpace(get(k))
-		if ressarc != "" {
-			break
+	if ressarc == "" {
+		for _, k := range keysRessarc {
+			ressarc = strings.TrimSpace(get(k))
+			if ressarc != "" {
+				break
+			}
 		}
 	}
 	var ressarcNum sql.NullFloat64
@@ -80,9 +163,36 @@ func createRequisicaoPersistente(c *gin.Context) {
 		}
 	}
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transação"})
+	var missing []string
+	if uc == "" {
+		missing = append(missing, "uc")
+	}
+	if cliente == "" {
+		missing = append(missing, "cliente")
+	}
+	if concessionaria == "" {
+		missing = append(missing, "concessionaria")
+	}
+	if descricaoIrregularidade == "" {
+		missing = append(missing, "descricaoIrregularidade")
+	}
+	if periodosIrregularidade == "" {
+		missing = append(missing, "periodosIrregularidade")
+	}
+	if !ressarcNum.Valid || ressarcNum.Float64 <= 0 {
+		missing = append(missing, "ressarcimentoEstimado")
+	}
+	if len(missing) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":          "Campos obrigatórios ausentes",
+			"missing_fields": missing,
+		})
+		return
+	}
+
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transaÃ§ão"})
 		return
 	}
 	defer tx.Rollback()
@@ -90,7 +200,7 @@ func createRequisicaoPersistente(c *gin.Context) {
 	log.Printf("[CreateRequisicaoPersist] recebidos: uc=%q cliente=%q endereco=%q descricao=%q periodos=%q link=%q",
 		uc, cliente, enderecoCompleto, descricaoIrregularidade, periodosIrregularidade, linkFatura)
 
-	res, err := tx.Exec(`
+	res, err := execGorm(tx, `
 			INSERT INTO FT_REQUISICOES (
 				cliente,
 				uc,
@@ -100,9 +210,12 @@ func createRequisicaoPersistente(c *gin.Context) {
 				descricao_irregularidade,
 				periodos_irregularidade,
 				link_fatura,
+				id_usuario,
+				id_tipo_irregularidade,
+				id_subtipo_irregularidade,
 				data_criacao,
 				data_mudanca_status
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
 		valOrNullStr(cliente),
 		valOrNullStr(uc),
 		valOrNullStr(concessionaria),
@@ -110,34 +223,111 @@ func createRequisicaoPersistente(c *gin.Context) {
 		valOrNullStr(enderecoCompleto),
 		valOrNullStr(descricaoIrregularidade),
 		valOrNullStr(periodosIrregularidade),
-		valOrNullStr(linkFatura))
+		valOrNullStr(linkFatura),
+		nullIntOrNil(userIDNull),
+		valOrNullStr(tipoID),
+		valOrNullStr(subtipoID))
 	if err != nil {
 		log.Printf("Erro ao inserir requisicao: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar requisição"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar requisiÃ§ão"})
 		return
 	}
 	lastID, _ := res.LastInsertId()
 	pid := int(lastID)
 
-	// cria FT_PROCESSOS básico (etapa Distribuidora ou fallback)
-	var etapaID int
-	if err := tx.QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = 'Distribuidora' LIMIT 1").Scan(&etapaID); err != nil {
-		etapaID = 1
-	}
-	if _, err := tx.Exec(`INSERT INTO FT_PROCESSOS (id_processo, id_etapa_processo, sub_etapa, relevancia, ultima_atualizacao) VALUES (?, ?, '', 0, NOW())`, pid, etapaID); err != nil {
+	// cria FT_PROCESSOS básico (etapa id=1, sub_etapa "Primeira reclamação da etapa - Em elaboração")
+	etapaID := 1
+	subEtapa := "Primeira reclamação da etapa - Em elaboração"
+	subID, _ := resolveSubEtapaIDGorm(tx, subEtapa)
+	var colID sql.NullInt64
+	var colNome sql.NullString
+	_ = queryRowGorm(tx, `
+		SELECT k.id_coluna, k.nome_coluna
+		  FROM DM_ETAPAS_PROCESSO e
+		  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
+		 WHERE e.id_etapa_processo = ?`,
+		etapaID,
+	).Scan(&colID, &colNome)
+	if _, err := execGorm(tx, `INSERT INTO FT_PROCESSOS (id_processo, id_etapa_processo, etapa, sub_etapa, id_sub_etapa_processo, id_coluna, nome_coluna, relevancia, ultima_atualizacao) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NOW())`,
+		pid, etapaID, "Distribuidora", subEtapa, nullIntToIface(subID), nullIntToIface(colID), func() interface{} {
+			if colNome.Valid {
+				return colNome.String
+			}
+			return nil
+		}()); err != nil {
 		log.Printf("Erro ao criar processo: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar processo"})
 		return
 	}
 
-	// histórico inicial
-	_, _ = tx.Exec(`INSERT INTO FT_HISTORICO_MOVIMENTACOES (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, relevancia_anterior, relevancia_nova, comentario, data_movimentacao, justificativa_atraso, tipo_movimentacao) VALUES (?, NULL, '', 'Distribuidora', '', 'Distribuidora', '', NULL, NULL, 'Requisição criada via API', NOW(), NULL, 'movimentacao')`, pid)
+	// Histórico de criaÃ§ão com todos os detalhes da requisiÃ§ão
+	anexosCount := 0
+	if c.Request != nil && c.Request.MultipartForm != nil {
+		if files, ok := c.Request.MultipartForm.File["anexos"]; ok {
+			anexosCount = len(files)
+		}
+	}
+	tipoNome := ""
+	subtipoNome := ""
+	if strings.TrimSpace(tipoID) != "" {
+		_ = queryRowGorm(tx, "SELECT nome FROM DM_TIPO_IRREGULARIDADE WHERE id_tipo = ?", tipoID).Scan(&tipoNome)
+	}
+	if strings.TrimSpace(subtipoID) != "" {
+		_ = queryRowGorm(tx, "SELECT nome FROM DM_SUBTIPO_IRREGULARIDADE WHERE id_subtipo = ?", subtipoID).Scan(&subtipoNome)
+	}
+	criadoEmStr := time.Now().Format("02/01/2006, 15:04")
+	periodoStr := formatPeriodos(periodosIrregularidade)
+	if strings.TrimSpace(periodoStr) == "" {
+		periodoStr = "-"
+	}
+	classStr := fmt.Sprintf("Irregularidade: %s | Sub irregularidade: %s", fallbackDash(tipoNome), fallbackDash(subtipoNome))
+	faturaStr := strings.TrimSpace(linkFatura)
+	if faturaStr == "" {
+		faturaStr = "-"
+	}
+	histComentario := strings.Join([]string{
+		fmt.Sprintf("UC: %s", uc),
+		fmt.Sprintf("Cliente: %s", cliente),
+		fmt.Sprintf("Concessionária: %s", concessionaria),
+		fmt.Sprintf("Valor estimado: %s", formatBRL(ressarcNum)),
+		fmt.Sprintf("Criado em: %s", criadoEmStr),
+		fmt.Sprintf("Período: %s", periodoStr),
+		fmt.Sprintf("Classificação: %s", classStr),
+		fmt.Sprintf("Fatura: %s", faturaStr),
+		fmt.Sprintf("Anexos: %d", anexosCount),
+		fmt.Sprintf("Descrição: %s", descricaoIrregularidade),
+	}, "\n")
+	_, _ = execGorm(tx, `
+		INSERT INTO FT_HISTORICO_MOVIMENTACOES
+		(id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
+		VALUES (?, ?, '', 'Nova Requisição', '', 'Nova Requisição', '', ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'criacao')`,
+		pid, nullIntOrNil(userIDNull), histComentario)
 
-	if err := tx.Commit(); err != nil {
+	// Se houve seleÃ§ão de fatura, registra na tabela e no histórico
+	if strings.TrimSpace(linkFatura) != "" {
+		_, _ = execGorm(tx, `
+			INSERT INTO FT_REQUISICOES_FATURAS (id_requisicao, link, mes_ref, dt_vencimento, valor_total)
+			VALUES (?, ?, NULL, NULL, NULL)`,
+			pid, linkFatura,
+		)
+		statusNome := strings.TrimSpace(getStatusNomeByRequisicaoGorm(tx, int64(pid)))
+		if statusNome == "" {
+			statusNome = "Nova Requisição"
+		}
+		_, _ = execGorm(tx, `
+			INSERT INTO FT_HISTORICO_MOVIMENTACOES
+			(id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
+			VALUES (?, ?, ?, ?, '', 'Distribuidora', ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'fatura')`,
+			pid, nullIntOrNil(userIDNull), statusNome, statusNome, subEtapa, "Fatura selecionada: "+strings.TrimSpace(linkFatura),
+		)
+	}
+
+	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar"})
 		return
 	}
 
+	syncSnapshotFromOriginal(pid, 0)
 	c.JSON(http.StatusCreated, gin.H{"id": pid, "message": "Requisição criada"})
 }
 
@@ -155,7 +345,87 @@ func nullFloatOrNil(n sql.NullFloat64) interface{} {
 	return nil
 }
 
+func nullIntOrNil(n sql.NullInt64) interface{} {
+	if n.Valid {
+		return n.Int64
+	}
+	return nil
+}
+
+func fallbackDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "-"
+	}
+	return strings.TrimSpace(s)
+}
+
+func formatPeriodos(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	type pItem struct {
+		Mes string `json:"mes"`
+		Ano string `json:"ano"`
+	}
+	var arr []pItem
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil || len(arr) == 0 {
+		return strings.TrimSpace(raw)
+	}
+	out := make([]string, 0, len(arr))
+	for _, p := range arr {
+		m := strings.TrimSpace(p.Mes)
+		a := strings.TrimSpace(p.Ano)
+		if m == "" || a == "" {
+			continue
+		}
+		if len(m) == 1 {
+			m = "0" + m
+		}
+		out = append(out, fmt.Sprintf("%s/%s", m, a))
+	}
+	return strings.Join(out, ", ")
+}
+
+func formatBRL(n sql.NullFloat64) string {
+	if !n.Valid {
+		return "R$ 0,00"
+	}
+	v := math.Round(n.Float64*100) / 100
+	s := fmt.Sprintf("%.2f", v)
+	parts := strings.SplitN(s, ".", 2)
+	intPart := parts[0]
+	decPart := "00"
+	if len(parts) > 1 {
+		decPart = parts[1]
+	}
+	neg := ""
+	if strings.HasPrefix(intPart, "-") {
+		neg = "-"
+		intPart = strings.TrimPrefix(intPart, "-")
+	}
+	var chunks []string
+	for len(intPart) > 3 {
+		chunks = append([]string{intPart[len(intPart)-3:]}, chunks...)
+		intPart = intPart[:len(intPart)-3]
+	}
+	if intPart != "" {
+		chunks = append([]string{intPart}, chunks...)
+	}
+	return fmt.Sprintf("R$ %s%s,%s", neg, strings.Join(chunks, "."), decPart)
+}
+
 // CreateRequisicaoPersist: persiste em FT_REQUISICOES e FT_PROCESSOS.
+// @Summary Criar requisicao (persistente)
+// @Tags Requisicoes
+// @Accept json
+// @Accept multipart/form-data
+// @Produce json
+// @Param body body CreateRequisicaoPayload true "Dados da requisicao"
+// @Param anexos formData file false "Anexos (multipart/form-data)"
+// @Success 201 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/requisicoes [post]
 func CreateRequisicaoPersist(c *gin.Context) {
 	createRequisicaoPersistente(c)
 }
@@ -165,6 +435,14 @@ HISTÓRICO
 ============================================================ */
 
 // GET /api/requisicoes/:id/historico
+// @Summary Historico da requisicao
+// @Tags Requisicoes
+// @Produce json
+// @Param id path int true "ID da requisicao"
+// @Success 200 {array} map[string]any
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/requisicoes/{id}/historico [get]
 func GetHistoricoByRequisicaoID(c *gin.Context) {
 	id := c.Param("id")
 
@@ -187,6 +465,14 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 	historicos := make([]HistoricoItem, 0)
 
 	// --- Tenta "schema novo" (com sub_etapa_anterior/nova e tipo_movimentacao)
+	var hasNewCols int
+	_ = database.GormDB_App.Raw(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME = 'FT_HISTORICO_MOVIMENTACOES'
+		  AND COLUMN_NAME IN ('sub_etapa_anterior','sub_etapa_nova','tipo_movimentacao')`,
+	).Row().Scan(&hasNewCols)
 	queryNew := `
 			SELECT
 				h.id_historico,
@@ -223,7 +509,8 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 			WHERE h.id_requisicao = ?
 			ORDER BY h.data_movimentacao DESC`
 
-	if rows, err := database.DB_App.Query(queryNew, id); err == nil {
+	if hasNewCols >= 2 {
+		if rows, err := database.GormDB_App.Raw(queryNew, id).Rows(); err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var it HistoricoItem
@@ -250,19 +537,19 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 		if historicos == nil {
 			historicos = make([]HistoricoItem, 0)
 		}
-		// Prepend criação do processo, se houver
+		// Prepend criaÃ§ão do processo, se houver
 		var createdAt sql.NullTime
-		if err := database.DB_App.QueryRow(
+		if err := database.GormDB_App.Raw(
 			"SELECT data_criacao FROM FT_REQUISICOES WHERE id_requisicao = ?",
 			id,
-		).Scan(&createdAt); err == nil && createdAt.Valid {
+		).Row().Scan(&createdAt); err == nil && createdAt.Valid {
 			ts := createdAt.Time.In(time.Local).Format("02/01/2006 15:04:05")
 			created := HistoricoItem{
 				ID:                 0,
 				NomeUsuario:        "Sistema",
 				StatusAnterior:     "",
-				StatusNovo:         "Criação do Processo",
-				StatusComposto:     "Criação do Processo",
+				StatusNovo:         "CriaÃ§ão do Processo",
+				StatusComposto:     "CriaÃ§ão do Processo",
 				EtapaAnterior:      "",
 				EtapaNova:          "",
 				SubEtapaAnterior:   "",
@@ -277,6 +564,7 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, historicos)
 		return
+		}
 	}
 
 	// --- Fallback: "schema antigo" (sub_etapa única)
@@ -314,7 +602,7 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 			WHERE h.id_requisicao = ?
 			ORDER BY h.data_movimentacao DESC`
 
-	rows2, err2 := database.DB_App.Query(queryOld, id)
+	rows2, err2 := database.GormDB_App.Raw(queryOld, id).Rows()
 	if err2 != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar histórico"})
 		return
@@ -348,18 +636,18 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 	if historicos == nil {
 		historicos = make([]HistoricoItem, 0)
 	}
-	// Prepend criação do processo, se houver
+	// Prepend criaÃ§ão do processo, se houver
 	var createdAt string
-	if err := database.DB_App.QueryRow(
+	if err := database.GormDB_App.Raw(
 		"SELECT DATE_FORMAT(data_criacao, '%Y-%m-%d %H:%i:%s') FROM FT_REQUISICOES WHERE id_requisicao = ?",
 		id,
-	).Scan(&createdAt); err == nil && createdAt != "" {
+	).Row().Scan(&createdAt); err == nil && createdAt != "" {
 		created := HistoricoItem{
 			ID:                 0,
 			NomeUsuario:        "Sistema",
 			StatusAnterior:     "",
-			StatusNovo:         "Criação do Processo",
-			StatusComposto:     "Criação do Processo",
+			StatusNovo:         "CriaÃ§ão do Processo",
+			StatusComposto:     "CriaÃ§ão do Processo",
 			EtapaAnterior:      "",
 			EtapaNova:          "",
 			SubEtapaAnterior:   "",
@@ -430,7 +718,7 @@ func CreateRequisicaoSimple(c *gin.Context) {
 		"link_fatura":              linkFatura,
 		"periodos_irregularidade":  periodos,
 		"anexos":                   anexos,
-		"message":                  "Requisição recebida (sem persistência nesta versão)",
+		"message":                  "RequisiÃ§ão recebida (sem persistência nesta versão)",
 	})
 }
 
@@ -439,6 +727,14 @@ ANEXOS
 ============================================================ */
 
 // GET /api/requisicoes/:id/anexos
+// @Summary Listar anexos da requisicao
+// @Tags Requisicoes
+// @Produce json
+// @Param id path int true "ID da requisicao"
+// @Success 200 {array} map[string]any
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/requisicoes/{id}/anexos [get]
 func GetAnexosByRequisicaoID(c *gin.Context) {
 	id := c.Param("id")
 
@@ -446,6 +742,7 @@ func GetAnexosByRequisicaoID(c *gin.Context) {
 		ID             int    `json:"id"`
 		NomeArquivo    string `json:"nome_arquivo"`
 		CaminhoArquivo string `json:"caminho_arquivo"`
+		URL            string `json:"url,omitempty"`
 		EnviadoPor     string `json:"enviado_por"`
 		DataUpload     string `json:"data_upload"` // string formatada
 	}
@@ -458,12 +755,15 @@ func GetAnexosByRequisicaoID(c *gin.Context) {
 			FROM FT_ANEXOS
 			WHERE id_requisicao = ?
 			ORDER BY data_upload DESC`
-	if rows, err := database.DB_App.Query(qNew, id); err == nil {
+	if rows, err := database.GormDB_App.Raw(qNew, id).Rows(); err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var a AnexoOut
 			if err := rows.Scan(&a.ID, &a.NomeArquivo, &a.CaminhoArquivo, &a.EnviadoPor, &a.DataUpload); err != nil {
 				continue
+			}
+			if a.ID > 0 {
+				a.URL = anexoDownloadURL(int64(a.ID))
 			}
 			anexos = append(anexos, a)
 		}
@@ -479,7 +779,7 @@ func GetAnexosByRequisicaoID(c *gin.Context) {
 			SELECT id_anexo, nome_arquivo, caminho_arquivo, enviado_por
 			FROM FT_ANEXOS
 			WHERE id_requisicao = ?`
-	rows2, err2 := database.DB_App.Query(qOld, id)
+	rows2, err2 := database.GormDB_App.Raw(qOld, id).Rows()
 	if err2 != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar anexos"})
 		return
@@ -491,6 +791,9 @@ func GetAnexosByRequisicaoID(c *gin.Context) {
 			continue
 		}
 		a.DataUpload = ""
+		if a.ID > 0 {
+			a.URL = anexoDownloadURL(int64(a.ID))
+		}
 		anexos = append(anexos, a)
 	}
 	if anexos == nil {
@@ -504,6 +807,12 @@ LISTAGEM E DETALHE
 ============================================================ */
 
 // GET /api/requisicoes
+// @Summary Listar requisicoes
+// @Tags Requisicoes
+// @Produce json
+// @Success 200 {object} map[string]any
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/requisicoes [get]
 func GetAllRequisicoes(c *gin.Context) {
 	type RequisicaoListItem struct {
 		ID                int     `json:"id"`
@@ -513,6 +822,10 @@ func GetAllRequisicoes(c *gin.Context) {
 		ValorEstimado     float64 `json:"ressarcimento_estimado"`
 		EnderecoCompleto  string  `json:"endereco_completo"`
 		Status            string  `json:"status"`
+		Etapa             string  `json:"etapa"`
+		SubEtapa          string  `json:"sub_etapa"`
+		Triagem           int     `json:"triagem"`
+		ProcessoCriado    int     `json:"processo_criado"`
 		DataCriacao       string  `json:"data_criacao"`
 		DataMudancaStatus string  `json:"data_mudanca_status"`
 	}
@@ -526,13 +839,19 @@ func GetAllRequisicoes(c *gin.Context) {
 				COALESCE(r.ressarcimento_estimado,0) AS ressarcimento_estimado,
 				COALESCE(r.endereco_completo,'')     AS endereco_completo,
 				COALESCE(s.status,'Nova Requisição') AS status,
+				COALESCE(e.etapa,'')                 AS etapa,
+				COALESCE(p.sub_etapa,'')             AS sub_etapa,
+				COALESCE(r.triagem,0)                AS triagem,
+				COALESCE(r.processo_criado,0)        AS processo_criado,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
 				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status
 			FROM FT_REQUISICOES r
 			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+			LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
+			LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
 			ORDER BY r.data_criacao DESC`
 
-	// Suporte opcional a paginação: ?limit=...&offset=...
+	// Suporte opcional a paginaÃ§ão: ?limit=...&offset=...
 	limitStr := strings.TrimSpace(c.Query("limit"))
 	offsetStr := strings.TrimSpace(c.Query("offset"))
 
@@ -558,10 +877,10 @@ func GetAllRequisicoes(c *gin.Context) {
 		}
 	}
 
-	rows, err := database.DB_App.Query(query)
+	rows, err := database.GormDB_App.Raw(query).Rows()
 	if err != nil {
 		log.Printf("GetAllRequisicoes: erro na query: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao listar requisições"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao listar requisiÃ§ões"})
 		return
 	}
 	defer rows.Close()
@@ -577,6 +896,10 @@ func GetAllRequisicoes(c *gin.Context) {
 			&it.ValorEstimado,
 			&it.EnderecoCompleto,
 			&it.Status,
+			&it.Etapa,
+			&it.SubEtapa,
+			&it.Triagem,
+			&it.ProcessoCriado,
 			&it.DataCriacao,
 			&it.DataMudancaStatus,
 		); err != nil {
@@ -591,9 +914,15 @@ func GetAllRequisicoes(c *gin.Context) {
 }
 
 // GET /api/v1/requisicoes/departamento
-// Regra atual: todo usuário autenticado visualiza todas as requisições (sem filtro por departamento).
+// Regra atual: todo usuário autenticado visualiza todas as requisiÃ§ões (sem filtro por departamento).
+// @Summary Listar requisicoes por departamento
+// @Tags Requisicoes
+// @Produce json
+// @Success 200 {object} map[string]any
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/requisicoes/departamento [get]
 func GetRequisicoesDepartamento(c *gin.Context) {
-	// usuário autenticado (validamos presença apenas)
+	// usuário autenticado (validamos presenÃ§a apenas)
 	if _, ok := c.Get("userID"); !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuário não autenticado"})
 		return
@@ -607,6 +936,8 @@ func GetRequisicoesDepartamento(c *gin.Context) {
 		ValorEstimado     float64 `json:"ressarcimento_estimado"`
 		EnderecoCompleto  string  `json:"endereco_completo"`
 		Status            string  `json:"status"`
+		Triagem           int     `json:"triagem"`
+		ProcessoCriado    int     `json:"processo_criado"`
 		DataCriacao       string  `json:"data_criacao"`
 		DataMudancaStatus string  `json:"data_mudanca_status"`
 	}
@@ -620,6 +951,8 @@ func GetRequisicoesDepartamento(c *gin.Context) {
 				COALESCE(r.ressarcimento_estimado,0) AS ressarcimento_estimado,
 				COALESCE(r.endereco_completo,'')     AS endereco_completo,
 				COALESCE(s.status,'Nova Requisição') AS status,
+				COALESCE(r.triagem,0)                AS triagem,
+				COALESCE(r.processo_criado,0)        AS processo_criado,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
 				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status
 			FROM FT_REQUISICOES r
@@ -652,10 +985,10 @@ func GetRequisicoesDepartamento(c *gin.Context) {
 		}
 	}
 
-	rows, err := database.DB_App.Query(query)
+	rows, err := database.GormDB_App.Raw(query).Rows()
 	if err != nil {
 		log.Printf("GetRequisicoesDepartamento: erro na query: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao listar requisições"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao listar requisiÃ§ões"})
 		return
 	}
 	defer rows.Close()
@@ -671,6 +1004,8 @@ func GetRequisicoesDepartamento(c *gin.Context) {
 			&it.ValorEstimado,
 			&it.EnderecoCompleto,
 			&it.Status,
+			&it.Triagem,
+			&it.ProcessoCriado,
 			&it.DataCriacao,
 			&it.DataMudancaStatus,
 		); err != nil {
@@ -685,6 +1020,15 @@ func GetRequisicoesDepartamento(c *gin.Context) {
 }
 
 // GET /api/requisicoes/:id
+// @Summary Buscar requisicao por ID
+// @Tags Requisicoes
+// @Produce json
+// @Param id path int true "ID da requisicao"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/requisicoes/{id} [get]
 func GetRequisicaoByID(c *gin.Context) {
 	id := c.Param("id")
 
@@ -714,7 +1058,7 @@ func GetRequisicaoByID(c *gin.Context) {
 				COALESCE(r.concessionaria, '')         AS concessionaria,
 				COALESCE(r.ressarcimento_estimado, 0)  AS ressarcimento_estimado,
 				COALESCE(r.endereco_completo, '')      AS endereco_completo,
-				COALESCE(s.status, 'Nova Requisição')  AS status,
+				COALESCE(s.status, 'Nova RequisiÃ§ão')  AS status,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
 				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS created_at,
@@ -725,13 +1069,13 @@ func GetRequisicaoByID(c *gin.Context) {
 				COALESCE(r.link_fatura, '')              AS link_fatura
 			FROM FT_REQUISICOES r
 			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
-			LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo_irregularidade = r.id_tipo_irregularidade
-			LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo_irregularidade = r.id_subtipo_irregularidade
+			LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo = r.id_tipo_irregularidade
+			LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo = r.id_subtipo_irregularidade
 			WHERE r.id_requisicao = ?
 			LIMIT 1`
 
 	var d RequisicaoDetail
-	if err := database.DB_App.QueryRow(q, id).Scan(
+	if err := database.GormDB_App.Raw(q, id).Row().Scan(
 		&d.ID,
 		&d.Cliente,
 		&d.UC,
@@ -749,7 +1093,7 @@ func GetRequisicaoByID(c *gin.Context) {
 		&d.LinkFatura,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Requisição não encontrada"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "RequisiÃ§ão não encontrada"})
 			return
 		}
 		// Fallback: ambientes sem tabela/coluna de subtipo.
@@ -762,7 +1106,7 @@ func GetRequisicaoByID(c *gin.Context) {
 				COALESCE(r.concessionaria, '')         AS concessionaria,
 				COALESCE(r.ressarcimento_estimado, 0)  AS ressarcimento_estimado,
 				COALESCE(r.endereco_completo, '')      AS endereco_completo,
-				COALESCE(s.status, 'Nova Requisição')  AS status,
+				COALESCE(s.status, 'Nova RequisiÃ§ão')  AS status,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
 				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS created_at,
@@ -775,7 +1119,7 @@ func GetRequisicaoByID(c *gin.Context) {
 			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
 			WHERE r.id_requisicao = ?
 			LIMIT 1`
-		if err2 := database.DB_App.QueryRow(qFallback, id).Scan(
+		if err2 := database.GormDB_App.Raw(qFallback, id).Row().Scan(
 			&d.ID,
 			&d.Cliente,
 			&d.UC,
@@ -793,11 +1137,11 @@ func GetRequisicaoByID(c *gin.Context) {
 			&d.LinkFatura,
 		); err2 != nil {
 			if errors.Is(err2, sql.ErrNoRows) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Requisição não encontrada"})
+				c.JSON(http.StatusNotFound, gin.H{"error": "RequisiÃ§ão não encontrada"})
 				return
 			}
 			log.Printf("GetRequisicaoByID: erro no fallback id=%s: %v", id, err2)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar requisição"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar requisiÃ§ão"})
 			return
 		}
 	}
@@ -806,6 +1150,14 @@ func GetRequisicaoByID(c *gin.Context) {
 }
 
 // GET /api/requisicoes/:id/faturas
+// @Summary Faturas selecionadas da requisicao
+// @Tags Requisicoes
+// @Produce json
+// @Param id path int true "ID da requisicao"
+// @Success 200 {array} map[string]any
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/requisicoes/{id}/faturas [get]
 func GetFaturasSelecionadasByRequisicaoID(c *gin.Context) {
 	id := c.Param("id")
 
@@ -821,7 +1173,7 @@ func GetFaturasSelecionadasByRequisicaoID(c *gin.Context) {
 				FROM FT_REQUISICOES_FATURAS
 				WHERE id_requisicao = ?
 				ORDER BY id ASC`
-	rows, err := database.DB_App.Query(q, id)
+	rows, err := database.GormDB_App.Raw(q, id).Rows()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar faturas"})
 		return
@@ -844,6 +1196,16 @@ UPDATE (com histórico completo)
 ============================================================ */
 
 // POST /api/requisicoes/:id/update
+// @Summary Atualizar requisicao
+// @Tags Requisicoes
+// @Accept json
+// @Produce json
+// @Param id path int true "ID da requisicao"
+// @Param body body map[string]any true "Dados"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/requisicoes/{id}/update [post]
 func UpdateRequisicaoCompleta(c *gin.Context) {
 	id := c.Param("id")
 
@@ -857,17 +1219,39 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 
 	// Aceita multipart (com anexos) e JSON (sem anexos)
 	var comentario, valorEstimado, etapaPost, subEtapaPost, statusPost string
+	var triagemPost *int
+	var processoCriadoPost *int
+	var clientePost *string
+	var ucPost *string
+	var concessionariaPost *string
+	var linkFaturaPost *string
+	var descricaoIrregularidadePost *string
+	var periodosIrregularidadePost *string
+	var enderecoCompletoPost *string
+	createdProcess := false
+	classificacaoUpdated := false
 	var tipoIDPost, subtipoIDPost string
 	ctype := strings.ToLower(c.GetHeader("Content-Type"))
 
 	if !strings.Contains(ctype, "multipart/form-data") {
 		// JSON
 		var body struct {
-			Comentario            string `json:"comentario"`
-			RessarcimentoEstimado string `json:"ressarcimento_estimado"`
-			Etapa                 string `json:"etapa"`
-			EtapaAtual            string `json:"etapa_atual"`
-			SubEtapa              string `json:"sub_etapa"`
+			Comentario              string  `json:"comentario"`
+			RessarcimentoEstimado   string  `json:"ressarcimento_estimado"`
+			Etapa                   string  `json:"etapa"`
+			EtapaAtual              string  `json:"etapa_atual"`
+			SubEtapa                string  `json:"sub_etapa"`
+			Triagem                 *int    `json:"triagem"`
+			ProcessoCriado          *int    `json:"processo_criado"`
+			Cliente                 *string `json:"cliente"`
+			UC                      *string `json:"uc"`
+			Concessionaria          *string `json:"concessionaria"`
+			LinkFatura              *string `json:"link_fatura"`
+			DescricaoIrregularidade *string `json:"descricao_irregularidade"`
+			PeriodosIrregularidade  *string `json:"periodos_irregularidade"`
+			EnderecoCompleto        *string `json:"endereco_completo"`
+			IdTipoIrregularidade    string  `json:"id_tipo_irregularidade"`
+			IdSubtipoIrregularidade string  `json:"id_subtipo_irregularidade"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Corpo inválido: " + err.Error()})
@@ -880,6 +1264,17 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 			etapaPost = strings.TrimSpace(body.Etapa)
 		}
 		subEtapaPost = strings.TrimSpace(body.SubEtapa)
+		triagemPost = body.Triagem
+		processoCriadoPost = body.ProcessoCriado
+		clientePost = body.Cliente
+		ucPost = body.UC
+		concessionariaPost = body.Concessionaria
+		linkFaturaPost = body.LinkFatura
+		descricaoIrregularidadePost = body.DescricaoIrregularidade
+		periodosIrregularidadePost = body.PeriodosIrregularidade
+		enderecoCompletoPost = body.EnderecoCompleto
+		tipoIDPost = strings.TrimSpace(body.IdTipoIrregularidade)
+		subtipoIDPost = strings.TrimSpace(body.IdSubtipoIrregularidade)
 	} else {
 		// multipart (comentário + arquivos + possível etapa/subetapa)
 		if err := c.Request.ParseMultipartForm(50 << 20); err != nil {
@@ -898,11 +1293,21 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 			etapaPost = strings.TrimSpace(c.PostForm("etapa"))
 		}
 		subEtapaPost = strings.TrimSpace(c.PostForm("sub_etapa"))
+		if raw := strings.TrimSpace(c.PostForm("triagem")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil {
+				triagemPost = &n
+			}
+		}
+		if raw := strings.TrimSpace(c.PostForm("processo_criado")); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil {
+				processoCriadoPost = &n
+			}
+		}
 	}
 
-	tx, err := database.DB_App.Begin()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transação"})
+	tx := database.GormDB_App.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao iniciar transaÃ§ão"})
 		return
 	}
 	defer tx.Rollback()
@@ -912,7 +1317,7 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		norm := strings.ReplaceAll(strings.TrimSpace(valorEstimado), ".", "")
 		norm = strings.ReplaceAll(norm, ",", ".")
 		if f, err := strconv.ParseFloat(norm, 64); err == nil {
-			if _, err := tx.Exec(`
+			if _, err := execGorm(tx, `
 					UPDATE FT_REQUISICOES
 					SET ressarcimento_estimado = ?
 					WHERE id_requisicao = ?`,
@@ -923,7 +1328,80 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		}
 	}
 
-	// Atualiza classificação (tipo/subtipo) se informados
+	// Atualiza campos de informações da requisição, se vieram
+	if clientePost != nil || ucPost != nil || concessionariaPost != nil || linkFaturaPost != nil ||
+		descricaoIrregularidadePost != nil || periodosIrregularidadePost != nil || enderecoCompletoPost != nil {
+		setParts := []string{}
+		args := []any{}
+
+		if clientePost != nil {
+			setParts = append(setParts, "cliente = ?")
+			args = append(args, strings.TrimSpace(*clientePost))
+		}
+		if ucPost != nil {
+			setParts = append(setParts, "uc = ?")
+			args = append(args, strings.TrimSpace(*ucPost))
+		}
+		if concessionariaPost != nil {
+			setParts = append(setParts, "concessionaria = ?")
+			args = append(args, strings.TrimSpace(*concessionariaPost))
+		}
+		if linkFaturaPost != nil {
+			setParts = append(setParts, "link_fatura = ?")
+			args = append(args, strings.TrimSpace(*linkFaturaPost))
+		}
+		if descricaoIrregularidadePost != nil {
+			setParts = append(setParts, "descricao_irregularidade = ?")
+			args = append(args, strings.TrimSpace(*descricaoIrregularidadePost))
+		}
+		if periodosIrregularidadePost != nil {
+			raw := strings.TrimSpace(*periodosIrregularidadePost)
+			if raw != "" {
+				// atualiza apenas quando o valor parece JSON válido
+				if strings.HasPrefix(raw, "[") || strings.HasPrefix(raw, "{") {
+					if json.Valid([]byte(raw)) {
+						setParts = append(setParts, "periodos_irregularidade = ?")
+						args = append(args, raw)
+					}
+				}
+			}
+		}
+		if enderecoCompletoPost != nil {
+			setParts = append(setParts, "endereco_completo = ?")
+			args = append(args, strings.TrimSpace(*enderecoCompletoPost))
+		}
+
+		if len(setParts) > 0 {
+			args = append(args, id)
+			if _, err := execGorm(tx, "UPDATE FT_REQUISICOES SET "+strings.Join(setParts, ", ")+" WHERE id_requisicao = ?", args...); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar informações da requisição"})
+				return
+			}
+		}
+	}
+
+	// Atualiza flags de triagem/processo_criado, se vieram
+	if triagemPost != nil || processoCriadoPost != nil {
+		set := []string{}
+		args := []any{}
+		if triagemPost != nil {
+			set = append(set, "triagem = ?")
+			args = append(args, *triagemPost)
+		}
+		if processoCriadoPost != nil {
+			set = append(set, "processo_criado = ?")
+			args = append(args, *processoCriadoPost)
+		}
+		if len(set) > 0 {
+			args = append(args, id)
+			if _, err := execGorm(tx, "UPDATE FT_REQUISICOES SET "+strings.Join(set, ", ")+" WHERE id_requisicao = ?", args...); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar flags da requisição"})
+				return
+			}
+		}
+	}
+
+	// Atualiza classificaÃ§ão (tipo/subtipo) se informados
 	if tipoIDPost != "" || subtipoIDPost != "" {
 		setParts := make([]string, 0, 2)
 		args := make([]interface{}, 0, 3)
@@ -937,13 +1415,14 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		}
 		q := "UPDATE FT_REQUISICOES SET " + strings.Join(setParts, ", ") + " WHERE id_requisicao = ?"
 		args = append(args, id)
-		if _, err := tx.Exec(q, args...); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar classificação"})
+		if _, err := execGorm(tx, q, args...); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar classificaÃ§ão"})
 			return
 		}
+		classificacaoUpdated = true
 		// Registrar no histórico (informativo)
 		var etapaAtual, subAtual sql.NullString
-		_ = tx.QueryRow(`
+		_ = queryRowGorm(tx, `
 				SELECT e.etapa, p.sub_etapa
 				FROM FT_PROCESSOS p
 				JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
@@ -954,19 +1433,19 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		if strings.TrimSpace(subAtual.String) != "" {
 			statusComp = statusComp + " - " + strings.TrimSpace(subAtual.String)
 		}
-		if _, err := tx.Exec(`
+		if _, err := execGorm(tx, `
 				INSERT INTO FT_HISTORICO_MOVIMENTACOES
 				(id_requisicao, id_usuario_gestor,
 				status_anterior, status_novo,
 				etapa_anterior, etapa_nova, sub_etapa,
 				comentario, data_movimentacao, tipo_movimentacao)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'classificacao')`,
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'classificacao')`,
 			id, gestorID,
 			statusComp, statusComp,
 			etapaAtual.String, etapaAtual.String, subAtual.String,
 			"Classificação atualizada",
 		); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar histórico de classificação"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar histórico de classificaÃ§ão"})
 			return
 		}
 	}
@@ -977,7 +1456,7 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 	if comentario != "" || etapaPost != "" || subEtapaPost != "" {
 		// Busca etapa/subetapa vigentes do processo (se existir)
 		var etapaAtual, subAtual sql.NullString
-		_ = tx.QueryRow(`
+		_ = queryRowGorm(tx, `
 				SELECT e.etapa, p.sub_etapa
 				FROM FT_PROCESSOS p
 				JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
@@ -1005,13 +1484,13 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 			status = status + " - " + subTxt
 		}
 
-		if _, err := tx.Exec(`
+		if _, err := execGorm(tx, `
 				INSERT INTO FT_HISTORICO_MOVIMENTACOES
 				(id_requisicao, id_usuario_gestor,
 				status_anterior, status_novo,
 				etapa_anterior, etapa_nova, sub_etapa,
 				comentario, data_movimentacao)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR))`,
 			id, gestorID,
 			status, status,
 			etapaTxt, etapaTxt, subTxt,
@@ -1021,7 +1500,7 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 			return
 		}
 
-		// Sinaliza via SSE atualização de histórico/kanban (inclui sub_etapa)
+		// Sinaliza via SSE atualizaÃ§ão de histórico/kanban (inclui sub_etapa)
 		go func(pid int, sub string, statusComp string) {
 			defer func() { recover() }()
 			payload := map[string]interface{}{
@@ -1033,30 +1512,30 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 	}
 
 	// =========================
-	// Atualização de status da requisição (se informado)
+	// AtualizaÃ§ão de status da requisiÃ§ão (se informado)
 	// =========================
 	if statusPost != "" {
-		// Validações de negócio: classificação e prazo
+		// ValidaÃ§ões de negócio: classificaÃ§ão e prazo
 		var currStatus string
 		var dataMudanca sql.NullTime
 		var tipoAtual sql.NullInt64
 		var subtipoAtual sql.NullInt64
-		_ = tx.QueryRow(`
+		_ = queryRowGorm(tx, `
 				SELECT s.status, r.data_mudanca_status, r.id_tipo_irregularidade, r.id_subtipo_irregularidade
 				FROM FT_REQUISICOES r
 				LEFT JOIN DM_STATUS s ON s.id_status = r.id_status
 				WHERE r.id_requisicao = ?`, id).Scan(&currStatus, &dataMudanca, &tipoAtual, &subtipoAtual)
 
-		if strings.EqualFold(currStatus, "Nova Requisição") && !strings.EqualFold(statusPost, "Nova Requisição") {
+		if strings.EqualFold(currStatus, "Nova RequisiÃ§ão") && !strings.EqualFold(statusPost, "Nova RequisiÃ§ão") {
 			if (!tipoAtual.Valid && strings.TrimSpace(c.PostForm("id_tipo_irregularidade")) == "") ||
 				(!subtipoAtual.Valid && strings.TrimSpace(c.PostForm("id_subtipo_irregularidade")) == "") {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Preencha Tipo e Subtipo da irregularidade antes de sair de Nova Requisição."})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Preencha Tipo e Subtipo da irregularidade antes de sair de Nova RequisiÃ§ão."})
 				return
 			}
 		}
 
 		prazoDias := 0
-		if strings.EqualFold(currStatus, "Nova Requisição") {
+		if strings.EqualFold(currStatus, "Nova RequisiÃ§ão") {
 			prazoDias = 5
 		} else if strings.EqualFold(currStatus, "Em Análise") || strings.EqualFold(currStatus, "Em Analise") {
 			prazoDias = 10
@@ -1064,29 +1543,29 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		if prazoDias > 0 && dataMudanca.Valid {
 			deadline := dataMudanca.Time.Add(time.Duration(prazoDias*24) * time.Hour)
 			if time.Now().After(deadline) && strings.TrimSpace(comentario) == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Movimentação vencida: adicione justificativa no comentário."})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "MovimentaÃ§ão vencida: adicione justificativa no comentário."})
 				return
 			}
 		}
 
 		// Busca id do status
 		var idStatus int
-		if err := tx.QueryRow("SELECT id_status FROM DM_STATUS WHERE status = ?", statusPost).Scan(&idStatus); err != nil {
+		if err := queryRowGorm(tx, "SELECT id_status FROM DM_STATUS WHERE status = ?", statusPost).Scan(&idStatus); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Status informado inválido"})
 			return
 		}
-		if _, err := tx.Exec(`
+		if _, err := execGorm(tx, `
 				UPDATE FT_REQUISICOES
 				SET id_status = ?, data_mudanca_status = NOW()
 				WHERE id_requisicao = ?`, idStatus, id); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar status da requisição"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar status da requisiÃ§ão"})
 			return
 		}
 
-		// Histórico da mudança de status (status_anterior/status_novo) com tipo/subtipo
+		// Histórico da mudanÃ§a de status (status_anterior/status_novo) com tipo/subtipo
 		var etapaAtual sql.NullString
 		var subAtual sql.NullString
-		_ = tx.QueryRow(`
+		_ = queryRowGorm(tx, `
 				SELECT e.etapa, p.sub_etapa
 				FROM FT_PROCESSOS p
 				JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
@@ -1101,7 +1580,7 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 				tid = strconv.FormatInt(tipoAtual.Int64, 10)
 			}
 			if tid != "" {
-				_ = tx.QueryRow("SELECT nome FROM DM_TIPO_IRREGULARIDADE WHERE id_tipo_irregularidade = ?", tid).Scan(&tipoNome)
+				_ = queryRowGorm(tx, "SELECT nome FROM DM_TIPO_IRREGULARIDADE WHERE id_tipo = ?", tid).Scan(&tipoNome)
 				if tipoNome.Valid {
 					commentParts = append(commentParts, "Tipo: "+strings.TrimSpace(tipoNome.String))
 				}
@@ -1114,7 +1593,7 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 				sid = strconv.FormatInt(subtipoAtual.Int64, 10)
 			}
 			if sid != "" {
-				_ = tx.QueryRow("SELECT nome FROM DM_SUBTIPO_IRREGULARIDADE WHERE id_subtipo_irregularidade = ?", sid).Scan(&subTipoNome)
+				_ = queryRowGorm(tx, "SELECT nome FROM DM_SUBTIPO_IRREGULARIDADE WHERE id_subtipo = ?", sid).Scan(&subTipoNome)
 				if subTipoNome.Valid {
 					commentParts = append(commentParts, "Subtipo: "+strings.TrimSpace(subTipoNome.String))
 				}
@@ -1122,104 +1601,101 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		}
 		statusAnterior := strings.TrimSpace(currStatus)
 		if statusAnterior == "" {
-			statusAnterior = "Nova Requisição"
+			statusAnterior = "Nova RequisiÃ§ão"
 		}
 		statusNovo := strings.TrimSpace(statusPost)
 		histComentario := strings.Join(commentParts, " | ")
 
-		_, _ = tx.Exec(`
+		_, _ = execGorm(tx, `
 				INSERT INTO FT_HISTORICO_MOVIMENTACOES
 				(id_requisicao, id_usuario_gestor,
 				status_anterior, status_novo,
 				etapa_anterior, etapa_nova, sub_etapa,
 				comentario, data_movimentacao, tipo_movimentacao)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'status')`,
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'status')`,
 			id, gestorID,
 			statusAnterior, statusNovo,
 			etapaAtual.String, etapaAtual.String, subAtual.String,
 			histComentario,
 		)
 
-		// Se aprovado, garantir criação do processo para aparecer no Kanban
+		// Se aprovado, marca triagem e processo_criado=1 e aguarda envio para Ativos
 		if strings.EqualFold(statusPost, "Aprovado") {
-			var cnt int
-			if err := tx.QueryRow("SELECT COUNT(1) FROM FT_PROCESSOS WHERE id_processo = ?", id).Scan(&cnt); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao verificar processo"})
-				return
+			if _, err := execGorm(tx, "UPDATE FT_REQUISICOES SET triagem = 1, processo_criado = 1 WHERE id_requisicao = ?", id); err != nil {
+				if !strings.Contains(strings.ToLower(err.Error()), "unknown column") {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao marcar triagem"})
+					return
+				}
 			}
-			autoCreate := func() bool {
-				v := strings.TrimSpace(os.Getenv("AUTO_CREATE_PROCESS_ON_APPROVAL"))
-				if v == "" {
-					return true
-				}
-				return strings.EqualFold(v, "true") || v == "1"
-			}()
-			if cnt == 0 && autoCreate {
-				// coluna inicial (DEFAULT: "Ativos"), pode ajustar via env INITIAL_KANBAN_COLUMN
-				initialCol := strings.TrimSpace(os.Getenv("INITIAL_KANBAN_COLUMN"))
-				if initialCol == "" {
-					initialCol = "Ativos"
-				}
-				var idEtapa int
-				if err := tx.QueryRow(
-					"SELECT e.id_etapa_processo FROM DM_ETAPAS_PROCESSO e "+
-						"JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban "+
-						"WHERE kc.nome_coluna = ? ORDER BY e.id_etapa_processo ASC LIMIT 1",
-					initialCol,
-				).Scan(&idEtapa); err != nil {
-					// fallback: menor id de etapa (qualquer)
-					_ = tx.QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO ORDER BY id_etapa_processo ASC LIMIT 1").Scan(&idEtapa)
-				}
-				if idEtapa == 0 {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Etapa inicial não encontrada (Pendente/Distribuidora)"})
-					return
-				}
-				if _, err := tx.Exec(`
-						INSERT INTO FT_PROCESSOS (id_processo, id_etapa_processo, id_responsavel, sub_etapa, relevancia, data_alerta, ultima_atualizacao)
-						VALUES (?, ?, ?, NULL, FALSE, NULL, NOW())`, id, idEtapa, gestorID); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar processo após aprovação"})
-					return
-				}
-				log.Printf("[REQ %s] Processo criado (FT_PROCESSOS) com etapa id=%d", id, idEtapa)
+			// Garante etapa/subetapa default do processo aprovado (id 1)
+			subEtapa := "Primeira reclamação da etapa - Em elaboração"
+			if nome, e2 := resolveSubEtapaNameByIDGorm(tx, 1); e2 == nil && nome.Valid {
+				subEtapa = strings.TrimSpace(nome.String)
+			}
+			subID, _ := resolveSubEtapaIDGorm(tx, subEtapa)
+			if !subID.Valid {
+				subID = sql.NullInt64{Int64: 1, Valid: true}
+			}
+			responsavelID := sql.NullInt64{Int64: gestorID, Valid: gestorID > 0}
+			if _, err := execGorm(tx,
+				`UPDATE FT_PROCESSOS
+				 SET id_etapa_processo = 1,
+				     etapa = 'Distribuidora',
+				     sub_etapa = ?,
+				     id_sub_etapa_processo = ?,
+				     id_coluna = 1,
+				     nome_coluna = 'Ativos',
+				     id_responsavel = ?,
+				     ultima_atualizacao = NOW()
+				 WHERE id_processo = ?`,
+				subEtapa, nullIntToIface(subID), nullIntToIface(responsavelID), id,
+			); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar etapa/subetapa do processo"})
+				return
 			}
 		}
 	}
 
-	// Anexos (campo: anexosGestor) - apenas para multipart
+	// Anexos (campo: anexosGestor) - apenas para multipart (grava no banco)
 	if strings.Contains(ctype, "multipart/form-data") && c.Request.MultipartForm != nil {
 		form := c.Request.MultipartForm
 		files := form.File["anexosGestor"]
-		if len(files) > 0 {
-			if err := os.MkdirAll("uploads", os.ModePerm); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao preparar diretório de upload"})
+		for _, f := range files {
+			name, data, mimeType, sizeBytes, err := readAnexoFile(f)
+			if err != nil {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Arquivo excede o tamanho maximo permitido"})
 				return
 			}
-			for _, f := range files {
-				name := filepath.Base(f.Filename)
-				path := filepath.Join("uploads", fmt.Sprintf("%s-%d-%s", id, time.Now().UnixNano(), name))
-				if err := c.SaveUploadedFile(f, path); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao salvar anexo"})
-					return
-				}
-				if _, err := tx.Exec(`
-						INSERT INTO FT_ANEXOS
-						(id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload)
-						VALUES (?, ?, ?, 'gestor', NOW())`,
-					id, name, path); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao registrar anexo"})
-					return
-				}
+			pidInt, _ := strconv.Atoi(id)
+			pseudoPath := buildAnexoPath(pidInt, 0, name)
+			if _, err := execGorm(tx,
+				`INSERT INTO FT_ANEXOS
+				(id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
+				VALUES (?, ?, ?, 'gestor', NOW(), ?, ?, ?)`,
+				id, name, pseudoPath, mimeType, sizeBytes, data); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao registrar anexo"})
+				return
 			}
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar a transação"})
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar a transaÃ§ão"})
 		return
+	}
+	if createdProcess {
+		if idInt, convErr := strconv.Atoi(id); convErr == nil {
+			syncSnapshotFromOriginal(idInt, int(gestorID))
+		}
+	}
+	if classificacaoUpdated {
+		if idInt, convErr := strconv.Atoi(id); convErr == nil {
+			syncSnapshotFromOriginal(idInt, int(gestorID))
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":   "Requisição atualizada",
+		"message":   "RequisiÃ§ão atualizada",
 		"sub_etapa": strings.TrimSpace(subEtapaPost),
 		"status_composto": func() string {
 			if subEtapaPost != "" {

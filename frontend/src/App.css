@@ -1,11 +1,13 @@
-/* Container principal */
+﻿/* Container principal */
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  color: #333;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  text-align: left;
+  font-family: var(--font-sans);
+  color: var(--fg);
 }
 
 /* Logos */
@@ -26,7 +28,7 @@
   filter: drop-shadow(0 0 2em #61dafbaa);
 }
 
-/* Animação de rotação do logo */
+/* AnimaÃ§Ã£o de rotaÃ§Ã£o do logo */
 @keyframes logo-spin {
   from {
     transform: rotate(0deg);
@@ -42,7 +44,7 @@
   }
 }
 
-/* Cartões */
+/* CartÃµes */
 .card {
   padding: 2em;
   background-color: #f9f9f9;
@@ -69,7 +71,7 @@
 }
 
 /* ========================================= */
-/* CORREÇÕES ADICIONADAS - MENU E KANBAN */
+/* CORREÃ‡Ã•ES ADICIONADAS - MENU E KANBAN */
 /* ========================================= */
 
 /* Aumentar fonte do menu principal */
@@ -95,7 +97,7 @@ header span {
 
 /* Melhorar hover do menu */
 header nav a:hover {
-  background-color: rgba(59, 130, 246, 0.1) !important;
+  background-color: color-mix(in srgb, var(--accent) 18%, transparent) !important;
   transform: translateY(-1px) !important;
 }
 
@@ -116,12 +118,12 @@ header nav a:hover {
 
 .kanban-column {
   flex: 1;
-  /* Compato por padrão; efeito de hover amplia o card */
+  /* Compato por padrÃ£o; efeito de hover amplia o card */
   max-width: 960px;
   min-width: 720px;
 }
 
-/* Ajustar espaçamento das bordas laterais */
+/* Ajustar espaÃ§amento das bordas laterais */
 .main-content {
   padding-left: 2rem;
   padding-right: 2rem;
@@ -137,7 +139,7 @@ header nav a:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-/* Cursor específico para arrasto (somente admin) */
+/* Cursor especÃ­fico para arrasto (somente admin) */
 .kanban-card-admin-draggable {
   cursor: grab;
 }
@@ -145,7 +147,7 @@ header nav a:hover {
   cursor: grabbing;
 }
 
-/* Melhorar botões */
+/* Melhorar botÃµes */
 button {
   transition: all 0.2s ease !important;
 }
@@ -160,7 +162,7 @@ input, select, textarea {
 }
 
 input:focus, select:focus, textarea:focus {
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent) !important;
 }
 
 /* Responsividade para telas menores */
@@ -175,7 +177,7 @@ input:focus, select:focus, textarea:focus {
   }
   
   .kanban-column {
-    min-width: 540px; /* mantém usabilidade em telas menores */
+    min-width: 540px; /* mantÃ©m usabilidade em telas menores */
   }
 }
 
@@ -245,20 +247,13 @@ input:focus, select:focus, textarea:focus {
   width: 8px;
 }
 
-::-webkit-scrollbar-track {
-  background: #1f2937;
-}
+::-webkit-scrollbar-track { background: color-mix(in srgb, var(--bg) 85%, var(--border)); }
 
-::-webkit-scrollbar-thumb {
-  background: #4b5563;
-  border-radius: 4px;
-}
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 4px; }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
-}
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--accent) 65%, var(--border)); }
 
-/* Animações suaves */
+/* AnimaÃ§Ãµes suaves */
 * {
   scroll-behavior: smooth;
 }
@@ -285,7 +280,7 @@ input:focus, select:focus, textarea:focus {
   transition: opacity 0.3s ease;
 }
 
-/* Melhorar notificações */
+/* Melhorar notificaÃ§Ãµes */
 .notification {
   animation: slideIn 0.3s ease-out;
 }
@@ -300,4 +295,6 @@ input:focus, select:focus, textarea:focus {
     opacity: 1;
   }
 }
+
+
 

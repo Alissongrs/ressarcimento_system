@@ -1,7 +1,7 @@
 # Multi-stage build otimizado para o backend Go
 
 # ====== Stage 1: Build ======
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Instala dependências de build
 RUN apk add --no-cache git ca-certificates tzdata
@@ -14,6 +14,10 @@ RUN go mod download && go mod verify
 
 # Copia código fonte
 COPY . .
+
+# Gera Swagger (swag) no build
+RUN go install github.com/swaggo/swag/cmd/swag@latest && \
+    /go/bin/swag init -g main.go -o docs
 
 # Build otimizado (binary menor e mais rápido)
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \

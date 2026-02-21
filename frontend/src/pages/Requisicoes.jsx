@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { withAuthToken } from '../services/apiClient';
 import {
   getAllRequisicoes,
   getRequisicaoById,
@@ -13,7 +14,6 @@ import {
   Paperclip,
   FileText,
   CalendarDays,
-  Link as LinkIcon,
 } from 'lucide-react';
 
 function Badge({ children, color = 'gray' }) {
@@ -62,120 +62,113 @@ export default function Requisicoes() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    (async () => {
+    loadRequisicoes();
+  }, []);
+
+  const loadRequisicoes = async () => {
+    try {
+      setErr('');
+      setLoading(true);
+      let list = [];
       try {
-        setErr('');
-        setLoading(true);
-        let list = [];
-        try {
-          const rows = await getAllRequisicoes();
-          list = Array.isArray(rows) ? rows : [];
-        } catch (e) {
-          // Se nao for gestor/admin (403), mostra apenas as requisicoes do proprio usuario
-          const status = e?.response?.status;
-          if (status === 403 || status === 401) {
-            const mine = await (await import('../services/requisicaoService')).getMinhasRequisicoes(true);
-            list = Array.isArray(mine) ? mine : [];
-          } else {
-            throw e;
+        const rows = await getAllRequisicoes();
+        list = Array.isArray(rows) ? rows : [];
+      } catch (e) {
+        const status = e?.response?.status;
+        if (status === 403 || status === 401) {
+          const mine = await (await import('../services/requisicaoService')).getMinhasRequisicoes(true);
+          list = Array.isArray(mine) ? mine : [];
+        } else {
+          throw e;
+        }
+      }
+      setItems(list);
+      setTotal(list.length);
+
+      // Enriquecer contagens de anexos/faturas com concorrência limitada
+      const ids = list
+        .map((r) => r.id || r.id_requisicao || r.ID)
+        .filter(Boolean);
+      let index = 0;
+      const limit = 4;
+
+      const worker = async () => {
+        while (index < ids.length) {
+          const i = index++;
+          const id = ids[i];
+          try {
+            const anex = await api.get(`/requisicoes/${id}/anexos`);
+            const anexosCount = Array.isArray(anex?.data)
+              ? anex.data.length
+              : 0;
+
+            const det = await getRequisicaoById(id);
+            const uc = det?.uc || det?.UC || '';
+            let periodoLabel = '';
+            let faturasCount = 0;
+            try {
+              let arr = [];
+              const raw =
+                det?.periodos_irregularidade ||
+                det?.PeriodosIrregularidade ||
+                '';
+              if (raw) arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+              const refs = Array.isArray(arr)
+                ? arr
+                    .map((p) => {
+                      const y = String(p?.ano ?? p?.Ano ?? '').trim();
+                      const m = String(p?.mes ?? p?.Mes ?? '').trim();
+                      if (!y || !m) return null;
+                      return `${y}-${String(m).padStart(2, '0')}`;
+                    })
+                    .filter(Boolean)
+                : [];
+              if (uc && refs.length) {
+                const dados = await buscarFaturasPorUnidadeMeses(uc, refs);
+                if (Array.isArray(dados?.faturas))
+                  faturasCount = dados.faturas.length;
+                else if (Array.isArray(dados?.links_faturas_detalhes))
+                  faturasCount = dados.links_faturas_detalhes.length;
+                else if (Array.isArray(dados?.links_faturas))
+                  faturasCount = dados.links_faturas.length;
+                const sorted = [...refs].sort();
+                if (sorted.length)
+                  periodoLabel = `${sorted[0]} a ${sorted[sorted.length - 1]}`;
+              }
+            } catch {}
+            setCounts((prev) => ({
+              ...prev,
+              [id]: {
+                anexos: anexosCount,
+                faturas: faturasCount,
+                periodo: periodoLabel,
+              },
+            }));
+          } catch {
+            setCounts((prev) => ({
+              ...prev,
+              [ids[i]]: { anexos: 0, faturas: 0, periodo: '' },
+            }));
           }
         }
-        setItems(list);
-        setTotal(list.length);
-        try {
-          console.info('[Requisicoes] carregadas:', list.length);
-        } catch {}
-
-        // Enriquecer contagens de anexos/faturas com concorrência limitada
-        const ids = list
-          .map((r) => r.id || r.id_requisicao || r.ID)
-          .filter(Boolean);
-        let index = 0;
-        const limit = 4;
-
-        const worker = async () => {
-          while (index < ids.length) {
-            const i = index++;
-            const id = ids[i];
-            try {
-              const anex = await api.get(`/requisicoes/${id}/anexos`);
-              const anexosCount = Array.isArray(anex?.data)
-                ? anex.data.length
-                : 0;
-
-              const det = await getRequisicaoById(id);
-              const uc = det?.uc || det?.UC || '';
-              let periodoLabel = '';
-              let faturasCount = 0;
-              try {
-                let arr = [];
-                const raw =
-                  det?.periodos_irregularidade ||
-                  det?.PeriodosIrregularidade ||
-                  '';
-                if (raw) arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
-                const refs = Array.isArray(arr)
-                  ? arr
-                      .map((p) => {
-                        const y = String(p?.ano ?? p?.Ano ?? '').trim();
-                        const m = String(p?.mes ?? p?.Mes ?? '').trim();
-                        if (!y || !m) return null;
-                        return `${y}-${String(m).padStart(2, '0')}`;
-                      })
-                      .filter(Boolean)
-                  : [];
-                if (uc && refs.length) {
-                  const dados = await buscarFaturasPorUnidadeMeses(uc, refs);
-                  if (Array.isArray(dados?.faturas))
-                    faturasCount = dados.faturas.length;
-                  else if (Array.isArray(dados?.links_faturas_detalhes))
-                    faturasCount = dados.links_faturas_detalhes.length;
-                  else if (Array.isArray(dados?.links_faturas))
-                    faturasCount = dados.links_faturas.length;
-                  const sorted = [...refs].sort();
-                  if (sorted.length)
-                    periodoLabel = `${sorted[0]} a ${
-                      sorted[sorted.length - 1]
-                    }`;
-                }
-              } catch {}
-              setCounts((prev) => ({
-                ...prev,
-                [id]: {
-                  anexos: anexosCount,
-                  faturas: faturasCount,
-                  periodo: periodoLabel,
-                },
-              }));
-            } catch {
-              setCounts((prev) => ({
-                ...prev,
-                [ids[i]]: { anexos: 0, faturas: 0, periodo: '' },
-              }));
-            }
-          }
-        };
-        Promise.all(
-          Array.from({ length: Math.min(limit, ids.length) }).map(() =>
-            worker()
-          )
-        ).catch(() => {});
-      } catch (e) {
-        const msg =
-          e?.response?.data?.detail ||
-          e?.response?.data?.error ||
-          e?.message ||
-          'Falha ao carregar requisições.';
-        setErr(String(msg));
-        try {
-          console.error('[Requisicoes] erro:', msg);
-        } catch {}
-        setItems([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+      };
+      Promise.all(
+        Array.from({ length: Math.min(limit, ids.length) }).map(() =>
+          worker()
+        )
+      ).catch(() => {});
+    } catch (e) {
+      const msg =
+        e?.response?.data?.detail ||
+        e?.response?.data?.error ||
+        e?.message ||
+        'Falha ao carregar requisições.';
+      setErr(String(msg));
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     if (!q) return items;
@@ -206,6 +199,45 @@ export default function Requisicoes() {
     }
   };
 
+  const pickFirst = (obj, keys, fallback = '') => {
+    for (const k of keys) {
+      const v = obj?.[k];
+      if (v != null && v !== '') return v;
+      const s = obj?.[k]?.String;
+      if (s != null && s !== '') return s;
+    }
+    return fallback;
+  };
+
+  const getEtapaAtual = (r) =>
+    pickFirst(r, [
+      'etapa_atual',
+      'etapa',
+      'Etapa Atual',
+      'Etapa_Atual',
+      'etapaAtual',
+    ]);
+
+  const getSubEtapaAtual = (r) =>
+    pickFirst(r, [
+      'sub_etapa',
+      'sub_etapa_atual',
+      'subetapa',
+      'Sub_etapa',
+      'Ultima Sub Etapa',
+      'subEtapa',
+    ]);
+
+  const isAprovadoDistribuidora = (r) => {
+    const status = normalize(r?.status);
+    const procFlag = String(
+      r?.processo_criado ?? r?.processoCriado ?? ''
+    ).trim();
+    const created =
+      procFlag === '1' || procFlag.toLowerCase() === 'true';
+    return (status.includes('aprov') || status.includes('proced')) && !created;
+  };
+
   const statusToColumn = (s) => {
     const n = normalize(s);
     if (n.includes('nova')) return 'Nova Requisição';
@@ -224,7 +256,9 @@ export default function Requisicoes() {
       Rejeitado: [],
     };
     for (const r of filtered) {
-      cols[statusToColumn(r.status)].push(r);
+      const col = statusToColumn(r.status);
+      if (col === 'Aprovado' && !isAprovadoDistribuidora(r)) continue;
+      cols[col].push(r);
     }
     return cols;
   }, [filtered]);
@@ -257,7 +291,11 @@ export default function Requisicoes() {
       : status.includes('rejeit')
       ? 'red'
       : 'gray';
-    const goDetalhes = () => navigate(`/requisicao/${id}`);
+    const isTriagem = isAprovadoDistribuidora(r);
+    const goDetalhes = () =>
+      isTriagem
+        ? navigate(`/admin/planilha?req=${id}`)
+        : navigate(`/requisicao/${id}`);
 
     return (
       <div
@@ -310,6 +348,7 @@ export default function Requisicoes() {
               {counts[id]?.periodo ? `(${counts[id].periodo})` : ''}
             </button>
           </div>
+
         </div>
       </div>
     );
@@ -409,22 +448,17 @@ export default function Requisicoes() {
   };
 
   const origin = resolveOrigin();
-
   const toHref = (path) => {
     if (!path) return '';
     let s = String(path).trim();
 
-    // Se já é http(s) e NÃO é localhost/127.0.0.1, devolve direto
-    const isHttp = /^https?:\/\//i.test(s);
-    const isLocal =
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(s);
-
-    if (isHttp && !isLocal) {
-      return s;
-    }
+    if (/^https?:\/\//i.test(s)) return withAuthToken(s);
+    if (s.startsWith('/api/')) return withAuthToken(s);
+    if (s.startsWith('api/')) return withAuthToken(`/${s}`);
 
     // Se vier com http://localhost:8080/uploads/xxx, tira a origem e deixa só o caminho
-    if (isHttp && isLocal) {
+    const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(s);
+    if (/^https?:\/\//i.test(s) && isLocal) {
       try {
         const u = new URL(s);
         s = u.pathname || '';
@@ -434,8 +468,9 @@ export default function Requisicoes() {
     }
 
     s = s.replace(/^\/+/, '').replace(/\\/g, '/');
+    if (s.startsWith('api/')) return withAuthToken(`/${s}`);
     const rel = s.startsWith('uploads/') ? s : `uploads/${s}`;
-    return `${origin.replace(/\/$/, '')}/${rel}`;
+    return withAuthToken(`${origin.replace(/\/$/, '')}/${rel}`);
   };
 
   const openFaturas = async (id, ev) => {
@@ -603,7 +638,31 @@ export default function Requisicoes() {
                   className="rounded-xl border border-[var(--border)] bg-[var(--panel)]"
                 >
                   <div className="px-16 py-6 border-b border-[var(--border)] font-bold">
-                    {col} ({grouped[col].length})
+                    {(() => {
+                      const icons = {
+                        'Nova Requisição': '/Icones/requisicao.png',
+                        'Em Análise': '/Icones/em_analise.png',
+                        Aprovado: '/Icones/aprovado.png',
+                        Rejeitado: '/Icones/rejeitado.png',
+                      };
+                      const iconSrc = icons[col];
+                      return iconSrc ? (
+                        <div className="flex flex-col items-center justify-center gap-2 text-center">
+                          <img
+                            src={iconSrc}
+                            alt={col}
+                            className="h-12 w-12 object-contain"
+                          />
+                          <div>
+                            {col} ({grouped[col].length})
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          {col} ({grouped[col].length})
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="px-14 py-6 space-y-6">
                     {(col === 'Aprovado'
@@ -618,7 +677,7 @@ export default function Requisicoes() {
 
           {!loading && !err && filtered.length === 0 && (
             <div className="opacity-70 border border-[var(--border)] rounded p-3">
-              Nenhuma requisição encontrada.
+              Nenhuma Requisição encontrada.
               <div className="mt-1 text-xs">
                 Dicas: confirme se há dados em FT_REQUISICOES, se você tem
                 permissão (gestor/admin) e se os filtros/busca não estão
@@ -678,11 +737,11 @@ export default function Requisicoes() {
                           </div>
                         </div>
                       </div>
-                      {(a.caminho_arquivo || a.CaminhoArquivo) && (
+                      {(a.url || a.caminho_arquivo || a.CaminhoArquivo) && (
                         <a
                           className="inline-flex items-center gap-1 text-sm underline"
                           href={toHref(
-                            a.caminho_arquivo || a.CaminhoArquivo
+                            a.url || a.caminho_arquivo || a.CaminhoArquivo
                           )}
                           target="_blank"
                           rel="noreferrer"
@@ -799,4 +858,8 @@ export default function Requisicoes() {
     </div>
   );
 }
+
+
+
+
 

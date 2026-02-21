@@ -1,7 +1,21 @@
 import api from './apiClient';
 
+const normalizeParams = (params) => {
+  if (!params) return {};
+  if (typeof URLSearchParams !== 'undefined' && params instanceof URLSearchParams) {
+    return Object.fromEntries(params.entries());
+  }
+  if (typeof params === 'string') {
+    const raw = params.startsWith('?') ? params.slice(1) : params;
+    return Object.fromEntries(new URLSearchParams(raw));
+  }
+  if (typeof params === 'object') return params;
+  return {};
+};
+
 export async function listPlanilha(params = {}) {
-  const { data } = await api.get('/admin/planilha', { params });
+  const normalized = normalizeParams(params);
+  const { data } = await api.get('/admin/planilha', { params: normalized });
   return Array.isArray(data?.rows) ? data.rows : [];
 }
 

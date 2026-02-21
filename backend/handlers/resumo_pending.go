@@ -10,9 +10,15 @@ import (
 )
 
 // GET /api/v1/resumos/pending?limit=50
+// GetResumosPending godoc
+// @Summary      Resumos pendentes
+// @Tags         ResumoProcesso
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/resumos/pending [get]
 func GetResumosPending(c *gin.Context) {
-    repo := repositories.NewResumoRepo(database.DB_App)
-    _ = repo.EnsureTable(c.Request.Context())
+    repo := repositories.NewResumoRepo(database.GormDB_App)
     limit := 50
     if v := c.Query("limit"); v != "" {
         if n, err := strconv.Atoi(v); err == nil && n > 0 { limit = n }
@@ -24,4 +30,3 @@ func GetResumosPending(c *gin.Context) {
     }
     c.JSON(http.StatusOK, gin.H{"pending_ids": ids, "limit": limit})
 }
-

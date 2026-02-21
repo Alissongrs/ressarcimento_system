@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"database/sql"
@@ -23,6 +23,13 @@ type deferidoRow struct {
 	Unidade            sql.NullString
 }
 
+// GetDashboardDeferidos godoc
+// @Summary      Deferidos do dashboard
+// @Tags         Dashboard
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/dashboard/deferidos [get]
 func GetDashboardDeferidos(c *gin.Context) {
 	query := `
 SELECT
@@ -42,7 +49,7 @@ LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = d.id_processo
 LEFT JOIN DM_STATUS s ON s.id_status = r.id_status
 LEFT JOIN DM_USUARIO u ON u.id_usuario = p.id_responsavel
 `
-	rows, err := database.DB_App.Query(query)
+	rows, err := queryGorm(database.GormDB_App, query)
 	if err != nil {
 		log.Printf("[dashboard] deferidos query failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao carregar deferidos"})
@@ -144,3 +151,4 @@ LEFT JOIN DM_USUARIO u ON u.id_usuario = p.id_responsavel
 		"barra":           bars,
 	})
 }
+

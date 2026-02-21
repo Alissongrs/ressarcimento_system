@@ -7,6 +7,16 @@ import Toast from '../components/Toast.jsx';
 import { Clock } from 'lucide-react';
 import { getProcessosComPrazo } from '../services/requisicaoService';
 
+const formatDateTimeBR = (value) => {
+  if (!value) return '-';
+  const raw = String(value).trim();
+  if (!raw) return '-';
+  const iso = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return raw;
+  return dt.toLocaleString('pt-BR');
+};
+
 export default function HomeGestorAdmin() {
   const { user } = useAuth();
   const isAdmin = String(user?.tipo_conta || '').toLowerCase() === 'admin';
@@ -111,6 +121,12 @@ export default function HomeGestorAdmin() {
                     .map((r) => {
                       const hrs = Number(r?.horas_restantes ?? 0);
                       const dias = Number(r?.dias_restantes ?? 0);
+                      const diasMov = r?.data_base_unix
+                        ? Math.max(
+                            0,
+                            Math.floor((Date.now() - Number(r.data_base_unix) * 1000) / 86400000)
+                          )
+                        : null;
                       const atrasado = !!r?.atrasado;
                       return (
                         <div
@@ -131,6 +147,11 @@ export default function HomeGestorAdmin() {
                           <span className="opacity-80">
                             Sub-etapa:{' '}
                             {r.sub_etapa || 'Aguardando retorno'}
+                          </span>
+                          <span
+                            className="px-2 py-1 rounded text-xs bg-amber-500/30 border border-amber-500/60 ml-auto"
+                          >
+                            Movimentado há {diasMov ?? '-'}d
                           </span>
                           <span className="opacity-80">
                             Deadline:{' '}

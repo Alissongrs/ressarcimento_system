@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
     "net/http"
@@ -27,6 +27,12 @@ type HistoricoItemDTO struct {
 
 // GET /api/v1/historico?limit=2000
 // GET /api/v1/requisicoes/historico?limit=2000 (alias de compatibilidade)
+// @Summary Historico recente
+// @Tags Historico
+// @Produce json
+// @Param limit query int false "Limite"
+// @Success 200 {array} HistoricoItemDTO
+// @Router /api/v1/historico [get]
 func HistoricoRecent(c *gin.Context) {
     limStr := c.DefaultQuery("limit", "1000")
     lim, _ := strconv.Atoi(limStr)
@@ -34,7 +40,7 @@ func HistoricoRecent(c *gin.Context) {
     if lim > 5000 { lim = 5000 }
 
     // Consulta básica ordenada por data/id desc
-    rows, err := database.DB_App.Query(`
+    rows, err := queryGorm(database.GormDB_App, `
         SELECT
           h.id_historico,
           h.id_requisicao,

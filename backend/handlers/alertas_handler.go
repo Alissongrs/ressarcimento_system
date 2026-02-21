@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"database/sql"
@@ -22,6 +22,15 @@ type alertaDTO struct {
 }
 
 // GET /api/alertas?overdue=1&unread=1
+// @Summary Listar alertas
+// @Tags Alertas
+// @Produce json
+// @Param overdue query bool false "Somente vencidos"
+// @Param unread query bool false "Somente nao lidos"
+// @Param due query string false "Filtro por data (today|tomorrow|yesterday)"
+// @Success 200 {array} alertaDTO
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/alertas [get]
 func GetAlertas(c *gin.Context) {
 	userIDVal, ok := c.Get("userID")
 	if !ok {
@@ -64,7 +73,7 @@ func GetAlertas(c *gin.Context) {
 		   CASE WHEN data_alerta IS NULL THEN 1 ELSE 0 END,
 		   data_alerta ASC, data_criacao DESC`
 
-	rows, err := database.DB_App.Query(q, args...)
+	rows, err := queryGorm(database.GormDB_App, q, args...)
 	if err != nil {
 		// Fallback em dev: retorna lista vazia
 		c.JSON(http.StatusOK, []alertaDTO{})
@@ -108,6 +117,16 @@ func GetAlertas(c *gin.Context) {
 }
 
 // POST /api/alertas  { mensagem, data_alerta (YYYY-MM-DD opcional), id_processo (opcional) }
+// @Summary Criar alerta
+// @Tags Alertas
+// @Accept json
+// @Produce json
+// @Param body body map[string]any true "Dados do alerta"
+// @Success 201 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/alertas [post]
 func CreateAlerta(c *gin.Context) {
 	userIDVal, ok := c.Get("userID")
 	if !ok {
@@ -137,7 +156,7 @@ func CreateAlerta(c *gin.Context) {
 		driverData = val
 	}
 
-	_, err := database.DB_App.Exec(`
+	_, err := execGorm(database.GormDB_App, `
 		INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta)
 		VALUES (?, ?, ?, 0, 0, NOW(), ?)`,
 		userID, body.ProcID, strings.TrimSpace(body.Mensagem), driverData,
@@ -150,6 +169,16 @@ func CreateAlerta(c *gin.Context) {
 }
 
 // PUT /api/alertas/:id  { mensagem?, data_alerta?, lido?, acknowledged? }
+// @Summary Atualizar alerta
+// @Tags Alertas
+// @Accept json
+// @Produce json
+// @Param id path string true "ID do alerta"
+// @Param body body map[string]any true "Campos do alerta"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/alertas/{id} [put]
 func UpdateAlerta(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -203,7 +232,7 @@ func UpdateAlerta(c *gin.Context) {
 
 	args = append(args, id)
 	q := `UPDATE FT_ALERTAS SET ` + strings.Join(set, ", ") + ` WHERE id_alerta = ?`
-	if _, err := database.DB_App.Exec(q, args...); err != nil {
+	if _, err := execGorm(database.GormDB_App, q, args...); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar alerta"})
 		return
 	}
@@ -211,6 +240,15 @@ func UpdateAlerta(c *gin.Context) {
 }
 
 // POST /api/alertas/ack  { alerta_ids: [ ... ] }
+// @Summary Confirmar alertas
+// @Tags Alertas
+// @Accept json
+// @Produce json
+// @Param body body map[string][]int true "IDs dos alertas"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/alertas/ack [post]
 func AckAlertas(c *gin.Context) {
 	var body struct {
 		AlertaIDs []int `json:"alerta_ids"`
@@ -224,9 +262,10 @@ func AckAlertas(c *gin.Context) {
 		args[i] = id
 	}
 	q := "UPDATE FT_ALERTAS SET acknowledged = 1 WHERE id_alerta IN (" + strings.Repeat("?,", len(args)-1) + "?)"
-	if _, err := database.DB_App.Exec(q, args...); err != nil {
+	if _, err := execGorm(database.GormDB_App, q, args...); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao confirmar alertas"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Alertas confirmados"})
 }
+

@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"net/http"
@@ -10,8 +10,13 @@ import (
 )
 
 // Retorna todas as etapas disponíveis para filtro (sem duplicar)
+// @Summary Listar etapas para filtro
+// @Tags Filtros
+// @Produce json
+// @Success 200 {array} string
+// @Router /api/v1/filtros/etapas [get]
 func GetEtapasParaFiltro(c *gin.Context) {
-	rows, err := database.DB_App.Query(`
+	rows, err := queryGorm(database.GormDB_App, `
 		SELECT DISTINCT etapa
 		  FROM DM_ETAPAS_PROCESSO
 		 WHERE etapa IS NOT NULL AND TRIM(etapa) <> ''
@@ -38,8 +43,13 @@ func GetEtapasParaFiltro(c *gin.Context) {
 }
 
 // Retorna todas as subetapas distintas existentes nos processos (sem duplicar)
+// @Summary Listar subetapas para filtro
+// @Tags Filtros
+// @Produce json
+// @Success 200 {array} string
+// @Router /api/v1/filtros/subetapas [get]
 func GetSubEtapasParaFiltro(c *gin.Context) {
-	rows, err := database.DB_App.Query(`
+	rows, err := queryGorm(database.GormDB_App, `
 		SELECT DISTINCT sub_etapa
 		  FROM FT_PROCESSOS
 		 WHERE sub_etapa IS NOT NULL AND TRIM(sub_etapa) <> ''
@@ -64,3 +74,4 @@ func GetSubEtapasParaFiltro(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, out)
 }
+

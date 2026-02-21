@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"database/sql"
@@ -23,6 +23,21 @@ func NewDashboardHandler(s *services.DashboardService) *DashboardHandler {
 	return &DashboardHandler{svc: s}
 }
 
+// Stats godoc
+// @Summary      Estatísticas do dashboard
+// @Tags         Dashboard
+// @Param        debug             query  bool    false  "Debug"
+// @Param        incluir_suspensos  query  bool    false  "Incluir suspensos (1/0)"
+// @Param        apenas_relevantes  query  bool    false  "Apenas relevantes (1/0)"
+// @Param        ini               query  string  false  "Data inicial (YYYY-MM-DD)"
+// @Param        fim               query  string  false  "Data final (YYYY-MM-DD)"
+// @Param        cliente           query  string  false  "Filtro por cliente"
+// @Param        concessionaria    query  string  false  "Filtro por concessionária"
+// @Param        gestor_id         query  int     false  "ID do gestor"
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/dashboard/stats [get]
 // GET /api/dashboard/stats[?debug=1]
 func (h *DashboardHandler) Stats(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -78,13 +93,23 @@ func (h *DashboardHandler) Stats(c *gin.Context) {
 			"error":    "failed to compute dashboard stats",
 			"detail":   err.Error(),
 			"warnings": out.Warnings,
-			"partial":  out, // ajuda na inspeção
+			"partial":  out, // ajuda na inspeÃ§ão
 		})
 		return
 	}
 	c.JSON(http.StatusOK, out)
 }
 
+// MovimentacoesPeriodo godoc
+// @Summary      MovimentaÃ§ões por período
+// @Tags         Dashboard
+// @Param        ini  query  string  true  "Data inicial (YYYY-MM-DD)"
+// @Param        fim  query  string  true  "Data final (YYYY-MM-DD)"
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/dashboard/movimentacoes [get]
 // GET /api/dashboard/movimentacoes?ini=YYYY-MM-DD&fim=YYYY-MM-DD
 func (h *DashboardHandler) MovimentacoesPeriodo(c *gin.Context) {
 	iniStr := c.Query("ini")
@@ -107,16 +132,23 @@ func (h *DashboardHandler) MovimentacoesPeriodo(c *gin.Context) {
 	ctx := c.Request.Context()
 	rows, err := h.svc.MovimentacoesPeriodo(ctx, ini, fim)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao buscar movimentações", "detail": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao buscar movimentaÃ§ões", "detail": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, rows)
 }
 
+// MovimentacoesUltimas24h godoc
+// @Summary      MovimentaÃ§ões das últimas 24h
+// @Tags         Dashboard
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/dashboard/changes-24h [get]
 // GET /api/dashboard/changes-24h
-// Lista alterações de histórico nas últimas 24h, com usuário e canais.
+// Lista alteraÃ§ões de histórico nas últimas 24h, com usuário e canais.
 func (h *DashboardHandler) MovimentacoesUltimas24h(c *gin.Context) {
-	rows, err := database.DB_App.Query(`
+	rows, err := queryGorm(database.GormDB_App, `
 		SELECT
 			h.id_historico,
 			h.id_requisicao,
@@ -150,7 +182,7 @@ func (h *DashboardHandler) MovimentacoesUltimas24h(c *gin.Context) {
 		ORDER BY h.data_movimentacao DESC, h.id_historico DESC;
 	`)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar movimentações das últimas 24h"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar movimentaÃ§ões das últimas 24h"})
 		return
 	}
 	defer rows.Close()
@@ -265,3 +297,4 @@ func (h *DashboardHandler) MovimentacoesUltimas24h(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, out)
 }
+

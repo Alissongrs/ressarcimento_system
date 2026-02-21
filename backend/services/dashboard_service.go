@@ -21,6 +21,8 @@ type DashboardStats struct {
 	TotalRequisicoes        int64            `json:"total_requisicoes"`
 	TotalProcessos          int64            `json:"total_processos"`
 	ValorTotalRessarcimento float64          `json:"valor_total_ressarcimento"`
+	ValorEmCarteira         float64          `json:"valor_em_carteira,omitempty"`
+	ProcessosEmCarteira     int64            `json:"processos_em_carteira,omitempty"`
 	ProcessosCounts         map[string]int64 `json:"processos_counts"`
 	StatusCounts            map[string]int64 `json:"status_counts"`
 	Creditos                struct {
@@ -75,6 +77,14 @@ func (s *DashboardService) GetStats(ctx context.Context, debug bool, f repositor
 		out.Warnings = append(out.Warnings, fmt.Sprintf("valor_total_ressarcimento: %v", err))
 	} else {
 		out.ValorTotalRessarcimento = v
+	}
+
+	// Valor/Processos em carteira (Ativos + Deferidos)
+	if c, err := s.repo.CarteiraTotals(ctx, f); err != nil {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("carteira_totals: %v", err))
+	} else {
+		out.ValorEmCarteira = c.Valor
+		out.ProcessosEmCarteira = c.Processos
 	}
 
 	// Processos por coluna (Kanban)

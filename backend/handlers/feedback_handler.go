@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"net/http"
@@ -16,6 +16,15 @@ type feedbackIn struct {
 
 // POST /api/feedback
 // Requer usuário autenticado; gestores e admins usarão via UI.
+// CreateFeedback godoc
+// @Summary      Envia feedback
+// @Tags         Feedback
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/feedback [post]
 func CreateFeedback(c *gin.Context) {
 	var uid int64
 	if v, ok := c.Get("userID"); ok {
@@ -39,14 +48,14 @@ func CreateFeedback(c *gin.Context) {
 		return
 	}
 
-	if _, err := database.DB_App.Exec(`INSERT INTO FEEDBACKS (id_usuario, mensagem) VALUES (?, ?)`, uid, msg); err != nil {
+	if _, err := execGorm(database.GormDB_App, `INSERT INTO FEEDBACKS (id_usuario, mensagem) VALUES (?, ?)`, uid, msg); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao salvar feedback"})
 		return
 	}
 
 	// Notifica administradores via ALERTAS (sino) e SSE
 	// 1) Seleciona admins ativos
-	rows, err := database.DB_App.Query(`SELECT id_usuario FROM DM_USUARIO WHERE usuario_ativo = TRUE AND perfil = 'admin'`)
+	rows, err := queryGorm(database.GormDB_App, `SELECT id_usuario FROM DM_USUARIO WHERE usuario_ativo = TRUE AND perfil = 'admin'`)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -55,7 +64,7 @@ func CreateFeedback(c *gin.Context) {
 				continue
 			}
 			// 2) Insere um alerta para cada admin
-			_, _ = database.DB_App.Exec("INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta) VALUES (?, NULL, ?, 0, 0, NOW(), NULL)", adminID, "Novo feedback recebido")
+			_, _ = execGorm(database.GormDB_App, "INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta) VALUES (?, NULL, ?, 0, 0, NOW(), NULL)", adminID, "Novo feedback recebido")
 			// 3) Atualiza contagem e emite evento de novo alerta para o sino
 			notifyUnread(adminID)
 			sse.BroadcastUser(adminID, sse.Event{
@@ -78,8 +87,15 @@ type feedbackDTO struct {
 
 // GET /api/admin/feedbacks
 // Apenas admins. Lista feedbacks recentes com nome do usuário.
+// ListFeedbacks godoc
+// @Summary      Lista feedbacks
+// @Tags         Feedback
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/feedback [get]
 func ListFeedbacks(c *gin.Context) {
-	rows, err := database.DB_App.Query(`
+	rows, err := queryGorm(database.GormDB_App, `
         SELECT f.id_feedback, f.id_usuario, COALESCE(u.nome_usuario,''), f.mensagem,
                DATE_FORMAT(f.created_at, '%Y-%m-%d %H:%i:%s')
         FROM FEEDBACKS f
@@ -104,3 +120,4 @@ func ListFeedbacks(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, out)
 }
+

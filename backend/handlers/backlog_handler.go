@@ -25,8 +25,15 @@ type backlogCheck struct {
 }
 
 // GetBacklogProcessos retorna processos ordenados pela data de ultima movimentacao mais antiga
+// GetBacklogProcessos godoc
+// @Summary      Lista processos em backlog
+// @Tags         Processos
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/processos/backlog [get]
 func GetBacklogProcessos(c *gin.Context) {
-	db := database.DB_App
+	db := database.GormDB_App
 	if db == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB not initialized"})
 		return
@@ -51,6 +58,15 @@ LEFT JOIN (
       FROM FT_HISTORICO_MOVIMENTACOES
      GROUP BY id_requisicao
 ) vh ON vh.id_requisicao = p.id_processo
+LEFT JOIN (
+    SELECT h1.id_requisicao, h1.sub_etapa, h1.data_movimentacao
+      FROM FT_HISTORICO_MOVIMENTACOES h1
+      JOIN (
+            SELECT id_requisicao, MAX(data_movimentacao) AS max_data
+              FROM FT_HISTORICO_MOVIMENTACOES
+             GROUP BY id_requisicao
+      ) h2 ON h2.id_requisicao = h1.id_requisicao AND h2.max_data = h1.data_movimentacao
+) hl ON hl.id_requisicao = p.id_processo
 LEFT JOIN BACKLOG_CHECKS bc ON bc.id_processo = p.id_processo
 JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
 JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban
@@ -60,6 +76,7 @@ WHERE LOWER(TRIM(kc.nome_coluna)) NOT IN (
     'rejeitados','rejeitado',
     'suspensos','suspenso'
 ) AND COALESCE(p.suspenso,0)=0
+  AND LOWER(TRIM(COALESCE(hl.sub_etapa, ''))) LIKE 'aguardando retorno%'
 `
 
 	// Apenas processos com última movimentação há 60+ dias
@@ -71,7 +88,7 @@ SELECT *
 ` + dataFilter + `
 ORDER BY x.data_ultima_movimentacao ASC`
 
-	rows, err := db.Query(queryRows)
+	rows, err := queryGorm(db, queryRows)
 	if err != nil {
 		log.Printf("GetBacklogProcessos query error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao consultar backlog"})
@@ -111,7 +128,7 @@ SELECT COUNT(*) AS total,
        SUM(CASE WHEN x.checked_by IS NOT NULL THEN 1 ELSE 0 END) AS tratados
   FROM (` + base + `) x
 ` + dataFilter
-	if err := db.QueryRow(countQuery).Scan(&totalCount, &tratadosCount); err != nil {
+	if err := queryRowGorm(db, countQuery).Scan(&totalCount, &tratadosCount); err != nil {
 		log.Printf("GetBacklogProcessos count error: %v", err)
 		// fallback para os contadores obtidos na paginação
 		totalCount = total
@@ -128,8 +145,17 @@ SELECT COUNT(*) AS total,
 }
 
 // POST /api/v1/processos/:id/backlog-check  {checked: true|false}
+// ToggleBacklogCheck godoc
+// @Summary      Marca/desmarca backlog check
+// @Tags         Processos
+// @Param        id   path   int  true  "ID do processo"
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/processos/{id}/backlog-check [post]
 func ToggleBacklogCheck(c *gin.Context) {
-	db := database.DB_App
+	db := database.GormDB_App
 	if db == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB not initialized"})
 		return
@@ -158,7 +184,7 @@ func ToggleBacklogCheck(c *gin.Context) {
 	}
 
 	if body.Checked {
-		_, err := db.Exec(
+		_, err := execGorm(db, 
 			"INSERT INTO BACKLOG_CHECKS (id_processo, checked_by, checked_at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE checked_by=VALUES(checked_by), checked_at=VALUES(checked_at)",
 			pid, uid,
 		)
@@ -167,7 +193,7 @@ func ToggleBacklogCheck(c *gin.Context) {
 			return
 		}
 	} else {
-		if _, err := db.Exec("DELETE FROM BACKLOG_CHECKS WHERE id_processo = ?", pid); err != nil {
+		if _, err := execGorm(db, "DELETE FROM BACKLOG_CHECKS WHERE id_processo = ?", pid); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao desmarcar"})
 			return
 		}
@@ -175,5 +201,7 @@ func ToggleBacklogCheck(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
+
+
 
 

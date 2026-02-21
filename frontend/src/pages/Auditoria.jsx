@@ -45,6 +45,7 @@ export default function MinhasRequisicoes() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingAll, setLoadingAll] = useState(false);
   const PAGE_LIMIT = 15;
   const [hasMore, setHasMore] = useState(true);
   const [showHelp, setShowHelp] = useState(false);
@@ -154,6 +155,21 @@ export default function MinhasRequisicoes() {
       setHasMore(rows.length === PAGE_LIMIT);
     } finally {
       setLoadingMore(false);
+    }
+  };
+
+  const loadAll = async () => {
+    if (loadingAll) return;
+    setLoadingAll(true);
+    try {
+      const all = await getRequisicoesDepartamento({ limit: 5000, offset: 0 });
+      const rows = Array.isArray(all) ? all : [];
+      setList(rows);
+      setHasMore(false);
+    } catch (e) {
+      setError('Não foi possível carregar todas as requisições.');
+    } finally {
+      setLoadingAll(false);
     }
   };
 
@@ -417,7 +433,17 @@ export default function MinhasRequisicoes() {
       </div>
 
       {/* Paginação: Carregar mais */}
-      <div className="px-4 md:px-6 py-4 text-center">
+      <div className="px-4 md:px-6 py-4 text-center space-y-2">
+        <div>
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--border)] hover:opacity-90"
+            onClick={loadAll}
+            disabled={loadingAll}
+          >
+            {loadingAll ? 'Carregando tudo…' : 'Carregar tudo'}
+          </button>
+        </div>
         {hasMore ? (
           <button
             type="button"

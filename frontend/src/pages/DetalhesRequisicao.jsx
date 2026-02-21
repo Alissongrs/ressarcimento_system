@@ -65,15 +65,15 @@ const normalize = (s) => {
   }
 };
 
-// CorreÃ§Ãµes simples de mojibake exibidas no histórico/comentÃ¡rios
+// CorreÃ§ões simples de mojibake exibidas no histórico/comentários
 const fixMojibake = (s) => {
   try {
     let out = String(s || '');
     const map = [
-      ['CriaÃ£o da requisiÃ£o', 'CriaÃ§Ã£o da requisição'],
-      ['CriaÃ§Ã£o da eequisiÃ§Ã£o', 'CriaÃ§Ã£o da requisição'],
-      ['Cria??o da requisi??o', 'CriaÃ§Ã£o da requisição'],
-      ['Cria?o da requisi?o', 'CriaÃ§Ã£o da requisição'],
+      ['Criaão da requisião', 'CriaÃ§ão da requisição'],
+      ['CriaÃ§ão da eequisiÃ§ão', 'CriaÃ§ão da requisição'],
+      ['Cria??o da requisi??o', 'CriaÃ§ão da requisição'],
+      ['Cria?o da requisi?o', 'CriaÃ§ão da requisição'],
     ];
     for (const [bad, good] of map) {
       if (out.includes(bad)) out = out.split(bad).join(good);
@@ -105,14 +105,14 @@ const formatCurrencyBRL = (value) => {
 
 /**
  * Monta a URL absoluta de um arquivo de upload.
- * Sempre usa o domÃ­nio atual (ex.: https://sure.app.br/uploads/...)
+ * Sempre usa o domínio atual (ex.: https://sure.app.br/uploads/...)
  * mesmo que o backend ou a VITE_API_BASE_URL ainda falem em localhost.
  */
 function makeUploadHref(path) {
   if (!path) return '';
   const s = String(path).trim();
 
-  // Se jÃ¡ Ã© URL absoluta, retorna como estÃ¡
+  // Se já é URL absoluta, retorna como está
   if (/^https?:\/\//i.test(s)) return s;
 
   const clean = s.replace(/^\/+/, '').replace(/\\/g, '/');
@@ -179,11 +179,11 @@ function extractPeriodosFromDetalhe(detalhe) {
 
   for (const p of arr) {
     const ano = String(p?.ano ?? p?.Ano ?? '').trim();
-    const mes = String(p?.mes ?? p?.Mes ?? p?.MÃªs ?? '').trim();
+    const mes = String(p?.mes ?? p?.Mes ?? p?.Mês ?? '').trim();
     if (!ano || !mes) continue;
     const mm = String(mes).padStart(2, '0');
     mesesRefs.push(`${ano}-${mm}`); // para API
-    labels.push(`${mm}/${ano}`); // para exibiÃ§Ã£o
+    labels.push(`${mm}/${ano}`); // para exibiÃ§ão
   }
 
   return {
@@ -211,6 +211,8 @@ export default function DetalhesRequisicao() {
 
   const inputAnexoRef = useRef(null);
   const [anexos, setAnexos] = useState([]);
+  const [reqAnexosCount, setReqAnexosCount] = useState(null);
+  const [reqAnexos, setReqAnexos] = useState([]);
 
   const [statusReq, setStatusReq] = useState('');
   const [detalhe, setDetalhe] = useState(null);
@@ -218,7 +220,7 @@ export default function DetalhesRequisicao() {
   const [ucLinks, setUcLinks] = useState([]); // faturas retornadas pela API
   const [faturasSelecionadas, setFaturasSelecionadas] = useState([]);
 
-  // Períodos extraÃ­dos da prÃ³pria requisição
+  // Períodos extraídos da própria requisição
   const { mesesRefs, labels: periodLabels } = useMemo(
     () => extractPeriodosFromDetalhe(detalhe),
     [detalhe],
@@ -296,7 +298,7 @@ export default function DetalhesRequisicao() {
     }
   }, [id]);
 
-  // Carrega detalhes da requisição (cabeÃ§alho) + status atual (1 request sÃ³)
+  // Carrega detalhes da requisição (cabeÃ§alho) + status atual (1 request só)
   useEffect(() => {
     (async () => {
       try {
@@ -311,15 +313,33 @@ export default function DetalhesRequisicao() {
     })();
   }, [id]);
 
+  // Contagem de anexos da requisiÃ§ão (criados na abertura)
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      try {
+        const { data } = await api.get(
+          `/requisicoes/${encodeURIComponent(id)}/anexos`,
+        );
+        const list = Array.isArray(data) ? data : [];
+        setReqAnexosCount(list.length);
+        setReqAnexos(list);
+      } catch {
+        setReqAnexosCount(null);
+        setReqAnexos([]);
+      }
+    })();
+  }, [id]);
+
   useEffect(() => {
     carregarHistorico();
   }, [carregarHistorico]);
 
-  // Busca links de faturas vÃ¡lidos com base nos períodos da requisição (se houver) e UC
+  // Busca links de faturas válidos com base nos períodos da requisição (se houver) e UC
   useEffect(() => {
     (async () => {
       try {
-        // Faturas selecionadas na criaÃ§Ã£o (se houver)
+        // Faturas selecionadas na criaÃ§ão (se houver)
         try {
           const resp = await api.get(`/requisicoes/${id}/faturas`);
           const lista = Array.isArray(resp?.data?.faturas) ? resp.data.faturas : [];
@@ -419,6 +439,7 @@ export default function DetalhesRequisicao() {
   }, [historico, statusReq]);
 
   const statusNorm = useMemo(() => normalize(statusAtual), [statusAtual]);
+  const isNova = statusNorm.includes('nova');
   const isLocked =
     statusNorm === 'aprovado' ||
     statusNorm === 'rejeitado' ||
@@ -452,6 +473,10 @@ export default function DetalhesRequisicao() {
   }, [subtipoId, subtipos, detalhe]);
 
   const salvarClassificacao = async () => {
+    if (isNova && (!tipoId || !subtipoId)) {
+      alert('Selecione Tipo e Subtipo de irregularidade.');
+      return;
+    }
     setSalvando(true);
     try {
       const fd = new FormData();
@@ -468,9 +493,9 @@ export default function DetalhesRequisicao() {
 
       await carregarHistorico();
 
-      alert('Classificação/observaÃ§Ãµes salvas.');
+      alert('Classificação/observaÃ§ões salvas.');
     } catch {
-      alert('NÃ£o foi possÃ­vel salvar.');
+      alert('Não foi possível salvar.');
     } finally {
       setSalvando(false);
     }
@@ -482,13 +507,17 @@ export default function DetalhesRequisicao() {
       error?.response?.data?.message ||
       error?.message ||
       fallback ||
-      'NÃ£o foi possÃ­vel atualizar o status.';
+      'Não foi possível atualizar o status.';
     alert(message);
   };
 
   const handleStatusChange = useCallback(
     async (statusValue, successMessage) => {
       if (isLocked) return;
+      if (isNova && (!tipoId || !subtipoId)) {
+        alert('Selecione Tipo e Subtipo de irregularidade.');
+        return;
+      }
       const fd = new FormData();
       fd.append('status', statusValue);
       if (tipoId) fd.append('id_tipo_irregularidade', String(tipoId));
@@ -504,10 +533,10 @@ export default function DetalhesRequisicao() {
         } catch {}
         alert(successMessage);
       } catch (error) {
-        showStatusError(error, 'NÃ£o foi possÃ­vel atualizar o status.');
+        showStatusError(error, 'Não foi possível atualizar o status.');
       }
     },
-    [carregarHistorico, id, isLocked, tipoId, subtipoId],
+    [carregarHistorico, id, isLocked, isNova, tipoId, subtipoId],
   );
 
   return (
@@ -540,7 +569,7 @@ export default function DetalhesRequisicao() {
           </h2>
 
           <div>
-            {/* Blocos fixos sempre visÃ­veis */}
+            {/* Blocos fixos sempre visíveis */}
             {detalhe && (
               <div className="border-l-2 border-[var(--accent)] pl-4 pb-4 mb-4">
                 <div className="flex items-center gap-2 mb-1">
@@ -589,6 +618,54 @@ export default function DetalhesRequisicao() {
                     </span>
                   </li>
                   <li>
+                    <span className="opacity-70">Período: </span>
+                    <span className="font-medium">
+                      {periodLabels.length > 0
+                        ? periodLabels.join(', ')
+                        : '-'}
+                    </span>
+                  </li>
+                  <li>
+                    <span className="opacity-70">Classificação: </span>
+                    <span className="font-medium">
+                      Irregularidade: {tipoLabel || '-'} | Sub irregularidade:{' '}
+                      {subtipoLabel || '-'}
+                    </span>
+                  </li>
+                  <li>
+                    <span className="opacity-70">Fatura: </span>
+                    {toStr(detalhe?.link_fatura || detalhe?.linkFatura) ? (
+                      <a
+                        className="font-medium text-[var(--accent)] underline break-all"
+                        href={toStr(detalhe?.link_fatura || detalhe?.linkFatura)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {toStr(detalhe?.link_fatura || detalhe?.linkFatura)}
+                      </a>
+                    ) : (
+                      <span className="font-medium">-</span>
+                    )}
+                  </li>
+                  <li>
+                    <span className="opacity-70">Anexos: </span>
+                    <span className="font-medium">
+                      {reqAnexosCount == null
+                        ? '-'
+                        : `${reqAnexosCount}`}
+                    </span>
+                  </li>
+                  {Array.isArray(reqAnexos) && reqAnexos.length > 0 && (
+                    <li>
+                      <span className="opacity-70">Arquivos: </span>
+                      <span className="font-medium">
+                        {reqAnexos
+                          .map((a) => a.nome_arquivo || a.nome || 'arquivo')
+                          .join(', ')}
+                      </span>
+                    </li>
+                  )}
+                  <li>
                     <span className="opacity-70">Descrição: </span>
                     <span className="font-medium">
                       {toStr(
@@ -604,7 +681,7 @@ export default function DetalhesRequisicao() {
             {/* Anexos da requisição */}
             <RequisicaoAnexos requisicaoId={id} />
 
-            {/* Faturas (selecionadas por perÃ­odo) */}
+            {/* Faturas (selecionadas por período) */}
             {(allInvoiceItems.length > 0 || periodLabels.length > 0) && (
               <div className="border-l-2 border-[var(--accent)] pl-4 pb-4 mb-4">
                 <div className="flex items-center gap-2 mb-1">
@@ -613,7 +690,7 @@ export default function DetalhesRequisicao() {
                   </span>
                 </div>
 
-                {/* Períodos selecionados (vÃªm da prÃ³pria requisição) */}
+                {/* Períodos selecionados (vêm da própria requisição) */}
                 {periodLabels.length > 0 && (
                   <div className="text-xs opacity-80 mb-2">
                     Períodos selecionados:{' '}
@@ -708,6 +785,13 @@ export default function DetalhesRequisicao() {
                   const comentarioTxt = fixMojibake(
                     toStr(h.comentario),
                   ).trim();
+                  const labelNorm = normalize(label);
+                  const comentarioNorm = normalize(comentarioTxt);
+                  if (
+                    labelNorm.includes('criacao do processo') ||
+                    comentarioNorm.includes('processo criado')
+                  )
+                    return null;
                   if (!comentarioTxt && !label) return null;
 
                   return (
@@ -740,7 +824,7 @@ export default function DetalhesRequisicao() {
           </div>
         </div>
 
-        {/* Coluna lateral: aÃ§Ãµes rÃ¡pidas e classificaÃ§Ã£o */}
+        {/* Coluna lateral: aÃ§ões rápidas e classificaÃ§ão */}
         <div className="lg:col-span-1 glass-card border border-[var(--border)] rounded-lg p-4 sticky top-24 self-start">
           <h2 className="text-lg font-semibold mb-4">
             Classificação de Irregularidade
@@ -778,7 +862,9 @@ export default function DetalhesRequisicao() {
             Classificação da Irregularidade
           </h2>
 
-          <label className="block text-sm mb-1">Tipo</label>
+          <label className="block text-sm mb-1">
+            Tipo{isNova ? ' *' : ''}
+          </label>
           <select
             value={tipoId}
             onChange={(e) => {
@@ -797,7 +883,9 @@ export default function DetalhesRequisicao() {
             ))}
           </select>
 
-          <label className="block text-sm mb-1">Subtipo</label>
+          <label className="block text-sm mb-1">
+            Subtipo{isNova ? ' *' : ''}
+          </label>
           <select
             value={subtipoId}
             onChange={(e) => setSubtipoId(e.target.value)}
@@ -869,7 +957,7 @@ export default function DetalhesRequisicao() {
 
           <button
             onClick={salvarClassificacao}
-            disabled={salvando || !tipoId}
+            disabled={salvando || (isNova && (!tipoId || !subtipoId))}
             className="w-full px-4 py-2 btn-accent rounded-lg hover:opacity-90 disabled:opacity-50"
           >
             {salvando
@@ -967,7 +1055,6 @@ function RequisicaoAnexos({ requisicaoId }) {
     </div>
   );
 }
-
 
 
 

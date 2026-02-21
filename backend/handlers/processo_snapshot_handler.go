@@ -39,6 +39,16 @@ type ProcessoSnapshotResponse struct {
 // com as tabelas originais
 // =============================================================================
 // POST /api/v1/processo-snapshot/:id_processo
+// UpdateProcessoSnapshot godoc
+// @Summary      Atualiza snapshot do processo
+// @Tags         ProcessoSnapshot
+// @Param        id_processo  path   int  true  "ID do processo"
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/processo-snapshot/{id_processo} [post]
 func UpdateProcessoSnapshot(c *gin.Context) {
 	// Extrair ID do processo
 	idProcessoStr := c.Param("id_processo")
@@ -124,6 +134,15 @@ func UpdateProcessoSnapshot(c *gin.Context) {
 // GetProcessoSnapshot retorna os dados de um processo no snapshot
 // =============================================================================
 // GET /api/v1/processo-snapshot/:id_processo
+// GetProcessoSnapshot godoc
+// @Summary      Busca snapshot do processo
+// @Tags         ProcessoSnapshot
+// @Param        id_processo  path   int  true  "ID do processo"
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/processo-snapshot/{id_processo} [get]
 func GetProcessoSnapshot(c *gin.Context) {
 	idProcessoStr := c.Param("id_processo")
 	idProcesso, err := strconv.Atoi(idProcessoStr)
@@ -161,6 +180,15 @@ func GetProcessoSnapshot(c *gin.Context) {
 // SyncProcessoSnapshot sincroniza um processo com as tabelas originais
 // =============================================================================
 // POST /api/v1/processo-snapshot/:id_processo/sync
+// SyncProcessoSnapshot godoc
+// @Summary      Sincroniza snapshot do processo
+// @Tags         ProcessoSnapshot
+// @Param        id_processo  path   int  true  "ID do processo"
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/processo-snapshot/{id_processo}/sync [post]
 func SyncProcessoSnapshot(c *gin.Context) {
 	idProcessoStr := c.Param("id_processo")
 	idProcesso, err := strconv.Atoi(idProcessoStr)
@@ -225,7 +253,7 @@ func getProcessoSnapshot(idProcesso int) (map[string]interface{}, error) {
 }
 
 func getProcessoSnapshotDynamic(idProcesso int) (map[string]interface{}, error) {
-	rows, err := database.DB_App.Query(
+	rows, err := queryGorm(database.GormDB_App, 
 		"SELECT * FROM FT_PROCESSO_SNAPSHOT WHERE id_processo = ?",
 		idProcesso,
 	)
@@ -298,6 +326,8 @@ func getProcessoSnapshotFromOriginal(idProcesso int) (map[string]interface{}, er
 			COALESCE(DATE_FORMAT(d.data_procedencia, '%Y-%m-%d'), '') AS data_simples,
 			COALESCE(d.credito_dobro, 0)                 AS credito_dobro,
 			COALESCE(DATE_FORMAT(d.data_credito_dobro, '%Y-%m-%d'), '') AS data_dobro,
+			COALESCE(d.repasse_simples, 0)               AS repasse_simples,
+			COALESCE(d.repasse_dobro, 0)                 AS repasse_dobro,
 			COALESCE(fr.forma_devolucao, '')             AS forma_devolucao,
 			COALESCE(fr.valor, 0)                        AS valor_ressarcimento,
 			COALESCE(DATE_FORMAT(fr.data_devolucao, '%Y-%m-%d'), '') AS data_devolucao,
@@ -337,7 +367,7 @@ func getProcessoSnapshotFromOriginal(idProcesso int) (map[string]interface{}, er
 		LIMIT 1
 	`
 
-	row := database.DB_App.QueryRow(query, idProcesso)
+	row := queryRowGorm(database.GormDB_App, query, idProcesso)
 
 	var (
 		idProc                                                                 int
@@ -425,7 +455,7 @@ func syncProcessoSnapshot(idProcesso int, userID int, updateData ProcessoSnapsho
 		CALL sp_update_processo_snapshot(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err := database.DB_App.Exec(query,
+	_, err := execGorm(database.GormDB_App, query,
 		idProcesso,
 		updateData.UC,
 		updateData.Cliente,
@@ -450,7 +480,7 @@ func syncProcessoSnapshot(idProcesso int, userID int, updateData ProcessoSnapsho
 // callSyncStoredProcedure executa a SP de sincronização
 func callSyncStoredProcedure(idProcesso int, userID int) error {
 	query := `CALL sp_sync_processo_snapshot(?, ?)`
-	_, err := database.DB_App.Exec(query, idProcesso, userID)
+	_, err := execGorm(database.GormDB_App, query, idProcesso, userID)
 
 	if err != nil {
 		log.Printf("Erro ao chamar sp_sync_processo_snapshot: %v", err)
@@ -468,7 +498,7 @@ func callSyncStoredProcedure(idProcesso int, userID int) error {
 // Deve ser chamado após atualizar FT_PROCESSOS, FT_REQUISICOES, etc.
 func syncFromOriginalTables(idProcesso int, userID int) error {
 	query := `CALL sp_sync_from_original_tables(?, ?)`
-	_, err := database.DB_App.Exec(query, idProcesso, userID)
+	_, err := execGorm(database.GormDB_App, query, idProcesso, userID)
 
 	if err != nil {
 		log.Printf("Erro ao sincronizar snapshot de tabelas originais: %v", err)
@@ -482,7 +512,7 @@ func syncFromOriginalTables(idProcesso int, userID int) error {
 // refreshAllProcessosSnapshot sincroniza TODOS os processos em lote
 func refreshAllProcessosSnapshot(userID int) error {
 	query := `CALL sp_refresh_all_processos_snapshot(?)`
-	_, err := database.DB_App.Exec(query, userID)
+	_, err := execGorm(database.GormDB_App, query, userID)
 
 	if err != nil {
 		log.Printf("Erro ao fazer refresh em lote do snapshot: %v", err)
@@ -501,4 +531,5 @@ func refreshAllProcessosSnapshotAsync(userID int) {
 		}
 	}()
 }
+
 

@@ -15,7 +15,7 @@ export default function Welcome() {
     {
       icon: <BarChart3 size={22} />,
       title: 'Visão e Métricas',
-      text: 'Dashboards, histórico e rastreabilidade em um só lugar — decisões com dados, não suposições.',
+      text: 'Métricas, histórico e rastreabilidade em um só lugar — decisões com dados, não suposições.',
     },
     {
       icon: <ShieldCheck size={22} />,
@@ -89,7 +89,7 @@ export default function Welcome() {
               onClick={() => navigate('/dashboard')}
               className="px-4 py-2 rounded-lg border panel-border panel-bg-60 hover:opacity-90"
             >
-              Abrir Dashboard
+              Abrir Métricas
             </button>
           </div>
         </div>

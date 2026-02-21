@@ -8,7 +8,7 @@ import (
 )
 
 type ProcessosService interface {
-	ListarKanbanFast(ctx context.Context) ([]models.ProcessoKanban, error)
+	ListarKanbanFast(ctx context.Context, limit int, coluna string) ([]models.ProcessoKanban, error)
 }
 
 type processosService struct {
@@ -19,6 +19,6 @@ func NewProcessosService(r repositories.ProcessosRepository) ProcessosService {
 	return &processosService{repo: r}
 }
 
-func (s *processosService) ListarKanbanFast(ctx context.Context) ([]models.ProcessoKanban, error) {
-	return s.repo.ListarKanbanFast(ctx)
+func (s *processosService) ListarKanbanFast(ctx context.Context, limit int, coluna string) ([]models.ProcessoKanban, error) {
+	return s.repo.ListarKanbanFast(ctx, limit, coluna)
 }

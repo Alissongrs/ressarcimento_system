@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"net/http"
@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Definição dos tipos
+// DefiniÃ§ão dos tipos
 type TipoIrregularidade struct {
 	ID   int    `json:"id"`
 	Nome string `json:"nome"`
@@ -21,8 +21,15 @@ type SubtipoIrregularidade struct {
 // ----------------------------
 // Buscar todos os Tipos
 // ----------------------------
+// GetTiposIrregularidade godoc
+// @Summary      Lista tipos de irregularidade
+// @Tags         Irregularidades
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/tipos-irregularidade [get]
 func GetTiposIrregularidade(c *gin.Context) {
-	rows, err := database.DB_App.Query("SELECT id_tipo, nome FROM DM_TIPO_IRREGULARIDADE ORDER BY nome")
+	rows, err := queryGorm(database.GormDB_App, "SELECT id_tipo, nome FROM DM_TIPO_IRREGULARIDADE ORDER BY nome")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar tipos de irregularidade"})
 		return
@@ -45,10 +52,18 @@ func GetTiposIrregularidade(c *gin.Context) {
 // ----------------------------
 // Buscar subtipos por tipoID
 // ----------------------------
+// GetSubtiposIrregularidade godoc
+// @Summary      Lista subtipos de irregularidade
+// @Tags         Irregularidades
+// @Param        tipoID  path   int  true  "ID do tipo"
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/tipos-irregularidade/{tipoID}/subtipos [get]
 func GetSubtiposIrregularidade(c *gin.Context) {
 	tipoID := c.Param("tipoID")
 
-	rows, err := database.DB_App.Query(
+	rows, err := queryGorm(database.GormDB_App, 
 		"SELECT id_subtipo, nome FROM DM_SUBTIPO_IRREGULARIDADE WHERE id_tipo = ? ORDER BY nome", tipoID,
 	)
 	if err != nil {
@@ -69,3 +84,4 @@ func GetSubtiposIrregularidade(c *gin.Context) {
 
 	c.JSON(http.StatusOK, subtipos)
 }
+

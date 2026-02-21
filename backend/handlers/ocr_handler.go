@@ -1,4 +1,4 @@
-// handlers/ocr_handler.go
+﻿// handlers/ocr_handler.go
 package handlers
 
 import (
@@ -151,7 +151,7 @@ func parseRetryAfter(h http.Header) time.Duration {
 	if n, err := strconv.Atoi(ra); err == nil && n >= 0 {
 		return time.Duration(n) * time.Second
 	}
-	// formato data HTTP (RFC1123) – opcional
+	// formato data HTTP (RFC1123) â€“ opcional
 	if t, err := time.Parse(time.RFC1123, ra); err == nil {
 		diff := time.Until(t)
 		if diff > 0 {
@@ -203,7 +203,7 @@ func doOpenAIWithRetry(ctx context.Context, payload []byte) (upstreamResp, error
 	var last upstreamResp
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		last = callOpenAIChat(ctx, payload)
-		// sucesso (200..499 exceto 429) → sai
+		// sucesso (200..499 exceto 429) â†’ sai
 		if last.err == nil {
 			return last, nil
 		}
@@ -211,7 +211,7 @@ func doOpenAIWithRetry(ctx context.Context, payload []byte) (upstreamResp, error
 		if last.status != http.StatusTooManyRequests && last.status < 500 {
 			return last, last.err
 		}
-		// última tentativa → sai
+		// última tentativa â†’ sai
 		if attempt == maxRetries {
 			return last, last.err
 		}
@@ -305,6 +305,15 @@ func callOllama(ctx context.Context, prompt string) (string, string, error) {
 
 // POST /api/v1/ocr/chat
 // body: { messages: [{role: 'system'|'user'|'assistant', content: string}], model?: string }
+// OCRChat godoc
+// @Summary      Chat OCR
+// @Tags         OCR
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/ocr/chat [post]
 func OCRChat(c *gin.Context) {
 	var body struct {
 		Messages []map[string]string `json:"messages"`
@@ -474,10 +483,20 @@ func OCRChat(c *gin.Context) {
 		"provider_used": "openai",
 	})
 }
+
 /* ===================== OCRAnalyze (compatível one-shot) ===================== */
 
 // POST /api/v1/ocr/analyze (multipart/form-data)
 // Encaminha arquivos diretamente para o OCR backend Python em modo one-shot.
+// OCRAnalyze godoc
+// @Summary      OCR analyze
+// @Tags         OCR
+// @Accept       multipart/form-data
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/ocr/analyze [post]
 func OCRAnalyze(c *gin.Context) {
 	ocrURL := strings.TrimSpace(os.Getenv("OCR_BACKEND_URL"))
 	if ocrURL == "" {
@@ -497,6 +516,18 @@ func OCRAnalyze(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "envie pelo menos um arquivo em files[]"})
 		return
 	}
+	engine := strings.ToUpper(strings.TrimSpace(c.PostForm("engine")))
+	profile := strings.ToUpper(strings.TrimSpace(c.PostForm("profile")))
+	force := strings.TrimSpace(c.PostForm("force"))
+	instruction := strings.TrimSpace(c.PostForm("instruction"))
+	allowedEngines := map[string]bool{"AUTO": true, "TESSERACT": true, "PADDLE": true, "EASYOCR": true}
+	allowedProfiles := map[string]bool{"FAST": true, "BALANCED": true, "HIGH": true}
+	if !allowedEngines[engine] {
+		engine = "AUTO"
+	}
+	if !allowedProfiles[profile] {
+		profile = "BALANCED"
+	}
 
 	var b bytes.Buffer
 	mw := multipart.NewWriter(&b)
@@ -508,6 +539,17 @@ func OCRAnalyze(c *gin.Context) {
 		w, _ := mw.CreateFormFile("files", fh.Filename)
 		_, _ = io.Copy(w, f)
 		_ = f.Close()
+	}
+	if instruction != "" {
+		_ = mw.WriteField("instruction", instruction)
+	}
+	_ = mw.WriteField("engine", engine)
+	_ = mw.WriteField("profile", profile)
+	if force != "" {
+		_ = mw.WriteField("force", force)
+	}
+	if force != "" {
+		_ = mw.WriteField("force", force)
 	}
 	_ = mw.Close()
 
@@ -575,6 +617,15 @@ func extractJSON(s string) string {
 // POST /api/v1/ocr/quick (multipart/form-data)
 // Executa OCR rápido (Tesseract apenas) e salva raw_text no banco
 // Retorna request_id para uso posterior no /ocr/interpret
+// OCRQuick godoc
+// @Summary      OCR quick
+// @Tags         OCR
+// @Accept       multipart/form-data
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/ocr/quick [post]
 func OCRQuick(c *gin.Context) {
 	ocrURL := strings.TrimSpace(os.Getenv("OCR_BACKEND_URL"))
 	if ocrURL == "" {
@@ -595,6 +646,17 @@ func OCRQuick(c *gin.Context) {
 		return
 	}
 
+	engine := strings.ToUpper(strings.TrimSpace(c.PostForm("engine")))
+	profile := strings.ToUpper(strings.TrimSpace(c.PostForm("profile")))
+	allowedEngines := map[string]bool{"AUTO": true, "TESSERACT": true, "PADDLE": true, "EASYOCR": true, "PDFTEXT": true}
+	allowedProfiles := map[string]bool{"FAST": true, "BALANCED": true, "HIGH": true}
+	if !allowedEngines[engine] {
+		engine = "TESSERACT"
+	}
+	if !allowedProfiles[profile] {
+		profile = "FAST"
+	}
+
 	// Monta multipart para o OCR Service Python
 	var b bytes.Buffer
 	mw := multipart.NewWriter(&b)
@@ -609,6 +671,8 @@ func OCRQuick(c *gin.Context) {
 		_, _ = io.Copy(w, f)
 		_ = f.Close()
 	}
+	_ = mw.WriteField("engine", engine)
+	_ = mw.WriteField("profile", profile)
 	_ = mw.Close()
 
 	// Chama Python /ocr/quick
@@ -626,12 +690,7 @@ func OCRQuick(c *gin.Context) {
 
 	// Parse response
 	var pythonResp struct {
-		Results []struct {
-			FileName  string `json:"file_name"`
-			RawText   string `json:"raw_text"`
-			PagesUsed int    `json:"pages_used"`
-			Status    string `json:"status"`
-		} `json:"results"`
+		Results []map[string]any `json:"results"`
 	}
 
 	if err := json.Unmarshal(rb, &pythonResp); err != nil {
@@ -643,11 +702,15 @@ func OCRQuick(c *gin.Context) {
 	reqID := uuid.New().String()
 
 	// Salva no banco (OCR_RESULTS)
-	if database.DB_App != nil {
-		repo := repositories.NewOCRResultRepo(database.DB_App)
-		ctx := c.Request.Context()
-		for _, item := range pythonResp.Results {
-			_ = repo.Insert(ctx, reqID, item.FileName, item.RawText, nil)
+	if database.GormDB_App != nil {
+		if database.GormDB_App != nil {
+			repo := repositories.NewOCRResultRepo(database.GormDB_App)
+			ctx := c.Request.Context()
+			for _, item := range pythonResp.Results {
+				filename, _ := item["file_name"].(string)
+				rawText, _ := item["raw_text"].(string)
+				_ = repo.Insert(ctx, reqID, filename, rawText, item["interpreted"])
+			}
 		}
 	}
 
@@ -663,7 +726,16 @@ func OCRQuick(c *gin.Context) {
 
 // POST /api/v1/ocr/interpret (application/json)
 // Body: { request_id, filename, rules?: string[], use_llm?: bool }
-// Busca OCR text salvo e chama Python para interpretação com regras
+// Busca OCR text salvo e chama Python para interpretaÃ§ão com regras
+// OCRInterpret godoc
+// @Summary      OCR interpretar
+// @Tags         OCR
+// @Accept       multipart/form-data
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/ocr/interpret [post]
 func OCRInterpret(c *gin.Context) {
 	ocrURL := strings.TrimSpace(os.Getenv("OCR_BACKEND_URL"))
 	if ocrURL == "" {
@@ -687,12 +759,12 @@ func OCRInterpret(c *gin.Context) {
 	}
 
 	// Busca OCR text salvo no banco
-	if database.DB_App == nil {
+	if database.GormDB_App == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database não configurado"})
 		return
 	}
 
-	repo := repositories.NewOCRResultRepo(database.DB_App)
+	repo := repositories.NewOCRResultRepo(database.GormDB_App)
 	ctx := c.Request.Context()
 	ocrText, _, err := repo.GetByRequestAndFilename(ctx, body.RequestID, body.Filename)
 	if err != nil {
@@ -748,6 +820,7 @@ func OCRInterpret(c *gin.Context) {
 		Filename    string         `json:"filename"`
 		RuleResults map[string]any `json:"rule_results"`
 		LLMResults  map[string]any `json:"llm_results"`
+		Interpreted map[string]any `json:"interpreted"`
 		Status      string         `json:"status"`
 	}
 
@@ -760,15 +833,115 @@ func OCRInterpret(c *gin.Context) {
 	combinedResult := map[string]any{
 		"rule_results": pythonResp.RuleResults,
 		"llm_results":  pythonResp.LLMResults,
+		"interpreted":  pythonResp.Interpreted,
 	}
 	_ = repo.UpdateLLMResult(ctx, body.RequestID, body.Filename, combinedResult)
 
 	// Retorna para o frontend
-	c.JSON(http.StatusOK, gin.H{
+	respBody := gin.H{
 		"request_id":   pythonResp.RequestID,
 		"filename":     pythonResp.Filename,
 		"rule_results": pythonResp.RuleResults,
 		"llm_results":  pythonResp.LLMResults,
 		"status":       pythonResp.Status,
-	})
+	}
+	for k, v := range pythonResp.Interpreted {
+		if _, exists := respBody[k]; !exists {
+			respBody[k] = v
+		}
+	}
+	c.JSON(http.StatusOK, respBody)
 }
+
+// POST /api/v1/ocr/interpret_json
+// Body: { request_id, filename, ocr_text, rules?, use_llm? }
+// OCRInterpretJson godoc
+// @Summary      OCR interpretar (JSON)
+// @Tags         OCR
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/ocr/interpret_json [post]
+func OCRInterpretJson(c *gin.Context) {
+	ocrURL := strings.TrimSpace(os.Getenv("OCR_BACKEND_URL"))
+	if ocrURL == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "ocr_backend_not_configured",
+			"message": "OCR_BACKEND_URL não configurado no .env",
+		})
+		return
+	}
+
+	var body struct {
+		RequestID string   `json:"request_id" binding:"required"`
+		Filename  string   `json:"filename" binding:"required"`
+		OcrText   string   `json:"ocr_text" binding:"required"`
+		Rules     []string `json:"rules"`
+		UseLLM    bool     `json:"use_llm"`
+	}
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JSON invalido", "details": err.Error()})
+		return
+	}
+
+	payload := map[string]any{
+		"request_id": body.RequestID,
+		"filename":   body.Filename,
+		"ocr_text":   body.OcrText,
+		"rules":      body.Rules,
+		"use_llm":    fmt.Sprintf("%t", body.UseLLM),
+	}
+
+	payloadBytes, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", strings.TrimRight(ocrURL, "/")+"/ocr/interpret_json", bytes.NewReader(payloadBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := httpClientWithTimeout().Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Falha ao contatar OCR backend", "details": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	rb, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		c.JSON(resp.StatusCode, gin.H{
+			"error":   "ocr_backend_error",
+			"details": string(rb),
+		})
+		return
+	}
+
+	var pythonResp struct {
+		RequestID   string         `json:"request_id"`
+		Filename    string         `json:"filename"`
+		RuleResults map[string]any `json:"rule_results"`
+		LLMResults  map[string]any `json:"llm_results"`
+		Interpreted map[string]any `json:"interpreted"`
+		Status      string         `json:"status"`
+	}
+	if err := json.Unmarshal(rb, &pythonResp); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Resposta invalida do OCR backend", "details": string(rb)})
+		return
+	}
+
+	respBody := gin.H{
+		"request_id":   pythonResp.RequestID,
+		"filename":     pythonResp.Filename,
+		"rule_results": pythonResp.RuleResults,
+		"llm_results":  pythonResp.LLMResults,
+		"status":       pythonResp.Status,
+	}
+	for k, v := range pythonResp.Interpreted {
+		if _, exists := respBody[k]; !exists {
+			respBody[k] = v
+		}
+	}
+	c.JSON(http.StatusOK, respBody)
+}
+
+

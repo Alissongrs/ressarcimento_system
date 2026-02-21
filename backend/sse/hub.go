@@ -55,4 +55,13 @@ func Broadcast(processoID int, ev Event) {
 			// slow consumer, drop
 		}
 	}
+	if processoID != 0 {
+		for ch := range subs[0] {
+			select {
+			case ch <- b:
+			default:
+				// slow consumer, drop
+			}
+		}
+	}
 }

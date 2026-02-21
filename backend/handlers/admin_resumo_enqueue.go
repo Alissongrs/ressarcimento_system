@@ -1,7 +1,6 @@
 package handlers
 
 import (
-    "database/sql"
     "net/http"
     "sort"
     "strconv"
@@ -10,6 +9,7 @@ import (
     "github.com/gin-gonic/gin"
     "ressarcimento-backend/database"
     "ressarcimento-backend/repositories"
+    "gorm.io/gorm"
 )
 
 type enqueueBody struct {
@@ -20,9 +20,17 @@ type enqueueBody struct {
 // POST /api/v1/resumos/enqueue
 // - body opcional: { ids: [..], mode: "changed"|"all" }
 // - se ids vazio: usa query ?mode=&limit= (busca em FT_PROCESSOS)
+// EnqueueResumos godoc
+// @Summary      Enfileira resumos
+// @Tags         ResumoProcesso
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/resumos/enqueue [post]
 func EnqueueResumos(c *gin.Context) {
-    repo := repositories.NewResumoRepo(database.DB_App)
-    _ = repo.EnsureTable(c.Request.Context())
+    repo := repositories.NewResumoRepo(database.GormDB_App)
 
     var body enqueueBody
     _ = c.ShouldBindJSON(&body)
@@ -36,7 +44,7 @@ func EnqueueResumos(c *gin.Context) {
         if v := c.Query("limit"); v != "" {
             if n, err := strconv.Atoi(v); err == nil && n > 0 { limit = n }
         }
-        ids = listProcessoIDs(database.DB_App, limit)
+        ids = listProcessoIDs(database.GormDB_App, limit)
     }
 
     enq := make([]int64, 0, len(ids))
@@ -44,7 +52,7 @@ func EnqueueResumos(c *gin.Context) {
         if mode == "all" {
             // força pendente com hash atual
             hash, _ := repo.ComputeHistoricoHash(c.Request.Context(), pid)
-            _, _ = database.DB_App.Exec(`INSERT INTO FT_RESUMOS_PROCESSO (processo_id, status, history_hash, updated_at)
+            _, _ = execGorm(database.GormDB_App, `INSERT INTO FT_RESUMOS_PROCESSO (processo_id, status, history_hash, updated_at)
                 VALUES (?, 'pending', ?, NOW())
                 ON DUPLICATE KEY UPDATE status='pending', history_hash=VALUES(history_hash), updated_at=NOW()`, pid, hash)
         } else {
@@ -60,9 +68,9 @@ func EnqueueResumos(c *gin.Context) {
     c.JSON(http.StatusOK, gin.H{"enqueued": enq, "count": len(enq), "mode": mode})
 }
 
-func listProcessoIDs(db *sql.DB, limit int) []int64 {
+func listProcessoIDs(db *gorm.DB, limit int) []int64 {
     if db == nil { return nil }
-    rows, err := db.Query(`SELECT id FROM FT_PROCESSOS ORDER BY updated_at DESC LIMIT ?`, limit)
+    rows, err := queryGorm(db, `SELECT id FROM FT_PROCESSOS ORDER BY updated_at DESC LIMIT ?`, limit)
     if err != nil { return nil }
     defer rows.Close()
     out := make([]int64, 0, limit)
@@ -82,4 +90,3 @@ func toCSV(ids []int64) string {
     }
     return b.String()
 }
-

@@ -62,6 +62,16 @@ func normalizeMonth(s string) (string, error) {
 }
 
 // GetUCByNumero busca os detalhes de uma UC pelo número (apenas dados cadastrais + link de fatura mais recente)
+// @Summary Buscar UC por numero
+// @Tags UC
+// @Produce json
+// @Param numero path string true "Numero da UC"
+// @Param mes_ref query []string false "Meses (YYYY-MM)"
+// @Param mes query []string false "Meses (YYYY-MM)"
+// @Success 200 {object} models.UCDetalhes
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/uc/{numero} [get]
 func GetUCByNumero(c *gin.Context) {
 	numeroUC := c.Param("numero")
 
@@ -198,6 +208,13 @@ WHERE (u.unidade = ? OR u.id_uc = ?);`
 // GetUCOpcoesByNumero retorna todas as combinações de unidade/empresa/concessionária
 // para um determinado número de UC, consolidando nomes para exibição.
 // GET /api/v1/uc/:numero/opcoes
+// @Summary Opcoes de UC (empresa/concessionaria)
+// @Tags UC
+// @Produce json
+// @Param numero path string true "Numero da UC"
+// @Success 200 {object} map[string][]any
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/uc/{numero}/opcoes [get]
 func GetUCOpcoesByNumero(c *gin.Context) {
 	numeroUC := c.Param("numero")
 	type Opcao struct {
@@ -354,6 +371,17 @@ func GetFaturasPorUC(c *gin.Context) {
 }
 
 // GetFaturasByUC: retorna faturas com campos adicionais {mes_ref, link, dt_vencimento, valor_total}
+// @Summary Listar faturas por UC
+// @Tags Faturas
+// @Produce json
+// @Param numero path string true "Numero da UC"
+// @Param mes query []string false "Meses (YYYY-MM)"
+// @Param mes_ref query []string false "Meses (YYYY-MM)"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/v1/uc/{numero}/faturas [get]
 func GetFaturasByUC(c *gin.Context) {
 	numeroUC := c.Param("numero")
 	var idUC, idEmpresa int64

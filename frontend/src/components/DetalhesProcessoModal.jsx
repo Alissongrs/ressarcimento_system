@@ -1,5 +1,5 @@
 ﻿// src/components/DetalhesProcessoModal.jsx - VERSÀO COM CARREGAMENTO DINÂMICO
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
     getHistoricoById,
     movimentarProcesso,
@@ -11,6 +11,7 @@ import { buscarEtapas, buscarSubEtapasPorEtapa, buscarEtapaPorNome } from '../se
 import { X, Calendar, MessageSquare, Tag, User, AlignLeft, Clock, Star, Trash2, ArrowRightCircle, AlertTriangle, CheckCircle, Paperclip, PlusCircle, MinusCircle, Save, RefreshCw } from 'lucide-react';
 import ModuloDeferimento from './ModuloDeferimento';
 import api from '../services/api';
+import { confirmAction } from '../utils/confirm.js';
 
 // ===== FUNCOES AUXILIARES PARA TRATAMENTO SEGURO DE DADOS =====
 
@@ -50,6 +51,22 @@ const processarDataSegura = (dataAlerta) => {
         console.warn('Erro ao processar data_alerta:', error);
         return '';
     }
+};
+
+const getHistoricoStep = (item) => {
+    const etapaRaw = extrairTextoSeguro(item?.etapa_nova || item?.etapa_destino || item?.etapa || '');
+    const subRaw = extrairTextoSeguro(item?.sub_etapa || '');
+    let etapa = etapaRaw;
+    let sub = subRaw;
+
+    if ((!etapa || !sub) && item?.status_composto) {
+        const parts = String(item.status_composto).split('-').map((p) => p.trim());
+        if (!etapa && parts.length) etapa = parts[0];
+        if (!sub && parts.length > 1) sub = parts.slice(1).join(' - ');
+    }
+
+    const label = `${etapa || 'N/A'}${sub ? ' - ' + sub : ''}`;
+    return { etapa: etapa || 'N/A', sub: sub || '', label };
 };
 
 // ===== COMPONENTES DOS MÓDULOS =====
@@ -299,6 +316,55 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
     const fileInputRef = useRef(null);
     const debouncedDataAlerta = useDebounce(dataAlerta, 1000);
 
+    const roadmap = useMemo(() => {
+        if (!Array.isArray(historico) || historico.length === 0) {
+            return { items: [], currentKey: '' };
+        }
+
+        const toDate = (value) => {
+            const raw = extrairTextoSeguro(value);
+            if (!raw) return null;
+            const d = new Date(raw);
+            return Number.isNaN(d.getTime()) ? null : d;
+        };
+
+        const order = [];
+        const byKey = new Map();
+        let lastEvent = null;
+
+        historico.forEach((item, idx) => {
+            const step = getHistoricoStep(item);
+            const key = `${step.etapa}||${step.sub}`.toLowerCase();
+            const date = toDate(item?.data_movimentacao || item?.data_movimentação || item?.data);
+
+            if (!byKey.has(key)) {
+                byKey.set(key, {
+                    key,
+                    etapa: step.etapa,
+                    sub: step.sub,
+                    label: step.label,
+                    lastDate: date,
+                    lastIdx: idx,
+                });
+                order.push(key);
+            } else {
+                const entry = byKey.get(key);
+                if (date) entry.lastDate = date;
+                entry.lastIdx = idx;
+            }
+
+            const rank = date ? date.getTime() : idx;
+            if (!lastEvent || rank > lastEvent.rank) {
+                lastEvent = { key, rank };
+            }
+        });
+
+        return {
+            items: order.map((k) => byKey.get(k)),
+            currentKey: lastEvent ? lastEvent.key : '',
+        };
+    }, [historico]);
+
     const toggleCanal = (id) => {
         setCanaisSel((prev) => {
             if (!Array.isArray(prev)) return [id];
@@ -543,6 +609,9 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                 try { formData.append('canais', JSON.stringify(canaisSel)); } catch {}
             }
 
+            if (!(await confirmAction('Deseja salvar as alteracoes deste processo?'))) {
+                return;
+            }
             await movimentarProcesso(processo.id, formData);
             
             if (onUpdate) {
@@ -1053,6 +1122,46 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                 Histórico de movimentações
                             </h3>
                         </div>
+
+                        {roadmap.items.length > 0 && (
+                            <div className="px-4 pt-4">
+                                <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                                    Roadmap do processo
+                                </div>
+                                <div className="mt-3 space-y-3">
+                                    {roadmap.items.map((step, idx) => {
+                                        const isCurrent = step.key === roadmap.currentKey;
+                                        return (
+                                            <div key={step.key} className="flex items-start gap-3">
+                                                <div className="flex flex-col items-center">
+                                                    <div
+                                                        className={`h-3 w-3 rounded-full ${isCurrent ? 'bg-[var(--accent)]' : 'bg-gray-500'}`}
+                                                    />
+                                                    {idx < roadmap.items.length - 1 && (
+                                                        <div className="w-px flex-1 bg-gray-700 mt-1" />
+                                                    )}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <div className={`text-sm ${isCurrent ? 'font-semibold text-[var(--fg)]' : 'text-gray-300'}`}>
+                                                        {step.etapa}
+                                                    </div>
+                                                    {step.sub && (
+                                                        <div className="text-xs opacity-70 truncate">
+                                                            {step.sub}
+                                                        </div>
+                                                    )}
+                                                    {isCurrent && (
+                                                        <div className="text-[10px] mt-1 text-[var(--accent)] font-semibold">
+                                                            Atual
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                         
                         <div className="flex-1 overflow-y-auto p-4">
                             {loadingHistorico ? (
