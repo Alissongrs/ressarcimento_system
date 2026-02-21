@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -133,5 +134,4 @@ func markGraphRead(token, sender, msgID string) error {
 	}
 	return nil
 }
-
 
