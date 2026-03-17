@@ -31,12 +31,13 @@ import {
   searchGlobalHistorico,
 } from '../services/requisicaoService';
 import api, { withAuthToken } from '../services/apiClient';
-import { getProcessoSnapshot, mapSnapshotToForm } from '../services/processoSnapshotService';
 import { getSummary, refreshSummary } from '../services/summaryService';
 import { sendResumoFeedback } from '../services/resumoFeedbackService';
 import { getRelatoriosMetricas } from '../services/relatoriosService';
 import { sendMailMessage, linkMailToProcess } from '../services/mailService';
 import { deleteHistorico } from '../services/adminPlanilhaService';
+import { getProcessoScore } from '../services/mlService';
+import { scoreQueue } from '../services/requestQueueService';
 import { getTiposIrregularidade, getSubtiposIrregularidade } from '../services/irregularidadeService';
 import Toast from '../components/Toast.jsx';
 import { confirmAction } from '../utils/confirm.js';
@@ -205,8 +206,8 @@ const normalizeKanbanName = (value) => {
 
 const normalizeReqStatusValue = (value) => {
   const n = norm(unwrapDbValue(value));
-  if (n.includes('nova requisicao') || n.includes('pendente')) return 'Nova Requisi\u00E7\u00E3o';
-  if (n.includes('analise')) return 'Em An\u00E1lise';
+  if (n.includes('nova requisicao') || n.includes('pendente')) return 'Nova Requisição';
+  if (n.includes('analise')) return 'Em Análise';
   if (n.includes('aprov')) return 'Aprovado';
   if (n.includes('rejeit')) return 'Rejeitado';
   return value || '';
@@ -239,7 +240,7 @@ const useTimer = (refreshInterval = 60000) => {
   return time;
 };
 
-const RequisicaoCard = ({ requisicao, onOpen, onReject }) => {
+const RequisicaoCard = ({ requisicao, onOpen, onReject, scoreData, onScoreLoad }) => {
   const now = useTimer();
   const criador =
     requisicao?.usuario_nome ||
@@ -267,7 +268,7 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject }) => {
   const id = requisicao?.id ?? requisicao?.id_requisicao ?? requisicao?.ID ?? '';
   const cliente = unwrapDbValue(requisicao?.cliente) || 'Cliente não definido';
   const uc = unwrapDbValue(requisicao?.uc) || 'N/A';
-  const statusLabel = normalizeReqStatusValue(requisicao?.status || 'Nova Requisi\u00E7\u00E3o');
+  const statusLabel = normalizeReqStatusValue(requisicao?.status || 'Nova Requisição');
   const valor = pickFirst(requisicao, ['valor_estimado', 'ressarcimento_estimado', 'valor'], '');
   const anexos = Number(
     pickFirst(requisicao, ['anexos', 'anexos_count', 'qtd_anexos', 'total_anexos', 'anexosTotal'], 0),
@@ -280,6 +281,16 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject }) => {
     norm(statusLabel).includes('rejeit') ? 'text-red-500 bg-red-500/10 border-red-500/30' :
     norm(statusLabel).includes('analise') ? 'text-amber-500 bg-amber-500/10 border-amber-500/30' :
     'text-sky-500 bg-sky-500/10 border-sky-500/30';
+
+  // Trigger score load quando o card for renderizado
+  useEffect(() => {
+    if (id && scoreData?.[id] === undefined) {
+      onScoreLoad?.(id);
+    }
+  }, [id, scoreData, onScoreLoad]);
+
+  const score = scoreData?.[id];
+  const isRejected = norm(statusLabel).includes('rejeit');
 
   return (
     <div
@@ -330,6 +341,14 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject }) => {
           <FileText size={12} /> Faturas {Number.isFinite(faturas) ? faturas : 0}
         </span>
       </div>
+
+      {score !== undefined && !isRejected && (
+        <div className="pt-2 border-t border-[var(--border)] opacity-50">
+          <div className="text-[9px] opacity-60">
+            Score: {score?.percentual?.toFixed(0)}%
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -349,6 +368,10 @@ const ReqDroppableColumn = ({ id, children }) => {
 };
 
 const determineProcessoCategory = (header, kanbanColuna) => {
+  if (kanbanColuna) {
+    const mapped = normalizeKanbanName(kanbanColuna);
+    if (mapped) return mapped;
+  }
   const idColunaRaw =
     header?.id_coluna ??
     header?.id_coluna_kanban ??
@@ -361,13 +384,8 @@ const determineProcessoCategory = (header, kanbanColuna) => {
     header?.idEtapaProcesso ??
     null;
   if (Number(idEtapaRaw) === 11) return 'Indeferidos';
-  if (
-    Number(idEtapaRaw) === 10 ||
-    Number(idColunaRaw) === 5 ||
-    String(header?.etapa || '').toLowerCase().includes('conclu') ||
-    String(header?.etapa_atual || '').toLowerCase().includes('conclu') ||
-    String(header?.nome_coluna || '').toLowerCase().includes('conclu')
-  ) {
+  const nomeColunaTxt = String(header?.nome_coluna || '').toLowerCase();
+  if (Number(idColunaRaw) === 5 && nomeColunaTxt.includes('conclu')) {
     return 'Concluídos';
   }
 
@@ -389,7 +407,11 @@ const determineProcessoCategory = (header, kanbanColuna) => {
     String(header?.data_pagamento || '').trim() !== '' ||
     String(header?.valor_nf || header?.valor_faturamento || header?.valor_fat || '').trim() !== '';
   const isPago = String(header?.data_pagamento || '').trim() !== '';
-  const isSuspenso = String(header?.sub_etapa || '').toLowerCase().includes('suspenso');
+  const isSuspenso =
+    header?.suspenso === true ||
+    header?.suspenso === 1 ||
+    String(header?.suspenso || '').trim() === '1' ||
+    String(header?.sub_etapa || '').toLowerCase().includes('suspenso');
 
   const etapaTxt = String(header?.etapa || header?.etapa_atual || '').toLowerCase();
   const subEtapaTxt = String(header?.sub_etapa || '').toLowerCase();
@@ -417,7 +439,7 @@ const determineProcessoCategory = (header, kanbanColuna) => {
         0,
     );
     const subTxt = String(header?.sub_etapa || '').toLowerCase().trim();
-    if (subId === 1 || subTxt.includes('primeira reclama\u00E7\u00E3o da etapa - em elabora\u00E7\u00E3o')) return '';
+    if (subId === 1 || subTxt.includes('primeira reclamação da etapa - em elaboração')) return '';
     return 'Ativos';
   }
   if (Number(idColunaRaw) === 3) return 'Fluxo de Ressarcimento';
@@ -425,10 +447,6 @@ const determineProcessoCategory = (header, kanbanColuna) => {
   if (Number(idColunaRaw) === 5) return 'Concluídos';
   if (Number(idColunaRaw) === 6) return 'Indeferidos';
 
-  if (kanbanColuna) {
-    const mapped = normalizeKanbanName(kanbanColuna);
-    if (mapped) return mapped;
-  }
   if (header?.nome_coluna) {
     const mapped = normalizeKanbanName(header.nome_coluna);
     if (mapped) return mapped;
@@ -566,17 +584,19 @@ const PROCESS_LIST_COLUMNS = [
   { key: 'status', label: 'Status atual', sortable: true },
   { key: 'ultima', label: 'Última movimentação', sortable: true },
   { key: 'dias_sem', label: 'Dias sem movimentar', sortable: true },
+  { key: 'score_progressao', label: 'Score de Progressão', sortable: false },
 ];
 
 const SUBETAPAS_DEFERIDOS = [
-  'Em contesta\u00E7\u00E3o - Em elabora\u00E7\u00E3o',
-  'Em contesta\u00E7\u00E3o - Aguardando retorno',
-  'Em contesta\u00E7\u00E3o - Em an\u00E1lise',
-  'Em contesta\u00E7\u00E3o - Pendente',
-  'Em concilia\u00E7\u00E3o - Em elabora\u00E7\u00E3o',
-  'Em Concilia\u00E7\u00E3o - Aguardando retorno',
-  'Em Concilia\u00E7\u00E3o - Em an\u00E1lise',
-  'Em Concilia\u00E7\u00E3o - Pendente',
+  'Em contestação - Em elaboração',
+  'Em contestação - Aguardando retorno',
+  'Em contestação - Em análise',
+  'Em contestação - Pendente',
+  'Em conciliação - Em elaboração',
+  'Em Conciliação - Aguardando retorno',
+  'Em Conciliação - Em análise',
+  'Em Conciliação - Pendente',
+  'Processo descontinuado',
 ];
 
 const toSentenceCase = (value) => {
@@ -622,14 +642,18 @@ const splitHistoryItems = (items) => {
 };
 
 const groupHistoryByStage = (items) => {
-  const map = new Map();
+  const out = [];
   (items || []).forEach((item) => {
     const { etapa } = getHistoryEtapaSub(item);
     const key = etapa || 'Sem etapa';
-    if (!map.has(key)) map.set(key, { etapa: key, items: [] });
-    map.get(key).items.push(item);
+    const last = out[out.length - 1];
+    if (!last || last.etapa !== key) {
+      out.push({ etapa: key, items: [item] });
+      return;
+    }
+    last.items.push(item);
   });
-  return Array.from(map.values());
+  return out;
 };
 
 const isProcessoCriadoHistory = (item) => {
@@ -687,17 +711,17 @@ const rowLastTs = (row) => {
 
   const headerTs = toTs(
     pickFirst(header, [
-      'ultima_atualizacao',
-      'updated_at',
-      'data_atualizacao',
-      'data',
-      'created_at',
-      'data_criacao',
-      'data_criacao_requisicao',
+      'data_ultima_movimentacao',
+      'ultima_movimentacao',
+      'dataUltimaMovimentacao',
+      'ultimaMovimentacao',
     ]),
   );
 
   const histTs = hist.reduce((max, h) => {
+    const etapaVal = pickFirst(h, ['etapa', 'etapa_nova', 'Etapa'], '');
+    const subVal = getSubEtapaFromStatus(h);
+    if (!String(etapaVal || '').trim() && !String(subVal || '').trim()) return max;
     const v = pickFirst(h, ['hist_data', 'data_movimentacao', 'data', 'created_at'], '');
     const ts = toTs(v);
     return ts > max ? ts : max;
@@ -773,11 +797,14 @@ const toDateTimeLocal = (dbValue) => {
 const formatDateTimeBR = (value) => {
   const raw = String(value || '').trim();
   if (!raw) return '-';
-  const parsed = new Date(raw.replace(' ', 'T'));
+  let iso = raw.replace(' ', 'T');
+  if (!/[zZ]|[+-]\d{2}:\d{2}$/.test(iso)) iso = `${iso}Z`;
+  const parsed = new Date(iso);
   if (Number.isNaN(parsed.getTime())) return raw;
   return new Intl.DateTimeFormat('pt-BR', {
     dateStyle: 'short',
     timeStyle: 'medium',
+    timeZone: 'America/Sao_Paulo',
   }).format(parsed);
 };
 
@@ -1006,6 +1033,33 @@ const useChunkedRender = (items, { initial = 120, step = 160, enabled = true } =
 // =======================
 // SUB-COMPONENTES UI (memo)
 // =======================
+
+// Score de Progressão Badge Component
+const ScoreBadge = memo(function ScoreBadge({ score }) {
+  if (score === undefined) return null; // não carregado ainda
+  if (score === null) return <span className="text-[9px] text-gray-400 opacity-50">...</span>; // carregando
+
+  if (score?.erro) {
+    return <span className="text-[9px] text-red-500 opacity-40">erro</span>;
+  }
+
+  const percentage = typeof score === 'number' ? score : score?.percentual || score?.percentage || 0;
+  const displayPercent = Math.round(percentage);
+
+  let bgColor = 'bg-gray-300 text-gray-600'; // default/low
+  if (displayPercent >= 70) bgColor = 'bg-green-500 text-white'; // high
+  else if (displayPercent >= 40) bgColor = 'bg-yellow-500 text-white'; // medium
+
+  return (
+    <div
+      className={`w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-semibold ${bgColor} opacity-70`}
+      title={`Score de Progressão: ${displayPercent}%`}
+    >
+      {displayPercent}%
+    </div>
+  );
+});
+
 const ProcessoCard = memo(function ProcessoCard({ row, onOpen, onIndeferir }) {
   const { pid, header, category } = row;
   const uc = pickFirst(header, ['uc', 'Uc', 'UC']);
@@ -1229,9 +1283,12 @@ function ProcessoDrawer({
   onToggleRelevancia,
   onToggleSuspenso,
   handleSaveProcesso,
+  onConcluirProcesso,
   detailsByPid,
   setDetailsByPid,
   detailValue: detailValueLocal,
+  scoreData,
+  activeTab,
 }) {
   if (!open || !row) return null;
 
@@ -1408,6 +1465,17 @@ function ProcessoDrawer({
 
   const detail = detailsByPid?.[pid] || {};
 
+  const isMoneyFilled = useCallback((val) => {
+    const n = toNumberValue(val);
+    return n !== '' && Number(n) > 0;
+  }, []);
+
+  const isDateFilled = useCallback((val) => {
+    return !!toDateInput(val);
+  }, []);
+
+  const isTextFilled = useCallback((val) => String(val || '').trim() !== '', []);
+
   const fluxoItens =
     Array.isArray(detail.fluxo_itens) && detail.fluxo_itens.length
       ? detail.fluxo_itens
@@ -1435,6 +1503,57 @@ function ProcessoDrawer({
             valor: detail.valor_nf ?? header.valor_nf ?? '',
           },
         ];
+
+  const isInFaturamento = normalizeKanbanName(category) === 'Faturamento';
+
+  const deferimentoCompleto = useMemo(() => {
+    const cs = detailValueMoney(detailsByPid, pid, 'cs', deferimentoDefaults.cs);
+    const ds = detailValueLocal(detailsByPid, pid, 'ds', deferimentoDefaults.ds);
+    const cd = detailValueMoney(detailsByPid, pid, 'cd', deferimentoDefaults.cd);
+    const dd = detailValueLocal(detailsByPid, pid, 'dd', deferimentoDefaults.dd);
+    const rs = detailValueMoney(detailsByPid, pid, 'rs', deferimentoDefaults.rs);
+    const rd = detailValueMoney(detailsByPid, pid, 'rd', deferimentoDefaults.rd);
+    return (
+      isMoneyFilled(cs) &&
+      isDateFilled(ds) &&
+      isMoneyFilled(cd) &&
+      isDateFilled(dd) &&
+      isMoneyFilled(rs) &&
+      isMoneyFilled(rd)
+    );
+  }, [
+    detailsByPid,
+    pid,
+    deferimentoDefaults,
+    detailValueLocal,
+    isMoneyFilled,
+    isDateFilled,
+  ]);
+
+  const fluxoCompleto = useMemo(
+    () =>
+      fluxoItens.length > 0 &&
+      fluxoItens.every((item) => {
+        const hasTipo = !!(item.simples || item.dobro || item.simples_dobro);
+        return (
+          hasTipo &&
+          isMoneyFilled(item.valor) &&
+          isTextFilled(item.forma_devolucao) &&
+          isDateFilled(item.data_devolucao) &&
+          isDateFilled(item.data_envio_financeiro)
+        );
+      }),
+    [fluxoItens, isMoneyFilled, isTextFilled, isDateFilled],
+  );
+
+  const faturamentoCompleto = useMemo(
+    () =>
+      faturamentoItens.length > 0 &&
+      faturamentoItens.some((item) => isMoneyFilled(item.valor)),
+    [faturamentoItens, isMoneyFilled],
+  );
+
+  const podeConcluir = isInFaturamento && faturamentoCompleto;
 
   const updateList = useCallback(
     (field, idx, key, val) => {
@@ -1810,6 +1929,20 @@ function ProcessoDrawer({
             Salvar faturamento
           </button>
         </div>
+
+        {isInFaturamento && (
+          <div className="flex justify-end p-3 pt-0">
+            <button
+              className="btn-press req-btn-aprovar px-3 py-1.5 rounded-md border"
+              type="button"
+              disabled={!podeConcluir}
+              title={!podeConcluir ? 'Preencha todos os campos de Deferidos, Fluxo e Faturamento.' : ''}
+              onClick={() => onConcluirProcesso?.(pid)}
+            >
+              Concluir
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2464,6 +2597,7 @@ export default function AdminPlanilha() {
 
   const [kanbanMap, setKanbanMap] = useState({});
   const [relevanciaMap, setRelevanciaMap] = useState({});
+  const [scoreData, setScoreData] = useState({});
 
   // filtros / UI
   const [q, setQ] = useState('');
@@ -2478,7 +2612,7 @@ export default function AdminPlanilha() {
       const parsed = raw ? JSON.parse(raw) : null;
       if (Array.isArray(parsed) && parsed.length === PROCESS_LIST_COLUMNS.length) return parsed;
     } catch {}
-    return [90, 120, 240, 180, 220, 260, 200, 170];
+    return [90, 120, 240, 180, 220, 260, 200, 170, 120];
   });
   const processResizeRef = useRef({ idx: -1, startX: 0, startW: 0 });
   const [processSort, setProcessSort] = useState({ key: 'ultima', dir: 'desc' });
@@ -2544,8 +2678,8 @@ export default function AdminPlanilha() {
   // Requisições (painel lateral)
   const [reqItems, setReqItems] = useState([]);
   const [reqColumns, setReqColumns] = useState({
-    'Nova Requisi\u00E7\u00E3o': [],
-    'Em An\u00E1lise': [],
+    'Nova Requisição': [],
+    'Em Análise': [],
     Aprovado: [],
     Rejeitado: [],
   });
@@ -2609,7 +2743,7 @@ export default function AdminPlanilha() {
   const [reqDefDobro, setReqDefDobro] = useState('');
   const [reqDefDataDobro, setReqDefDataDobro] = useState('');
   const [reqEtapas, setReqEtapas] = useState([]);
-  const reqStatusLabel = normalizeReqStatusValue(reqDetails?.status || reqDetails?.Status || 'Nova Requisi\u00E7\u00E3o');
+  const reqStatusLabel = normalizeReqStatusValue(reqDetails?.status || reqDetails?.Status || 'Nova Requisição');
   const isNovaRequisicao = norm(reqStatusLabel).includes('nova requisicao') || norm(reqStatusLabel).includes('pendente');
   const [showAtivosMetricas, setShowAtivosMetricas] = useState(false);
 
@@ -2647,6 +2781,22 @@ export default function AdminPlanilha() {
     }, 1000);
     return () => window.clearTimeout(t);
   }, []);
+
+  // Carrega score de progressão para um processo (via fila)
+  const fetchScoreForRow = useCallback((pid) => {
+    if (scoreData[pid] !== undefined) return; // já carregado ou carregando
+    setScoreData((prev) => ({ ...prev, [pid]: null })); // marca como carregando
+
+    scoreQueue.add(`score_${pid}`, async () => {
+      try {
+        const data = await getProcessoScore(pid);
+        setScoreData((prev) => ({ ...prev, [pid]: data }));
+      } catch (err) {
+        console.warn('[Score] Erro ao buscar score:', err);
+        setScoreData((prev) => ({ ...prev, [pid]: { erro: 'Indisponível' } }));
+      }
+    });
+  }, [scoreData]);
 
   // Move / Edit
   const [mvByPid] = useState({}); // mantido (compat)
@@ -3036,8 +3186,12 @@ export default function AdminPlanilha() {
   const openDrawer = useCallback((row) => {
     setSelectedPid(row.pid);
     setDrawerOpen(true);
-    setDrawerPane('');
-  }, []);
+    setDrawerPane('history');
+    // Carrega score de progressão para processos em ATIVOS (para a tabela)
+    if (activeTab === 'ATIVOS') {
+      fetchScoreForRow(row.pid);
+    }
+  }, [fetchScoreForRow, activeTab]);
 
 
   useEffect(() => {
@@ -3050,13 +3204,29 @@ export default function AdminPlanilha() {
     openedFromQueryRef.current = true;
   }, [queryPid, tableRows, openDrawer]);
 
+  // Carrega scores automaticamente para todos os processos (independente da aba)
+  useEffect(() => {
+    if (!tableRows || tableRows.length === 0) return;
+
+    // Carrega score para cada processo visível (sem duplicar se já carregado)
+    tableRows.forEach((row) => {
+      if (scoreData[row.pid] === undefined) {
+        fetchScoreForRow(row.pid);
+      }
+    });
+  }, [tableRows, scoreData, fetchScoreForRow]);
+
   const [headerFlags, setHeaderFlags] = useState({ relevancia: false, suspenso: false });
   useEffect(() => {
     if (!selectedRow) {
       setHeaderFlags({ relevancia: false, suspenso: false });
       return;
     }
-    const susp = String(selectedRow.header?.sub_etapa || '').toLowerCase().includes('suspenso');
+    const susp =
+      selectedRow.header?.suspenso === true ||
+      selectedRow.header?.suspenso === 1 ||
+      String(selectedRow.header?.suspenso || '').trim() === '1' ||
+      String(selectedRow.header?.sub_etapa || '').toLowerCase().includes('suspenso');
     setHeaderFlags({
       relevancia: isRelevante(selectedRow.header, selectedRow.pid, relevanciaMap),
       suspenso: susp,
@@ -3142,8 +3312,7 @@ export default function AdminPlanilha() {
 
     (async () => {
       try {
-        const [snapResp, reqResp, anexosResp, fluxoResp, fatResp] = await Promise.allSettled([
-          getProcessoSnapshot(selectedPid),
+        const [reqResp, anexosResp, fluxoResp, fatResp] = await Promise.allSettled([
           api.get(`/requisicoes/${selectedPid}`),
           api.get(`/requisicoes/${selectedPid}/anexos`),
           api.get(`/fluxo-ressarcimento/${selectedPid}`),
@@ -3152,7 +3321,6 @@ export default function AdminPlanilha() {
 
         if (!mounted) return;
 
-        const snap = snapResp.status === 'fulfilled' ? mapSnapshotToForm(snapResp.value) : null;
         const req = reqResp.status === 'fulfilled' ? (reqResp.value?.data || null) : null;
 
         const anexosList =
@@ -3163,10 +3331,11 @@ export default function AdminPlanilha() {
         const fluxoRaw = fluxoResp.status === 'fulfilled' ? (fluxoResp.value?.data || null) : null;
         const fatRaw = fatResp.status === 'fulfilled' ? (fatResp.value?.data || null) : null;
 
-        setSnapshotHeaderData(snap);
+        setSnapshotHeaderData(null);
         setRequisicaoHeaderData(req);
         setProcessoAnexos(anexosList);
 
+        const snap = null;
         setDetailsByPid((prev) => {
           const cur = prev?.[selectedPid] || {};
           const hasLocal = (key) => Object.prototype.hasOwnProperty.call(cur, key);
@@ -3336,14 +3505,14 @@ export default function AdminPlanilha() {
       setReqItems(safeRows);
 
       const cols = {
-        'Nova Requisi\u00E7\u00E3o': [],
-        'Em An\u00E1lise': [],
+        'Nova Requisição': [],
+        'Em Análise': [],
         Aprovado: [],
         Rejeitado: [],
       };
 
       safeRows.forEach((req) => {
-        const k = norm(normalizeReqStatusValue(req?.status || 'Nova Requisi\u00E7\u00E3o'));
+        const k = norm(normalizeReqStatusValue(req?.status || 'Nova Requisição'));
 
         // Regra especial: aprovado só conta se estiver na etapa/sub-etapa certa
         if (k.includes('aprov')) {
@@ -3353,10 +3522,10 @@ export default function AdminPlanilha() {
           return;
         }
 
-        if (k.includes('nova requisicao') || k.includes('pendente')) cols['Nova Requisi\u00E7\u00E3o'].push(req);
-        else if (k.includes('analise')) cols['Em An\u00E1lise'].push(req);
+        if (k.includes('nova requisicao') || k.includes('pendente')) cols['Nova Requisição'].push(req);
+        else if (k.includes('analise')) cols['Em Análise'].push(req);
         else if (k.includes('rejeit')) cols.Rejeitado.push(req);
-        else cols['Nova Requisi\u00E7\u00E3o'].push(req);
+        else cols['Nova Requisição'].push(req);
       });
 
       setReqColumns(cols);
@@ -3364,8 +3533,8 @@ export default function AdminPlanilha() {
       console.warn('Falha ao carregar requisi\u00E7\u00F5es:', err?.message || err);
       setReqItems([]);
       setReqColumns({
-        'Nova Requisi\u00E7\u00E3o': [],
-        'Em An\u00E1lise': [],
+        'Nova Requisição': [],
+        'Em Análise': [],
         Aprovado: [],
         Rejeitado: [],
       });
@@ -3398,8 +3567,8 @@ export default function AdminPlanilha() {
   const reqFilteredColumns = useMemo(() => {
     const base =
       reqColumns || {
-        'Nova Requisi\u00E7\u00E3o': [],
-        'Em An\u00E1lise': [],
+        'Nova Requisição': [],
+        'Em Análise': [],
         Aprovado: [],
         Rejeitado: [],
       };
@@ -3686,7 +3855,7 @@ export default function AdminPlanilha() {
         } catch {}
       })();
     } catch (err) {
-      console.warn('Falha ao carregar detalhes da requisi\u00E7\u00E3o:', err?.message || err);
+      console.warn('Falha ao carregar detalhes da requisição:', err?.message || err);
       setReqFaturas([]);
     }
   }, [isReqNovaStatus]);
@@ -3730,9 +3899,10 @@ export default function AdminPlanilha() {
         req?.processoId ??
         req?.ProcessoID ??
         null;
+      let found = null;
       if (!processoId) {
         const all = Object.values(reqColumns || {}).flat();
-        const found = all.find((r) => String(r?.id) === String(id));
+        found = all.find((r) => String(r?.id) === String(id)) || null;
         processoId =
           found?.processo_id ??
           found?.id_processo ??
@@ -3740,14 +3910,15 @@ export default function AdminPlanilha() {
           found?.ProcessoID ??
           processoId;
       }
+      const reqRef = req || found || {};
+      const tipoId = pickFirst(reqRef, ['id_tipo_irregularidade', 'idTipoIrregularidade', 'id_tipo', 'tipo_id'], '');
+      const subtipoId = pickFirst(reqRef, ['id_subtipo_irregularidade', 'idSubtipoIrregularidade', 'id_subtipo', 'subtipo_id'], '');
       if (isApproved && !(extra?.etapa || extra?.sub_etapa)) {
-        setReqMoveTarget({ id, destino: 'Aprovado' });
-        setReqDestinoStatus('Aprovado');
-        setReqDestinoEtapa('Distribuidora');
-        setReqDestinoSub('Primeira reclama\u00E7\u00E3o da etapa - Em elabora\u00E7\u00E3o');
-        setReqMoveComment(comentario || '');
-        setReqMoveOpen(true);
-        return;
+        extra = {
+          ...(extra || {}),
+          etapa: 'Distribuidora',
+          sub_etapa: 'Primeira reclamação da etapa - Em elaboração',
+        };
       }
       const formData = new FormData();
       formData.append('status', statusValue);
@@ -3755,6 +3926,10 @@ export default function AdminPlanilha() {
       if (isApproved) {
         if (extra?.etapa) formData.append('etapa', extra.etapa);
         if (extra?.sub_etapa) formData.append('sub_etapa', extra.sub_etapa);
+        formData.append('triagem', '1');
+        formData.append('processo_criado', '1');
+        if (tipoId) formData.append('id_tipo_irregularidade', tipoId);
+        if (subtipoId) formData.append('id_subtipo_irregularidade', subtipoId);
       }
       if (!(await confirmAction(`Deseja atualizar a requisição #${id}?`))) return;
       try {
@@ -3777,8 +3952,8 @@ export default function AdminPlanilha() {
         setToast({ open: true, type: 'success', text: `Requisição #${id} movida para "${statusValue}"` });
         closeReqDrawer();
       } catch (err) {
-        setToast({ open: true, type: 'error', text: 'Falha ao atualizar o status da requisi\u00E7\u00E3o.' });
-        console.error('Erro ao atualizar requisi\u00E7\u00E3o:', err);
+        setToast({ open: true, type: 'error', text: 'Falha ao atualizar o status da requisição.' });
+        console.error('Erro ao atualizar requisição:', err);
       }
     },
     [reqColumns, loadRequisicoes, closeReqDrawer],
@@ -3798,7 +3973,7 @@ export default function AdminPlanilha() {
       setReqDestinoStatus(destino);
       if (destino === 'Aprovado') {
         setReqDestinoEtapa('Distribuidora');
-        setReqDestinoSub('Primeira reclama\u00E7\u00E3o da etapa - Em elabora\u00E7\u00E3o');
+        setReqDestinoSub('Primeira reclamação da etapa - Em elaboração');
       }
       setReqMoveOpen(true);
     },
@@ -3908,7 +4083,7 @@ export default function AdminPlanilha() {
     async (req) => {
       const id = req?.id ?? req?.id_requisicao ?? req?.ID ?? '';
       if (!id) return;
-      await handleUpdateRequisicao(req, 'Rejeitado', 'Requisi\u00E7\u00E3o rejeitada no card');
+      await handleUpdateRequisicao(req, 'Rejeitado', 'Requisição rejeitada no card');
     },
     [handleUpdateRequisicao],
   );
@@ -3932,6 +4107,33 @@ export default function AdminPlanilha() {
           open: true,
           type: 'error',
           text: err?.response?.data?.error || err?.message || 'Falha ao indeferir processo.',
+        });
+        notifyNetworkChange(err);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [load, notifyNetworkChange],
+  );
+
+  const handleConcluirProcesso = useCallback(
+    async (pid) => {
+      if (!pid) return;
+      if (!(await confirmAction(`Deseja concluir o processo #${pid}?`))) return;
+      setLoading(true);
+      try {
+        const fd = new FormData();
+        fd.append('etapa_atual', 'Concluídos');
+        fd.append('sub_etapa', '');
+        fd.append('comentario', 'Processo concluído via Faturamento.');
+        await movimentarProcesso(pid, fd);
+        await load({ force: true });
+        setToast({ open: true, type: 'success', text: `Processo #${pid} concluído.` });
+      } catch (err) {
+        setToast({
+          open: true,
+          type: 'error',
+          text: err?.response?.data?.error || err?.message || 'Falha ao concluir processo.',
         });
         notifyNetworkChange(err);
       } finally {
@@ -3997,7 +4199,7 @@ export default function AdminPlanilha() {
           attachBodyPdf: true,
           attachAttachments: true,
           moveToLinkedFolderId: '',
-          note: 'E-mail enviado via Triagem de Requisi\u00E7\u00E3o',
+          note: 'E-mail enviado via Triagem de Requisição',
         });
       }
       setReqEmail((prev) => ({
@@ -4035,7 +4237,7 @@ export default function AdminPlanilha() {
     if (!selectedReqId) return;
     if (
       !window.confirm(
-        'Deseja tornar esta requisi\u00E7\u00E3o um processo e enviar para Ativos (Distribuidora / Primeira reclama\u00E7\u00E3o da etapa - Aguardando retorno)?',
+        'Deseja tornar esta requisição um processo e enviar para Ativos (Distribuidora / Primeira reclamação da etapa - Aguardando retorno)?',
       )
     ) {
       return;
@@ -4044,7 +4246,7 @@ export default function AdminPlanilha() {
     try {
       const fd = new FormData();
       fd.append('etapa_atual', 'Distribuidora');
-      fd.append('sub_etapa', 'Primeira reclama\u00E7\u00E3o da etapa - Aguardando retorno');
+      fd.append('sub_etapa', 'Primeira reclamação da etapa - Aguardando retorno');
       fd.append('comentario', 'Processo aprovado na triagem de Requisi\u00E7\u00F5es.');
       await movimentarProcesso(selectedReqId, fd);
       try {
@@ -4201,9 +4403,9 @@ export default function AdminPlanilha() {
   );
 
   useEffect(() => {
-    if (!drawerOpen || !selectedPid) return;
+    if (!drawerOpen || drawerPane !== 'history' || !selectedPid) return;
     loadHistoryDetails(selectedPid, true);
-  }, [drawerOpen, selectedPid, loadHistoryDetails]);
+  }, [drawerOpen, drawerPane, selectedPid, loadHistoryDetails]);
 
   useEffect(() => {
     if (!drawerOpen || drawerPane !== 'resume' || !selectedPid) return;
@@ -5215,7 +5417,7 @@ export default function AdminPlanilha() {
         if (h?.sub_etapa) {
           fdMove.append('sub_etapa', h.sub_etapa);
         } else if (targetCol === 'Deferidos') {
-          fdMove.append('sub_etapa', 'Primeira reclama\u00E7\u00E3o da etapa - Em elabora\u00E7\u00E3o');
+          fdMove.append('sub_etapa', 'Primeira reclamação da etapa - Em elaboração');
         }
         await movimentarProcesso(pid, fdMove);
       }
@@ -5569,7 +5771,7 @@ export default function AdminPlanilha() {
 
     const textFields = [
       { key: 'uc', label: 'UC' },
-      { key: 'id_requisicao', label: 'ID Requisi\u00E7\u00E3o' },
+      { key: 'id_requisicao', label: 'ID Requisição' },
       { key: 'cliente', label: 'Cliente' },
       { key: 'concessionaria', label: 'Concessionária' },
       { key: 'id_status', label: 'ID Status' },
@@ -6540,6 +6742,13 @@ export default function AdminPlanilha() {
                             </div>
                             <div className="px-2 py-2 border-t panel-border truncate">{lastLabel}</div>
                             <div className="px-2 py-2 border-t panel-border truncate">{diasSem}</div>
+                            <div className="px-2 py-2 border-t panel-border flex items-center justify-center">
+                              {activeTab === 'ATIVOS' ? (
+                                <ScoreBadge score={scoreData[row.pid]} />
+                              ) : (
+                                <span className="text-xs opacity-50">-</span>
+                              )}
+                            </div>
                           </button>
                         );
                       });
@@ -6621,10 +6830,10 @@ export default function AdminPlanilha() {
                       className="glass-card border border-[var(--border)] text-[var(--fg)] rounded-lg p-3 w-80 flex-shrink-0 flex flex-col"
                     >
                       <h3 className="font-bold mb-4 px-2 text-sm uppercase tracking-wider flex items-center justify-center gap-2 text-center">
-                        {columnId === 'Nova Requisi\u00E7\u00E3o' && (
+                        {columnId === 'Nova Requisição' && (
                           <img src="/Icones/requisicao.png" alt="" className="h-6 w-6 opacity-95" />
                         )}
-                        {columnId === 'Em An\u00E1lise' && (
+                        {columnId === 'Em Análise' && (
                           <img src="/Icones/em_analise.png" alt="" className="h-4 w-4 opacity-90" />
                         )}
                         {columnId === 'Aprovado' && (
@@ -6651,6 +6860,8 @@ export default function AdminPlanilha() {
                                     })
                                   }
                                   onReject={handleRejectRequisicao}
+                                  scoreData={scoreData}
+                                  onScoreLoad={fetchScoreForRow}
                                 />
                               </ReqDraggableCard>
                             );
@@ -6691,7 +6902,7 @@ export default function AdminPlanilha() {
                   <option>Rejeitado</option>
                 </select>
                 <div className="flex flex-wrap gap-2 mt-2">
-                  {['Nova Requisi\u00E7\u00E3o', 'Em An\u00E1lise', 'Aprovado', 'Rejeitado'].map((s) => (
+                  {['Nova Requisição', 'Em Análise', 'Aprovado', 'Rejeitado'].map((s) => (
                     <button
                       key={s}
                       type="button"
@@ -6716,7 +6927,7 @@ export default function AdminPlanilha() {
                         const e = reqColToEtapa[c];
                         if (e) setReqDestinoEtapa(e);
                         if (c === 'Ativos' && reqDestinoStatus === 'Aprovado') {
-                          setReqDestinoSub('Primeira reclama\u00E7\u00E3o da etapa - Aguardando retorno');
+                          setReqDestinoSub('Primeira reclamação da etapa - Aguardando retorno');
                         }
                       }}
                       className={`px-2 py-1 rounded border ${reqDestinoColuna === c ? 'bg-[var(--accent)] text-[var(--fg)]' : 'border-[var(--panel-border)]'}`}
@@ -6844,9 +7055,12 @@ export default function AdminPlanilha() {
             onToggleRelevancia={updateRelevancia}
             onToggleSuspenso={updateSuspenso}
             handleSaveProcesso={handleSaveProcesso}
+            onConcluirProcesso={handleConcluirProcesso}
             detailsByPid={detailsByPid}
             setDetailsByPid={setDetailsByPid}
             detailValue={detailValue}
+            scoreData={scoreData}
+            activeTab={activeTab}
           />
 
           {reqNovaModalOpen && (
@@ -7186,7 +7400,7 @@ export default function AdminPlanilha() {
 
                   <div className="sap-card border panel-border p-3">
                     <div className="text-xs font-semibold mb-2">
-                      {isNovaRequisicao ? 'Comentário' : 'Tratativa da primeira reclama\u00E7\u00E3o'}
+                      {isNovaRequisicao ? 'Comentário' : 'Tratativa da primeira reclamação'}
                     </div>
                     <textarea
                       rows={3}
@@ -7238,7 +7452,7 @@ export default function AdminPlanilha() {
                           type="button"
                           className="btn-press req-btn-analise px-3 py-1.5 rounded-md border"
                           disabled={reqSaving}
-                          onClick={() => handleUpdateRequisicao(reqDetails || selectedReqId, 'Em An\u00E1lise', reqComentario)}
+                          onClick={() => handleUpdateRequisicao(reqDetails || selectedReqId, 'Em Análise', reqComentario)}
                         >
                           Em análise
                         </button>
@@ -7723,8 +7937,3 @@ export default function AdminPlanilha() {
     </div>
   );
 }
-
-
-
-
-
