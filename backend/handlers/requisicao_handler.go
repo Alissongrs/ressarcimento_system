@@ -1238,6 +1238,7 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		var body struct {
 			Comentario              string  `json:"comentario"`
 			RessarcimentoEstimado   string  `json:"ressarcimento_estimado"`
+			Status                  string  `json:"status"`
 			Etapa                   string  `json:"etapa"`
 			EtapaAtual              string  `json:"etapa_atual"`
 			SubEtapa                string  `json:"sub_etapa"`
@@ -1259,6 +1260,7 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		}
 		comentario = strings.TrimSpace(body.Comentario)
 		valorEstimado = strings.TrimSpace(body.RessarcimentoEstimado)
+		statusPost = strings.TrimSpace(body.Status)
 		etapaPost = strings.TrimSpace(body.EtapaAtual)
 		if etapaPost == "" {
 			etapaPost = strings.TrimSpace(body.Etapa)

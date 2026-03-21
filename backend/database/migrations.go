@@ -545,8 +545,27 @@ func runMigrations(db *sql.DB) error {
 			}
 		}
 
+		ensureView := func(viewName, viewSQL string) {
+			var has int
+			_ = db.QueryRow(`
+				SELECT COUNT(1)
+				FROM INFORMATION_SCHEMA.VIEWS
+				WHERE TABLE_SCHEMA = DATABASE()
+				  AND TABLE_NAME = ?`,
+				viewName,
+			).Scan(&has)
+			if has > 0 {
+				return
+			}
+			log.Printf("[migrate] Criando view %s...", viewName)
+			if _, err := db.Exec(viewSQL); err != nil {
+				log.Printf("[migrate] aviso: falha ao criar view %s: %v", viewName, err)
+			}
+		}
+
 		// Índices em FT_HISTORICO_MOVIMENTACOES
 		ensureIndex("FT_HISTORICO_MOVIMENTACOES", "idx_historico_data_movimentacao", "data_movimentacao DESC")
+		ensureIndex("FT_HISTORICO_MOVIMENTACOES", "idx_historico_req_data", "id_requisicao, data_movimentacao DESC, id_historico DESC")
 		// ensureIndex("FT_HISTORICO_MOVIMENTACOES", "idx_historico_id_processo", "id_processo") // Coluna id_processo não existe
 
 		// Índices em FT_PROCESSOS
@@ -557,6 +576,38 @@ func runMigrations(db *sql.DB) error {
 		ensureIndex("FT_REQUISICOES", "idx_requisicoes_data_criacao", "data_criacao DESC")
 		ensureIndex("FT_REQUISICOES", "idx_requisicoes_status", "id_status")
 		ensureIndex("FT_REQUISICOES", "idx_requisicoes_usuario", "id_usuario")
+
+		// View compatível com consultas legadas (mail/processes/search)
+		ensureView("VW_POWERBI_PROCESSOS", `
+CREATE VIEW VW_POWERBI_PROCESSOS AS
+SELECT
+  p.id_processo                          AS id_processo,
+  COALESCE(r.cliente,'')                 AS Cliente,
+  COALESCE(r.uc,'')                      AS UC,
+  COALESCE(r.cnpj,'')                    AS CNPJ,
+  COALESCE(r.concessionaria,'')          AS Concessionaria,
+  COALESCE(e.etapa,'')                   AS `+"`Etapa Atual`"+`,
+  COALESCE(kc.nome_coluna,'')            AS `+"`Coluna Kanban Atual`"+`,
+  COALESCE(h.etapa_nova,'')              AS `+"`Ultima Etapa`"+`,
+  COALESCE(h.sub_etapa,'')               AS `+"`Ultima Sub Etapa`"+`,
+  ''                                     AS `+"`Status Analise`"+`,
+  COALESCE(DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s'), '') AS `+"`Data Ultima Movimentacao`"+`,
+  ''                                     AS Prioridade,
+  COALESCE(p.suspenso,0)                 AS `+"`Suspenso`"+`
+FROM FT_PROCESSOS p
+JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+LEFT JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban
+LEFT JOIN (
+  SELECT h1.id_requisicao, h1.etapa_nova, h1.sub_etapa, h1.data_movimentacao
+  FROM FT_HISTORICO_MOVIMENTACOES h1
+  JOIN (
+    SELECT id_requisicao, MAX(id_historico) AS max_id
+    FROM FT_HISTORICO_MOVIMENTACOES
+    GROUP BY id_requisicao
+  ) h2 ON h2.id_requisicao = h1.id_requisicao AND h2.max_id = h1.id_historico
+) h ON h.id_requisicao = p.id_processo
+`)
 
 		// Índices em DM_ALERTAS (se a tabela existir)
 		var hasAlertas int

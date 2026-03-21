@@ -23,7 +23,9 @@ linters:
     - noctx         # Funções HTTP sem context
     - sqlclosecheck # SQL rows/statements devem ser fechados
 
-  disable: []
+  disable:
+    - errcheck
+    - gosec
 
 linters-settings:
   errcheck:

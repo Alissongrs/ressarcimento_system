@@ -392,17 +392,41 @@ func GetConcessionariasParaFiltro(c *gin.Context) {
 		  FROM VW_POWERBI_PROCESSOS
 		 WHERE COALESCE(Concessionaria,'') <> ''
 		 ORDER BY Concessionaria ASC`)
-	if err != nil {
-		fmt.Printf("[GetConcessionariasParaFiltro] erro ao buscar concessionarias (GormDB_App): %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar concessionarias: " + err.Error()})
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var sigla string
+			if err := rows.Scan(&sigla); err != nil {
+				fmt.Printf("[GetConcessionariasParaFiltro] erro ao escanear VW_POWERBI_PROCESSOS: %v\n", err)
+				continue
+			}
+			concessionarias = append(concessionarias, models.ConcessionariaFiltro{
+				CodConcess: 0,
+				Sigla:      sigla,
+			})
+		}
+		c.JSON(http.StatusOK, concessionarias)
 		return
 	}
-	defer rows.Close()
 
-	for rows.Next() {
+	// Fallback: FT_PROCESSOS (quando a view foi removida)
+	fmt.Printf("[GetConcessionariasParaFiltro] fallback para FT_PROCESSOS: %v\n", err)
+	fbRows, fbErr := queryGorm(database.GormDB_App, `
+		SELECT DISTINCT COALESCE(concessionaria,'') AS sigla
+		FROM FT_PROCESSOS
+		WHERE COALESCE(concessionaria,'') <> ''
+		ORDER BY concessionaria ASC`)
+	if fbErr != nil {
+		fmt.Printf("[GetConcessionariasParaFiltro] erro no fallback FT_PROCESSOS: %v\n", fbErr)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar concessionarias: " + fbErr.Error()})
+		return
+	}
+	defer fbRows.Close()
+
+	for fbRows.Next() {
 		var sigla string
-		if err := rows.Scan(&sigla); err != nil {
-			fmt.Printf("[GetConcessionariasParaFiltro] erro ao escanear fallback: %v\n", err)
+		if err := fbRows.Scan(&sigla); err != nil {
+			fmt.Printf("[GetConcessionariasParaFiltro] erro ao escanear FT_PROCESSOS: %v\n", err)
 			continue
 		}
 		concessionarias = append(concessionarias, models.ConcessionariaFiltro{
@@ -506,4 +530,3 @@ func GetFaturasAnos(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"anos": out})
 }
-

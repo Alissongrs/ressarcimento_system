@@ -16,8 +16,8 @@ import (
 // AdminEditPayload consolida campos para criação/edição completa de um processo
 type AdminEditPayload struct {
 	// Identificação
-	ProcessoID *int `json:"processo_id,omitempty"`
-	CriarNovo  bool `json:"criar_novo"`
+	ProcessoID *int    `json:"processo_id,omitempty"`
+	CriarNovo  bool    `json:"criar_novo"`
 	Coluna     *string `json:"coluna,omitempty"`
 
 	// Requisição (FT_REQUISICOES)
@@ -97,7 +97,6 @@ func AdminEditProcesso(c *gin.Context) {
 		}
 	}
 
-	
 	userIDVal, _ := c.Get("userID")
 	var userIDNull sql.NullInt64
 	switch v := userIDVal.(type) {
@@ -153,7 +152,12 @@ func AdminEditProcesso(c *gin.Context) {
 		).Scan(&colID, &colNome)
 		_, err = execGorm(tx, `INSERT INTO FT_PROCESSOS (id_processo, id_etapa_processo, sub_etapa, id_sub_etapa_processo, id_coluna, nome_coluna, relevancia, data_alerta, ultima_atualizacao)
                           VALUES (?, ?, ?, ?, ?, ?, COALESCE(?,0), NULLIF(?, ''), COALESCE(NULLIF(?, ''), NOW()))`,
-			pid, etapaID.Int64, subEtapa, nullIntToIface(subEtapaID), nullIntToIface(colID), func() interface{} { if colNome.Valid { return colNome.String }; return nil }(), boolToTiny(body.Relevancia), valOrEmpty(body.DataAlerta), valOrEmpty(body.UltimaAtual))
+			pid, etapaID.Int64, subEtapa, nullIntToIface(subEtapaID), nullIntToIface(colID), func() interface{} {
+				if colNome.Valid {
+					return colNome.String
+				}
+				return nil
+			}(), boolToTiny(body.Relevancia), valOrEmpty(body.DataAlerta), valOrEmpty(body.UltimaAtual))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao criar processo: " + err.Error()})
 			return
@@ -297,12 +301,12 @@ func AdminEditProcesso(c *gin.Context) {
 	// Deferimento (somente se houver pelo menos um campo significativo)
 	if len(body.Deferimento) > 0 {
 		var input struct {
-			DataProcedencia  *string           `json:"data_procedencia"`
-			CreditoSimples   *decimal.Decimal  `json:"credito_simples"`
-			CreditoDobro     *decimal.Decimal  `json:"credito_dobro"`
-			DataCreditoDobro *string           `json:"data_credito_dobro"`
-			RepasseSimples   *decimal.Decimal  `json:"repasse_simples"`
-			RepasseDobro     *decimal.Decimal  `json:"repasse_dobro"`
+			DataProcedencia  *string          `json:"data_procedencia"`
+			CreditoSimples   *decimal.Decimal `json:"credito_simples"`
+			CreditoDobro     *decimal.Decimal `json:"credito_dobro"`
+			DataCreditoDobro *string          `json:"data_credito_dobro"`
+			RepasseSimples   *decimal.Decimal `json:"repasse_simples"`
+			RepasseDobro     *decimal.Decimal `json:"repasse_dobro"`
 		}
 		if err2 := json.Unmarshal(body.Deferimento, &input); err2 == nil {
 			hasData := (input.DataProcedencia != nil && strings.TrimSpace(*input.DataProcedencia) != "") ||
@@ -345,7 +349,7 @@ func AdminEditProcesso(c *gin.Context) {
 		}
 	}
 
-	// Hist?rico: delete espec?ficos
+	// Histórico: delete espec?ficos
 	if len(body.HistoricoDeleteIDs) > 0 {
 		// constr?i placeholders
 		qs := make([]string, 0, len(body.HistoricoDeleteIDs))
@@ -360,12 +364,12 @@ func AdminEditProcesso(c *gin.Context) {
 		}
 		args = append(args, pid)
 		if _, err = execGorm(tx, q, args...); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao deletar hist?rico: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao deletar histórico: " + err.Error()})
 			return
 		}
 	}
 
-	// Hist?rico: upsert b?sico (update se vier id, sen?o insert)
+	// Histórico: upsert b?sico (update se vier id, senão insert)
 	if len(body.Historico) > 0 {
 		for _, h := range body.Historico {
 			if h.IDHistorico > 0 {
@@ -379,7 +383,7 @@ func AdminEditProcesso(c *gin.Context) {
 					h.IDHistorico, pid,
 				)
 				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao atualizar hist?rico: " + err.Error()})
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao atualizar histórico: " + err.Error()})
 					return
 				}
 			} else {
@@ -393,14 +397,14 @@ func AdminEditProcesso(c *gin.Context) {
 					pid, userIDNull, adminNullIfEmpty(h.StatusAnterior), adminNullIfEmpty(h.StatusNovo), adminNullIfEmpty(h.EtapaAnterior), adminNullIfEmpty(h.EtapaNova), adminNullIfEmpty(h.SubEtapa),
 					adminBoolStrOrNull(h.RelevanciaAnterior), adminBoolStrOrNull(h.RelevanciaNova), strings.TrimSpace(h.Comentario), adminNullIfEmpty(h.JustificativaAtraso), adminNullIfEmpty(h.TipoMovimentacao), h.Data)
 				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao inserir hist?rico: " + err.Error()})
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao inserir histórico: " + err.Error()})
 					return
 				}
 			}
 		}
 	}
 
-	if err = updateColunaByData(tx, pid); err != nil {
+	if err = updateColunaByData(tx, pid, 0); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao atualizar coluna do processo: " + err.Error()})
 		return
 	}
@@ -480,8 +484,3 @@ func adminBoolStrOrNull(p *bool) interface{} {
 	}
 	return "false"
 }
-
-
-
-
-

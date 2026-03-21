@@ -213,6 +213,8 @@ JOIN alvo a ON LOWER(TRIM(e.etapa)) = LOWER(TRIM(a.etapa)) COLLATE utf8mb4_unico
            AND LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE LOWER(CONCAT(TRIM(a.sub_etapa), '%')) COLLATE utf8mb4_unicode_ci
 LEFT JOIN hist h ON h.id_requisicao = p.id_processo
 WHERE COALESCE(h.data_movimentacao, p.ultima_atualizacao) IS NOT NULL
+  AND COALESCE(p.suspenso, 0) = 0
+  AND LOWER(TRIM(COALESCE(p.sub_etapa, ''))) NOT LIKE 'suspenso%'
 LIMIT ?`
 
 	rows, err := queryGorm(db, q, limit)
@@ -313,4 +315,3 @@ LIMIT ?`
 
 	c.JSON(http.StatusOK, gin.H{"rows": out, "count": len(out)})
 }
-

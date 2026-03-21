@@ -201,6 +201,14 @@ export const getHistoricoById = async (id) => {
     const key = getKey(h);
     const extras = key != null ? procMap.get(String(key)) : null;
     const combined = { ...(extras || {}), ...(h || {}) };
+    const prefer = (val, fallback) =>
+      val != null && String(val).trim() !== '' ? val : fallback;
+    if (extras) {
+      ['etapa_nova', 'etapa_anterior', 'sub_etapa', 'sub_etapa_nova', 'sub_etapa_anterior',
+       'status_novo', 'status_anterior', 'status_composto'].forEach((f) => {
+        combined[f] = prefer(combined[f], extras[f]);
+      });
+    }
     if (extras?.anexos) combined.anexos = extras.anexos;
     if (extras?.canais) combined.canais = extras.canais;
     if (extras?.canal_comunicacao) combined.canal_comunicacao = extras.canal_comunicacao;
@@ -940,6 +948,5 @@ export async function getMesesPorIdUc(idUcOrParams) {
     return { meses: [] };
   }
 }
-
 
 

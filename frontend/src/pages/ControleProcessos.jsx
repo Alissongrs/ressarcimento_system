@@ -1056,7 +1056,7 @@ const ControleProcessos = () => {
     const indexDestino = ordemColunas.indexOf(colunaDestino);
 
     if (!isAdmin && indexDestino < indexOrigem) {
-      alert("N?o ? permitido mover um card para uma coluna anterior.");
+      alert("Não ? permitido mover um card para uma coluna anterior.");
       return;
     }
     const processoMovido = colunas?.[colunaOrigem]?.find((p) => p.id === active.id);
@@ -1064,7 +1064,7 @@ const ControleProcessos = () => {
 
     const novaEtapa = mapaColunasParaEtapas[colunaDestino];
     if (!novaEtapa && colunaDestino !== 'Suspensos') {
-      alert(`Movimenta??o para "${colunaDestino}" n?o ? permitida.`);
+      alert(`Movimenta??o para "${colunaDestino}" não ? permitida.`);
       return;
     }
 

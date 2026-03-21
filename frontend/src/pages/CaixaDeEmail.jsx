@@ -47,17 +47,18 @@ import { getHistoricoById, movimentarProcesso } from '../services/requisicaoServ
 import Toast from '../components/Toast';
 
 const POLL_MS = 120_000;
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 500;
+const REQUEST_PAGE_SIZE = Math.min(PAGE_SIZE, 200);
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
 
 const folderLabel = (name) => {
   const raw = String(name || '').trim();
   const s = raw.toLowerCase();
-  if (s.includes('conversation history')) return { icon: FileText, label: 'Hist?rico de Conversas' };
+  if (s.includes('conversation history')) return { icon: FileText, label: 'Histórico de Conversas' };
   if (s.includes('faturas recebidas')) return { icon: FileText, label: 'Faturas Recebidas' };
-  if (s.includes('resposta automatica') || s.includes('resposta autom?tica')) {
-    return { icon: FileText, label: 'Resposta autom?tica' };
+  if (s.includes('resposta automatica') || s.includes('resposta automática')) {
+    return { icon: FileText, label: 'Resposta automática' };
   }
   if (s.includes('itens enviados')) return { icon: Send, label: 'Itens Enviados' };
   if (s.includes('items deletados') || s.includes('itens deletados')) return { icon: Trash2, label: 'Itens Deletados' };
@@ -69,7 +70,7 @@ const folderLabel = (name) => {
     return { icon: Trash2, label: 'Lixo/Spam' };
   }
   if (s.includes('deleted') || s.includes('exclu')) return { icon: Trash2, label: 'Itens Deletados' };
-  if (s.includes('outbox') || s.includes('caixa de sa?da')) return { icon: Send, label: 'Caixa de Sa?da' };
+  if (s.includes('outbox') || s.includes('caixa de sa?da')) return { icon: Send, label: 'Caixa de Saída' };
   return { icon: Mail, label: raw || 'Caixa' };
 };
 
@@ -184,7 +185,7 @@ const KANBAN_COLUNAS = [
   'Deferidos',
   'Fluxo de Ressarcimento',
   'Faturamento',
-  'Conclu?dos',
+  'Concluídos',
   'Indeferidos',
   'Suspensos',
 ];
@@ -194,7 +195,7 @@ const MAPA_COLUNAS_PARA_ETAPAS = {
   Deferidos: 'Pendente',
   'Fluxo de Ressarcimento': 'Valida??o',
   Faturamento: 'Ressarcimento',
-  'Conclu?dos': 'Conclu?dos',
+  'Concluídos': 'Concluídos',
   Indeferidos: 'Indeferido',
   Suspensos: 'Suspenso',
 };
@@ -202,7 +203,7 @@ const MAPA_COLUNAS_PARA_ETAPAS = {
 /* =========================
    UI helpers
 ========================= */
-const Chip = ({ children, tone = 'neutral', className = '' }) => {
+const Chip = ({ children, tone = 'neutral', className = '', forceTextBlack = false }) => {
   const toneCls =
     tone === 'info'
       ? 'bg-blue-500/15 text-blue-200 border-blue-500/20'
@@ -214,8 +215,16 @@ const Chip = ({ children, tone = 'neutral', className = '' }) => {
       ? 'bg-rose-500/15 text-rose-200 border-rose-500/20'
       : 'bg-[var(--muted)]/25 text-[var(--fg)] border-[var(--border)]/40';
 
+  const style = forceTextBlack ? { color: '#000' } : undefined;
   return (
-    <span className={cx('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] leading-none', toneCls, className)}>
+    <span
+      className={cx(
+        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] leading-none',
+        toneCls,
+        className,
+      )}
+      style={style}
+    >
       {children}
     </span>
   );
@@ -296,7 +305,7 @@ const ComposeModal = ({ open, minimized, onMinimize, onClose, onSend, seed }) =>
             </div>
             <div>
               <div className="text-lg font-bold">Novo e-mail</div>
-              <div className="text-xs opacity-70">Envie com anexos e hist?rico</div>
+              <div className="text-xs opacity-70">Envie com anexos e histórico</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -496,7 +505,7 @@ const ProcessHistoryModal = ({ open, loading, items, processoId, onClose }) => {
     <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="sap-card w-full max-w-3xl p-4 md:p-5">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-lg font-bold">Hist?rico do processo #{processoId}</div>
+          <div className="text-lg font-bold">Histórico do processo #{processoId}</div>
           <button className="btn-outline" onClick={onClose} type="button">
             Fechar
           </button>
@@ -505,7 +514,7 @@ const ProcessHistoryModal = ({ open, loading, items, processoId, onClose }) => {
         {loading ? (
           <div className="text-sm opacity-70">Carregando...</div>
         ) : items.length === 0 ? (
-          <div className="text-sm opacity-70">Nenhum hist?rico encontrado.</div>
+          <div className="text-sm opacity-70">Nenhum histórico encontrado.</div>
         ) : (
           <div className="space-y-3 max-h-[60vh] overflow-auto pr-1">
             {items.map((h, idx) => {
@@ -698,7 +707,7 @@ const LinkProcessModal = ({
             </div>
             <div>
               <div className="text-lg font-bold">Anexar ao processo</div>
-              <div className="text-xs opacity-70">Guarde evid?ncia (PDF do corpo) + anexos no processo</div>
+              <div className="text-xs opacity-70">Guarde evidência (PDF do corpo) + anexos no processo</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -714,7 +723,7 @@ const LinkProcessModal = ({
         <div className="space-y-2">
           <input
             className="input-themed w-full"
-            placeholder="Buscar por id / cliente / UC / CNPJ / concession?ria"
+            placeholder="Buscar por id / cliente / UC / CNPJ / concessionária"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -759,7 +768,7 @@ const LinkProcessModal = ({
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="text-sm font-semibold truncate">
-                        #{r.id_processo} ??" {cliente}
+                        #{r.id_processo} - {cliente}
                       </div>
                       <div className="text-xs opacity-70 mt-0.5 truncate">
                         UC: {uc} . {concessionaria}
@@ -769,20 +778,24 @@ const LinkProcessModal = ({
                       <button
                         type="button"
                         className="btn-outline text-[11px] px-2 py-1 inline-flex items-center gap-1"
-                        title="Ver hist?rico do processo"
+                        title="Ver histórico do processo"
                         onClick={(e) => {
                           e.stopPropagation();
                           openHistory(r.id_processo);
                         }}
                       >
                         <Clock size={12} />
-                        Hist?rico
+                        Histórico
                       </button>
                       {active && <Chip tone="success" className="text-black">Selecionado</Chip>}
                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1 text-black">
-                    {coluna ? <Chip tone="info" className="text-black">Kanban: {coluna}</Chip> : null}
+                    {coluna ? (
+                      <Chip tone="info" className="text-black" forceTextBlack>
+                        Kanban: {coluna}
+                      </Chip>
+                    ) : null}
                     {etapa ? <Chip className="text-black">Etapa: {etapa}</Chip> : null}
                     {ultimaSub ? <Chip tone="warn" className="text-black">Sub-etapa: {ultimaSub}</Chip> : null}
                   </div>
@@ -813,14 +826,14 @@ const LinkProcessModal = ({
 
           <textarea
             className="input-themed w-full min-h-[80px]"
-            placeholder="Nota opcional para hist?rico do processo"
+            placeholder="Nota opcional para histórico do processo"
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
 
           <div className="border-t panel-border pt-3 space-y-2">
             <div className="text-sm font-semibold">Movimenta??o obrigat?ria</div>
-            <div className="text-xs opacity-70">Informe coluna, etapa e sub-etapa para concluir o v?nculo.</div>
+            <div className="text-xs opacity-70">Informe coluna, etapa e sub-etapa para concluir o vínculo.</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {!moveRequiredOk && (
                   <div className="sm:col-span-2 text-xs text-amber-200 bg-amber-500/15 border border-amber-500/30 rounded-lg px-2 py-1">
@@ -906,12 +919,12 @@ const LinkProcessModal = ({
                 </div>
 
                 <div className="sm:col-span-2">
-                  <div className="text-xs opacity-70 mb-1">Coment?rio de movimenta??o</div>
+                  <div className="text-xs opacity-70 mb-1">Comentário de movimenta??o</div>
                   <input
                     className="input-themed w-full"
                     value={moveComentario}
                     onChange={(e) => setMoveComentario(e.target.value)}
-                    placeholder="Coment?rio para hist?rico"
+                    placeholder="Comentário para histórico"
                   />
                 </div>
               </div>
@@ -1213,7 +1226,7 @@ const CaixaDeEmail = () => {
           folderId: activeFolder.id,
           q: search || undefined,
           unread: undefined,
-          limit: PAGE_SIZE,
+          limit: REQUEST_PAGE_SIZE,
           offset: 0,
         });
 
@@ -1237,9 +1250,9 @@ const CaixaDeEmail = () => {
             return merged;
           });
           if (messagesOffset <= 0) {
-            setHasMoreMessages((list || []).length === PAGE_SIZE);
+            setHasMoreMessages((list || []).length === REQUEST_PAGE_SIZE);
           }
-          // manter selecionado se poss?vel; sen?o escolhe o primeiro apenas se n?o houver sele??o
+          // manter selecionado se poss?vel; senão escolhe o primeiro apenas se não houver sele??o
           if (list?.length) {
             if (selectedMessage?.id) {
               const keep = list.find((x) => x.id === selectedMessage.id);
@@ -1500,7 +1513,7 @@ const CaixaDeEmail = () => {
         setReloadSeq((s) => s + 1);
         window.dispatchEvent(new CustomEvent('mail-unread-refresh'));
       } catch {
-        setToast({ open: true, type: 'error', message: 'Falha ao marcar como n?o lido.' });
+        setToast({ open: true, type: 'error', message: 'Falha ao marcar como não lido.' });
       }
     },
     [user?.nome]
@@ -1510,12 +1523,12 @@ const CaixaDeEmail = () => {
     if (!activeFolder?.id || loadingMore || !hasMoreMessages) return;
     setLoadingMore(true);
     try {
-      const nextOffset = messagesOffset + PAGE_SIZE;
+    const nextOffset = messagesOffset + REQUEST_PAGE_SIZE;
       const list = await getMailMessages({
         folderId: activeFolder.id,
         q: search || undefined,
         unread: undefined,
-        limit: PAGE_SIZE,
+        limit: REQUEST_PAGE_SIZE,
         offset: nextOffset,
       });
       setMessages((prev) => {
@@ -1527,7 +1540,7 @@ const CaixaDeEmail = () => {
         return [...(prev || []), ...extra];
       });
       setMessagesOffset(nextOffset);
-      setHasMoreMessages((list || []).length === PAGE_SIZE);
+      setHasMoreMessages((list || []).length === REQUEST_PAGE_SIZE);
     } catch {
       setToast({ open: true, type: 'error', message: 'Falha ao carregar mais mensagens.' });
     } finally {
@@ -1732,7 +1745,7 @@ const CaixaDeEmail = () => {
       setReloadSeq((s) => s + 1);
       window.dispatchEvent(new CustomEvent('mail-unread-refresh'));
     } catch {
-      setToast({ open: true, type: 'error', message: 'Falha ao marcar selecionados como n?o lidos.' });
+      setToast({ open: true, type: 'error', message: 'Falha ao marcar selecionados como não lidos.' });
     }
   }, [selectedIds, user?.nome, selectedMessage?.id]);
 
@@ -1826,7 +1839,7 @@ const CaixaDeEmail = () => {
         open: true,
         type: historyOk ? 'success' : 'info',
         message: historyOk
-          ? `Email vinculado ao processo ID#${payload.processoId} e hist?rico atualizado`
+          ? `Email vinculado ao processo ID#${payload.processoId} e histórico atualizado`
           : `Email vinculado ao processo ID#${payload.processoId}`,
       });
       if (payload?.moveProcess) {
@@ -1910,7 +1923,7 @@ const CaixaDeEmail = () => {
             <div className="min-w-0">
               <div className="font-bold text-base leading-tight truncate">Caixa de Correio</div>
               <div className="text-xs opacity-70 truncate">
-                {activeFolderMeta.label} . {onlyUnread ? 'N?o lidos' : 'Todos'} . {search ? `Filtro: "${search}"` : 'Sem filtro'}
+                {activeFolderMeta.label} . {onlyUnread ? 'Não lidos' : 'Todos'} . {search ? `Filtro: "${search}"` : 'Sem filtro'}
               </div>
             </div>
           </div>
@@ -1943,10 +1956,10 @@ const CaixaDeEmail = () => {
                 className="btn-outline text-[11px] px-2 py-1 inline-flex items-center gap-2"
                 onClick={() => selectedMessage && markAsUnread(selectedMessage)}
                 disabled={!selectedMessage || !selectedMessage.is_read_local}
-                title="Marcar como n?o lido"
+                title="Marcar como não lido"
               >
                 <Mail size={14} />
-                <span>Marcar como n?o lido</span>
+                <span>Marcar como não lido</span>
               </button>
               <button
                 className="btn-themed w-full text-xs"
@@ -2028,7 +2041,7 @@ const CaixaDeEmail = () => {
             <div className="mt-4 p-3 rounded-xl border panel-border bg-[var(--panel)]/25">
               <div className="text-xs font-semibold mb-1">Dicas</div>
               <div className="text-[11px] opacity-70 leading-relaxed">
-                Use <b>Anexar ao processo</b> para salvar o corpo em PDF e anexos como evid?ncia.
+                Use <b>Anexar ao processo</b> para salvar o corpo em PDF e anexos como evidência.
               </div>
             </div>
           </div>
@@ -2071,7 +2084,7 @@ const CaixaDeEmail = () => {
                     onClick={() => setOnlyUnread((v) => !v)}
                   >
                     <Filter size={14} />
-                    Apenas n?o lidos
+                    Apenas não lidos
                   </button>
                   <label className="inline-flex items-center gap-2 px-3 py-1 rounded-full border panel-border bg-[var(--panel)]/15">
                     <input
@@ -2202,7 +2215,7 @@ const CaixaDeEmail = () => {
                         )}
 
                         <div className="mt-2 flex flex-wrap items-center gap-2">
-                        {!m.is_read_local && <Chip tone="info">N?o lido</Chip>}
+                        {!m.is_read_local && <Chip tone="info">Não lido</Chip>}
                           {g.kind === 'thread' && g.count > 1 && <Chip>{g.count} na conversa</Chip>}
                           {g.hasAttachments && (
                             <Chip>
@@ -2251,7 +2264,7 @@ const CaixaDeEmail = () => {
                   <Mail size={28} />
                 </div>
                 <p className="mt-4 text-lg font-semibold">Selecione um e-mail para ler</p>
-                <p className="mt-1 text-xs opacity-70">Use "Anexar ao processo" para registrar evid?ncias.</p>
+                <p className="mt-1 text-xs opacity-70">Use "Anexar ao processo" para registrar evidências.</p>
               </div>
             )}
 
@@ -2386,7 +2399,7 @@ const CaixaDeEmail = () => {
                               </div>
                               <div className="text-xs opacity-70 truncate mt-0.5">{itm.snippet}</div>
                               <div className="mt-2 flex items-center gap-2">
-                                {!itm.is_read_local && <Chip tone="info">N?o lido</Chip>}
+                                {!itm.is_read_local && <Chip tone="info">Não lido</Chip>}
                                 {itm.has_attachments && (
                                   <Chip>
                                     <Paperclip size={12} /> Anexo
@@ -2546,9 +2559,4 @@ const CaixaDeEmail = () => {
 };
 
 export default CaixaDeEmail;
-
-
-
-
-
 

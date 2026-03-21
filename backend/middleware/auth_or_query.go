@@ -4,7 +4,6 @@ package middleware
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"ressarcimento-backend/auth"
@@ -36,18 +35,7 @@ func AuthOrQueryToken() gin.HandlerFunc {
 			return
 		}
 
-		// 4) Bypass DEV opcional (NÃO use em produção)
-		if bypass := strings.TrimSpace(os.Getenv("DEV_BYPASS_JWT")); bypass != "" && tokenString == bypass {
-			c.Set("userID", int64(0))
-			c.Set("userName", "dev-bypass")
-			c.Set("userTipoConta", "admin")
-			c.Set("role", "admin")
-			c.Set("isAdmin", true)
-			c.Next()
-			return
-		}
-
-		// 5) Valida JWT HS256 com a mesma chave que assina no /login
+		// 4) Valida JWT HS256 com a mesma chave que assina no /login
 		claims := &auth.Claims{} // suas claims estendem jwt.RegisteredClaims
 		tok, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {

@@ -20,38 +20,13 @@ type ResumoService struct {
 	HTTPClient *http.Client
 }
 
-const systemPromptSingle = `Você é um Analista Especialista em Ressarcimento do setor elétrico (Brasil), com forte experiência em tratativas com concessionárias e regulação ANEEL.
-
-Base normativa:
-- Use a REN ANEEL 1000 como referência principal.
-- Use a REN ANEEL 457 quando o caso for antigo e o período do histórico indicar que se aplica.
-Importante: não invente artigos, prazos ou trechos. Se faltar informação para afirmar algo, declare "Informação insuficiente" e liste o que falta.
-
-Objetivo:
-Avaliar o andamento do processo com base nos dados fornecidos (etapa/subetapa/histórico/valores) e sugerir próximos passos, de forma prática e operacional.
-
-Restrições e segurança:
-- Não forneça aconselhamento jurídico; forneça orientação operacional e de compliance.
-- Seja direto, claro e orientado a decisão.
-- Não exponha dados sensíveis além do que foi informado.
-- Se houver inconsistência no histórico (datas fora de ordem, falta de protocolo, ausência de retorno etc.), sinalize.
-
-Formato de saída (OBRIGATÓRIO, sempre):
-Responda em PT-BR e produza exatamente dois blocos:
-
-1) "Análise (visão de negócios)"
-- 4 a 8 bullets curtos.
-- Deve conter: status atual, risco/prioridade, gargalo provável, impacto (prazo/valor), e base normativa aplicável (sem citar artigos específicos se você não tiver certeza).
-
-2) "Próximos passos (operacional)"
-- Checklist numerado (5 a 12 itens).
-- Deve incluir: o que fazer agora, quais evidências/coletas buscar, qual mensagem/solicitação típica enviar, e critérios de pronto para avançar (gate).
-- Se couber, incluir 2 variações: se houve retorno vs se não houve retorno.
-
-Extras:
-- Se o histórico for grande, use apenas os eventos fornecidos e o resumo fornecido; não tente reconstruir o que não existe.
-- Quando mencionar norma, use esta forma:
-  "Base normativa: REN 1000 (tema: ...); REN 457 (aplicável se período antigo)."`
+const systemPromptSingle = `Resuma o processo em máximo 10 linhas em português puro, sem código:
+  - Etapa atual
+  - Tipo de irregularidade
+  - Últimas ações
+  - Risco (alto/médio/baixo)
+  - Próximo passo
+  `
 
 const systemPromptBatch = `Você é um Analista Especialista em Ressarcimento do setor elétrico (Brasil), com forte experiência em tratativas com concessionárias e regulação ANEEL.
 
@@ -99,7 +74,7 @@ func NewResumoService(res *repositories.ResumoRepo, proc *repositories.Processos
 	return &ResumoService{
 		Repo:       res,
 		DBRepo:     proc,
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		HTTPClient: &http.Client{Timeout: 180 * time.Second},
 	}
 }
 
@@ -109,11 +84,11 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 
 	// Fetch processo info
 	var (
-		uc, cliente, concessionaria, status string
+		uc, cliente, concessionaria, status                         string
 		descricaoIrregularidade, periodosIrregularidade, linkFatura string
-		razaoSocial, cnpj, endereco string
-		tipoIrregularidade, subtipoIrregularidade string
-		etapaAtual, subEtapaAtual string
+		razaoSocial, cnpj, endereco                                 string
+		tipoIrregularidade, subtipoIrregularidade                   string
+		etapaAtual, subEtapaAtual                                   string
 	)
 	_ = s.DBRepo.DB.WithContext(ctx).Raw(`
 		SELECT
@@ -188,22 +163,22 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 	payload := map[string]any{
 		"processo_id": processoID,
 		"identificacao": map[string]any{
-			"uc":            uc,
-			"cliente":       cliente,
+			"uc":             uc,
+			"cliente":        cliente,
 			"concessionaria": concessionaria,
-			"cnpj":          cnpj,
-			"razao_social":  razaoSocial,
+			"cnpj":           cnpj,
+			"razao_social":   razaoSocial,
 		},
 		"status_atual": map[string]any{
-			"status":        status,
-			"etapa":         etapaAtual,
-			"sub_etapa":     subEtapaAtual,
+			"status":    status,
+			"etapa":     etapaAtual,
+			"sub_etapa": subEtapaAtual,
 		},
 		"irregularidade": map[string]any{
-			"descricao":    descricaoIrregularidade,
-			"periodos":     periodosIrregularidade,
-			"tipo":         tipoIrregularidade,
-			"subtipo":      subtipoIrregularidade,
+			"descricao": descricaoIrregularidade,
+			"periodos":  periodosIrregularidade,
+			"tipo":      tipoIrregularidade,
+			"subtipo":   subtipoIrregularidade,
 		},
 		"link_fatura": linkFatura,
 		"endereco":    endereco,
@@ -216,6 +191,49 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 }
 
 // callOpenAI performs a minimal chat call
+// callLocalAgent chama o agente IA local (Llama via Docker) para gerar resumo
+func (s *ResumoService) callLocalAgent(ctx context.Context, system, user string) (string, error) {
+	// Detecta URL do agente: Docker (LLAMA_AGENT_URL) ou localhost para dev
+	llamaURL := os.Getenv("LLAMA_AGENT_URL")
+	if llamaURL == "" {
+		llamaURL = "http://localhost:8000"
+	}
+
+	prompt := system + "\n\n" + user
+	body := map[string]string{
+		"question": prompt,
+	}
+	buf, _ := json.Marshal(body)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, llamaURL+"/query", bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		return "", Errf("agente llama indisponível (%s): %v", llamaURL, err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		FinalAnswer string `json:"final_answer"`
+		Resposta    string `json:"resposta"`
+		Answer      string `json:"answer"`
+		Error       string `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if resp.StatusCode >= 400 {
+		return "", Errf("agente llama %d: %s", resp.StatusCode, out.Error)
+	}
+	// Tenta vários campos possíveis de resposta
+	if out.FinalAnswer != "" {
+		return out.FinalAnswer, nil
+	}
+	if out.Resposta != "" {
+		return out.Resposta, nil
+	}
+	if out.Answer != "" {
+		return out.Answer, nil
+	}
+	return "", Err("resposta vazia do agente llama")
+}
+
 func (s *ResumoService) callOpenAI(ctx context.Context, system, user string) (string, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
@@ -269,11 +287,11 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 	items = make(map[int64]any, len(ids))
 	for _, pid := range ids {
 		var (
-			uc, cliente, concessionaria, status string
+			uc, cliente, concessionaria, status                         string
 			descricaoIrregularidade, periodosIrregularidade, linkFatura string
-			razaoSocial, cnpj, endereco string
-			tipoIrregularidade, subtipoIrregularidade string
-			etapaAtual, subEtapaAtual string
+			razaoSocial, cnpj, endereco                                 string
+			tipoIrregularidade, subtipoIrregularidade                   string
+			etapaAtual, subEtapaAtual                                   string
 		)
 		_ = s.DBRepo.DB.WithContext(ctx).Raw(`
 			SELECT
@@ -328,11 +346,11 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 		items[pid] = map[string]any{
 			"id": pid,
 			"identificacao": map[string]any{
-				"uc":            uc,
-				"cliente":       cliente,
+				"uc":             uc,
+				"cliente":        cliente,
 				"concessionaria": concessionaria,
-				"cnpj":          cnpj,
-				"razao_social":  razaoSocial,
+				"cnpj":           cnpj,
+				"razao_social":   razaoSocial,
 			},
 			"status_atual": map[string]any{
 				"status":    status,
@@ -361,6 +379,57 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 	user = "Dados dos processos (JSON):\n" + string(b)
 	return
 }
+
+// callLocalAgentJSON chama o agente llama esperando resposta em JSON
+func (s *ResumoService) callLocalAgentJSON(ctx context.Context, system, user string) (map[string]any, error) {
+	// Detecta URL do agente: Docker (LLAMA_AGENT_URL) ou localhost para dev
+	llamaURL := os.Getenv("LLAMA_AGENT_URL")
+	if llamaURL == "" {
+		llamaURL = "http://localhost:8000"
+	}
+
+	prompt := system + "\n\n" + user
+	body := map[string]string{
+		"question": prompt,
+	}
+	buf, _ := json.Marshal(body)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, llamaURL+"/query", bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.HTTPClient.Do(req)
+	if err != nil {
+		return nil, Errf("agente llama indisponível (%s): %v", llamaURL, err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		FinalAnswer string `json:"final_answer"`
+		Resposta    string `json:"resposta"`
+		Answer      string `json:"answer"`
+		Error       string `json:"error"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if resp.StatusCode >= 400 {
+		return nil, Errf("agente llama %d: %s", resp.StatusCode, out.Error)
+	}
+
+	// Tenta vários campos possíveis de resposta
+	var jsonStr string
+	if out.FinalAnswer != "" {
+		jsonStr = out.FinalAnswer
+	} else if out.Resposta != "" {
+		jsonStr = out.Resposta
+	} else if out.Answer != "" {
+		jsonStr = out.Answer
+	} else {
+		return nil, Err("resposta vazia do agente llama")
+	}
+
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(jsonStr), &obj); err != nil {
+		return nil, Errf("erro ao parsear JSON do agente llama: %v", err)
+	}
+	return obj, nil
+}
+
 // callOpenAIJSON asks the model to return a JSON object
 func (s *ResumoService) callOpenAIJSON(ctx context.Context, system, user string) (map[string]any, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
@@ -407,10 +476,10 @@ func (s *ResumoService) callOpenAIJSON(ctx context.Context, system, user string)
 	return obj, nil
 }
 
-
-// GerarResumoAgora gera o resumo de um processo de forma síncrona.
+// GerarResumoAgora gera o resumo de um processo de forma síncrona via OpenAI.
 func (s *ResumoService) GerarResumoAgora(ctx context.Context, processoID int64) (string, error) {
 	system, user := s.buildPrompt(ctx, processoID)
+
 	text, err := s.callOpenAI(ctx, system, user)
 	if err != nil {
 		_ = s.Repo.SaveError(ctx, processoID, err.Error())
@@ -424,6 +493,7 @@ func (s *ResumoService) GerarResumoAgora(ctx context.Context, processoID int64) 
 	_ = s.Repo.SaveReady(ctx, processoID, text, "openai", openAIModel())
 	return text, nil
 }
+
 // ProcessarResumos busca pendentes e gera texto
 func (s *ResumoService) ProcessarResumos(ctx context.Context, limit int) error {
 	ids, err := s.Repo.ListPending(ctx, limit)
@@ -451,7 +521,11 @@ func (s *ResumoService) ProcessarResumos(ctx context.Context, limit int) error {
 		resumoStats.updateDispatch(batch)
 		// monta payload batch
 		system, user, _ := s.buildBatchPrompt(ctx, batch)
+
+		// Usa OpenAI diretamente
+		provider := "openai"
 		obj, err := s.callOpenAIJSON(ctx, system, user)
+
 		if err != nil {
 			// se falhou a chamada inteira, marca cada como error e segue
 			for _, id := range batch {
@@ -497,7 +571,11 @@ func (s *ResumoService) ProcessarResumos(ctx context.Context, limit int) error {
 				errIDs = append(errIDs, pid)
 				continue
 			}
-			_ = s.Repo.SaveReady(ctx, pid, sum, "openai", "gpt-4o-mini")
+			model := "llama"
+			if provider == "openai" {
+				model = "gpt-4o-mini"
+			}
+			_ = s.Repo.SaveReady(ctx, pid, sum, provider, model)
 			seen[pid] = true
 			okIDs = append(okIDs, pid)
 		}
@@ -607,12 +685,3 @@ func GetResumoRuntimeStatus() ResumoRuntimeStatus {
 	}
 	return cp
 }
-
-
-
-
-
-
-
-
-

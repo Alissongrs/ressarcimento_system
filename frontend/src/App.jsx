@@ -23,11 +23,8 @@ import {
   FileText,
   Workflow,
   ShieldCheck,
-  ListChecks,
-  ScanText,
   Inbox,
   Mail as MailIcon,
-  Megaphone,
   AlarmClock,
   FilePenLine,
   PlusCircle,
@@ -43,7 +40,6 @@ import CommandPaletteHost from './components/CommandPaletteHost.jsx';
 import PageContainer from './components/PageContainer.jsx';
 
 // Components
-import AlertsModal from './components/AlertsModal.jsx';
 import AlertasVencimentoModal from './components/AlertasVencimentoModal.jsx';
 import GlobalNewProcessNotifier from './components/GlobalNewProcessNotifier.jsx';
 
@@ -57,8 +53,6 @@ import ProcessoDetalhes from './pages/ProcessoDetalhes.jsx';
 import Relatorios from './pages/Relatorios.jsx';
 import CaixaDeEmail from './pages/CaixaDeEmail.jsx';
 import AnaliseDesvio from './pages/AnaliseDesvio.jsx';
-import Ocr from './pages/Ocr.jsx';
-import Regras from './pages/Regras.jsx';
 import Auditoria from './pages/Auditoria.jsx';
 import ChatRequisicao from './pages/ChatRequisicaoNew.jsx';
 import HomeGestorAdmin from './pages/HomeGestorAdmin.jsx';
@@ -119,7 +113,7 @@ function MailLinkMinimizedBar({ visible, onRestore }) {
   );
 }
 
-function TopNav({ role, unread, mailUnread, onOpenAlerts, onLogout }) {
+function TopNav({ role, unread, mailUnread, onLogout }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const navigate = useNavigate();
   const baseItems = [
@@ -128,9 +122,7 @@ function TopNav({ role, unread, mailUnread, onOpenAlerts, onLogout }) {
     { to: '/admin/planilha', label: 'Gerenciar Processos', Icon: Workflow },
     { to: '/backlog', label: 'Backlog', Icon: Archive },
     { to: '/auditoria', label: 'Auditoria', Icon: ShieldCheck },
-    { to: '/ocr', label: 'OCR', Icon: ScanText },
     { to: '/analise-desvio', label: 'Análise de Desvio', Icon: Receipt },
-    { to: '/regras', label: 'Regras', Icon: ListChecks },
     { to: '/historico', label: 'Histórico', Icon: History },
     { to: '/dashboard', label: 'Métricas', Icon: BarChart3 },
   ];
@@ -157,16 +149,7 @@ function TopNav({ role, unread, mailUnread, onOpenAlerts, onLogout }) {
                 {Number(item.badge) > 0 && <span className="top-nav-badge">{item.badge}</span>}
               </NavLink>
             ))}
-            <button
-              type="button"
-              onClick={onOpenAlerts}
-              className="top-nav-link top-nav-alert"
-              title="Alertas"
-            >
-              <Megaphone className="top-nav-icon" />
-              <span className="top-nav-text">Alertas</span>
-              {unread > 0 && <span className="top-nav-badge">{unread}</span>}
-            </button>
+            {null}
           </div>
           {moreItems.length > 0 && (
             <div className="top-nav-more">
@@ -229,7 +212,7 @@ function App() {
   const role = String(user?.tipo_conta || '').trim().toLowerCase();
   const isSolicitante = role === 'solicitante';
   const solicitanteAllowed = (key) => {
-    const allowed = new Set(['inicio', 'novo', 'backlog', 'alertas', 'auditoria']);
+    const allowed = new Set(['inicio', 'novo', 'backlog', 'auditoria']);
     return allowed.has(key);
   };
   const solicitanteClass = (key) =>
@@ -247,7 +230,6 @@ function App() {
 
   // Alerts state
   const [unread, setUnread] = useState(0);
-  const [openAlerts, setOpenAlerts] = useState(false);
   const [openGestorVenc, setOpenGestorVenc] = useState(false);
   const [openFeedback, setOpenFeedback] = useState(false);
   const [toast, setToast] = useState({ open: false, type: 'info', text: '', position: 'bottom-right' });
@@ -590,26 +572,7 @@ function App() {
             <span className={`text-sm font-medium sidebar-label ${solicitanteClass('backlog')}`}>Backlog</span>
           </NavLink>
 
-          {/* Alertas (modal) */}
-          <button
-            type="button"
-            onClick={() => setOpenAlerts(true)}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-[var(--menu-hover)] transition-colors"
-            title="Alertas"
-          >
-            <Inbox className="w-5 h-5" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('alertas')}`}>Alertas</span>
-            {unread > 0 && (
-              <span
-                className="ml-auto text-xs px-2 py-0.5 rounded-full"
-                style={{ background: 'var(--accent)', color: '#fff' }}
-                aria-label={`${unread} alertas não lidos`}
-                title={`${unread} não lidos`}
-              >
-                {unread}
-              </span>
-            )}
-          </button>
+          {null}
 
           <NavLink
             to="/auditoria"
@@ -627,21 +590,6 @@ function App() {
           </NavLink>
 
           <NavLink
-            to="/ocr"
-            className={({ isActive }) =>
-              `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                isActive
-                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                  : 'hover:bg-[var(--menu-hover)]'
-              }`
-            }
-            title="OCR"
-          >
-            <ScanText className="sidebar-icon" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('ocr')}`}>OCR</span>
-          </NavLink>
-
-          <NavLink
             to="/analise-desvio"
             className={({ isActive }) =>
               `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
@@ -654,21 +602,6 @@ function App() {
           >
             <Workflow className="w-5 h-5" strokeWidth={1.25} />
             <span className={`text-sm font-medium sidebar-label ${solicitanteClass('analise')}`}>Análise de Desvio</span>
-          </NavLink>
-
-          <NavLink
-            to="/regras"
-            className={({ isActive }) =>
-              `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                isActive
-                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                  : 'hover:bg-[var(--menu-hover)]'
-              }`
-            }
-            title="Regras"
-          >
-            <ListChecks className="w-5 h-5" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('regras')}`}>Regras</span>
           </NavLink>
 
           <NavLink
@@ -842,26 +775,7 @@ function App() {
             <span className={`text-sm font-medium sidebar-label ${solicitanteClass('backlog')}`}>Backlog</span>
           </NavLink>
 
-          {/* Alertas (modal) */}
-          <button
-            type="button"
-            onClick={() => setOpenAlerts(true)}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-[var(--menu-hover)] transition-colors"
-            title="Alertas"
-          >
-            <Inbox className="sidebar-icon shrink-0" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('alertas')}`}>Alertas</span>
-            {unread > 0 && (
-              <span
-                className="ml-auto text-xs px-2 py-0.5 rounded-full"
-                style={{ background: 'var(--accent)', color: '#fff' }}
-                aria-label={`${unread} alertas não lidos`}
-                title={`${unread} não lidos`}
-              >
-                {unread}
-              </span>
-            )}
-          </button>
+          {null}
 
           <NavLink
             to="/historico"
@@ -952,13 +866,7 @@ function App() {
         <RouteKeeper user={user} />
         <div className="flex min-h-screen themed-surface flex-col">
           {user && (
-            <TopNav
-              role={role}
-              unread={unread}
-              mailUnread={mailUnread}
-              onOpenAlerts={() => setOpenAlerts(true)}
-              onLogout={logout}
-            />
+            <TopNav role={role} mailUnread={mailUnread} onLogout={logout} />
           )}
 
           <main className="flex-1 min-w-0 pt-16">
@@ -998,9 +906,7 @@ function App() {
                         <Route path="/dashboard" element={<Relatorios />} />
                         <Route path="/processos" element={<ControleProcessos />} />
                         <Route path="/processos/:id" element={<ProcessoDetalhes />} />
-                        <Route path="/ocr" element={<Ocr />} />
                         <Route path="/analise-desvio" element={<AnaliseDesvio />} />
-                        <Route path="/regras" element={<Regras />} />
                         <Route path="/caixa-de-email" element={<CaixaDeEmail />} />
 
                         {role === 'admin' && (
@@ -1020,9 +926,7 @@ function App() {
                         <Route path="/gestao" element={<Navigate to="/" replace />} />
                         <Route path="/processos" element={<Navigate to="/" replace />} />
                         <Route path="/processos/:id" element={<Navigate to="/" replace />} />
-                        <Route path="/ocr" element={<Navigate to="/" replace />} />
                         <Route path="/analise-desvio" element={<Navigate to="/" replace />} />
-                        <Route path="/regras" element={<Navigate to="/" replace />} />
                         <Route path="/caixa-de-email" element={<Navigate to="/" replace />} />
                       </>
                     )}
@@ -1061,14 +965,13 @@ function App() {
         </div>
 
         {/* Global Modals */}
-        <AlertsModal open={openAlerts} onClose={() => setOpenAlerts(false)} />
         <ThemeSwitcher />
         <GlobalNewProcessNotifier />
         <AlertasVencimentoModal
           open={openGestorVenc}
           onClose={() => setOpenGestorVenc(false)}
         />
-        <CommandPaletteHost onOpenAlerts={() => setOpenAlerts(true)} />
+        <CommandPaletteHost />
 
         {sessionExpired && (
           <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">

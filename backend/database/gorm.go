@@ -3,7 +3,9 @@ package database
 import (
 	"log"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -36,6 +38,21 @@ func InitGorm() {
 		timeZone = "-03:00"
 	}
 
+	getEnvInt := func(key string, def int) int {
+		raw := strings.TrimSpace(os.Getenv(key))
+		if raw == "" {
+			return def
+		}
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 {
+			return n
+		}
+		return def
+	}
+	// maxOpen=0 => sem limite de conexões abertas
+	maxOpen := getEnvInt("DB_MAX_OPEN_CONNS", 0)
+	maxIdle := getEnvInt("DB_MAX_IDLE_CONNS", 10)
+	maxLifeMin := getEnvInt("DB_CONN_MAX_LIFETIME_MIN", 15)
+
 	if connStrApp != "" {
 		db, err := gorm.Open(mysql.Open(connStrApp), &gorm.Config{
 			SkipDefaultTransaction: true,
@@ -46,6 +63,9 @@ func InitGorm() {
 		}
 		if raw, err := db.DB(); err == nil {
 			_ = raw.Ping()
+			raw.SetMaxOpenConns(maxOpen)
+			raw.SetMaxIdleConns(maxIdle)
+			raw.SetConnMaxLifetime(time.Duration(maxLifeMin) * time.Minute)
 		}
 		_ = db.Exec("SET time_zone = '" + timeZone + "'")
 		_ = db.Exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci")
@@ -71,6 +91,9 @@ func InitGorm() {
 	}
 	if raw, err := dbc.DB(); err == nil {
 		_ = raw.Ping()
+		raw.SetMaxOpenConns(maxOpen)
+		raw.SetMaxIdleConns(maxIdle)
+		raw.SetConnMaxLifetime(time.Duration(maxLifeMin) * time.Minute)
 	}
 	_ = dbc.Exec("SET time_zone = '" + timeZone + "'")
 	_ = dbc.Exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci")

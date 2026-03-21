@@ -74,6 +74,7 @@ func GetEtapaSubCombinacoes(c *gin.Context) {
 	addIDs("Enviado ao Financeiro", 14, 5)
 	// Faturamento
 	addIDs("Repasse Amee", 15)
+	// Indeferido
+	addIDs("Indeferido", 16)
 	c.JSON(http.StatusOK, gin.H{"map": out})
 }
-

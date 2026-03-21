@@ -242,7 +242,7 @@ api.interceptors.response.use(
       setSavingCount(Math.max(0, getSavingCount() - 1));
     }
     const status = error?.response?.status;
-    if (status === 401 && !error?.config?.skipAuthExpired) {
+    if (status === 401 && error?.config?.authExpired === true) {
       notifyAuthExpired(status);
     }
     return Promise.reject(error);

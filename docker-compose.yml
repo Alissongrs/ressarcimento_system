@@ -22,7 +22,7 @@ services:
       retries: 30
       start_period: 60s
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - db_data:/var/lib/mysql
       - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
@@ -30,8 +30,6 @@ services:
   ollama:
     image: ollama/ollama:latest
     restart: unless-stopped
-    ports:
-      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
@@ -61,8 +59,6 @@ services:
       OCR_FEWSHOT_PATH: "/app/prompts/ilttio_fewshot.txt"
       OCR_LANG: "por"
       OCR_MAX_PAGES: "2"
-    ports:
-      - "8000:8000"
     healthcheck:
       test:
         [
@@ -73,6 +69,37 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+
+  llama-agent:
+    build:
+      context: ./backend/ia
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      TZ: "America/Sao_Paulo"
+      OLLAMA_URL: "http://ollama:11434"
+      LLAMA_MODEL: "mistral"
+      LLAMA_TIMEOUT: "120"
+      PORT: "8000"
+      HOST: "0.0.0.0"
+      DEBUG: "false"
+    ports:
+      - "127.0.0.1:8001:8000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ping', timeout=2).read()\""
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   backend:
     image: ressarcimento-backend
@@ -93,6 +120,9 @@ services:
       RAG_TEXT_CHUNK_CHARS: "1500"
       RAG_CHAT_TIMEOUT_SEC: "300"
 
+      # Llama Agent para resumos (container interno)
+      LLAMA_AGENT_URL: "http://llama-agent:8000"
+
       # OCR interno (FastAPI/Tesseract)
       OCR_BACKEND_URL: "http://ocr:8000"
       DESVIO_MEDIA_FORCE_PROXY: "1"
@@ -105,6 +135,8 @@ services:
       db:
         condition: service_healthy
       ocr:
+        condition: service_healthy
+      llama-agent:
         condition: service_healthy
       ollama:
         condition: service_healthy

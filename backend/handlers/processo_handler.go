@@ -547,6 +547,11 @@ func MovimentarProcesso(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar relevância do processo"})
 			return
 		}
+		// Mantém snapshot alinhado para evitar rollback via sync
+		if _, err = execGorm(tx, "UPDATE FT_PROCESSO_SNAPSHOT SET relevancia = ? WHERE id_processo = ?", relNovo, processoID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar relevância do snapshot"})
+			return
+		}
 	}
 
 	// Atualiza etapa/subetapa no processo (apenas quando mudou algo)
@@ -574,6 +579,10 @@ func MovimentarProcesso(c *gin.Context) {
 				 WHERE e.id_etapa_processo = ?`,
 				novaEtapaID,
 			).Scan(&colID, &colNome)
+			if strings.EqualFold(strings.TrimSpace(novaEtapaNome), "Concluídos") {
+				colID = sql.NullInt64{Int64: 5, Valid: true}
+				colNome = sql.NullString{String: "Concluídos", Valid: true}
+			}
 			setClauses = append(setClauses, "id_coluna = ?")
 			if colID.Valid {
 				args = append(args, colID.Int64)
@@ -602,6 +611,15 @@ func MovimentarProcesso(c *gin.Context) {
 			if _, err2 := execGorm(tx, query, args...); err2 != nil {
 				log.Printf("[DEBUG-MOV] proc=%d falha UPDATE: %v | query=%s | args=%v", processoID, err2, query, args)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar etapa/sub-etapa do processo"})
+				return
+			}
+		}
+
+		// Se houve movimentação manual sem atualização de dados (defer/fluxo/fat),
+		// aplica regra automática para alinhar coluna com os dados já existentes.
+		if !hasDeferimentoUpdate && !hasFluxoUpdate && !hasFaturamentoUpdate {
+			if err := updateColunaByData(tx, processoID, gestorID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao recalcular coluna do processo"})
 				return
 			}
 		}
@@ -706,7 +724,7 @@ func MovimentarProcesso(c *gin.Context) {
 
 	// Recalcula coluna/etapa automática pela regra (prioriza estágio mais avançado)
 	if hasDeferimentoUpdate || hasFluxoUpdate || hasFaturamentoUpdate {
-		if err := updateColunaByData(tx, processoID); err != nil {
+		if err := updateColunaByData(tx, processoID, gestorID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar coluna do processo"})
 			return
 		}
@@ -1827,13 +1845,13 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 		return
 	}
 
-	if err := updateColunaByData(tx, processoID); err != nil {
+	gestorIDVal, _ := c.Get("userID")
+	gestorID, _ := gestorIDVal.(int64)
+
+	if err := updateColunaByData(tx, processoID, gestorID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao atualizar coluna do processo"})
 		return
 	}
-
-	gestorIDVal, _ := c.Get("userID")
-	gestorID, _ := gestorIDVal.(int64)
 	// etapa/sub-etapa atuais
 	var etapaNome, subEtapa sql.NullString
 	_ = queryRowGorm(tx, `SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo WHERE p.id_processo = ?`, processoID).
@@ -2433,8 +2451,3 @@ func notifyUnread(userID int64) {
 		},
 	})
 }
-
-
-
-
-

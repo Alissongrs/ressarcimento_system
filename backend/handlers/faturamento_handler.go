@@ -195,7 +195,7 @@ func SalvarFaturamento(c *gin.Context) {
 		sse.Broadcast(pid, sse.Event{Type: "processo_update", ProcessoID: pid, Payload: payload})
 	}(processoID, subTxt)
 
-	if err := updateColunaByData(tx, processoID); err != nil {
+	if err := updateColunaByData(tx, processoID, gestorID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar coluna do processo"})
 		return
 	}
@@ -353,7 +353,6 @@ func GetFaturamentoStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, stats)
 }
-
 
 
 

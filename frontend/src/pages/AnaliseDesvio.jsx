@@ -326,34 +326,22 @@ export default function AnaliseDesvio() {
               <th className="px-3 py-2">RAZAO_SOCIAL</th>
               <th className="px-3 py-2">KWH_FPonta</th>
               <th className="px-3 py-2">media_base</th>
-              <th className="px-3 py-2">mad</th>
-              <th className="px-3 py-2">limite_inf</th>
-              <th className="px-3 py-2">limite_sup</th>
-              <th className="px-3 py-2">base_len</th>
-              <th className="px-3 py-2">dif_abs</th>
-              <th className="px-3 py-2">dif_pct</th>
               <th className="px-3 py-2">score</th>
               <th className="px-3 py-2">status_desvio</th>
               <th className="px-3 py-2">status_extra</th>
-              <th className="px-3 py-2">verificado</th>
-              <th className="px-3 py-2">processo_criado</th>
-              <th className="px-3 py-2">analise</th>
-              <th className="px-3 py-2">descartar</th>
-              <th className="px-3 py-2">processo_id</th>
-              <th className="px-3 py-2">updated_at</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={24} className="px-3 py-6 text-center text-sm opacity-70">
+                <td colSpan={12} className="px-3 py-6 text-center text-sm opacity-70">
                   Carregando...
                 </td>
               </tr>
             )}
             {!loading && tableRows.length === 0 && (
               <tr>
-                <td colSpan={24} className="px-3 py-6 text-center text-sm opacity-70">
+                <td colSpan={12} className="px-3 py-6 text-center text-sm opacity-70">
                   Nenhum registro encontrado.
                 </td>
               </tr>
@@ -386,60 +374,9 @@ export default function AnaliseDesvio() {
                 <td className="px-3 py-2">{row.razao_social || row.razao_social_fatura || '-'}</td>
                 <td className="px-3 py-2">{row.kwh_fponta || '-'}</td>
                 <td className="px-3 py-2">{row.media_base || '-'}</td>
-                <td className="px-3 py-2">{row.mad || '-'}</td>
-                <td className="px-3 py-2">{row.limite_inf || '-'}</td>
-                <td className="px-3 py-2">{row.limite_sup || '-'}</td>
-                <td className="px-3 py-2">{row.base_len || '-'}</td>
-                <td className="px-3 py-2">{row.dif_abs || '-'}</td>
-                <td className="px-3 py-2">{row.dif_pct || '-'}</td>
                 <td className="px-3 py-2">{row.score || '-'}</td>
                 <td className="px-3 py-2">{row.status_desvio || '-'}</td>
                 <td className="px-3 py-2">{row.status_extra || '-'}</td>
-                <td className="px-3 py-2">
-                  <button
-                    className={flagClass(row.verificado === 1)}
-                    onClick={() =>
-                      onFlag(row, { verificado: row.verificado === 1 ? 0 : 1 })
-                    }
-                  >
-                    Verificado
-                  </button>
-                </td>
-                <td className="px-3 py-2">
-                  <button
-                    className={flagClass((row.analise ?? row.para_analise) === 1)}
-                    onClick={() =>
-                      onFlag(row, { analise: (row.analise ?? row.para_analise) === 1 ? 0 : 1 })
-                    }
-                  >
-                    Analise
-                  </button>
-                </td>
-                <td className="px-3 py-2">
-                  <button
-                    className={flagClass(row.descartar === 1 || row.descarte === 1)}
-                    onClick={() =>
-                      onFlag(row, { descartar: (row.descartar ?? row.descarte) === 1 ? 0 : 1 })
-                    }
-                  >
-                    Descartar
-                  </button>
-                </td>
-                <td className="px-3 py-2">
-                  <button
-                    className={
-                      row.processo_criado === 1 || row.processo_id
-                        ? 'btn-themed text-[11px] px-2 py-1'
-                        : 'btn-outline text-[11px] px-2 py-1'
-                    }
-                    onClick={() => onCreateProcesso(row)}
-                    disabled={row.processo_criado === 1 || !!row.processo_id}
-                  >
-                    {row.processo_criado === 1 || row.processo_id ? 'Criado' : 'Criar processo'}
-                  </button>
-                </td>
-                <td className="px-3 py-2">{row.processo_id || '-'}</td>
-                <td className="px-3 py-2">{row.updated_at || '-'}</td>
               </tr>
             ))}
           </tbody>

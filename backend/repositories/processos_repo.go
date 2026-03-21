@@ -26,66 +26,48 @@ func NewProcessosRepo(db *gorm.DB) *ProcessosRepo {
 const sqlKanbanFast = `
 SELECT
   CASE
-    WHEN p.id_etapa_processo = 10
-      OR LOWER(TRIM(p.etapa)) IN ('concluido','concluídos','concluidos')
-      OR LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos')
-      OR p.id_coluna = 5
+    WHEN COALESCE(
+      p.suspenso,
+      CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END
+    ) = 1
+    THEN 'Suspensos'
+    WHEN fat.has_pagamento = 1
+      OR (p.id_coluna = 5 AND LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos'))
     THEN 'Concluídos'
     WHEN p.id_etapa_processo = 11 OR LOWER(TRIM(p.etapa)) IN ('indeferido','indeferidos') THEN 'Indeferidos'
-    WHEN fat.has_faturamento = 1
-      OR (
-        fr.has_fluxo = 1
-        AND (
-          LOWER(TRIM(COALESCE(p.etapa,''))) LIKE 'enviado ao financeiro%'
-          OR LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE 'enviado ao financeiro%'
-        )
-        AND LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE 'enviado%'
-      )
-    THEN 'Faturamento'
+    WHEN fat.has_faturamento = 1 THEN 'Faturamento'
     WHEN fr.has_fluxo = 1 THEN 'Fluxo de Ressarcimento'
-    WHEN def.has_defer_data = 1 THEN 'Deferidos'
+    WHEN def.has_defer = 1 THEN 'Deferidos'
     ELSE COALESCE(p.nome_coluna, 'Ativos')
   END AS coluna_kanban,
   CASE
-    WHEN p.id_etapa_processo = 10
-      OR LOWER(TRIM(p.etapa)) IN ('concluido','concluídos','concluidos')
-      OR LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos')
-      OR p.id_coluna = 5
+    WHEN COALESCE(
+      p.suspenso,
+      CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END
+    ) = 1
+    THEN 'Suspensos'
+    WHEN fat.has_pagamento = 1
+      OR (p.id_coluna = 5 AND LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos'))
     THEN 'Concluídos'
     WHEN p.id_etapa_processo = 11 OR LOWER(TRIM(p.etapa)) IN ('indeferido','indeferidos') THEN 'Indeferidos'
-    WHEN fat.has_faturamento = 1
-      OR (
-        fr.has_fluxo = 1
-        AND (
-          LOWER(TRIM(COALESCE(p.etapa,''))) LIKE 'enviado ao financeiro%'
-          OR LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE 'enviado ao financeiro%'
-        )
-        AND LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE 'enviado%'
-      )
-    THEN 'Faturamento'
+    WHEN fat.has_faturamento = 1 THEN 'Faturamento'
     WHEN fr.has_fluxo = 1 THEN 'Fluxo de Ressarcimento'
-    WHEN def.has_defer_data = 1 THEN 'Deferidos'
+    WHEN def.has_defer = 1 THEN 'Deferidos'
     ELSE COALESCE(p.nome_coluna, 'Ativos')
   END AS nome_coluna,
   CASE
-    WHEN p.id_etapa_processo = 10
-      OR LOWER(TRIM(p.etapa)) IN ('concluido','concluídos','concluidos')
-      OR LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos')
-      OR p.id_coluna = 5
+    WHEN COALESCE(
+      p.suspenso,
+      CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END
+    ) = 1
+    THEN 99
+    WHEN fat.has_pagamento = 1
+      OR (p.id_coluna = 5 AND LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos'))
     THEN 5
     WHEN p.id_etapa_processo = 11 OR LOWER(TRIM(p.etapa)) IN ('indeferido','indeferidos') THEN 6
-    WHEN fat.has_faturamento = 1
-      OR (
-        fr.has_fluxo = 1
-        AND (
-          LOWER(TRIM(COALESCE(p.etapa,''))) LIKE 'enviado ao financeiro%'
-          OR LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE 'enviado ao financeiro%'
-        )
-        AND LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE 'enviado%'
-      )
-    THEN 4
+    WHEN fat.has_faturamento = 1 THEN 4
     WHEN fr.has_fluxo = 1 THEN 3
-    WHEN def.has_defer_data = 1 THEN 2
+    WHEN def.has_defer = 1 THEN 2
     ELSE COALESCE(p.id_coluna, 1)
   END AS id_coluna,
   p.id_etapa_processo AS id_etapa_processo,
@@ -101,10 +83,7 @@ SELECT
   DATE_FORMAT(def_raw.data_credito_dobro, '%Y-%m-%d') AS data_dobro,
   def_raw.repasse_simples AS repasse_simples,
   def_raw.repasse_dobro   AS repasse_dobro,
-  (SELECT COUNT(1)
-     FROM FT_ALERTAS a
-    WHERE a.id_processo = p.id_processo
-      AND a.lido = 0) AS alertas_count,
+  COALESCE(alrt.alertas_count, 0) AS alertas_count,
   p.sub_etapa         AS sub_etapa,
   p.relevancia        AS relevancia,
   COALESCE(
@@ -152,12 +131,9 @@ LEFT JOIN (
   SELECT
     id_processo,
     MAX(CASE
-      WHEN (numero_nf IS NOT NULL AND TRIM(numero_nf) <> '')
-        OR data_emissao IS NOT NULL
-        OR data_vencimento IS NOT NULL
-        OR data_pagamento IS NOT NULL
-        OR valor IS NOT NULL
-      THEN 1 ELSE 0 END) AS has_faturamento
+      WHEN valor IS NOT NULL THEN 1 ELSE 0 END) AS has_faturamento,
+    MAX(CASE
+      WHEN data_pagamento IS NOT NULL THEN 1 ELSE 0 END) AS has_pagamento
   FROM FT_FATURAMENTO
   GROUP BY id_processo
 ) fat
@@ -170,26 +146,27 @@ LEFT JOIN (
   GROUP BY id_requisicao
 ) vh
   ON vh.id_requisicao = p.id_processo
+LEFT JOIN (
+  SELECT id_processo, COUNT(1) AS alertas_count
+  FROM FT_ALERTAS
+  WHERE lido = 0
+  GROUP BY id_processo
+) alrt
+  ON alrt.id_processo = p.id_processo
 ORDER BY
   CASE
-    WHEN p.id_etapa_processo = 10
-      OR LOWER(TRIM(p.etapa)) IN ('concluido','concluídos','concluidos')
-      OR LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos')
-      OR p.id_coluna = 5
+    WHEN COALESCE(
+      p.suspenso,
+      CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END
+    ) = 1
+    THEN 99
+    WHEN fat.has_pagamento = 1
+      OR (p.id_coluna = 5 AND LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos'))
     THEN 5
     WHEN p.id_etapa_processo = 11 OR LOWER(TRIM(p.etapa)) IN ('indeferido','indeferidos') THEN 6
-    WHEN fat.has_faturamento = 1
-      OR (
-        fr.has_fluxo = 1
-        AND (
-          LOWER(TRIM(COALESCE(p.etapa,''))) LIKE 'enviado ao financeiro%'
-          OR LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE 'enviado ao financeiro%'
-        )
-        AND LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE 'enviado%'
-      )
-    THEN 4
+    WHEN fat.has_faturamento = 1 THEN 4
     WHEN fr.has_fluxo = 1 THEN 3
-    WHEN def.has_defer_data = 1 THEN 2
+    WHEN def.has_defer = 1 THEN 2
     ELSE COALESCE(p.id_coluna, 1)
   END,
   p.ultima_atualizacao DESC
@@ -406,10 +383,7 @@ SELECT
   r.ressarcimento_estimado          AS valor_estimado,
   def.credito_simples               AS credito_simples,
   def.credito_dobro                 AS credito_dobro,
-  (SELECT COUNT(1)
-     FROM FT_ALERTAS a
-    WHERE a.id_processo = p.id_processo
-      AND a.lido = 0)               AS alertas_count,
+  COALESCE(alrt.alertas_count, 0)   AS alertas_count,
   p.sub_etapa                       AS sub_etapa,
   p.relevancia                      AS relevancia,
   COALESCE(p.suspenso, CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END) AS suspenso,
@@ -426,6 +400,12 @@ LEFT JOIN (
       FROM FT_HISTORICO_MOVIMENTACOES
      GROUP BY id_requisicao
 ) vh ON vh.id_requisicao = p.id_processo
+LEFT JOIN (
+    SELECT id_processo, COUNT(1) AS alertas_count
+      FROM FT_ALERTAS
+     WHERE lido = 0
+     GROUP BY id_processo
+) alrt ON alrt.id_processo = p.id_processo
 WHERE COALESCE(p.suspenso,0)=1
 ORDER BY COALESCE(vh.data_movimentacao, p.ultima_atualizacao) DESC
 LIMIT ? OFFSET ?;

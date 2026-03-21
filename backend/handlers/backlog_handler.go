@@ -76,6 +76,7 @@ WHERE LOWER(TRIM(kc.nome_coluna)) NOT IN (
     'rejeitados','rejeitado',
     'suspensos','suspenso'
 ) AND COALESCE(p.suspenso,0)=0
+  AND LOWER(TRIM(COALESCE(p.sub_etapa, ''))) NOT LIKE 'suspenso%'
   AND LOWER(TRIM(COALESCE(hl.sub_etapa, ''))) LIKE 'aguardando retorno%'
 `
 
@@ -201,7 +202,6 @@ func ToggleBacklogCheck(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
-
 
 
 

@@ -147,6 +147,14 @@ func startScheduler() {
         _ = srv.ProcessarResumos(ctx, 20)
     })
 
+	// Tarefa 7: Atualizar CSVs para modelos ML (a cada 1 hora)
+	// Gera dados atualizados para AdminPlanilha requisições e Ativos
+	s.Every(1).Hour().Do(services.AtualizarCSVsMLAsync)
+
+	// Tarefa 8: Treinar Score de Progressão Model (a cada 1 hora)
+	// Atualiza automaticamente com dados mais recentes do banco
+	s.Every(1).Hour().Do(services.AtualizarScoreModelAsync)
+
 	log.Println("Agendador de tarefas iniciado.")
 	s.StartAsync()
 }

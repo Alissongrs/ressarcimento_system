@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"ressarcimento-backend/database"
@@ -32,6 +33,30 @@ var mailAllowedUsers = map[string]bool{
 	"eliane.araujo@amee.com.br":     true,
 	"paulo.passos@amee.com.br":      true,
 	"eduardo.navarro@amee.com.br":   true,
+}
+
+var mailUpsertMu sync.Mutex
+var powerbiViewMu sync.Mutex
+var powerbiViewChecked bool
+var powerbiViewExists bool
+
+func hasPowerBIProcessosView(db *gorm.DB) bool {
+	powerbiViewMu.Lock()
+	defer powerbiViewMu.Unlock()
+	if powerbiViewChecked {
+		return powerbiViewExists
+	}
+	var cnt int
+	if err := db.Raw(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME = 'VW_POWERBI_PROCESSOS'`,
+	).Row().Scan(&cnt); err == nil && cnt > 0 {
+		powerbiViewExists = true
+	}
+	powerbiViewChecked = true
+	return powerbiViewExists
 }
 
 func isLockErr(err error) bool {
@@ -205,7 +230,15 @@ func MailMessages(c *gin.Context) {
 			offset = n
 		}
 	}
-	msgs, err := services.ListMailMessages(folderID, q, unread, limit, offset)
+	// Fast path: try cached list from DB first
+	var msgs []services.GraphMessage
+	var err error
+	if strings.TrimSpace(q) == "" {
+		msgs, err = listMailMessagesCached(database.GormDB_App, folderID, q, limit, offset)
+	}
+	if err != nil || len(msgs) == 0 {
+		msgs, err = services.ListMailMessages(folderID, q, unread, limit, offset)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -982,49 +1015,130 @@ func MailProcessSearch(c *gin.Context) {
 		"WHERE (Cliente LIKE ? OR UC LIKE ? OR CNPJ LIKE ? OR Concessionaria LIKE ? OR id_processo = ?)\n" +
 		"ORDER BY id_processo DESC\n" +
 		"LIMIT ?"
-	rows, err := queryGorm(database.GormDB_App, query, like, like, like, like, processID, limit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha na busca"})
-		return
-	}
-	defer rows.Close()
 	out := make([]map[string]any, 0)
-	for rows.Next() {
-		var idp int64
-		var cliente, uc, cnpj, concess sql.NullString
-		var etapaAtual, colunaKanban, ultimaEtapa, ultimaSub, statusAnalise, prioridade sql.NullString
-		var dataUlt sql.NullString
-		var suspenso sql.NullInt64
-		if err := rows.Scan(
-			&idp,
-			&cliente,
-			&uc,
-			&cnpj,
-			&concess,
-			&etapaAtual,
-			&colunaKanban,
-			&ultimaEtapa,
-			&ultimaSub,
-			&statusAnalise,
-			&dataUlt,
-			&prioridade,
-			&suspenso,
-		); err == nil {
-			out = append(out, map[string]any{
-				"id_processo": idp,
-				"cliente":          cliente.String,
-				"uc":               uc.String,
-				"cnpj":             cnpj.String,
-				"concessionaria":   concess.String,
-				"etapa_atual":      etapaAtual.String,
-				"coluna_kanban":    colunaKanban.String,
-				"ultima_etapa":     ultimaEtapa.String,
-				"ultima_sub_etapa": ultimaSub.String,
-				"status_analise":   statusAnalise.String,
-				"data_ultima_mov":  dataUlt.String,
-				"prioridade":       prioridade.String,
-				"suspenso":         suspenso.Int64,
-			})
+	useView := hasPowerBIProcessosView(database.GormDB_App)
+	var err error
+	var rows *sql.Rows
+	if useView {
+		rows, err = queryGorm(database.GormDB_App, query, like, like, like, like, processID, limit)
+	}
+	if useView && err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var idp int64
+			var cliente, uc, cnpj, concess sql.NullString
+			var etapaAtual, colunaKanban, ultimaEtapa, ultimaSub, statusAnalise, prioridade sql.NullString
+			var dataUlt sql.NullString
+			var suspenso sql.NullInt64
+			if err := rows.Scan(
+				&idp,
+				&cliente,
+				&uc,
+				&cnpj,
+				&concess,
+				&etapaAtual,
+				&colunaKanban,
+				&ultimaEtapa,
+				&ultimaSub,
+				&statusAnalise,
+				&dataUlt,
+				&prioridade,
+				&suspenso,
+			); err == nil {
+				out = append(out, map[string]any{
+					"id_processo":      idp,
+					"cliente":          cliente.String,
+					"uc":               uc.String,
+					"cnpj":             cnpj.String,
+					"concessionaria":   concess.String,
+					"etapa_atual":      etapaAtual.String,
+					"coluna_kanban":    colunaKanban.String,
+					"ultima_etapa":     ultimaEtapa.String,
+					"ultima_sub_etapa": ultimaSub.String,
+					"status_analise":   statusAnalise.String,
+					"data_ultima_mov":  dataUlt.String,
+					"prioridade":       prioridade.String,
+					"suspenso":         suspenso.Int64,
+				})
+			}
+		}
+	}
+
+	// Fallback quando a view não existe ou falhou
+	if !useView || err != nil {
+		fbQuery := `
+SELECT
+  p.id_processo,
+  COALESCE(r.cliente,'')        AS cliente,
+  COALESCE(r.uc,'')             AS uc,
+  COALESCE(r.cnpj,'')           AS cnpj,
+  COALESCE(r.concessionaria,'') AS concessionaria,
+  COALESCE(e.etapa,'')          AS etapa_atual,
+  COALESCE(kc.nome_coluna,'')   AS coluna_kanban,
+  COALESCE(h.etapa_nova,'')     AS ultima_etapa,
+  COALESCE(h.sub_etapa,'')      AS ultima_sub_etapa,
+  ''                            AS status_analise,
+  COALESCE(DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s'), '') AS data_ultima_mov,
+  ''                            AS prioridade,
+  COALESCE(p.suspenso,0)        AS suspenso
+FROM FT_PROCESSOS p
+JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+LEFT JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban
+LEFT JOIN (
+  SELECT h1.id_requisicao, h1.etapa_nova, h1.sub_etapa, h1.data_movimentacao
+  FROM FT_HISTORICO_MOVIMENTACOES h1
+  JOIN (
+    SELECT id_requisicao, MAX(id_historico) AS max_id
+    FROM FT_HISTORICO_MOVIMENTACOES
+    GROUP BY id_requisicao
+  ) h2 ON h2.id_requisicao = h1.id_requisicao AND h2.max_id = h1.id_historico
+) h ON h.id_requisicao = p.id_processo
+WHERE (r.cliente LIKE ? OR r.uc LIKE ? OR r.cnpj LIKE ? OR r.concessionaria LIKE ? OR p.id_processo = ?)
+ORDER BY p.id_processo DESC
+LIMIT ?`
+		fbRows, fbErr := queryGorm(database.GormDB_App, fbQuery, like, like, like, like, processID, limit)
+		if fbErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "falha na busca"})
+			return
+		}
+		defer fbRows.Close()
+		out = make([]map[string]any, 0)
+		for fbRows.Next() {
+			var idp int64
+			var cliente, uc, cnpj, concess, etapaAtual, colunaKanban, ultimaEtapa, ultimaSub, statusAnalise, prioridade, dataUlt sql.NullString
+			var suspenso sql.NullInt64
+			if err := fbRows.Scan(
+				&idp,
+				&cliente,
+				&uc,
+				&cnpj,
+				&concess,
+				&etapaAtual,
+				&colunaKanban,
+				&ultimaEtapa,
+				&ultimaSub,
+				&statusAnalise,
+				&dataUlt,
+				&prioridade,
+				&suspenso,
+			); err == nil {
+				out = append(out, map[string]any{
+					"id_processo":      idp,
+					"cliente":          cliente.String,
+					"uc":               uc.String,
+					"cnpj":             cnpj.String,
+					"concessionaria":   concess.String,
+					"etapa_atual":      etapaAtual.String,
+					"coluna_kanban":    colunaKanban.String,
+					"ultima_etapa":     ultimaEtapa.String,
+					"ultima_sub_etapa": ultimaSub.String,
+					"status_analise":   statusAnalise.String,
+					"data_ultima_mov":  dataUlt.String,
+					"prioridade":       prioridade.String,
+					"suspenso":         suspenso.Int64,
+				})
+			}
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"results": out})
@@ -1073,13 +1187,22 @@ func upsertMailMessages(msgs []services.GraphMessage) error {
 	if len(msgs) == 0 {
 		return nil
 	}
-	tx := database.GormDB_App.Begin()
-	if tx.Error != nil {
-		return tx.Error
+	// Serializa upserts para reduzir lock waits em mail_messages
+	mailUpsertMu.Lock()
+	defer mailUpsertMu.Unlock()
+	// Lock global no MySQL para evitar concorrência entre múltiplos containers
+	var gotLock int
+	if err := database.GormDB_App.Raw("SELECT GET_LOCK(?, ?)", "mail_messages_upsert", 10).Row().Scan(&gotLock); err != nil {
+		return err
 	}
-	defer tx.Rollback()
+	if gotLock != 1 {
+		return fmt.Errorf("nao foi possivel obter lock de email")
+	}
+	defer func() {
+		_, _ = execGorm(database.GormDB_App, "SELECT RELEASE_LOCK(?)", "mail_messages_upsert")
+	}()
 	for _, m := range msgs {
-		if _, err := upsertMailMessageTx(tx, &services.GraphMessageDetail{
+		if _, err := upsertMailMessageTx(database.GormDB_App, &services.GraphMessageDetail{
 			ID:                m.ID,
 			InternetMessageID: m.InternetMessageID,
 			ConversationID:    m.ConversationID,
@@ -1099,7 +1222,92 @@ func upsertMailMessages(msgs []services.GraphMessage) error {
 			return err
 		}
 	}
-	return tx.Commit().Error
+	return nil
+}
+
+func listMailMessagesCached(db *gorm.DB, folderID, q string, limit, offset int) ([]services.GraphMessage, error) {
+	if db == nil || strings.TrimSpace(folderID) == "" {
+		return nil, fmt.Errorf("cache indisponível")
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	where := "WHERE folder_id = ?"
+	args := []any{folderID}
+	if strings.TrimSpace(q) != "" {
+		like := "%" + q + "%"
+		where += " AND (subject LIKE ? OR from_email LIKE ? OR from_name LIKE ? OR snippet LIKE ?)"
+		args = append(args, like, like, like, like)
+	}
+	args = append(args, limit, offset)
+	rows, err := queryGorm(db, `
+		SELECT graph_message_id, internet_message_id, subject, from_email, from_name, to_json, cc_json,
+		       received_at, snippet, has_attachments, thread_id, folder_id, raw_meta_json
+		  FROM mail_messages
+		`+where+`
+		 ORDER BY received_at DESC, id DESC
+		 LIMIT ? OFFSET ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]services.GraphMessage, 0, limit)
+	for rows.Next() {
+		var (
+			graphID, internetID, subject, fromEmail, fromName, toJSON, ccJSON, snippet, threadID, folder sql.NullString
+			receivedAt sql.NullTime
+			hasAttach  sql.NullInt64
+			rawMeta    sql.NullString
+		)
+		if err := rows.Scan(
+			&graphID, &internetID, &subject, &fromEmail, &fromName, &toJSON, &ccJSON,
+			&receivedAt, &snippet, &hasAttach, &threadID, &folder, &rawMeta,
+		); err != nil {
+			continue
+		}
+		var toList, ccList []string
+		if toJSON.Valid && toJSON.String != "" {
+			_ = json.Unmarshal([]byte(toJSON.String), &toList)
+		}
+		if ccJSON.Valid && ccJSON.String != "" {
+			_ = json.Unmarshal([]byte(ccJSON.String), &ccList)
+		}
+		isRead := false
+		if rawMeta.Valid && rawMeta.String != "" {
+			var meta map[string]any
+			if json.Unmarshal([]byte(rawMeta.String), &meta) == nil {
+				if v, ok := meta["is_read"]; ok {
+					if b, ok := v.(bool); ok {
+						isRead = b
+					}
+				}
+			}
+		}
+		out = append(out, services.GraphMessage{
+			ID:                graphID.String,
+			InternetMessageID: internetID.String,
+			ConversationID:    threadID.String,
+			Subject:           subject.String,
+			FromEmail:         fromEmail.String,
+			FromName:          fromName.String,
+			To:                toList,
+			Cc:                ccList,
+			ReceivedAt: func() string {
+				if receivedAt.Valid {
+					return receivedAt.Time.Format("2006-01-02T15:04:05Z")
+				}
+				return ""
+			}(),
+			BodyPreview:    snippet.String,
+			HasAttachments: hasAttach.Valid && hasAttach.Int64 == 1,
+			IsRead:         isRead,
+			FolderID:       folder.String,
+		})
+	}
+	return out, nil
 }
 
 func upsertMailMessageTx(tx *gorm.DB, msg *services.GraphMessageDetail) (int64, error) {
@@ -1950,12 +2158,3 @@ func parseDateTime(raw string) time.Time {
 	}
 	return time.Now()
 }
-
-
-
-
-
-
-
-
-

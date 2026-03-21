@@ -118,7 +118,7 @@ export default function HomeGestorAdmin() {
                       (a, b) =>
                         (a.deadline_unix || 0) - (b.deadline_unix || 0),
                     )
-                    .map((r) => {
+                    .map((r, idx) => {
                       const hrs = Number(r?.horas_restantes ?? 0);
                       const dias = Number(r?.dias_restantes ?? 0);
                       const diasMov = r?.data_base_unix
@@ -130,7 +130,7 @@ export default function HomeGestorAdmin() {
                       const atrasado = !!r?.atrasado;
                       return (
                         <div
-                          key={r.id_processo}
+                          key={`${etapa}-${r.id_processo ?? 'pid'}-${idx}`}
                           className={`flex flex-wrap items-center gap-3 text-sm rounded border px-3 py-2 ${
                             atrasado
                               ? 'border-red-500 bg-red-500/10'

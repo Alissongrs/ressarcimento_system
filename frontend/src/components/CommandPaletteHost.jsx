@@ -27,7 +27,6 @@ export default function CommandPaletteHost({ onOpenAlerts }) {
     const common = [
       { id: 'goto-new', title: 'Nova Requisição', subtitle: 'Abrir formulário de requisição', run: () => navigate('/novo') },
       { id: 'goto-chat', title: 'Assistente de Requisição (Chat)', subtitle: 'Abrir fluxo guiado por chat', run: () => navigate('/requisicao-chat') },
-      { id: 'open-alertas', title: 'Abrir Alertas', subtitle: 'Ver seus alertas', run: () => onOpenAlerts?.() },
       { id: 'theme-cycle', title: 'Trocar Tema', subtitle: `Atual: ${theme}`, run: () => {
           const order = ['dark','light','light-1','light-2','light-3','light-4','sap','navy','orange-gray','green-orange','orange-purple-green','pink','pinklight'];
           const i = order.indexOf(theme); setTheme(order[(i+1+order.length)%order.length]);

@@ -539,59 +539,6 @@ const ProcessoDetalhes = () => {
     })();
   }, [id]);
 
-  // Carregar dados de Deferimento, Fluxo e Faturamento do Snapshot
-  useEffect(() => {
-    (async () => {
-      if (!id) return;
-      try {
-        const { getProcessoSnapshot } = await import('../services/processoSnapshotService');
-        const snapshot = await getProcessoSnapshot(id);
-        console.log('[DEBUG] Snapshot data:', snapshot); // Debug log
-        if (snapshot && typeof snapshot === 'object') {
-          // Deferimento
-          if (snapshot.data_simples) {
-            setDataDeferimento(snapshot.data_simples);
-          }
-          if (snapshot.credito_simples) {
-            setCreditoSimples(String(snapshot.credito_simples));
-          }
-          if (snapshot.credito_dobro) {
-            setCreditoDobro(String(snapshot.credito_dobro));
-            setHabilitarCreditoDobro(true);
-          }
-          if (snapshot.data_dobro) {
-            setDataCreditoDobro(snapshot.data_dobro);
-          }
-
-          // Fluxo de Ressarcimento
-          if (snapshot.forma_devolucao || snapshot.valor_ressarcimento || snapshot.data_devolucao) {
-            setFluxoRessarcimento([{
-              id: 1,
-              formasDevolucao: snapshot.forma_devolucao ? [{ value: snapshot.forma_devolucao }] : [],
-              valor: snapshot.valor_ressarcimento ? String(snapshot.valor_ressarcimento) : '',
-              data: snapshot.data_devolucao || '',
-            }]);
-          }
-
-          // Faturamento
-          if (snapshot.numero_nf || snapshot.data_emissao || snapshot.valor_nf) {
-            setFaturamento([{
-              id: 1,
-              numeroNF: snapshot.numero_nf || '',
-              dataEmissao: snapshot.data_emissao || '',
-              dataVencimento: snapshot.data_vencimento || '',
-              dataPagamento: snapshot.data_pagamento || '',
-              valor: snapshot.valor_nf ? String(snapshot.valor_nf) : '',
-              anexoNF: null,
-            }]);
-          }
-        }
-      } catch (err) {
-        console.error('[DEBUG] Erro ao carregar snapshot:', err);
-      }
-    })();
-  }, [id]);
-
   // Fallback: buscar dados do Kanban Fast
   useEffect(() => {
     (async () => {

@@ -154,6 +154,16 @@ func GetProcessoSnapshot(c *gin.Context) {
 		return
 	}
 
+	if !snapshotTableExists() {
+		if fallback, fbErr := getProcessoSnapshotFromOriginal(idProcesso); fbErr == nil {
+			c.JSON(200, ProcessoSnapshotResponse{
+				Success: true,
+				Data:    fallback,
+			})
+			return
+		}
+	}
+
 	data, err := getProcessoSnapshot(idProcesso)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -174,6 +184,19 @@ func GetProcessoSnapshot(c *gin.Context) {
 		Success: true,
 		Data:    data,
 	})
+}
+
+func snapshotTableExists() bool {
+	var has int
+	if err := database.GormDB_App.Raw(`
+		SELECT COUNT(1)
+		FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME = 'FT_PROCESSO_SNAPSHOT'`,
+	).Row().Scan(&has); err != nil {
+		return false
+	}
+	return has > 0
 }
 
 // =============================================================================
@@ -237,19 +260,11 @@ func SyncProcessoSnapshot(c *gin.Context) {
 // getProcessoSnapshot recupera os dados do snapshot do banco.
 // Usa SELECT * para tolerar diferenças de schema entre ambientes.
 func getProcessoSnapshot(idProcesso int) (map[string]interface{}, error) {
-	snapshot, err := getProcessoSnapshotDynamic(idProcesso)
-	if err == nil {
-		return snapshot, nil
-	}
-	if err == sql.ErrNoRows {
-		return nil, sql.ErrNoRows
-	}
-	log.Printf("[snapshot] erro ao ler FT_PROCESSO_SNAPSHOT id=%d: %v", idProcesso, err)
-	// Fallback para tabelas originais quando o snapshot estiver ausente ou com schema diferente.
+	// Fonte oficial: tabelas originais (FT_PROCESSOS + FT_REQUISICOES + etc.)
 	if fallback, fbErr := getProcessoSnapshotFromOriginal(idProcesso); fbErr == nil {
 		return fallback, nil
 	}
-	return nil, err
+	return nil, sql.ErrNoRows
 }
 
 func getProcessoSnapshotDynamic(idProcesso int) (map[string]interface{}, error) {
@@ -308,52 +323,44 @@ func getProcessoSnapshotDynamic(idProcesso int) (map[string]interface{}, error) 
 }
 
 func getProcessoSnapshotFromOriginal(idProcesso int) (map[string]interface{}, error) {
-	query := `
+	queryBase := `
 		SELECT
-			r.id_requisicao                              AS id_processo,
-			COALESCE(r.uc, '')                           AS uc,
-			COALESCE(r.cliente, '')                      AS cliente,
-			COALESCE(r.concessionaria, '')               AS concessionaria,
-			DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
-			COALESCE(s.status, '')                       AS status_class,
-			COALESCE(r.descricao_irregularidade, '')     AS descricao_irregularidade,
-			COALESCE(r.periodos_irregularidade, '')      AS periodos_irregularidade,
-			COALESCE(r.link_fatura, '')                  AS link_fatura,
-			COALESCE(r.razao_social_fatura, '')          AS razao_social_fatura,
-			COALESCE(r.cnpj, '')                         AS cnpj,
-			COALESCE(r.endereco_completo, '')            AS endereco_completo,
-			COALESCE(d.credito_simples, 0)               AS credito_simples,
+			COALESCE(p.id_processo, r.id_requisicao)     AS id_processo,
+			COALESCE(p.uc, r.uc, '')                    AS uc,
+			COALESCE(p.cliente, r.cliente, '')          AS cliente,
+			COALESCE(p.concessionaria, r.concessionaria, '') AS concessionaria,
+			COALESCE(e.etapa, '')                       AS etapa_nome,
+			COALESCE(p.sub_etapa, '')                   AS sub_etapa,
+			COALESCE(p.suspenso, 0)                     AS suspenso,
+			COALESCE(p.suspenso_motivo, '')             AS suspenso_motivo,
+			COALESCE(d.credito_simples, 0)              AS credito_simples,
 			COALESCE(DATE_FORMAT(d.data_procedencia, '%Y-%m-%d'), '') AS data_simples,
-			COALESCE(d.credito_dobro, 0)                 AS credito_dobro,
+			COALESCE(d.credito_dobro, 0)                AS credito_dobro,
 			COALESCE(DATE_FORMAT(d.data_credito_dobro, '%Y-%m-%d'), '') AS data_dobro,
-			COALESCE(d.repasse_simples, 0)               AS repasse_simples,
-			COALESCE(d.repasse_dobro, 0)                 AS repasse_dobro,
-			COALESCE(fr.forma_devolucao, '')             AS forma_devolucao,
-			COALESCE(fr.valor, 0)                        AS valor_ressarcimento,
+			COALESCE(d.repasse_simples, 0)              AS repasse_simples,
+			COALESCE(d.repasse_dobro, 0)                AS repasse_dobro,
+			COALESCE(fr.forma_devolucao, '')            AS forma_devolucao,
+			COALESCE(fr.valor, 0)                       AS valor_ressarcimento,
 			COALESCE(DATE_FORMAT(fr.data_devolucao, '%Y-%m-%d'), '') AS data_devolucao,
-			COALESCE(f.numero_nf, '')                    AS numero_nf,
+			COALESCE(fr.data_envio_financeiro, '')      AS data_envio_financeiro,
+			COALESCE(f.numero_nf, '')                   AS numero_nf,
 			COALESCE(DATE_FORMAT(f.data_emissao, '%Y-%m-%d'), '') AS data_emissao,
 			COALESCE(DATE_FORMAT(f.data_vencimento, '%Y-%m-%d'), '') AS data_vencimento,
 			COALESCE(DATE_FORMAT(f.data_pagamento, '%Y-%m-%d'), '') AS data_pagamento,
-			COALESCE(f.valor, 0)                         AS valor_nf,
-			COALESCE(e.etapa, '')                        AS etapa_nome,
-			COALESCE(p.sub_etapa, '')                    AS sub_etapa,
-			COALESCE(p.suspenso, 0)                      AS suspenso,
-			COALESCE(p.suspenso_motivo, '')              AS suspenso_motivo
-		FROM FT_REQUISICOES r
-		LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
-		LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
+			COALESCE(f.valor, 0)                        AS valor_nf
+		FROM FT_PROCESSOS p
+		LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
 		LEFT JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo
-		LEFT JOIN FT_DEFERIMENTOS d ON d.id_processo = r.id_requisicao
+		LEFT JOIN FT_DEFERIMENTOS d ON d.id_processo = COALESCE(p.id_processo, r.id_requisicao)
 		LEFT JOIN (
-			SELECT x.id_processo, x.forma_devolucao, x.valor, x.data_devolucao, x.created_at
+			SELECT x.id_processo, x.forma_devolucao, x.valor, x.data_devolucao, x.data_envio_financeiro, x.created_at
 			FROM FT_FLUXO_RESSARCIMENTO x
 			JOIN (
 				SELECT id_processo, MAX(created_at) AS mx
 				FROM FT_FLUXO_RESSARCIMENTO
 				GROUP BY id_processo
 			) ult ON ult.id_processo = x.id_processo AND ult.mx = x.created_at
-		) fr ON fr.id_processo = r.id_requisicao
+		) fr ON fr.id_processo = COALESCE(p.id_processo, r.id_requisicao)
 		LEFT JOIN (
 			SELECT y.id_processo, y.numero_nf, y.data_emissao, y.data_vencimento, y.data_pagamento, y.valor, y.created_at
 			FROM FT_FATURAMENTO y
@@ -362,37 +369,32 @@ func getProcessoSnapshotFromOriginal(idProcesso int) (map[string]interface{}, er
 				FROM FT_FATURAMENTO
 				GROUP BY id_processo
 			) uf ON uf.id_processo = y.id_processo AND uf.my = y.created_at
-		) f ON f.id_processo = r.id_requisicao
-		WHERE r.id_requisicao = ?
+		) f ON f.id_processo = COALESCE(p.id_processo, r.id_requisicao)
+		WHERE p.id_processo = ?
 		LIMIT 1
 	`
 
-	row := queryRowGorm(database.GormDB_App, query, idProcesso)
+	row := queryRowGorm(database.GormDB_App, queryBase, idProcesso)
 
 	var (
-		idProc                                                                 int
-		uc, cliente, concess, dataCriacao                                     sql.NullString
-		statusClass, descricao, periodos, linkFatura, razaoSocial, cnpj, ender sql.NullString
-		creditoSimples, creditoDobro, valorRessarc, valorNF                    sql.NullFloat64
-		dataSimples, dataDobro, dataDevol, dataEmissao, dataVenc, dataPag      sql.NullString
-		formaDevolucao                                                        sql.NullString
-		numeroNF, etapaNome, subEtapa, suspensoMotivo                           sql.NullString
-		suspenso                                                                sql.NullInt64
+		idProc                                                              int
+		uc, cliente, concess, etapaNome, subEtapa, suspensoMotivo            sql.NullString
+		creditoSimples, creditoDobro, valorRessarc, valorNF                  sql.NullFloat64
+		dataSimples, dataDobro, dataDevol, dataEmissao, dataVenc, dataPag    sql.NullString
+		formaDevolucao, dataEnvioFinanceiro, numeroNF                        sql.NullString
+		suspenso                                                             sql.NullInt64
 	)
 
-	if err := row.Scan(
-		&idProc,
-		&uc,
-		&cliente,
-		&concess,
-		&dataCriacao,
-		&statusClass,
-		&descricao,
-		&periodos,
-		&linkFatura,
-		&razaoSocial,
-		&cnpj,
-		&ender,
+	scanFull := func(r *sql.Row) error {
+		return r.Scan(
+			&idProc,
+			&uc,
+			&cliente,
+			&concess,
+			&etapaNome,
+		&subEtapa,
+		&suspenso,
+		&suspensoMotivo,
 		&creditoSimples,
 		&dataSimples,
 		&creditoDobro,
@@ -400,51 +402,133 @@ func getProcessoSnapshotFromOriginal(idProcesso int) (map[string]interface{}, er
 		&formaDevolucao,
 		&valorRessarc,
 		&dataDevol,
+		&dataEnvioFinanceiro,
 		&numeroNF,
-		&dataEmissao,
-		&dataVenc,
-		&dataPag,
-		&valorNF,
-		&etapaNome,
-		&subEtapa,
-		&suspenso,
-		&suspensoMotivo,
-	); err != nil {
+			&dataEmissao,
+			&dataVenc,
+			&dataPag,
+			&valorNF,
+		)
+	}
+
+	if err := scanFull(row); err != nil {
 		if err == sql.ErrNoRows {
-			return nil, sql.ErrNoRows
+			// tentativa 2: base em FT_REQUISICOES
+			row2 := queryRowGorm(database.GormDB_App, `
+				SELECT
+					r.id_requisicao                            AS id_processo,
+					COALESCE(r.uc, '')                         AS uc,
+					COALESCE(r.cliente, '')                    AS cliente,
+					COALESCE(r.concessionaria, '')             AS concessionaria,
+					COALESCE(e.etapa, '')                      AS etapa_nome,
+					COALESCE(p.sub_etapa, '')                  AS sub_etapa,
+					COALESCE(p.suspenso, 0)                    AS suspenso,
+					COALESCE(p.suspenso_motivo, '')            AS suspenso_motivo,
+					COALESCE(d.credito_simples, 0)             AS credito_simples,
+					COALESCE(DATE_FORMAT(d.data_procedencia, '%Y-%m-%d'), '') AS data_simples,
+					COALESCE(d.credito_dobro, 0)               AS credito_dobro,
+					COALESCE(DATE_FORMAT(d.data_credito_dobro, '%Y-%m-%d'), '') AS data_dobro,
+					COALESCE(d.repasse_simples, 0)             AS repasse_simples,
+					COALESCE(d.repasse_dobro, 0)               AS repasse_dobro,
+					COALESCE(fr.forma_devolucao, '')           AS forma_devolucao,
+					COALESCE(fr.valor, 0)                      AS valor_ressarcimento,
+					COALESCE(DATE_FORMAT(fr.data_devolucao, '%Y-%m-%d'), '') AS data_devolucao,
+					COALESCE(fr.data_envio_financeiro, '')     AS data_envio_financeiro,
+					COALESCE(f.numero_nf, '')                  AS numero_nf,
+					COALESCE(DATE_FORMAT(f.data_emissao, '%Y-%m-%d'), '') AS data_emissao,
+					COALESCE(DATE_FORMAT(f.data_vencimento, '%Y-%m-%d'), '') AS data_vencimento,
+					COALESCE(DATE_FORMAT(f.data_pagamento, '%Y-%m-%d'), '') AS data_pagamento,
+					COALESCE(f.valor, 0)                       AS valor_nf
+				FROM FT_REQUISICOES r
+				LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
+				LEFT JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo
+				LEFT JOIN FT_DEFERIMENTOS d ON d.id_processo = r.id_requisicao
+				LEFT JOIN (
+					SELECT x.id_processo, x.forma_devolucao, x.valor, x.data_devolucao, x.data_envio_financeiro, x.created_at
+					FROM FT_FLUXO_RESSARCIMENTO x
+					JOIN (
+						SELECT id_processo, MAX(created_at) AS mx
+						FROM FT_FLUXO_RESSARCIMENTO
+						GROUP BY id_processo
+					) ult ON ult.id_processo = x.id_processo AND ult.mx = x.created_at
+				) fr ON fr.id_processo = r.id_requisicao
+				LEFT JOIN (
+					SELECT y.id_processo, y.numero_nf, y.data_emissao, y.data_vencimento, y.data_pagamento, y.valor, y.created_at
+					FROM FT_FATURAMENTO y
+					JOIN (
+						SELECT id_processo, MAX(created_at) AS my
+						FROM FT_FATURAMENTO
+						GROUP BY id_processo
+					) uf ON uf.id_processo = y.id_processo AND uf.my = y.created_at
+				) f ON f.id_processo = r.id_requisicao
+				WHERE r.id_requisicao = ?
+				LIMIT 1
+			`, idProcesso)
+			if err2 := scanFull(row2); err2 != nil {
+				if err2 == sql.ErrNoRows {
+					return nil, sql.ErrNoRows
+				}
+				return nil, err2
+			}
+		} else {
+			// fallback minimal caso o schema não suporte todos os campos
+			minRow := queryRowGorm(database.GormDB_App, `
+				SELECT
+					r.id_requisicao AS id_processo,
+					COALESCE(r.uc, '') AS uc,
+					COALESCE(r.cliente, '') AS cliente,
+					COALESCE(r.concessionaria, '') AS concessionaria,
+					COALESCE(p.suspenso, 0) AS suspenso,
+					COALESCE(p.suspenso_motivo, '') AS suspenso_motivo
+				FROM FT_REQUISICOES r
+				LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
+				WHERE r.id_requisicao = ?
+				LIMIT 1
+			`, idProcesso)
+			var (
+				idProcMin                                    int
+				ucMin, clienteMin, concessMin, suspMotivoMin sql.NullString
+				suspMin                                      sql.NullInt64
+			)
+			if err2 := minRow.Scan(&idProcMin, &ucMin, &clienteMin, &concessMin, &suspMin, &suspMotivoMin); err2 != nil {
+				return nil, err
+			}
+			out := map[string]interface{}{
+				"id_processo":     idProcMin,
+				"uc":              ucMin.String,
+				"cliente":         clienteMin.String,
+				"concessionaria":  concessMin.String,
+				"suspenso":        suspMin.Int64,
+				"suspenso_motivo": suspMotivoMin.String,
+			}
+			return out, nil
 		}
-		return nil, err
 	}
 
 	return map[string]interface{}{
-		"id_processo":             idProc,
-		"uc":                      uc.String,
-		"cliente":                 cliente.String,
-		"concessionaria":          concess.String,
-		"data_criacao":            dataCriacao.String,
-		"status_class":            statusClass.String,
-		"descricao_irregularidade": descricao.String,
-		"periodos_irregularidade": periodos.String,
-		"link_fatura":             linkFatura.String,
-		"razao_social_fatura":     razaoSocial.String,
-		"cnpj":                    cnpj.String,
-		"endereco_completo":       ender.String,
-		"credito_simples":         creditoSimples.Float64,
-		"data_simples":            dataSimples.String,
-		"credito_dobro":           creditoDobro.Float64,
-		"data_dobro":              dataDobro.String,
-		"forma_devolucao":         formaDevolucao.String,
-		"valor_ressarcimento":     valorRessarc.Float64,
-		"data_devolucao":          dataDevol.String,
-		"numero_nf":               numeroNF.String,
-		"data_emissao":            dataEmissao.String,
-		"data_vencimento":         dataVenc.String,
-		"data_pagamento":          dataPag.String,
-		"valor_nf":                valorNF.Float64,
-		"etapa_nome":              etapaNome.String,
-		"sub_etapa":               subEtapa.String,
-		"suspenso":                suspenso.Int64,
-		"suspenso_motivo":         suspensoMotivo.String,
+		"id_processo":         idProc,
+		"uc":                  uc.String,
+		"cliente":             cliente.String,
+		"concessionaria":      concess.String,
+		"etapa_nome":          etapaNome.String,
+		"sub_etapa":           subEtapa.String,
+		"suspenso":            suspenso.Int64,
+		"suspenso_motivo":     suspensoMotivo.String,
+		"credito_simples":     creditoSimples.Float64,
+		"data_simples":        dataSimples.String,
+		"credito_dobro":       creditoDobro.Float64,
+		"data_dobro":          dataDobro.String,
+		"repasse_simples":     nil,
+		"repasse_dobro":       nil,
+		"forma_devolucao":     formaDevolucao.String,
+		"valor_ressarcimento": valorRessarc.Float64,
+		"data_devolucao":      dataDevol.String,
+		"data_envio_financeiro": dataEnvioFinanceiro.String,
+		"numero_nf":           numeroNF.String,
+		"data_emissao":        dataEmissao.String,
+		"data_vencimento":     dataVenc.String,
+		"data_pagamento":      dataPag.String,
+		"valor_nf":            valorNF.Float64,
 	}, nil
 }
 
@@ -531,5 +615,3 @@ func refreshAllProcessosSnapshotAsync(userID int) {
 		}
 	}()
 }
-
-

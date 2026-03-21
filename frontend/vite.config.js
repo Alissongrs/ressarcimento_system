@@ -7,6 +7,11 @@ import autoprefixer from 'autoprefixer'
 export default defineConfig({
   plugins: [react()],
   cacheDir: 'node_modules/.vite_theme_fix',
+  build: {
+    rollupOptions: {
+      input: 'index.html'
+    }
+  },
   server: {
     proxy: {
       '/api': {

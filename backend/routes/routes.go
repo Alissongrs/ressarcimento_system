@@ -245,6 +245,10 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Resumos de processo (persistidos)
 			authRequired.GET("/processos/:id/summary", handlers.GetProcessoSummary)
 			authRequired.POST("/processos/:id/summary/refresh", handlers.RefreshProcessoSummary)
+			// ML (predicoes)
+			authRequired.GET("/processo/:id/predict-status", handlers.PredictStatusML)
+			authRequired.POST("/detect/anomaly", handlers.PredictAnomalyML)
+			authRequired.POST("/predict/sla", handlers.PredictSLAML)
 			// Monitoramento simples (status)
 			authRequired.GET("/resumos/status", handlers.GetResumosStatus)
 			// Lista de pendentes (preview)
@@ -378,6 +382,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.POST("/admin/planilha/import", handlers.AdminPlanilhaImport)
 			gestorRequired.POST("/admin/planilha/bulk-mover", handlers.AdminPlanilhaBulkMover)
 			gestorRequired.POST("/admin/planilha/bulk-comentario-replace", handlers.AdminPlanilhaBulkComentarioReplace)
+			gestorRequired.POST("/admin/planilha/recalcular-coluna", handlers.AdminPlanilhaRecalcularColuna)
 			gestorRequired.DELETE("/admin/historico/:id", handlers.AdminDeleteHistorico)
 
 			// Admin - Prazos (configurações de prazos por kanban/etapa)
@@ -393,11 +398,6 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.POST("/admin/editor/processo", handlers.AdminEditProcesso)
 			gestorRequired.GET("/admin/editor/next-id", handlers.AdminNextProcessID)
 
-			// Snapshot - Sincronização com tabelas originais
-			gestorRequired.GET("/processo-snapshot/:id_processo", handlers.GetProcessoSnapshot)
-			gestorRequired.POST("/processo-snapshot/:id_processo", handlers.UpdateProcessoSnapshot)
-			gestorRequired.POST("/processo-snapshot/:id_processo/sync", handlers.SyncProcessoSnapshot)
-
 			// Dashboard
 			gestorRequired.GET("/dashboard/stats", dashHandler.Stats)
 			gestorRequired.GET("/dashboard/movimentacoes", dashHandler.MovimentacoesPeriodo)
@@ -407,6 +407,11 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 
 			// IA
 			gestorRequired.POST("/perguntar-ia", handlers.PerguntaIAHandler)
+			gestorRequired.GET("/ml/processo/:id", handlers.MLProcessoHandler)
+			gestorRequired.GET("/ml/status", handlers.MLStatusHandler)
+
+			// Score de Progressão (novo)
+			gestorRequired.GET("/processos/:id/score", handlers.ScoreProcessoHandler)
 
 			// Menções
 			gestorRequired.GET("/usuarios/mencoes", handlers.GetUsuariosMencoes)
@@ -561,6 +566,10 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/search/global", handlers.SearchGlobal)
 
 			gestorRequired.POST("/perguntar-ia", handlers.PerguntaIAHandler)
+
+			// Score de Progressão (novo)
+			gestorRequired.GET("/processos/:id/score", handlers.ScoreProcessoHandler)
+
 			gestorRequired.GET("/usuarios/mencoes", handlers.GetUsuariosMencoes)
 			gestorRequired.GET("/tags", handlers.GetAllTags)
 			gestorRequired.POST("/tags", handlers.CreateTag)

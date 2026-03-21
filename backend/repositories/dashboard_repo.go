@@ -154,41 +154,32 @@ func (r *DashboardRepo) ValorTotalEstimado(ctx context.Context, f DashFilters) (
 
 // Valor em carteira = Ativos (ressarcimento estimado) + Deferidos (credito simples+dobro), exclui suspensos por padrÃÂ£o.
 func (r *DashboardRepo) CarteiraTotals(ctx context.Context, f DashFilters) (CarteiraTotals, error) {
-	qValor := "WITH Base AS (\n" +
-		"  SELECT\n" +
-		"    TRIM(REPLACE(CONVERT(id_processo USING latin1), CHAR(160), ' ')) AS pid,\n" +
-		"    TRIM(`Coluna Kanban Atual`) AS kanban,\n" +
-		"    `Ressarcimento Estimado` AS ressarcimento_estimado,\n" +
-		"    `CREDITO SIMPLES` AS credito_simples,\n" +
-		"    `CREDITO DOBRO` AS credito_dobro\n" +
-		"  FROM db_ressarcimento.VW_POWERBI_PROCESSOS\n" +
-		"  WHERE id_processo IS NOT NULL\n" +
-		"    AND LOWER(TRIM(`Coluna Kanban Atual`)) IN ('ativos', 'deferidos')\n" +
-		"    AND `Suspenso` = 0\n" +
-		")\n" +
-		"SELECT\n" +
-		"  SUM(\n" +
-		"    CASE\n" +
-		"      WHEN col = 'ativos' THEN v_ativos\n" +
-		"      WHEN col = 'deferidos' THEN v_deferidos\n" +
-		"      ELSE 0\n" +
-		"    END\n" +
-		"  ) AS valor_em_carteira\n" +
-		"FROM (\n" +
-		"  SELECT\n" +
-		"    pid,\n" +
-		"    LOWER(MAX(kanban)) AS col,\n" +
-		"    COALESCE(MAX(ressarcimento_estimado), 0) AS v_ativos,\n" +
-		"    COALESCE(MAX(credito_simples), 0) + COALESCE(MAX(credito_dobro), 0) AS v_deferidos\n" +
-		"  FROM Base\n" +
-		"  GROUP BY pid\n" +
-		") t"
+	qValor := "SELECT\n" +
+		"  COALESCE((\n" +
+		"    SELECT SUM(COALESCE(ressarcimento_estimado, 0))\n" +
+		"    FROM FT_PROCESSOS\n" +
+		"    WHERE TRIM(nome_coluna) = 'Ativos'\n" +
+		"      AND COALESCE(suspenso, 0) <> 1\n" +
+		"      AND COALESCE(id_etapa_processo, 0) <> 11\n" +
+		"      AND COALESCE(id_sub_etapa_processo, 0) <> 1\n" +
+		"      AND COALESCE(id_coluna, 0) <> 99\n" +
+		"  ), 0)\n" +
+		"  +\n" +
+		"  COALESCE((\n" +
+		"    SELECT SUM(COALESCE(credito_simples, 0) + COALESCE(credito_dobro, 0))\n" +
+		"    FROM FT_PROCESSOS\n" +
+		"    WHERE TRIM(nome_coluna) = 'Deferidos'\n" +
+		"      AND COALESCE(suspenso, 0) <> 1\n" +
+		"      AND COALESCE(id_etapa_processo, 0) <> 11\n" +
+		"      AND COALESCE(id_sub_etapa_processo, 0) <> 1\n" +
+		"      AND COALESCE(id_coluna, 0) <> 99\n" +
+		"  ), 0) AS valor_em_carteira"
 	qCount := "SELECT COUNT(DISTINCT id_processo) AS qtd_processos_em_carteira\n" +
-		"FROM db_ressarcimento.VW_POWERBI_PROCESSOS\n" +
+		"FROM FT_PROCESSOS\n" +
 		"WHERE id_processo IS NOT NULL\n" +
-		"  AND TRIM(id_processo) <> ''\n" +
-		"  AND LOWER(TRIM(`Coluna Kanban Atual`)) IN ('ativos', 'deferidos')\n" +
-		"  AND COALESCE(`Suspenso`, 0) = 0"
+		"  AND TRIM(CAST(id_processo AS CHAR)) <> ''\n" +
+		"  AND id_coluna IN (1, 2)\n" +
+		"  AND COALESCE(suspenso, 0) <> 1"
 
 	var valor sql.NullFloat64
 	if res := r.db.Raw( qValor).Scan(&valor); res.Error != nil {

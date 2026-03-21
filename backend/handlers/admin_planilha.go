@@ -88,8 +88,17 @@ func AdminPlanilhaList(c *gin.Context) {
     ini := strings.TrimSpace(c.Query("ini")) // YYYY-MM-DD
     fim := strings.TrimSpace(c.Query("fim")) // YYYY-MM-DD
     coluna := strings.TrimSpace(c.Query("coluna"))
-    limit := strings.TrimSpace(c.DefaultQuery("limit", "100"))
-    offset := strings.TrimSpace(c.DefaultQuery("offset", "0"))
+    limitVal, err := strconv.Atoi(strings.TrimSpace(c.DefaultQuery("limit", "100")))
+    if err != nil || limitVal < 1 {
+        limitVal = 100
+    }
+    if limitVal > 500 {
+        limitVal = 500
+    }
+    offsetVal, err := strconv.Atoi(strings.TrimSpace(c.DefaultQuery("offset", "0")))
+    if err != nil || offsetVal < 0 {
+        offsetVal = 0
+    }
 
     // Monta SQL base (usa LEFT JOIN e subselect para pegar último fluxo/faturamento)
     sqlBase := `
@@ -190,12 +199,8 @@ func AdminPlanilhaList(c *gin.Context) {
         sqlBase += " WHERE " + strings.Join(where, " AND ")
     }
     sqlBase += " ORDER BY p.id_processo ASC, h.data_movimentacao ASC"
-    if limit != "" {
-        sqlBase += fmt.Sprintf(" LIMIT %s", limit)
-        if offset != "" && offset != "0" {
-            sqlBase += fmt.Sprintf(" OFFSET %s", offset)
-        }
-    }
+    sqlBase += " LIMIT ? OFFSET ?"
+    args = append(args, limitVal, offsetVal)
 
     rows, err := queryGorm(database.GormDB_App, sqlBase, args...)
     if err != nil {
@@ -247,13 +252,9 @@ func AdminPlanilhaList(c *gin.Context) {
             sqlBaseFallback += " WHERE " + strings.Join(where, " AND ")
         }
         sqlBaseFallback += " ORDER BY p.id_processo ASC, h.data_movimentacao ASC"
-        if limit != "" {
-            sqlBaseFallback += fmt.Sprintf(" LIMIT %s", limit)
-            if offset != "" && offset != "0" {
-                sqlBaseFallback += fmt.Sprintf(" OFFSET %s", offset)
-            }
-        }
-        rows, err = queryGorm(database.GormDB_App, sqlBaseFallback, args...)
+        sqlBaseFallback += " LIMIT ? OFFSET ?"
+        fallbackArgs := append(args, limitVal, offsetVal)
+        rows, err = queryGorm(database.GormDB_App, sqlBaseFallback, fallbackArgs...)
         if err != nil {
             c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
             return
@@ -475,6 +476,87 @@ func AdminPlanilhaBulkComentarioReplace(c *gin.Context) {
         return
     }
     c.JSON(http.StatusOK, gin.H{"ok": true, "count": len(body.HistoricoIDs)})
+}
+
+// POST /api/v1/admin/planilha/recalcular-coluna
+// Recalcula coluna do kanban para processos com dados (deferimento/fluxo/faturamento).
+func AdminPlanilhaRecalcularColuna(c *gin.Context) {
+    db := database.GormDB_App
+    if db == nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "DB not initialized"})
+        return
+    }
+
+    limit := 1000
+    if v := strings.TrimSpace(c.DefaultQuery("limit", "")); v != "" {
+        if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 20000 {
+            limit = n
+        }
+    }
+
+    userIDVal, _ := c.Get("userID")
+    userID, _ := userIDVal.(int64)
+
+    rows, err := queryGorm(db, `
+        SELECT p.id_processo
+          FROM FT_PROCESSOS p
+          LEFT JOIN FT_DEFERIMENTOS d ON d.id_processo = p.id_processo
+          LEFT JOIN FT_FLUXO_RESSARCIMENTO fr ON fr.id_processo = p.id_processo
+          LEFT JOIN FT_FATURAMENTO f ON f.id_processo = p.id_processo
+         WHERE (
+            d.data_procedencia IS NOT NULL OR d.data_credito_dobro IS NOT NULL
+            OR d.credito_simples IS NOT NULL OR d.credito_dobro IS NOT NULL
+            OR d.repasse_simples IS NOT NULL OR d.repasse_dobro IS NOT NULL
+            OR fr.valor IS NOT NULL OR fr.data_devolucao IS NOT NULL OR fr.data_envio_financeiro IS NOT NULL
+            OR fr.forma_devolucao IS NOT NULL OR fr.simples = 1 OR fr.dobro = 1 OR fr.simples_dobro = 1
+            OR (f.numero_nf IS NOT NULL AND TRIM(f.numero_nf) <> '')
+            OR f.data_emissao IS NOT NULL OR f.data_vencimento IS NOT NULL OR f.data_pagamento IS NOT NULL
+            OR f.valor IS NOT NULL
+         )
+         GROUP BY p.id_processo
+         ORDER BY p.id_processo DESC
+         LIMIT ?`, limit)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao listar processos"})
+        return
+    }
+    defer rows.Close()
+
+    ids := make([]int, 0, limit)
+    for rows.Next() {
+        var pid int
+        if err := rows.Scan(&pid); err == nil && pid > 0 {
+            ids = append(ids, pid)
+        }
+    }
+
+    tx := db.Begin()
+    if tx.Error != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+        return
+    }
+    defer tx.Rollback()
+
+    updated := 0
+    for _, pid := range ids {
+        if err := updateColunaByData(tx, pid, userID); err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("falha ao atualizar processo %d: %v", pid, err)})
+            return
+        }
+        updated++
+    }
+
+    if err := tx.Commit().Error; err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{
+        "ok":      true,
+        "scanned": len(ids),
+        "updated": updated,
+        "limit":   limit,
+    })
 }
 
 // GET /api/v1/admin/planilha/export
@@ -1144,7 +1226,6 @@ func AdminPlanilhaImport(c *gin.Context) {
     }
     c.JSON(http.StatusOK, gin.H{"ok": true, "count": count})
 }
-
 
 
 

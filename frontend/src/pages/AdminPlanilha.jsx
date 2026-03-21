@@ -3204,9 +3204,9 @@ export default function AdminPlanilha() {
     openedFromQueryRef.current = true;
   }, [queryPid, tableRows, openDrawer]);
 
-  // Carrega scores automaticamente para todos os processos (independente da aba)
+  // Carrega scores automaticamente apenas para ATIVOS
   useEffect(() => {
-    if (!tableRows || tableRows.length === 0) return;
+    if (activeTab !== 'ATIVOS' || !tableRows || tableRows.length === 0) return;
 
     // Carrega score para cada processo visível (sem duplicar se já carregado)
     tableRows.forEach((row) => {
@@ -3214,7 +3214,7 @@ export default function AdminPlanilha() {
         fetchScoreForRow(row.pid);
       }
     });
-  }, [tableRows, scoreData, fetchScoreForRow]);
+  }, [tableRows, scoreData, fetchScoreForRow, activeTab]);
 
   const [headerFlags, setHeaderFlags] = useState({ relevancia: false, suspenso: false });
   useEffect(() => {

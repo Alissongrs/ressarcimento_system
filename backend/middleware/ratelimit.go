@@ -147,9 +147,9 @@ func GlobalRateLimit() gin.HandlerFunc {
 }
 
 // AuthRateLimit rate limiting mais restrito para rotas de autenticação.
-// Padrão: 5 req/5min por IP. Ajuste por env AUTH_RATE_LIMIT_PER_5MIN.
+// Padrão: 30 req/5min por IP. Ajuste por env AUTH_RATE_LIMIT_PER_5MIN.
 func AuthRateLimit() gin.HandlerFunc {
-	limit := getEnvInt("AUTH_RATE_LIMIT_PER_5MIN", 5)
+	limit := getEnvInt("AUTH_RATE_LIMIT_PER_5MIN", 30)
 	window := 5 * time.Minute
 	rl := newRateLimiter(limit, window)
 

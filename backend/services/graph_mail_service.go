@@ -148,7 +148,8 @@ func ListMailMessages(folderID, q string, unread *bool, limit, offset int) ([]Gr
 	params.Set("$orderby", "receivedDateTime desc")
 	params.Set("$select", selectFields)
 	if q != "" {
-		params.Set("$search", fmt.Sprintf("\"%s\"", q))
+		// AQS: busca explícita em corpo e assunto
+		params.Set("$search", fmt.Sprintf("body:%q OR subject:%q", q, q))
 	}
 	if unread != nil {
 		params.Set("$filter", fmt.Sprintf("isRead eq %v", !*unread))
@@ -188,7 +189,7 @@ func ListMailMessages(folderID, q string, unread *bool, limit, offset int) ([]Gr
 	for _, m := range payload.Value {
 		out = append(out, mapGraphMessage(m))
 	}
-	if originalQ != "" {
+	if originalQ != "" && q == "" {
 		needle := strings.ToLower(originalQ)
 		filtered := make([]GraphMessage, 0, len(out))
 		for _, m := range out {
