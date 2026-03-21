@@ -22,7 +22,7 @@ RUN mkdir -p models data
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/predict/score', timeout=2).read()" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ping', timeout=2).read()" || exit 1
 
 # Expõe porta
 EXPOSE 8000
