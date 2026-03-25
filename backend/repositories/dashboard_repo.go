@@ -178,7 +178,10 @@ func (r *DashboardRepo) CarteiraTotals(ctx context.Context, f DashFilters) (Cart
 		"FROM FT_PROCESSOS\n" +
 		"WHERE id_processo IS NOT NULL\n" +
 		"  AND TRIM(CAST(id_processo AS CHAR)) <> ''\n" +
-		"  AND id_coluna IN (1, 2)\n" +
+		"  AND id_coluna IN (\n" +
+		"    SELECT id_coluna FROM DM_KANBAN_COLUNAS\n" +
+		"    WHERE nome_coluna IN ('Ativos', 'Deferidos')\n" +
+		"  )\n" +
 		"  AND COALESCE(suspenso, 0) <> 1"
 
 	var valor sql.NullFloat64

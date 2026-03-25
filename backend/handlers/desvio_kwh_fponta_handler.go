@@ -524,8 +524,20 @@ func countDesvioKwhRows(where []string, args []interface{}) int64 {
 	return 0
 }
 
+var distinctListAllowed = map[string]bool{
+	"status_desvio": true,
+	"status_extra":  true,
+	"Mes_Ref":       true,
+	"Tp_Tensao":     true,
+	"Concessionaria": true,
+	"score":         true,
+}
+
 func distinctList(column string) []string {
 	if database.GormDB_App == nil {
+		return nil
+	}
+	if !distinctListAllowed[column] {
 		return nil
 	}
 	query := "SELECT DISTINCT " + column + " FROM vw_processos_desvio_media_kwh_fponta WHERE " + column + " IS NOT NULL AND TRIM(" + column + ") <> '' ORDER BY " + column

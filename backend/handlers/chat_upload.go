@@ -81,7 +81,7 @@ func callOCR(files []*multipart.FileHeader) (map[string]ocrResult, error) {
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -153,6 +153,10 @@ func ChatUploadHandler(c *gin.Context) {
 	var ocrFiles []*multipart.FileHeader
 	for _, f := range files {
 		name := filepath.Base(f.Filename)
+		if !isTextFile(name) && !isOCRFile(name) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tipo de arquivo não permitido: " + filepath.Ext(name)})
+			return
+		}
 		dest := filepath.Join(baseDir, name)
 		if err := c.SaveUploadedFile(f, dest); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save file"})
@@ -176,9 +180,10 @@ func ChatUploadHandler(c *gin.Context) {
 	}
 
 	if len(ocrFiles) > 0 {
-		ocrTexts, err := callOCR(ocrFiles)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "ocr failed", "details": err.Error()})
+		ocrTexts, ocrErr := callOCR(ocrFiles)
+		if ocrErr != nil {
+			// OCR indisponível — retorna arquivos sem texto extraído (não é fatal)
+			c.JSON(http.StatusOK, chatUploadResponse{Files: out})
 			return
 		}
 		for i := range out {

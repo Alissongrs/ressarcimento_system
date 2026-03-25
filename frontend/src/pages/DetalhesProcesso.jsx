@@ -184,7 +184,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
         alert('Dados do Fluxo de Ressarcimento salvos com sucesso!');
       } else {
         const error = await response.json();
-        alert(`Erro ao salvar: ${error.error}`);
+        alert('Erro ao salvar. Tente novamente.');
       }
     } catch (error) {
       console.error('Erro ao salvar dados do Fluxo de Ressarcimento:', error);
@@ -382,7 +382,7 @@ const ModalGerenciarTags = ({
       }
       setNewTagName('');
     } catch (error) {
-      alert(error.response?.data?.error || 'Erro ao criar a tag.');
+      alert('Erro ao criar a tag. Tente novamente.');
     }
   };
 

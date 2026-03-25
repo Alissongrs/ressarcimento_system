@@ -19,7 +19,17 @@ func llamaAgentURL() string {
 func AtualizarScoreModel() error {
 	url := llamaAgentURL() + "/train/score"
 
-	resp, err := http.Post(url, "application/json", nil)
+	req, err := http.NewRequest(http.MethodPost, url, nil)
+	if err != nil {
+		return fmt.Errorf("[Score Model] Erro ao criar request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token := os.Getenv("TRAIN_API_TOKEN"); token != "" {
+		req.Header.Set("X-Train-Token", token)
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("[Score Model] Erro ao chamar /train/score: %w", err)
 	}

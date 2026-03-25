@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -45,7 +46,7 @@ func PerguntaIAHandler(c *gin.Context) {
 	req.Header.Set("Content-Type", "application/json")
 
 	// 3. Executa a requisição
-	client := &http.Client{}
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Não foi possível se comunicar com o agente de IA.", "details": err.Error()})

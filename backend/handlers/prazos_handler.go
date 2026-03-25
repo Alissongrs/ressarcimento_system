@@ -190,30 +190,42 @@ func GetProcessosComPrazo(c *gin.Context) {
 	q := `
 WITH alvo AS (
     SELECT 'Distribuidora' AS etapa, 'Aguardando retorno' AS sub_etapa, 7 AS prazo_dias
+    UNION ALL SELECT 'Distribuidora', 'Primeira reclamação - Aguardando retorno', 7
     UNION ALL SELECT 'Ouvidoria', 'Aguardando retorno', 15
+    UNION ALL SELECT 'Ouvidoria', 'Em contestação - Aguardando retorno', 15
+    UNION ALL SELECT 'Ouvidoria', 'Em Conciliação - Aguardando retorno', 15
     UNION ALL SELECT 'ANEEL', 'Aguardando retorno', 15
+    UNION ALL SELECT 'ANEEL', 'Em contestação - Aguardando retorno', 15
+    UNION ALL SELECT 'ANEEL', 'Em Conciliação - Aguardando retorno', 15
+    UNION ALL SELECT 'SMA', 'Aguardando retorno', 15
+    UNION ALL SELECT 'SMA', 'Em contestação - Aguardando retorno', 15
+    UNION ALL SELECT 'SMA', 'Em Conciliação - Aguardando retorno', 15
 ),
 hist AS (
-    SELECT id_requisicao, etapa_nova, sub_etapa, MAX(data_movimentacao) AS data_movimentacao
-      FROM FT_HISTORICO_MOVIMENTACOES
-     WHERE etapa_nova IS NOT NULL
-       AND LOWER(TRIM(etapa_nova)) IN ('distribuidora','ouvidoria','aneel')
-       AND LOWER(TRIM(COALESCE(sub_etapa,''))) LIKE 'aguardando retorno%'
-     GROUP BY id_requisicao, etapa_nova, sub_etapa
+    -- Data em que o processo ENTROU na sub-etapa de aguardando retorno (pelo historico)
+    -- Processos sem esse registro no historico sao excluidos (nao aparecem no painel)
+    SELECT hm.id_requisicao, MAX(hm.data_movimentacao) AS data_movimentacao
+      FROM FT_HISTORICO_MOVIMENTACOES hm
+     WHERE LOWER(TRIM(COALESCE(hm.sub_etapa, ''))) IN (
+               'aguardando retorno',
+               'primeira reclamação - aguardando retorno',
+               'em contestação - aguardando retorno',
+               'em conciliação - aguardando retorno'
+           )
+     GROUP BY hm.id_requisicao
 )
 SELECT
     p.id_processo,
     e.etapa,
     p.sub_etapa,
     a.prazo_dias,
-    COALESCE(h.data_movimentacao, p.ultima_atualizacao) AS data_base
+    h.data_movimentacao AS data_base
 FROM FT_PROCESSOS p
 JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
 JOIN alvo a ON LOWER(TRIM(e.etapa)) = LOWER(TRIM(a.etapa)) COLLATE utf8mb4_unicode_ci
-           AND LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE LOWER(CONCAT(TRIM(a.sub_etapa), '%')) COLLATE utf8mb4_unicode_ci
-LEFT JOIN hist h ON h.id_requisicao = p.id_processo
-WHERE COALESCE(h.data_movimentacao, p.ultima_atualizacao) IS NOT NULL
-  AND COALESCE(p.suspenso, 0) = 0
+           AND LOWER(TRIM(COALESCE(p.sub_etapa,''))) = LOWER(TRIM(a.sub_etapa)) COLLATE utf8mb4_unicode_ci
+JOIN hist h ON h.id_requisicao = p.id_processo
+WHERE COALESCE(p.suspenso, 0) = 0
   AND LOWER(TRIM(COALESCE(p.sub_etapa, ''))) NOT LIKE 'suspenso%'
 LIMIT ?`
 

@@ -6,14 +6,8 @@ export const login = async (email, password) => {
     const response = await api.post('/login', { email, password }, { skipAuthExpired: true });
     return response.data;
   } catch (error) {
-    console.error('Erro detalhado no serviço de login:', error);
-    if (error.response) {
-      console.error('Dados do erro:', error.response.data);
-      console.error('Status do erro:', error.response.status);
-    } else if (error.request) {
-      console.error('Requisição feita, mas sem resposta:', error.request);
-    } else {
-      console.error('Erro ao configurar a requisição:', error.message);
+    if (import.meta.env.DEV) {
+      console.error('[auth] login error:', error?.response?.status ?? error?.message);
     }
     throw error;
   }
@@ -25,7 +19,9 @@ export const register = async (userData) => {
     const response = await api.post('/register', userData, { skipAuthExpired: true });
     return response.data;
   } catch (error) {
-    console.error('Erro no serviço de registro:', error.response?.data?.error || error.message);
+    if (import.meta.env.DEV) {
+      console.error('[auth] register error:', error?.response?.status ?? error?.message);
+    }
     throw error;
   }
 };

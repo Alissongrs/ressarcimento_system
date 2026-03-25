@@ -283,11 +283,10 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject, scoreData, onScoreLoad }
     'text-sky-500 bg-sky-500/10 border-sky-500/30';
 
   // Trigger score load quando o card for renderizado
+  // onScoreLoad (fetchScoreForRow) já faz dedup internamente — scoreData não precisa ser dep
   useEffect(() => {
-    if (id && scoreData?.[id] === undefined) {
-      onScoreLoad?.(id);
-    }
-  }, [id, scoreData, onScoreLoad]);
+    if (id) onScoreLoad?.(id);
+  }, [id, onScoreLoad]);
 
   const score = scoreData?.[id];
   const isRejected = norm(statusLabel).includes('rejeit');
@@ -850,14 +849,7 @@ const cleanToken = (t) => String(t || '').trim().replace(/^['"]+|['"]+$/g, '');
 
 const getAuthToken = () => {
   try {
-    return cleanToken(
-      localStorage.getItem('userToken') ||
-        localStorage.getItem('token') ||
-        localStorage.getItem('authToken') ||
-        localStorage.getItem('jwt') ||
-        sessionStorage.getItem('token') ||
-        '',
-    );
+    return cleanToken(localStorage.getItem('userToken') || '');
   } catch {
     return '';
   }
@@ -969,6 +961,7 @@ const buildRowsFromKanbanFast = (data) => {
         data_simples: p?.data_simples ?? p?.dataSimples ?? p?.data_procedencia ?? p?.dataProcedencia ?? '',
         data_credito_dobro: p?.data_credito_dobro ?? p?.dataCreditoDobro ?? p?.data_dobro ?? p?.dataDobro ?? '',
         data_dobro: p?.data_dobro ?? p?.dataDobro ?? p?.data_credito_dobro ?? p?.dataCreditoDobro ?? '',
+        score_percentual: p?.score_percentual ?? null,
       };
 
       rows.push(header);
@@ -1036,8 +1029,7 @@ const useChunkedRender = (items, { initial = 120, step = 160, enabled = true } =
 
 // Score de Progressão Badge Component
 const ScoreBadge = memo(function ScoreBadge({ score }) {
-  if (score === undefined) return null; // não carregado ainda
-  if (score === null) return <span className="text-[9px] text-gray-400 opacity-50">...</span>; // carregando
+  if (score === undefined || score === null) return <span className="text-xs opacity-40">-</span>;
 
   if (score?.erro) {
     return <span className="text-[9px] text-red-500 opacity-40">erro</span>;
@@ -2015,6 +2007,12 @@ function ProcessoDrawer({
           <button className={paneBtn('history')} type="button" onClick={() => togglePane('history')}>
             Histórico
           </button>
+
+          {activeTab === 'ATIVOS' && (
+            <button className={paneBtn('score')} type="button" onClick={() => togglePane('score')}>
+              Score
+            </button>
+          )}
         </div>
 
         <div className="mt-4 flex-1 overflow-hidden">
@@ -2178,6 +2176,49 @@ function ProcessoDrawer({
                         </div>
                       )}
                     </div>
+                  ) : pane === 'score' ? (
+                    (() => {
+                      const rawPct = header?.score_percentual ?? scoreData?.[pid]?.percentual ?? null;
+                      const pct = rawPct != null ? Math.round(Number(rawPct)) : null;
+                      const labelColor =
+                        pct === null ? 'text-gray-400' :
+                        pct >= 70 ? 'text-green-500' :
+                        pct >= 40 ? 'text-yellow-500' : 'text-red-400';
+                      const barColor =
+                        pct === null ? 'bg-gray-300' :
+                        pct >= 70 ? 'bg-green-500' :
+                        pct >= 40 ? 'bg-yellow-500' : 'bg-red-400';
+
+                      return (
+                        <div className="flex flex-col gap-4 pt-1">
+                          <div className="font-semibold">Score de Progressão</div>
+                          <p className="text-xs opacity-60">
+                            Probabilidade de avançar para Fluxo, Faturamento ou Concluídos.
+                          </p>
+
+                          {pct === null ? (
+                            <div className="text-sm opacity-50">Score não calculado para este processo.</div>
+                          ) : (
+                            <>
+                              <div className={`text-5xl font-bold ${labelColor}`}>
+                                {pct}%
+                              </div>
+
+                              <div className={`text-sm font-semibold ${labelColor}`}>
+                                {pct >= 70 ? 'Alta' : pct >= 40 ? 'Média' : 'Baixa'}
+                              </div>
+
+                              <div className="w-full bg-[var(--border)] rounded-full h-3">
+                                <div
+                                  className={`${barColor} h-3 rounded-full transition-all duration-500`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()
                   ) : (
                     rightPane || <div className="text-sm opacity-70">Selecione uma opção.</div>
                   )}
@@ -2784,19 +2825,25 @@ export default function AdminPlanilha() {
 
   // Carrega score de progressão para um processo (via fila)
   const fetchScoreForRow = useCallback((pid) => {
-    if (scoreData[pid] !== undefined) return; // já carregado ou carregando
-    setScoreData((prev) => ({ ...prev, [pid]: null })); // marca como carregando
-
-    scoreQueue.add(`score_${pid}`, async () => {
-      try {
-        const data = await getProcessoScore(pid);
-        setScoreData((prev) => ({ ...prev, [pid]: data }));
-      } catch (err) {
-        console.warn('[Score] Erro ao buscar score:', err);
-        setScoreData((prev) => ({ ...prev, [pid]: { erro: 'Indisponível' } }));
-      }
+    setScoreData((prev) => {
+      if (prev[pid] !== undefined) return prev; // já carregado ou carregando — sem re-render
+      // Evita crescimento ilimitado: mantém no máximo 300 entradas (FIFO)
+      const entries = Object.entries(prev);
+      const trimmed = entries.length >= 300
+        ? Object.fromEntries(entries.slice(entries.length - 299))
+        : prev;
+      scoreQueue.add(`score_${pid}`, async () => {
+        try {
+          const data = await getProcessoScore(pid);
+          setScoreData((p) => ({ ...p, [pid]: data }));
+        } catch (err) {
+          console.warn('[Score] Erro ao buscar score:', err);
+          setScoreData((p) => ({ ...p, [pid]: { erro: 'Indisponível' } }));
+        }
+      });
+      return { ...trimmed, [pid]: null }; // null = carregando
     });
-  }, [scoreData]);
+  }, []);
 
   // Move / Edit
   const [mvByPid] = useState({}); // mantido (compat)
@@ -2859,6 +2906,7 @@ export default function AdminPlanilha() {
   const [historyByPid, setHistoryByPid] = useState({});
   const [historyDetailLoading, setHistoryDetailLoading] = useState(false);
   const [historyAnexoUploading, setHistoryAnexoUploading] = useState({});
+  const historyLoadedRef = useRef(new Set()); // rastreia pids já carregados sem causar re-render
 
   const [ativosMetricas, setAtivosMetricas] = useState({
     loading: true,
@@ -2936,7 +2984,7 @@ export default function AdminPlanilha() {
 
   const load = useCallback(async (opts = {}) => loadAll(opts), [loadAll]);
 
-  const loadAtivosMetricas = useCallback(async () => {
+  const loadAtivosMetricas = useCallback(async (signal) => {
     setAtivosMetricas((prev) => ({ ...prev, loading: true, error: '' }));
 
     const baseYear = 2026;
@@ -2984,6 +3032,7 @@ export default function AdminPlanilha() {
       next.error = 'Falha ao carregar métricas.';
     }
 
+    if (signal?.aborted) return;
     setAtivosMetricas(next);
   }, [selectedMonthIdx]);
 
@@ -2998,7 +3047,9 @@ export default function AdminPlanilha() {
   }, [loadAll, loadAtivosMetricas]);
 
   useEffect(() => {
-    loadAtivosMetricas();
+    const controller = new AbortController();
+    loadAtivosMetricas(controller.signal);
+    return () => controller.abort();
   }, [loadAtivosMetricas]);
 
   const requestRealtimeRefresh = useCallback(() => {
@@ -3037,28 +3088,30 @@ export default function AdminPlanilha() {
       return;
     }
 
-    let canceled = false;
+    const controller = new AbortController();
 
     (async () => {
       try {
         setHistoryLoading(true);
-        const data = await searchGlobalHistorico(term, 500, 0);
+        const data = await searchGlobalHistorico(term, 500, 0, controller.signal);
         const hits = new Set();
         const arr = Array.isArray(data?.results) ? data.results : [];
         for (const it of arr) {
           const pid = String(it?.processo_id ?? it?.ProcessoID ?? it?.id ?? it?.ID ?? '');
           if (pid) hits.add(pid);
         }
-        if (!canceled) setHistoryMatches(hits);
-      } catch {
-        if (!canceled) setHistoryMatches(new Set());
+        setHistoryMatches(hits);
+      } catch (err) {
+        if (err?.code !== 'ERR_CANCELED' && err?.name !== 'AbortError') {
+          setHistoryMatches(new Set());
+        }
       } finally {
-        if (!canceled) setHistoryLoading(false);
+        if (!controller.signal.aborted) setHistoryLoading(false);
       }
     })();
 
     return () => {
-      canceled = true;
+      controller.abort();
     };
   }, [qDebounced]);
 
@@ -3204,17 +3257,6 @@ export default function AdminPlanilha() {
     openedFromQueryRef.current = true;
   }, [queryPid, tableRows, openDrawer]);
 
-  // Carrega scores automaticamente apenas para ATIVOS
-  useEffect(() => {
-    if (activeTab !== 'ATIVOS' || !tableRows || tableRows.length === 0) return;
-
-    // Carrega score para cada processo visível (sem duplicar se já carregado)
-    tableRows.forEach((row) => {
-      if (scoreData[row.pid] === undefined) {
-        fetchScoreForRow(row.pid);
-      }
-    });
-  }, [tableRows, scoreData, fetchScoreForRow, activeTab]);
 
   const [headerFlags, setHeaderFlags] = useState({ relevancia: false, suspenso: false });
   useEffect(() => {
@@ -3458,19 +3500,22 @@ export default function AdminPlanilha() {
   const loadHistoryDetails = useCallback(
     async (pid, force = false) => {
       if (!pid) return;
-      if (!force && Array.isArray(historyByPid[pid]) && historyByPid[pid].length > 0) return;
+      if (!force && historyLoadedRef.current.has(pid)) return;
 
+      if (force) historyLoadedRef.current.delete(pid);
+      historyLoadedRef.current.add(pid);
       setHistoryDetailLoading(true);
       try {
         const data = await getHistoricoById(pid);
         setHistoryByPid((prev) => ({ ...(prev || {}), [pid]: data || [] }));
       } catch {
+        historyLoadedRef.current.delete(pid); // permite retry em caso de erro
         setHistoryByPid((prev) => ({ ...(prev || {}), [pid]: [] }));
       } finally {
         setHistoryDetailLoading(false);
       }
     },
-    [historyByPid],
+    [], // ref não precisa estar nas deps
   );
 
   const attachHistoryAnexo = useCallback(
@@ -3496,11 +3541,12 @@ export default function AdminPlanilha() {
     [loadHistoryDetails],
   );
 
-  const loadRequisicoes = useCallback(async () => {
+  const loadRequisicoes = useCallback(async (signal) => {
     setReqLoading(true);
 
     try {
       const rows = await getAllRequisicoes();
+      if (signal?.aborted) return;
       const safeRows = Array.isArray(rows) ? rows : [];
       setReqItems(safeRows);
 
@@ -3544,7 +3590,9 @@ export default function AdminPlanilha() {
   }, []);
 
   useEffect(() => {
-    loadRequisicoes();
+    const controller = new AbortController();
+    loadRequisicoes(controller.signal);
+    return () => controller.abort();
   }, [loadRequisicoes]);
 
   const reqCountsByCol = useMemo(() => {
@@ -6744,7 +6792,7 @@ export default function AdminPlanilha() {
                             <div className="px-2 py-2 border-t panel-border truncate">{diasSem}</div>
                             <div className="px-2 py-2 border-t panel-border flex items-center justify-center">
                               {activeTab === 'ATIVOS' ? (
-                                <ScoreBadge score={scoreData[row.pid]} />
+                                <ScoreBadge score={row.header?.score_percentual ?? scoreData[row.pid] ?? undefined} />
                               ) : (
                                 <span className="text-xs opacity-50">-</span>
                               )}

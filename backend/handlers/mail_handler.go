@@ -27,13 +27,30 @@ import (
 	"golang.org/x/text/encoding/charmap"
 )
 
-var mailAllowedUsers = map[string]bool{
-	"alisson.rodrigues@amee.com.br": true,
-	"luana.nascimento@amee.com.br":  true,
-	"eliane.araujo@amee.com.br":     true,
-	"paulo.passos@amee.com.br":      true,
-	"eduardo.navarro@amee.com.br":   true,
-}
+// mailAllowedUsers carregado via env MAIL_ALLOWED_USERS (emails separados por vírgula).
+// Fallback: lista padrão para compatibilidade.
+var mailAllowedUsers = func() map[string]bool {
+	m := map[string]bool{}
+	if v := os.Getenv("MAIL_ALLOWED_USERS"); v != "" {
+		for _, email := range strings.Split(v, ",") {
+			if e := strings.TrimSpace(email); e != "" {
+				m[e] = true
+			}
+		}
+		return m
+	}
+	// fallback padrão
+	for _, e := range []string{
+		"alisson.rodrigues@amee.com.br",
+		"luana.nascimento@amee.com.br",
+		"eliane.araujo@amee.com.br",
+		"paulo.passos@amee.com.br",
+		"eduardo.navarro@amee.com.br",
+	} {
+		m[e] = true
+	}
+	return m
+}()
 
 var mailUpsertMu sync.Mutex
 var powerbiViewMu sync.Mutex
@@ -230,14 +247,12 @@ func MailMessages(c *gin.Context) {
 			offset = n
 		}
 	}
-	// Fast path: try cached list from DB first
+	// Sempre busca do Graph API (dados frescos); DB cache apenas como fallback se Graph falhar
 	var msgs []services.GraphMessage
 	var err error
-	if strings.TrimSpace(q) == "" {
+	msgs, err = services.ListMailMessages(folderID, q, unread, limit, offset)
+	if err != nil && strings.TrimSpace(q) == "" {
 		msgs, err = listMailMessagesCached(database.GormDB_App, folderID, q, limit, offset)
-	}
-	if err != nil || len(msgs) == 0 {
-		msgs, err = services.ListMailMessages(folderID, q, unread, limit, offset)
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

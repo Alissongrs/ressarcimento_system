@@ -5,10 +5,10 @@ services:
     image: mysql:8.0
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: appdb
-      MYSQL_USER: app
-      MYSQL_PASSWORD: app
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-r00t_S3cure!}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-appdb}
+      MYSQL_USER: ${MYSQL_USER:-appuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-App_S3cur3!}
       TZ: "America/Sao_Paulo"
     command:
       - "--default-authentication-plugin=mysql_native_password"
@@ -26,9 +26,11 @@ services:
     volumes:
       - db_data:/var/lib/mysql
       - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - backend
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.6.2
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
@@ -38,6 +40,8 @@ services:
       timeout: 5s
       retries: 20
       start_period: 20s
+    networks:
+      - ai
 
   ocr:
     build:
@@ -69,10 +73,13 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+    networks:
+      - backend
+      - ai
 
   llama-agent:
     build:
-      context: ./backend/ia
+      context: ./ia
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
@@ -100,6 +107,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - backend
+      - ai
 
   backend:
     image: ressarcimento-backend
@@ -151,6 +161,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    networks:
+      - backend
+      - frontend
 
   frontend:
     build:
@@ -168,6 +181,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    networks:
+      - frontend
 
 volumes:
   db_data:
@@ -176,3 +191,11 @@ volumes:
     driver: local
   uploads_data:
     driver: local
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+  ai:
+    driver: bridge

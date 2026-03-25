@@ -15,6 +15,7 @@ import (
 var (
 	GormDB_App      *gorm.DB
 	GormDB_Consulta *gorm.DB
+	GormDB_Faturas  *gorm.DB
 )
 
 // InitGorm inicializa conexões GORM para DB_APP e DB_CONSULTA.
@@ -100,4 +101,31 @@ func InitGorm() {
 	_ = dbc.Exec("SET collation_connection = 'utf8mb4_unicode_ci'")
 	GormDB_Consulta = dbc
 	log.Println("Conexão GORM com o Banco de Consulta estabelecida com sucesso!")
+
+	// DB_FATURAS
+	connStrFaturas := buildDSN(os.Getenv("DB_FATURAS"))
+	if strings.TrimSpace(connStrFaturas) == "" {
+		GormDB_Faturas = nil
+		log.Println("Aviso: DB_FATURAS vazio — banco de faturas desabilitado")
+		return
+	}
+	dbf, err := gorm.Open(mysql.Open(connStrFaturas), &gorm.Config{
+		SkipDefaultTransaction: true,
+		Logger:                 logger.Default.LogMode(logger.Error),
+	})
+	if err != nil {
+		log.Printf("Aviso: falha ao ABRIR GORM no banco de faturas: %v", err)
+		GormDB_Faturas = nil
+		return
+	}
+	if raw, err := dbf.DB(); err == nil {
+		_ = raw.Ping()
+		raw.SetMaxOpenConns(maxOpen)
+		raw.SetMaxIdleConns(maxIdle)
+		raw.SetConnMaxLifetime(time.Duration(maxLifeMin) * time.Minute)
+	}
+	_ = dbf.Exec("SET time_zone = '" + timeZone + "'")
+	_ = dbf.Exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci")
+	GormDB_Faturas = dbf
+	log.Println("Conexão GORM com o Banco de Faturas estabelecida com sucesso!")
 }

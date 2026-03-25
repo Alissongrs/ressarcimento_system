@@ -983,7 +983,7 @@ function App() {
                 borderColor: '#9a9a9a',
                 borderRadius: 6,
                 boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
-                fontFamily: '"Segoe UI", Tahoma, Arial, sans-serif',
+                fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif',
               }}
             >
               <div

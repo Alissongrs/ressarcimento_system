@@ -27,6 +27,7 @@ type ProcessoKanban struct {
 	UltimaAtualizacao      *time.Time `db:"ultima_atualizacao"       json:"ultima_atualizacao,omitempty"`
 	DataUltimaMovimentacao *time.Time `db:"data_ultima_movimentacao" json:"data_ultima_movimentacao,omitempty"`
 	Suspenso               *bool      `db:"suspenso"                 json:"suspenso,omitempty"`
+	ScorePercentual        *float64   `db:"score_percentual"         json:"score_percentual,omitempty"`
 }
 
 // DTO enviado ao front (sem coluna_kanban dentro do item)
@@ -53,6 +54,7 @@ type ProcessoKanbanDTO struct {
 	UltimaAtualizacao      *time.Time `json:"ultima_atualizacao,omitempty"`
 	DataUltimaMovimentacao *time.Time `json:"data_ultima_movimentacao,omitempty"`
 	Suspenso               *bool      `json:"suspenso,omitempty"`
+	ScorePercentual        *float64   `json:"score_percentual,omitempty"`
 }
 
 func (p ProcessoKanban) ToDTO() ProcessoKanbanDTO {
@@ -79,5 +81,6 @@ func (p ProcessoKanban) ToDTO() ProcessoKanbanDTO {
 		UltimaAtualizacao:      p.UltimaAtualizacao,
 		DataUltimaMovimentacao: p.DataUltimaMovimentacao,
 		Suspenso:               p.Suspenso,
+		ScorePercentual:        p.ScorePercentual,
 	}
 }

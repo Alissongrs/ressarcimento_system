@@ -1,7 +1,7 @@
 // Bypass axios para evitar qualquer prefixo incorreto: usa fetch com URL absoluta
 function authHeader() {
   try {
-    const t = localStorage.getItem('userToken') || localStorage.getItem('token');
+    const t = localStorage.getItem('userToken');
     return t ? { Authorization: `Bearer ${t}` } : {};
   } catch {
     return {};

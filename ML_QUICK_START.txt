@@ -26,13 +26,13 @@ DADOS NECESSÁRIOS (do banco):
   ✓ estado, concessionaria
 
 ARQUIVOS A CRIAR:
-  1. backend/ia/train_status_model.py      (Treinar modelo)
+  1. ia/train_status_model.py      (Treinar modelo)
   2. backend/handlers/ml_prediction.go     (Integração Go)
   3. Adicionar rota em backend/routes/routes.go
 
 COMANDO:
-  python backend/ia/train_status_model.py
-  (gera: backend/ia/models/status_model.pkl)
+  python ia/train_status_model.py
+  (gera: ia/models/status_model.pkl)
 
 ENDPOINT:
   GET /api/v1/processo/:id/predict-status
@@ -61,11 +61,11 @@ DADOS NECESSÁRIOS:
   ✓ processos_30d_concessionaria
 
 ARQUIVOS A CRIAR:
-  1. backend/ia/train_anomaly_model.py (15 linhas, super rápido!)
+  1. ia/train_anomaly_model.py (15 linhas, super rápido!)
 
 COMANDO:
-  python backend/ia/train_anomaly_model.py
-  (gera: backend/ia/models/anomaly_model.pkl)
+  python ia/train_anomaly_model.py
+  (gera: ia/models/anomaly_model.pkl)
 
 ENDPOINT:
   POST /api/v1/detect/anomaly
@@ -93,11 +93,11 @@ DADOS NECESSÁRIOS:
   ✓ prioridade
 
 ARQUIVOS A CRIAR:
-  1. backend/ia/train_sla_model.py (similar ao de anomalia)
+  1. ia/train_sla_model.py (similar ao de anomalia)
 
 COMANDO:
-  python backend/ia/train_sla_model.py
-  (gera: backend/ia/models/sla_model.pkl)
+  python ia/train_sla_model.py
+  (gera: ia/models/sla_model.pkl)
 
 ENDPOINT:
   POST /api/v1/predict/sla
@@ -114,25 +114,25 @@ ENDPOINT:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 DIA 1: SETUP
-  [ ] Criar diretórios: mkdir -p backend/ia/{models,data}
-  [ ] Instalar: pip install -r backend/ia/requirements.txt
+  [ ] Criar diretórios: mkdir -p ia/{models,data}
+  [ ] Instalar: pip install -r ia/requirements.txt
   [ ] requirements.txt já está pronto!
 
 DIA 2-3: DADOS
   [ ] Executar queries SQL no seu banco
-  [ ] Salvar em: backend/ia/data/status_training_data.csv
-                 backend/ia/data/anomaly_training_data.csv
-                 backend/ia/data/sla_training_data.csv
+  [ ] Salvar em: ia/data/status_training_data.csv
+                 ia/data/anomaly_training_data.csv
+                 ia/data/sla_training_data.csv
 
 DIA 4: TREINAMENTO
-  [ ] python backend/ia/train_status_model.py
-  [ ] python backend/ia/train_anomaly_model.py
-  [ ] python backend/ia/train_sla_model.py
-  [ ] Verificar se .pkl foram criados em backend/ia/models/
+  [ ] python ia/train_status_model.py
+  [ ] python ia/train_anomaly_model.py
+  [ ] python ia/train_sla_model.py
+  [ ] Verificar se .pkl foram criados em ia/models/
 
 DIA 5: API PYTHON
-  [ ] Copiar backend/ia/api_predictor.py
-  [ ] python backend/ia/api_predictor.py
+  [ ] Copiar ia/api_predictor.py
+  [ ] python ia/api_predictor.py
   [ ] Testar: curl http://localhost:8001/health
 
 DIA 6: BACKEND GO

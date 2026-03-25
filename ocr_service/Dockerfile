@@ -43,5 +43,8 @@ RUN if [ "$INSTALL_OCR_EXTRAS" = "1" ]; then \
 # Copy project (not only app.py) to include utils/modules
 COPY . /app
 
+RUN useradd -r -u 1001 appuser && chown -R appuser /app
+USER appuser
+
 EXPOSE 8000
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

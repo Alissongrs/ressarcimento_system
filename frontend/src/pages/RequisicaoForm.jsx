@@ -2,12 +2,11 @@
 import {
   criarRequisicao,
   buscarUC,
-  buscarFaturasPorUnidadeMeses,
-  buscarFaturasPorIdUcMeses,
   getUCOpcoes,
+  listarTodasFaturasPorIdUc,
 } from '../services/requisicaoService';
 import { useAuth } from '../context/AuthContext.jsx';
-import { Search, HelpCircle, X, FileText, Loader2, Clock } from 'lucide-react';
+import { Search, HelpCircle, X, FileText, Loader2, Clock, Mail, MessageCircle, Users } from 'lucide-react';
 import Toast from '../components/Toast.jsx';
 
 const MESES_PT_BR = [
@@ -65,12 +64,14 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
   }, [manualModeProp]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isFieldDisabled = isUcEncontrada && !manualMode;
-  const [ucLinksDetalhes, setUcLinksDetalhes] = useState([]);
-  const [faturasOpen, setFaturasOpen] = useState(false);
   const [toast, setToast] = useState({ open: false, type: 'info', text: '' });
   const [ucOpcoes, setUcOpcoes] = useState([]);
   const [ucOpcaoIdx, setUcOpcaoIdx] = useState(null);
   const [createdReqId, setCreatedReqId] = useState(null);
+  const [todasFaturas, setTodasFaturas] = useState([]);
+  const [todasFaturasLoading, setTodasFaturasLoading] = useState(false);
+  const [faturasSelected, setFaturasSelected] = useState(new Set());
+  const [periodoModoManual, setPeriodoModoManual] = useState(false);
 
   const showToast = (type, text, timeout = 3000) => {
     setToast({ open: true, type, text });
@@ -223,7 +224,16 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
     try {
       const dados = await buscarUC(formData.uc, []);
       const opcoes = await getUCOpcoes(formData.uc);
-      setUcOpcoes(Array.isArray(opcoes) ? opcoes : []);
+      const dedupOpcoes = (arr) => {
+        const seen = new Set();
+        return (Array.isArray(arr) ? arr : []).filter((opt) => {
+          const key = `${toStr(opt?.cliente)}|${toStr(opt?.concessionaria)}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      };
+      setUcOpcoes(dedupOpcoes(opcoes));
       setUcOpcaoIdx(null);
 
       setFormData((prev) => ({
@@ -240,13 +250,26 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
       }));
       setManualMode(false);
       setManualPromptVisible(false);
-      setUcLinksDetalhes([]);
       setIsUcEncontrada(true);
+      setFaturasSelected(new Set());
+      setPeriodoModoManual(false);
+      setPeriodos([{ mes: '', ano: '' }]);
+      // Buscar todas as faturas disponíveis para esta UC
+      setTodasFaturasLoading(true);
+      setTodasFaturas([]);
+      listarTodasFaturasPorIdUc(
+        String(dados?.id_uc || ''),
+        String(dados?.id_empresa || ''),
+        String(dados?.id_concessionaria || '')
+      ).then((result) => {
+        setTodasFaturas(Array.isArray(result?.faturas) ? result.faturas : []);
+      }).catch(() => {}).finally(() => setTodasFaturasLoading(false));
     } catch (error) {
       setIsUcEncontrada(false);
       setUcError('UC não encontrada. Por favor, preencha os campos manualmente.');
       setUcOpcoes([]);
       setUcOpcaoIdx(null);
+      setTodasFaturas([]);
       setFormData((prev) => ({
         ...prev,
         cliente: '',
@@ -307,32 +330,19 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
   };
 
   useEffect(() => {
-    setPeriodoError('');
-    const refs = periodoAte
-      ? expandRange(
-          buildMesRef(periodos[0]?.mes, periodos[0]?.ano),
-          buildMesRef(periodoFim.mes, periodoFim.ano),
-        )
-      : (periodos || [])
-          .map((p) => buildMesRef(p.mes, p.ano))
-          .filter(Boolean);
-    if (periodoAte) {
-      const startRef = buildMesRef(periodos[0]?.mes, periodos[0]?.ano);
-      const endRef = buildMesRef(periodoFim.mes, periodoFim.ano);
-      if (startRef && endRef) {
-        const [sy, sm] = startRef.split('-').map(Number);
-        const [ey, em] = endRef.split('-').map(Number);
-        if (ey < sy || (ey === sy && em < sm)) {
-          setPeriodoError('Período inválido: o fim deve ser maior ou igual ao início.');
-          setUcLinksDetalhes([]);
-          return;
-        }
+    if (!periodoModoManual || !periodoAte) { setPeriodoError(''); return; }
+    const startRef = buildMesRef(periodos[0]?.mes, periodos[0]?.ano);
+    const endRef = buildMesRef(periodoFim.mes, periodoFim.ano);
+    if (startRef && endRef) {
+      const [sy, sm] = startRef.split('-').map(Number);
+      const [ey, em] = endRef.split('-').map(Number);
+      if (ey < sy || (ey === sy && em < sm)) {
+        setPeriodoError('Período inválido: o fim deve ser maior ou igual ao início.');
+        return;
       }
     }
-    if (!formData.uc || refs.length === 0) return;
-    const t = setTimeout(() => handleBuscarFaturas(refs), 250);
-    return () => clearTimeout(t);
-  }, [formData.uc, formData.id_uc, formData.id_empresa, formData.id_concessionaria, periodos, periodoAte, periodoFim]);
+    setPeriodoError('');
+  }, [periodos, periodoAte, periodoFim, periodoModoManual]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -383,6 +393,9 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
       setIsUcEncontrada(false);
       setManualMode(false);
       setManualPromptVisible(false);
+      setTodasFaturas([]);
+      setFaturasSelected(new Set());
+      setPeriodoModoManual(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (error) {
       showToast('error', 'Falha ao enviar. Verifique os dados e tente novamente.');
@@ -392,8 +405,65 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
     }
   };
 
+  const contatosSuporte = [
+    {
+      icon: <MessageCircle size={20} />,
+      label: 'WhatsApp',
+      sub: '(15) 99747-7277',
+      href: 'https://wa.me/5515997477277',
+      color: 'bg-green-600 hover:bg-green-500',
+    },
+    {
+      icon: <Mail size={20} />,
+      label: 'E-mail',
+      sub: 'complaint@amee.com.br',
+      href: 'mailto:complaint@amee.com.br',
+      color: 'bg-blue-600 hover:bg-blue-500',
+    },
+    {
+      icon: <Users size={18} />,
+      label: 'Luana',
+      sub: 'Teams',
+      href: 'https://teams.microsoft.com/l/chat/0/0?users=luana.nascimento@amee.com.br',
+      color: 'bg-indigo-600 hover:bg-indigo-500',
+    },
+    {
+      icon: <Users size={18} />,
+      label: 'Eliane',
+      sub: 'Teams',
+      href: 'https://teams.microsoft.com/l/chat/0/0?users=eliane.araujo@amee.com.br',
+      color: 'bg-indigo-600 hover:bg-indigo-500',
+    },
+    {
+      icon: <Users size={18} />,
+      label: 'Paulo',
+      sub: 'Teams',
+      href: 'https://teams.microsoft.com/l/chat/0/0?users=paulo.passos@amee.com.br',
+      color: 'bg-indigo-600 hover:bg-indigo-500',
+    },
+  ];
+
   return (
     <div className="max-w-4xl mx-auto p-6 text-[var(--fg)]">
+      {/* Ícones flutuantes de suporte */}
+      <div className="fixed right-4 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-2">
+        {contatosSuporte.map((c, i) => (
+          <a
+            key={i}
+            href={c.href}
+            target="_blank"
+            rel="noreferrer"
+            title={`${c.label} — ${c.sub}`}
+            className={`group flex items-center gap-2 ${c.color} text-white rounded-full shadow-lg transition-all duration-200 overflow-hidden w-10 hover:w-44 h-10`}
+          >
+            <span className="shrink-0 w-10 h-10 flex items-center justify-center">{c.icon}</span>
+            <span className="whitespace-nowrap text-xs font-medium pr-3 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <span className="block font-semibold leading-tight">{c.label}</span>
+              <span className="block opacity-80 leading-tight">{c.sub}</span>
+            </span>
+          </a>
+        ))}
+      </div>
       <div className="glass-card border border-[var(--border)] rounded-lg p-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold">Nova Requisição</h1>
@@ -511,127 +581,132 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
         </div>
 
         <div>
-          <label className="block font-semibold text-[var(--fg)] mb-2">Qual o período da irregularidade? *</label>
-          <div className="flex items-center gap-3 mb-2 text-xs">
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={periodoAte}
-                onChange={(e) => setPeriodoAte(e.target.checked)}
-              />
-              Até
-            </label>
-          </div>
+          <label className="block font-semibold text-[var(--fg)] mb-2">
+            {(isUcEncontrada && !manualMode && !periodoModoManual) ? 'Selecione a(s) fatura(s) com irregularidade *' : 'Qual o período da irregularidade? *'}
+          </label>
 
-          {!periodoAte && (
+          {/* Lista de faturas disponíveis */}
+          {isUcEncontrada && !manualMode && !periodoModoManual && (
             <>
-              {periodos.map((p, index) => (
-                <div key={index} className="flex items-center space-x-2 mb-2">
-                  <select name="mes" value={p.mes} onChange={(e) => handlePeriodoChange(index, e)} className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]" required>
-                    <option value="">Mês</option>
-                    {MESES_PT_BR.map((mesLabel, i) => (
-                      <option key={i} value={i + 1}>{mesLabel}</option>
-                    ))}
-                  </select>
-                  <input type="number" name="ano" value={p.ano} onChange={(e) => handlePeriodoChange(index, e)} placeholder="Ano" className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]" required />
-                  {periodos.length > 1 && (
-                    <button type="button" onClick={() => handleRemovePeriodo(index)} className="px-3 py-2 bg-red-500 text-[var(--fg)] rounded-lg hover:bg-red-600 inline-flex items-center gap-1">
-                      <X size={14}/> Remover
-                    </button>
-                  )}
+              {todasFaturasLoading ? (
+                <div className="text-xs opacity-70 inline-flex items-center gap-2 mb-2">
+                  <Loader2 className="animate-spin" size={14} /> Buscando faturas...
                 </div>
-              ))}
-              <div className="mt-2 flex items-center gap-2">
-                <button type="button" onClick={handleAddPeriodo} className="px-4 py-2 bg-green-600 text-[var(--fg)] text-sm font-semibold rounded-lg hover:bg-green-700">
-                  + Adicionar Período
-                </button>
-              </div>
+              ) : todasFaturas.length === 0 ? (
+                <div className="text-xs opacity-50 mb-2">Nenhuma fatura encontrada para esta UC.</div>
+              ) : (
+                <div className="space-y-1 max-h-72 overflow-auto border border-[var(--border)] rounded p-2 mb-2">
+                  <div className="text-xs opacity-50 mb-1">{todasFaturas.length} fatura(s) disponível(is) — selecione as que têm irregularidade</div>
+                  {todasFaturas.map((f, idx) => {
+                    const mr = toStr(f?.mes_ref || '');
+                    const parts = mr.split('-');
+                    const fmtMes = parts[1] && parts[0] ? `${parts[1]}/${parts[0]}` : mr || '-';
+                    const valor = Number(f?.valor_total ?? 0);
+                    const selected = faturasSelected.has(idx);
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => {
+                          setFaturasSelected((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(idx)) { next.delete(idx); } else { next.add(idx); }
+                            const sel = Array.from(next).map((i) => {
+                              const ref = toStr(todasFaturas[i]?.mes_ref || '');
+                              const p = ref.split('-');
+                              return { ano: p[0] || '', mes: String(parseInt(p[1] || '0', 10)) };
+                            }).filter((p) => p.mes && p.ano);
+                            setPeriodos(sel.length > 0 ? sel : [{ mes: '', ano: '' }]);
+                            const firstIdx = Array.from(next)[0];
+                            if (firstIdx != null) {
+                              setFormData((prev) => ({ ...prev, linkFatura: toStr(todasFaturas[firstIdx]?.link) || '' }));
+                            } else {
+                              setFormData((prev) => ({ ...prev, linkFatura: '' }));
+                            }
+                            return next;
+                          });
+                        }}
+                        className={`flex items-center justify-between px-3 py-2 rounded border cursor-pointer transition-colors ${selected ? 'border-blue-500 bg-blue-900/20' : 'border-[var(--border)] hover:bg-[var(--panel)]'}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <input type="checkbox" checked={selected} readOnly className="pointer-events-none" />
+                          <span className="text-sm font-medium">{fmtMes}</span>
+                          {valor > 0 && <span className="text-xs opacity-60">{valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>}
+                        </div>
+                        {f?.link && (
+                          <a href={toStr(f.link)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs text-[var(--accent)] underline shrink-0">ver fatura</a>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => { setPeriodoModoManual(true); setFaturasSelected(new Set()); setPeriodos([{ mes: '', ano: '' }]); setFormData((p) => ({ ...p, linkFatura: '' })); }}
+                className="text-xs underline text-[var(--accent)]"
+              >
+                Informar período manualmente
+              </button>
             </>
           )}
 
-          {periodoAte && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              <div className="flex items-center gap-2">
-                <select
-                  value={periodos[0]?.mes}
-                  onChange={(e) => setPeriodos([{ ...periodos[0], mes: e.target.value, ano: periodos[0]?.ano }])}
-                  className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]"
-                  required
-                >
-                  <option value="">Mês inicial</option>
-                  {MESES_PT_BR.map((mesLabel, i) => (
-                    <option key={i} value={i + 1}>{mesLabel}</option>
+          {/* Seletor de período manual */}
+          {(periodoModoManual || !isUcEncontrada || manualMode) && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3 mb-2 text-xs">
+                <label className="inline-flex items-center gap-2">
+                  <input type="checkbox" checked={periodoAte} onChange={(e) => setPeriodoAte(e.target.checked)} />
+                  Até
+                </label>
+              </div>
+              {!periodoAte && (
+                <>
+                  {periodos.map((p, index) => (
+                    <div key={index} className="flex items-center space-x-2 mb-2">
+                      <select name="mes" value={p.mes} onChange={(e) => handlePeriodoChange(index, e)} className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]" required>
+                        <option value="">Mês</option>
+                        {MESES_PT_BR.map((mesLabel, i) => (<option key={i} value={i + 1}>{mesLabel}</option>))}
+                      </select>
+                      <input type="number" name="ano" value={p.ano} onChange={(e) => handlePeriodoChange(index, e)} placeholder="Ano" className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]" required />
+                      {periodos.length > 1 && (
+                        <button type="button" onClick={() => handleRemovePeriodo(index)} className="px-3 py-2 bg-red-500 text-[var(--fg)] rounded-lg hover:bg-red-600 inline-flex items-center gap-1">
+                          <X size={14}/> Remover
+                        </button>
+                      )}
+                    </div>
                   ))}
-                </select>
-                <input
-                  type="number"
-                  value={periodos[0]?.ano}
-                  onChange={(e) => setPeriodos([{ ...periodos[0], ano: e.target.value, mes: periodos[0]?.mes }])}
-                  placeholder="Ano inicial"
-                  className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]"
-                  required
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <select
-                  value={periodoFim.mes}
-                  onChange={(e) => setPeriodoFim((prev) => ({ ...prev, mes: e.target.value }))}
-                  className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]"
-                  required
-                >
-                  <option value="">Mês final</option>
-                  {MESES_PT_BR.map((mesLabel, i) => (
-                    <option key={i} value={i + 1}>{mesLabel}</option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  value={periodoFim.ano}
-                  onChange={(e) => setPeriodoFim((prev) => ({ ...prev, ano: e.target.value }))}
-                  placeholder="Ano final"
-                  className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]"
-                  required
-                />
-              </div>
-            </div>
-          )}
-          {periodoError && (
-            <div className="text-xs text-red-400 mt-2">{periodoError}</div>
-          )}
-        </div>
-
-        <div>
-          <label className="block font-semibold text-[var(--fg)] mb-1">Faturas encontradas</label>
-          {faturasLoading ? (
-            <div className="text-xs opacity-70 inline-flex items-center gap-2">
-              <Loader2 className="animate-spin" size={14} /> Buscando faturas...
-            </div>
-          ) : faturasError ? (
-            <div className="text-xs text-red-400">{faturasError}</div>
-          ) : ucLinksDetalhes.length === 0 ? (
-            <div className="text-xs opacity-70">Nenhuma fatura encontrada.</div>
-          ) : (
-            <div className="space-y-2 max-h-48 overflow-auto">
-              <div className="text-xs opacity-70">
-                {ucLinksDetalhes.length} fatura(s) encontrada(s)
-              </div>
-              {ucLinksDetalhes.map((it, idx) => (
-                <div key={`${(it.link || '')}-${idx}`} className="flex items-start gap-2 text-sm border border-[var(--border)] rounded p-2 bg-[var(--panel)]">
-                  {toStr(it.mes_ref) && <span className="opacity-70 shrink-0">{toStr(it.mes_ref)}</span>}
-                  <a className="text-[var(--accent)] underline break-all" href={toStr(it.link)} target="_blank" rel="noreferrer">{toStr(it.link)}</a>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFormData((prev) => ({ ...prev, linkFatura: toStr(it.link) }));
-                    }}
-                    className="ml-auto text-xs underline text-[var(--accent)]"
-                  >
-                    Usar
+                  <button type="button" onClick={handleAddPeriodo} className="px-4 py-2 bg-green-600 text-[var(--fg)] text-sm font-semibold rounded-lg hover:bg-green-700">
+                    + Adicionar Período
                   </button>
+                </>
+              )}
+              {periodoAte && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div className="flex items-center gap-2">
+                    <select value={periodos[0]?.mes} onChange={(e) => setPeriodos([{ ...periodos[0], mes: e.target.value, ano: periodos[0]?.ano }])} className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]" required>
+                      <option value="">Mês inicial</option>
+                      {MESES_PT_BR.map((mesLabel, i) => (<option key={i} value={i + 1}>{mesLabel}</option>))}
+                    </select>
+                    <input type="number" value={periodos[0]?.ano} onChange={(e) => setPeriodos([{ ...periodos[0], ano: e.target.value, mes: periodos[0]?.mes }])} placeholder="Ano inicial" className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]" required />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select value={periodoFim.mes} onChange={(e) => setPeriodoFim((prev) => ({ ...prev, mes: e.target.value }))} className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]" required>
+                      <option value="">Mês final</option>
+                      {MESES_PT_BR.map((mesLabel, i) => (<option key={i} value={i + 1}>{mesLabel}</option>))}
+                    </select>
+                    <input type="number" value={periodoFim.ano} onChange={(e) => setPeriodoFim((prev) => ({ ...prev, ano: e.target.value }))} placeholder="Ano final" className="w-full p-2 border border-[var(--border)] rounded glass-card bg-[var(--panel)] text-[var(--fg)]" required />
+                  </div>
                 </div>
-              ))}
+              )}
+              {periodoModoManual && (
+                <button type="button" onClick={() => { setPeriodoModoManual(false); setFaturasSelected(new Set()); setPeriodos([{ mes: '', ano: '' }]); }} className="text-xs underline text-[var(--accent)]">
+                  ← Voltar para seleção de faturas
+                </button>
+              )}
             </div>
           )}
+
+          {periodoError && <div className="text-xs text-red-400 mt-2">{periodoError}</div>}
         </div>
 
         <div>

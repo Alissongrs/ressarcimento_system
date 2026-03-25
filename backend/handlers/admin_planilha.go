@@ -49,12 +49,15 @@ type PlanilhaRow struct {
     ValorNF           float64 `json:"valor_nf"`
 
     // Histórico
-    IDHistorico       int64   `json:"id_historico"`
-    HistData          string  `json:"hist_data"`
-    HistComentario    string  `json:"hist_comentario"`
-    Etapa             string  `json:"etapa"`
-    SubEtapa          string  `json:"sub_etapa"`
-    TipoMov           string  `json:"tipo_movimentacao"`
+    IDHistorico       int64    `json:"id_historico"`
+    HistData          string   `json:"hist_data"`
+    HistComentario    string   `json:"hist_comentario"`
+    Etapa             string   `json:"etapa"`
+    SubEtapa          string   `json:"sub_etapa"`
+    TipoMov           string   `json:"tipo_movimentacao"`
+
+    // Score de Progressão (cache de FT_PROCESSOS)
+    ScorePercentual   *float64 `json:"score_percentual"`
 }
 
 // GET /api/v1/admin/planilha
@@ -139,7 +142,8 @@ func AdminPlanilhaList(c *gin.Context) {
           COALESCE(h.comentario, '')                        AS hist_comentario,
           COALESCE(h.etapa_nova, '')                        AS etapa,
           COALESCE(h.sub_etapa, '')                         AS sub_etapa,
-          COALESCE(h.tipo_movimentacao, '')                 AS tipo_movimentacao
+          COALESCE(h.tipo_movimentacao, '')                 AS tipo_movimentacao,
+          p.score_percentual                                AS score_percentual
         FROM FT_PROCESSOS p
         JOIN FT_REQUISICOES r         ON r.id_requisicao = p.id_processo
         JOIN DM_ETAPAS_PROCESSO etapa ON p.id_etapa_processo = etapa.id_etapa_processo
@@ -215,6 +219,7 @@ func AdminPlanilhaList(c *gin.Context) {
           COALESCE(r.cliente, '')                           AS cliente,
           ''                                                AS tipo_irregularidade,
           ''                                                AS subtipo_irregularidade,
+          0                                                 AS ressarcimento_estimado,
           COALESCE(p.nome_coluna, kanb.nome_coluna, '')     AS nome_coluna,
           COALESCE(etapa.etapa, '')                         AS etapa_atual,
 
@@ -227,6 +232,9 @@ func AdminPlanilhaList(c *gin.Context) {
 
           ''                                                AS forma_devolucao,
           0                                                 AS valor_fluxo,
+          0                                                 AS fluxo_simples,
+          0                                                 AS fluxo_dobro,
+          0                                                 AS fluxo_simples_dobro,
           ''                                                AS data_fluxo,
 
           ''                                                AS numero_nf,
@@ -240,7 +248,8 @@ func AdminPlanilhaList(c *gin.Context) {
           COALESCE(h.comentario, '')                        AS hist_comentario,
           COALESCE(h.etapa_nova, '')                        AS etapa,
           COALESCE(h.sub_etapa, '')                         AS sub_etapa,
-          COALESCE(h.tipo_movimentacao, '')                 AS tipo_movimentacao
+          COALESCE(h.tipo_movimentacao, '')                 AS tipo_movimentacao,
+          p.score_percentual                                AS score_percentual
         FROM FT_PROCESSOS p
         JOIN FT_REQUISICOES r         ON r.id_requisicao = p.id_processo
         JOIN DM_ETAPAS_PROCESSO etapa ON p.id_etapa_processo = etapa.id_etapa_processo
@@ -270,7 +279,7 @@ func AdminPlanilhaList(c *gin.Context) {
             &it.CreditoSimples, &it.DataSimples, &it.CreditoDobro, &it.DataDobro, &it.RepasseSimples, &it.RepasseDobro,
             &it.FormaDevolucao, &it.ValorFluxo, &it.FluxoSimples, &it.FluxoDobro, &it.FluxoSimplesDobro, &it.DataFluxo,
             &it.NumeroNF, &it.DataEmissao, &it.DataVencimento, &it.DataPagamento, &it.ValorNF,
-            &it.IDHistorico, &it.HistData, &it.HistComentario, &it.Etapa, &it.SubEtapa, &it.TipoMov,
+            &it.IDHistorico, &it.HistData, &it.HistComentario, &it.Etapa, &it.SubEtapa, &it.TipoMov, &it.ScorePercentual,
         ); err == nil {
             out = append(out, it)
         }
@@ -316,7 +325,8 @@ func AdminPlanilhaList(c *gin.Context) {
           COALESCE(h.comentario, '')                        AS hist_comentario,
           COALESCE(h.etapa_nova, '')                        AS etapa,
           COALESCE(h.sub_etapa, '')                         AS sub_etapa,
-          COALESCE(h.tipo_movimentacao, '')                 AS tipo_movimentacao
+          COALESCE(h.tipo_movimentacao, '')                 AS tipo_movimentacao,
+          p.score_percentual                                AS score_percentual
         FROM FT_REQUISICOES r
         LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
         LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = r.id_requisicao
@@ -359,7 +369,7 @@ func AdminPlanilhaList(c *gin.Context) {
                     &it.CreditoSimples, &it.DataSimples, &it.CreditoDobro, &it.DataDobro, &it.RepasseSimples, &it.RepasseDobro,
                     &it.FormaDevolucao, &it.ValorFluxo, &it.FluxoSimples, &it.FluxoDobro, &it.FluxoSimplesDobro, &it.DataFluxo,
                     &it.NumeroNF, &it.DataEmissao, &it.DataVencimento, &it.DataPagamento, &it.ValorNF,
-                    &it.IDHistorico, &it.HistData, &it.HistComentario, &it.Etapa, &it.SubEtapa, &it.TipoMov,
+                    &it.IDHistorico, &it.HistData, &it.HistComentario, &it.Etapa, &it.SubEtapa, &it.TipoMov, &it.ScorePercentual,
                 ); err == nil {
                     out = append(out, it)
                 }
@@ -420,6 +430,11 @@ func AdminPlanilhaBulkMover(c *gin.Context) {
 
     subID, _ := resolveSubEtapaIDGorm(tx, strings.TrimSpace(body.SubEtapa))
     for _, pid := range body.ProcessoIDs {
+        // Captura coluna e id_requisicao atuais antes de mover
+        var oldColuna sql.NullInt64
+        var reqID sql.NullInt64
+        _ = queryRowGorm(tx, `SELECT id_coluna, id_requisicao FROM FT_PROCESSOS WHERE id_processo = ?`, pid).Scan(&oldColuna, &reqID)
+
         // Atualiza processo
         if _, err := execGorm(tx, "UPDATE FT_PROCESSOS SET id_etapa_processo = ?, sub_etapa = ?, id_sub_etapa_processo = ?, id_coluna = ?, nome_coluna = ?, ultima_atualizacao = NOW() WHERE id_processo = ?",
             etapaID.Int64, strings.TrimSpace(body.SubEtapa), nullIntToIface(subID),
@@ -429,13 +444,21 @@ func AdminPlanilhaBulkMover(c *gin.Context) {
             c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("falha ao atualizar processo %d: %v", pid, err)})
             return
         }
-        // Registra histórico da movimentaÃ§ão (status compatível com DM_STATUS)
+        // Registra histórico da movimentação (status compatível com DM_STATUS)
         statusNome := getStatusNomeByRequisicaoGorm(tx, int64(pid))
         if _, err := execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao)
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR))`,
             pid, userIDNull, statusNome, statusNome, body.Etapa, body.Etapa, strings.TrimSpace(body.SubEtapa), strings.TrimSpace(body.Comentario)); err != nil {
             c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("falha ao registrar histórico %d: %v", pid, err)})
             return
+        }
+
+        // Se saiu de Ativos (id_coluna=1): invalida cache e grava training log
+        if oldColuna.Valid && oldColuna.Int64 == 1 && reqID.Valid && colID.Valid {
+            go func(rID int64, newCol int64) {
+                InvalidateScoreCache(rID)
+                RegistrarTrainingLog(rID, int(newCol), ScoreData{})
+            }(reqID.Int64, colID.Int64)
         }
     }
 

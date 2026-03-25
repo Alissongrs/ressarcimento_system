@@ -211,7 +211,7 @@ func DesvioMedia(c *gin.Context) {
   raw := out.Bytes()
   var payload any
   if err := json.Unmarshal(raw, &payload); err != nil {
-    c.JSON(200, gin.H{
+    c.JSON(http.StatusOK, gin.H{
       "raw":    out.String(),
       "stderr": strings.TrimSpace(stderr.String()),
     })
@@ -237,11 +237,11 @@ func DesvioMedia(c *gin.Context) {
       "python_bin":                   pythonBin,
       "script_path":                  scriptPath,
     }
-    c.JSON(200, m)
+    c.JSON(http.StatusOK, m)
     return
   }
 
-  c.JSON(200, payload)
+  c.JSON(http.StatusOK, payload)
 }
 
 // ------------------ helpers ------------------

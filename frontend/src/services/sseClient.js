@@ -13,6 +13,7 @@ export function subscribeProcesso(processoId, token, onUpdate) {
   if (!processoId || !token) return () => {};
   const origin = resolveOrigin();
   const url = new URL(`/api/v1/processos/${encodeURIComponent(processoId)}/events`, origin);
+  // EventSource não suporta headers — token via query param é o padrão aceito (requer HTTPS).
   url.searchParams.set('token', token);
   const es = new EventSource(url.toString());
   const handler = (ev) => { try { const data = JSON.parse(ev.data || '{}'); onUpdate?.(data); } catch {} };

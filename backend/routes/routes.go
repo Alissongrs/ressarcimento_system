@@ -216,9 +216,6 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 
 		apiV1.GET("/departamentos", handlers.GetDepartamentos)
 
-		// Rotas que podem alterar alertas por ID sem sessão (casos específicos)
-		apiV1.PUT("/alertas/:id", handlers.UpdateAlerta)
-		apiV1.DELETE("/alertas/:id", handlers.DeleteAlerta)
 
 		// ------------------- Autenticado (qualquer usuário) -------------------
 		authRequired := apiV1.Group("/")
@@ -263,9 +260,27 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Alertas
 			authRequired.GET("/alertas", handlers.GetAlertasByUser)
 			authRequired.POST("/alertas/marcar-lido", handlers.MarcarAlertaComoLido)
+			authRequired.PUT("/alertas/:id", handlers.UpdateAlerta)
+			authRequired.DELETE("/alertas/:id", handlers.DeleteAlerta)
 
 			// Faturas auxiliares
 			authRequired.GET("/faturas-anos", handlers.GetFaturasAnos)
+
+			// Faturas Kanban (Análise de Desvio)
+			authRequired.GET("/faturas/cache", handlers.ListFaturasCache)
+
+			// Fichas de Análise (F01–F05 + Resumo)
+			authRequired.GET("/faturas/ficha/resumo", handlers.ListFichaResumo)
+			authRequired.GET("/faturas/ficha/01", handlers.ListFicha01)
+			authRequired.GET("/faturas/ficha/02", handlers.ListFicha02)
+			authRequired.GET("/faturas/ficha/03", handlers.ListFicha03)
+			authRequired.GET("/faturas/ficha/04", handlers.ListFicha04)
+			authRequired.GET("/faturas/ficha/05", handlers.ListFicha05)
+			authRequired.GET("/faturas/ficha/combinados", handlers.ListFichaCombinados)
+			authRequired.GET("/faturas/uc-historico", handlers.GetUCFaturas)
+			authRequired.GET("/faturas/ucs-em-processo", handlers.ListUCsEmProcesso)
+			authRequired.POST("/faturas/aisure/chat", handlers.AisureChatHandler)
+			authRequired.POST("/faturas/aisure/confirmar", handlers.AisureConfirmarHandler)
 
 			// Busca global
 			authRequired.GET("/search/global", handlers.SearchGlobal)
@@ -412,6 +427,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 
 			// Score de Progressão (novo)
 			gestorRequired.GET("/processos/:id/score", handlers.ScoreProcessoHandler)
+			gestorRequired.POST("/admin/score/precalcular", handlers.PrecalcularScoresHandler)
 
 			// Menções
 			gestorRequired.GET("/usuarios/mencoes", handlers.GetUsuariosMencoes)
@@ -569,6 +585,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 
 			// Score de Progressão (novo)
 			gestorRequired.GET("/processos/:id/score", handlers.ScoreProcessoHandler)
+			gestorRequired.POST("/admin/score/precalcular", handlers.PrecalcularScoresHandler)
 
 			gestorRequired.GET("/usuarios/mencoes", handlers.GetUsuariosMencoes)
 			gestorRequired.GET("/tags", handlers.GetAllTags)

@@ -87,12 +87,13 @@ func AdminEditProcesso(c *gin.Context) {
 			if len(snippet) > 400 {
 				snippet = snippet[:400] + "..."
 			}
-			c.JSON(http.StatusBadRequest, gin.H{"error": "payload inválido: " + err.Error(), "_raw": snippet})
+			_ = snippet // usado apenas em log interno
+		c.JSON(http.StatusBadRequest, gin.H{"error": "payload inválido"})
 			return
 		}
 	} else {
 		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "payload inválido: " + err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "payload inválido"})
 			return
 		}
 	}

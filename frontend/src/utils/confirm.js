@@ -25,7 +25,7 @@ const ensureStyles = () => {
   border: 1px solid #9a9a9a;
   border-radius: 6px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-  font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
 }
 .confirm-title {
   padding: 10px 12px;

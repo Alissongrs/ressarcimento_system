@@ -1,4 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
+import DOMPurify from 'dompurify';
 import PropTypes from 'prop-types';
 import { getEmailsByProcessoID, enviarEmailProcesso, marcarEmailProcessoLido } from '../services/requisicaoService';
 import { X, Send, History, Mail, User, Calendar, Paperclip } from 'lucide-react';
@@ -238,7 +239,7 @@ const ModalEmail = ({ processo, onClose }) => {
                   <div
                     className="whitespace-pre-wrap opacity-80 text-sm"
                     dangerouslySetInnerHTML={{
-                      __html: pickStr(email.corpo).replace(/\n/g, '<br />'),
+                      __html: DOMPurify.sanitize(pickStr(email.corpo).replace(/\n/g, '<br />')),
                     }}
                   />
                 </div>

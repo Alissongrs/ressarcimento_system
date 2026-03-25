@@ -7,8 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"ressarcimento-backend/database"
+
+	"github.com/gin-gonic/gin"
 )
 
 type backlogCheck struct {
@@ -185,7 +186,7 @@ func ToggleBacklogCheck(c *gin.Context) {
 	}
 
 	if body.Checked {
-		_, err := execGorm(db, 
+		_, err := execGorm(db,
 			"INSERT INTO BACKLOG_CHECKS (id_processo, checked_by, checked_at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE checked_by=VALUES(checked_by), checked_at=VALUES(checked_at)",
 			pid, uid,
 		)
@@ -202,6 +203,3 @@ func ToggleBacklogCheck(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
-
-
-

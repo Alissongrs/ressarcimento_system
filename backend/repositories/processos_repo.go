@@ -92,7 +92,8 @@ SELECT
   ) AS suspenso,
   p.data_alerta        AS data_alerta,
   p.ultima_atualizacao AS ultima_atualizacao,
-  vh.data_movimentacao AS data_ultima_movimentacao
+  vh.data_movimentacao AS data_ultima_movimentacao,
+  p.score_percentual   AS score_percentual
 FROM FT_PROCESSOS p
 LEFT JOIN FT_REQUISICOES r
   ON r.id_requisicao = p.id_processo
@@ -210,6 +211,7 @@ func (r *ProcessosRepo) ListarKanbanFast(ctx context.Context, limit int, coluna 
 			dataAlerta     sql.NullTime
 			ultAtual       sql.NullTime
 			dataUltMov     sql.NullTime
+			scorePerc      sql.NullFloat64
 		)
 
 		if err := rows.Scan(
@@ -236,6 +238,7 @@ func (r *ProcessosRepo) ListarKanbanFast(ctx context.Context, limit int, coluna 
 			&dataAlerta,
 			&ultAtual,
 			&dataUltMov,
+			&scorePerc,
 		); err != nil {
 			return nil, err
 		}
@@ -361,6 +364,13 @@ func (r *ProcessosRepo) ListarKanbanFast(ctx context.Context, limit int, coluna 
 			DataAlerta:             dataAlertaPtr,
 			UltimaAtualizacao:      ultAtualPtr,
 			DataUltimaMovimentacao: dataUltMovPtr,
+			ScorePercentual: func() *float64 {
+				if scorePerc.Valid {
+					v := scorePerc.Float64
+					return &v
+				}
+				return nil
+			}(),
 		})
 	}
 

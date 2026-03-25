@@ -27,7 +27,6 @@ export const AuthProvider = ({ children }) => {
 
   const clearAuth = () => {
     localStorage.removeItem('userToken');
-    try { localStorage.removeItem('token'); } catch {}
     setUser(null);
     setRemainingSeconds(null);
     expMsRef.current = null;
@@ -108,7 +107,6 @@ export const AuthProvider = ({ children }) => {
       const decoded = jwtDecode(token);
       const tipoConta = decoded.tipo_conta || decoded.role || decoded.tipoConta;
       localStorage.setItem('userToken', token);
-      try { localStorage.setItem('token', token); } catch {}
       setUser({
         nome: decoded.nome,
         tipo_conta: tipoConta,

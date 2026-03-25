@@ -2,13 +2,7 @@
 import axios from 'axios';
 
 export function getRawToken() {
-  return (
-    localStorage.getItem('token') ||
-    localStorage.getItem('authToken') ||
-    localStorage.getItem('jwt') ||
-    sessionStorage.getItem('token') ||
-    ''
-  );
+  return localStorage.getItem('userToken') || '';
 }
 
 function cleanToken(t) {

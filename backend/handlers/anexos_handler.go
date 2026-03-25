@@ -190,17 +190,20 @@ func DownloadAnexoByID(c *gin.Context) {
 	clean := strings.TrimSpace(caminho.String)
 	if clean != "" {
 		clean = filepath.Clean(clean)
-		slash := filepath.ToSlash(clean)
-		if strings.HasPrefix(slash, "uploads/") && !strings.Contains(slash, "..") {
-			if fileBytes, err := os.ReadFile(clean); err == nil {
-				contentType := strings.TrimSpace(mime.String)
-				if contentType == "" {
-					contentType = http.DetectContentType(fileBytes)
-				}
-				c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-				c.Data(http.StatusOK, contentType, fileBytes)
-				return
+		absPath, errAbs := filepath.Abs(clean)
+		absUploads, errUploads := filepath.Abs("uploads")
+		if errAbs != nil || errUploads != nil || !strings.HasPrefix(absPath, absUploads+string(filepath.Separator)) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Caminho de arquivo inválido"})
+			return
+		}
+		if fileBytes, err := os.ReadFile(absPath); err == nil {
+			contentType := strings.TrimSpace(mime.String)
+			if contentType == "" {
+				contentType = http.DetectContentType(fileBytes)
 			}
+			c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+			c.Data(http.StatusOK, contentType, fileBytes)
+			return
 		}
 	}
 

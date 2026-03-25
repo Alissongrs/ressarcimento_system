@@ -44,3 +44,6 @@ frontend/.vite_theme_fix/
 *.save
 *~
 ressarcimento_system_old_*/
+
+# Backups gerados pelos scripts
+/backups/

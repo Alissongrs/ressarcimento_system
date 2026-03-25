@@ -568,6 +568,9 @@ func runMigrations(db *sql.DB) error {
 		ensureIndex("FT_HISTORICO_MOVIMENTACOES", "idx_historico_req_data", "id_requisicao, data_movimentacao DESC, id_historico DESC")
 		// ensureIndex("FT_HISTORICO_MOVIMENTACOES", "idx_historico_id_processo", "id_processo") // Coluna id_processo não existe
 
+		// Índices em FT_HISTORICO_CANAIS — sem índice causa full scan no JOIN por id_historico
+		ensureIndex("FT_HISTORICO_CANAIS", "idx_historico_canais_hist", "id_historico")
+
 		// Índices em FT_PROCESSOS
 		ensureIndex("FT_PROCESSOS", "idx_processos_etapa", "id_etapa_processo")
 		// ensureIndex("FT_PROCESSOS", "idx_processos_data_criacao", "data_criacao DESC") // Coluna data_criacao não existe

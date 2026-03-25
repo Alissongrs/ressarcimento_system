@@ -501,7 +501,7 @@ export const getUltimoHistorico = async (id) => {
 };
 
 // ======================= Busca Global (históricos) =======================
-export const searchGlobalHistorico = async (q, limit = 200, offset = 0) => {
+export const searchGlobalHistorico = async (q, limit = 200, offset = 0, signal = undefined) => {
   const query = String(q ?? '').trim();
   if (!query) return { results: [], count: 0 };
   const params = { q: query };
@@ -510,6 +510,7 @@ export const searchGlobalHistorico = async (q, limit = 200, offset = 0) => {
   const { data } = await api.get('/api/v1/search/global', {
     params,
     baseURL: '',
+    signal,
   });
   return data || { results: [], count: 0 };
 };

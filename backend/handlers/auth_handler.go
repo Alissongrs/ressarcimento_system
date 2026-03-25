@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -20,8 +21,13 @@ import (
 )
 
 // Sal legado para compatibilidade com hashes SHA256 antigos
-// DEPRECATED: usado apenas para migraÃ§ão de senhas antigas
-var salt = "um-sal-secreto-para-aumentar-a-seguranca"
+// DEPRECATED: usado apenas para migração de senhas antigas
+var salt = func() string {
+	if s := os.Getenv("LEGACY_PASSWORD_SALT"); s != "" {
+		return s
+	}
+	return "um-sal-secreto-para-aumentar-a-seguranca"
+}()
 
 // hashPasswordBcrypt cria um hash seguro usando bcrypt (custo 12)
 func hashPasswordBcrypt(password string) (string, error) {

@@ -1311,7 +1311,8 @@ async def ocr_upload(file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Erro interno: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno no servidor")
 
 
 @app.post("/ocr/analyze")
@@ -1461,7 +1462,8 @@ async def ocr_desvio_media(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Erro interno: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno no servidor")
 
 
 # ============================================================================
@@ -1679,7 +1681,8 @@ async def ocr_interpret(
             "status": "success",
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro na interpretação: {str(e)}")
+        logger.error(f"Erro na interpretação: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno na interpretação")
 
 
 @app.post("/ocr/interpret_json")
@@ -1713,7 +1716,8 @@ def ocr_interpret_json(payload: InterpretPayload):
             "status": "success",
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro na interpretação: {str(e)}")
+        logger.error(f"Erro na interpretação: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno na interpretação")
 
 @app.post("/ocr/explain")
 def ocr_explain(payload: dict):

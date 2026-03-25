@@ -24,7 +24,7 @@ export default function HomeGestorAdmin() {
 
   const [prazos, setPrazos] = React.useState({ grupos: {}, rows: [], count: 0 });
   const [errPrazos, setErrPrazos] = React.useState('');
-  const [toast, setToast] = React.useState({ open: false, type: 'info', text: '' });
+const [toast, setToast] = React.useState({ open: false, type: 'info', text: '' });
 
   React.useEffect(() => {
     (async () => {
@@ -37,6 +37,7 @@ export default function HomeGestorAdmin() {
       }
     })();
   }, []);
+
 
   if (!isAdmin) {
     return (
@@ -189,21 +190,6 @@ export default function HomeGestorAdmin() {
         )}
       </div>
 
-      <div
-        className="rounded-xl shadow-elevated p-4 mb-6 border-2"
-        style={{
-          background: 'var(--header-bg)',
-          borderColor: 'var(--header-border)',
-          color: 'var(--header-fg)',
-        }}
-      >
-        <h1 className="text-xl font-extrabold tracking-tight">
-          Movimentações (últimas 24h)
-        </h1>
-        <p className="opacity-90 text-sm">
-          Quem fez, em qual processo e o que mudou.
-        </p>
-      </div>
 
       <Toast
         open={toast.open}

@@ -9,11 +9,21 @@
 
 set -euo pipefail
 
+# Carrega variaveis do .env se existir
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/../backend/.env"
+if [ -f "$ENV_FILE" ]; then
+    set -o allexport
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +o allexport
+fi
+
 # Configurações (editar ou usar env vars)
-DB_CONTAINER="${DB_CONTAINER:-ressarcimento_db}"
-DB_NAME="${DB_NAME:-appdb}"
-DB_USER="${DB_USER:-root}"
-DB_PASSWORD="${DB_PASSWORD:-root}"
+DB_CONTAINER="${DB_CONTAINER:-ressarcimento_system-db-1}"
+DB_NAME="${MYSQL_DATABASE:-appdb}"
+DB_USER="${MYSQL_USER:-appuser}"
+DB_PASSWORD="${MYSQL_PASSWORD:-App_S3cur3!}"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 

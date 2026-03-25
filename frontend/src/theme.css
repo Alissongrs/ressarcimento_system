@@ -1,6 +1,6 @@
 ﻿/* ====================== BASE (ROOT) ====================== */
 :root {
-  --font-sans: 'Space Grotesk', 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
   --bg: #ffffff;
   --fg: #0f172a;
   --card: #ffffff;

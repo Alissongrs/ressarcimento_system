@@ -328,6 +328,45 @@ func createRequisicaoPersistente(c *gin.Context) {
 	}
 
 	syncSnapshotFromOriginal(pid, 0)
+
+	// Dispara cálculo de score em background para o novo processo
+	go func(reqID int) {
+		var data ScoreData
+		const q = `
+		SELECT
+			COALESCE(COUNT(DISTINCT hm.id_historico), 0),
+			COALESCE((SELECT COUNT(DISTINCT id_anexo) FROM FT_ANEXOS WHERE id_requisicao = p.id_requisicao), 0),
+			COALESCE(p.ressarcimento_estimado, 0),
+			COALESCE(DATEDIFF(NOW(), p.data_criacao), 0),
+			0,
+			COALESCE(p.id_tipo_irregularidade, 0),
+			COALESCE(p.id_subtipo_irregularidade, 0),
+			CASE WHEN COALESCE(p.descricao_irregularidade, '') != '' THEN 1 ELSE 0 END,
+			CASE WHEN COALESCE(p.link_fatura, '') != '' THEN 1 ELSE 0 END,
+			CASE WHEN COALESCE(p.periodos_irregularidade, '') != '' THEN 1 ELSE 0 END
+		FROM FT_REQUISICOES p
+		LEFT JOIN FT_HISTORICO_MOVIMENTACOES hm ON p.id_requisicao = hm.id_requisicao
+		WHERE p.id_requisicao = ?
+		GROUP BY p.id_requisicao, p.ressarcimento_estimado, p.data_criacao,
+		         p.id_tipo_irregularidade, p.id_subtipo_irregularidade,
+		         p.descricao_irregularidade, p.link_fatura, p.periodos_irregularidade`
+		if err := database.GormDB_App.Raw(q, reqID).Scan(&data).Error; err != nil {
+			return
+		}
+		result, err := callScoreAPI(data)
+		if err != nil {
+			return
+		}
+		resp := ScoreResponse{}
+		if v, ok := result["score"].(float64); ok { resp.Score = v }
+		if v, ok := result["label"].(string); ok { resp.Label = v }
+		if v, ok := result["percentual"].(float64); ok { resp.Percentual = v }
+		if v, ok := result["erro"].(string); ok { resp.Erro = v }
+		if resp.Erro == "" {
+			saveScoreCache(fmt.Sprintf("%d", reqID), resp)
+		}
+	}(pid)
+
 	c.JSON(http.StatusCreated, gin.H{"id": pid, "message": "Requisição criada"})
 }
 

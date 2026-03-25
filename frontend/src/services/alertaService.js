@@ -4,13 +4,7 @@ import api from './apiClient';
 // tenta achar o token salvo pelo login
 function getToken() {
   try {
-    const byStorage =
-      localStorage.getItem('userToken') ||
-      localStorage.getItem('token') ||
-      localStorage.getItem('auth_token') ||
-      localStorage.getItem('access_token') ||
-      sessionStorage.getItem('token');
-
+    const byStorage = localStorage.getItem('userToken');
     if (byStorage) return byStorage;
 
     const auth = api?.defaults?.headers?.common?.Authorization || '';

@@ -22,6 +22,8 @@ export function useAlertasSSE({ onBoot, onUnread, onNovo, onLido }) {
     const origin = resolveOrigin();
     const token = localStorage.getItem("userToken") || "";
     const url = new URL('/api/v1/alertas/stream', origin);
+    // EventSource não suporta headers customizados — token via query param é o padrão aceito.
+    // Mitigação: a aplicação deve rodar exclusivamente em HTTPS (token criptografado em trânsito).
     if (token) url.searchParams.set('token', token);
 
     const es = new EventSource(url.toString(), { withCredentials: false });

@@ -15,14 +15,7 @@ const cleanToken = (t) => {
 
 const getToken = () => {
   try {
-    return cleanToken(
-      localStorage.getItem('userToken') ||
-        localStorage.getItem('token') ||
-        localStorage.getItem('authToken') ||
-        localStorage.getItem('jwt') ||
-        sessionStorage.getItem('token') ||
-        '',
-    );
+    return cleanToken(localStorage.getItem('userToken') || '');
   } catch {
     return '';
   }

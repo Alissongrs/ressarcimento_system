@@ -1,0 +1,36 @@
+# Regras de Análise de Anomalias em Faturas — AISURE
+# Carregado automaticamente. Edite e aguarde até 60s para recarregar.
+
+## F01 – Divergência de Fórmula de Medição
+A energia faturada (KWH_Ponta, KWH_FPonta, KWH_Reservado) deve ser igual a:
+  (Leitura_Atual - Leitura_Anterior) × Constante
+com tolerância de 2,5%.
+Se o valor faturado divergir do cálculo pela fórmula, a fatura está incorreta.
+Exceção: faturas com KWH_FPonta = 30, 50 ou 100 são excluídas (são estimativas padronizadas).
+Segmentos verificados: P (ponta), FP (fora ponta), R (reservado).
+
+## F02 – Desvio de Média (Consumo Atípico)
+O consumo do período é comparado com a média dos últimos 12 meses da mesma UC.
+O desvio é calculado usando MAD (Median Absolute Deviation) com fator 3.0 para identificar outliers.
+Sinaliza quando: consumo > (média + 3 × MAD) E desvio percentual > 100% acima da média.
+Requer histórico mínimo de 1 período com consumo > 50 KWH.
+Não se aplica se a fatura já foi sinalizada como F03, F04 ou F05.
+
+## F03 – Acúmulo de Consumo (Congelamento de Leitura)
+As 4 faturas imediatamente anteriores da mesma UC têm exatamente o mesmo valor de consumo.
+Indica que as leituras estavam congeladas/estimadas e pode haver consumo acumulado não faturado.
+Aplica-se separadamente para cada segmento (P, FP, R).
+
+## F04 – Troca de Medidor com Inconsistência de Leitura
+O número do medidor (NroMedidor) mudou em relação ao período anterior E
+a leitura anterior informada no novo período NÃO coincide com a leitura atual do período anterior.
+Indica que pode ter havido cobranças incorretas na transição entre medidores.
+
+## F05 – Quebra de Continuidade de Leitura
+O número do medidor é o MESMO que o período anterior MAS
+a leitura anterior informada no período atual NÃO coincide com a leitura atual registrada no período anterior.
+Indica que houve uma alteração retroativa ou erro de lançamento nas leituras.
+Este é o caso mais técnico: para confirmar, é necessário comparar os campos:
+  - Leitura_Atual_KWH_FP do período anterior = Leitura_Anterior_KWH_FP do período atual
+  - Idem para KWH_P e KWH_R
+Se esses valores não batem com o mesmo medidor, a anomalia está confirmada.

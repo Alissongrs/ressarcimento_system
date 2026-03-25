@@ -19,12 +19,7 @@ function getBackendOrigin() {
 
 function getAuthToken() {
   try {
-    return (
-      localStorage.getItem('userToken') ||
-      localStorage.getItem('token') ||
-      localStorage.getItem('auth_token') ||
-      ''
-    );
+    return localStorage.getItem('userToken') || '';
   } catch { return ''; }
 }
 

@@ -1,4 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import DOMPurify from 'dompurify';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import {
@@ -2363,7 +2364,7 @@ const CaixaDeEmail = () => {
                       className="email-body text-sm leading-relaxed max-h-[calc(100vh-260px)] overflow-y-auto"
                       style={{ wordBreak: 'break-word' }}
                       dangerouslySetInnerHTML={{
-                        __html: bodyHtml,
+                        __html: DOMPurify.sanitize(bodyHtml),
                       }}
                     />
                     {inlineBusy && (

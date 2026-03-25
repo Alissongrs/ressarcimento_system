@@ -58,6 +58,10 @@ func ChatLearnHandler(c *gin.Context) {
 	var ocrFiles []*multipart.FileHeader
 	for _, f := range files {
 		name := filepath.Base(f.Filename)
+		if !isTextFile(name) && !isOCRFile(name) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tipo de arquivo não permitido: " + filepath.Ext(name)})
+			return
+		}
 		dest := filepath.Join(baseDir, name)
 		if err := c.SaveUploadedFile(f, dest); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save file"})

@@ -143,14 +143,7 @@ export async function desvioMediaAnalyze(file, opts = {}) {
 export async function ocrChat(messages, model, { retryOnceOn429 = true } = {}) {
   const token = (function() {
     try {
-      return (
-        localStorage.getItem('userToken') ||
-        localStorage.getItem('token') ||
-        localStorage.getItem('auth_token') ||
-        localStorage.getItem('access_token') ||
-        sessionStorage.getItem('token') ||
-        ''
-      );
+      return localStorage.getItem('userToken') || '';
     } catch { return ''; }
   })();
 
