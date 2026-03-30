@@ -203,31 +203,23 @@ func (r *DashboardRepo) CarteiraTotals(ctx context.Context, f DashFilters) (Cart
 // Se for numérico (ou string numérica), usamos o número.
 func (r *DashboardRepo) ProcessosCounts(ctx context.Context, f DashFilters) (ProcCounts, error) {
 	q := `
-        WITH base AS (
-          SELECT
-            CASE
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'ativo' THEN 1
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'defer' THEN 2
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fluxo|ressarc' THEN 3
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fatur' THEN 4
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'conclu|finaliz|encerr|pago|credit' THEN 5
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'indefer|improced|rejeit' THEN 6
-              ELSE 1
-            END AS col_id
-          FROM FT_PROCESSOS p
-          LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-          LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-          LEFT JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-          WHERE 1=1
-        )
         SELECT
-          SUM(col_id=1) AS ativos,
-          SUM(col_id=2) AS deferidos,
-          SUM(col_id=3) AS fluxo,
-          SUM(col_id=4) AS faturamento,
-          SUM(col_id=5) AS concluidos,
-          SUM(col_id=6) AS indeferidos
-        FROM base;
+          SUM(CASE
+            WHEN p.id_etapa_processo = 11   THEN 0
+            WHEN COALESCE(p.suspenso,0) = 1 THEN 0
+            WHEN p.id_coluna = 1            THEN 1 ELSE 0 END) AS ativos,
+          SUM(CASE WHEN p.id_etapa_processo != 11 AND COALESCE(p.suspenso,0)=0
+                        AND p.id_coluna = 2 THEN 1 ELSE 0 END) AS deferidos,
+          SUM(CASE WHEN p.id_etapa_processo != 11 AND COALESCE(p.suspenso,0)=0
+                        AND p.id_coluna = 3 THEN 1 ELSE 0 END) AS fluxo,
+          SUM(CASE WHEN p.id_etapa_processo != 11 AND COALESCE(p.suspenso,0)=0
+                        AND p.id_coluna = 4 THEN 1 ELSE 0 END) AS faturamento,
+          SUM(CASE WHEN p.id_etapa_processo != 11 AND COALESCE(p.suspenso,0)=0
+                        AND p.id_coluna = 5 THEN 1 ELSE 0 END) AS concluidos,
+          SUM(CASE WHEN p.id_etapa_processo = 11  THEN 1 ELSE 0 END) AS indeferidos
+        FROM FT_PROCESSOS p
+        LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+        WHERE 1=1
     `
 	args := []any{}
 
@@ -243,7 +235,7 @@ func (r *DashboardRepo) ProcessosCounts(ctx context.Context, f DashFilters) (Pro
 	}
 
 	var out ProcCounts
-	err := r.db.Raw( q, args...).Row().Scan(
+	err := r.db.Raw(q, args...).Row().Scan(
 		&out.Ativos, &out.Deferidos, &out.Fluxo, &out.Faturamento, &out.Concluidos, &out.Indeferidos,
 	)
 	return out, err
@@ -342,12 +334,11 @@ func (r *DashboardRepo) StatusCounts(ctx context.Context) (StatusCounts, error) 
 func (r *DashboardRepo) StatusCountsFiltered(ctx context.Context, f DashFilters) (StatusCounts, error) {
 	q := `
 	SELECT
-	  SUM(LOWER(COALESCE(s.status,'')) REGEXP 'nova requis') AS pendente,
-	  SUM(LOWER(COALESCE(s.status,'')) REGEXP 'analis|triag') AS em_analise,
-	  SUM(LOWER(COALESCE(s.status,'')) REGEXP 'aprov|proced') AS aprovado,
-	  SUM(LOWER(COALESCE(s.status,'')) REGEXP 'rejeit|improced') AS rejeitado
+	  SUM(CASE WHEN r.id_status = 1 THEN 1 ELSE 0 END) AS pendente,
+	  SUM(CASE WHEN r.id_status = 2 THEN 1 ELSE 0 END) AS em_analise,
+	  SUM(CASE WHEN r.id_status = 3 THEN 1 ELSE 0 END) AS aprovado,
+	  SUM(CASE WHEN r.id_status = 4 THEN 1 ELSE 0 END) AS rejeitado
 	FROM FT_REQUISICOES r
-	LEFT JOIN DM_STATUS s ON s.id_status = r.id_status
 	WHERE 1=1`
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {

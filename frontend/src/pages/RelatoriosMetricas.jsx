@@ -161,6 +161,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
   const [updatedAt, setUpdatedAt] = useState(null);
   const [metricsModalOpen, setMetricsModalOpen] = useState(false);
   const [metricsTab, setMetricsTab] = useState('estrategicos');
+  const [viewTab, setViewTab] = useState('todos');
   const [concessionarias, setConcessionarias] = useState([]);
   const [kanbanConcs, setKanbanConcs] = useState([]);
   const [kanbanConcSearch, setKanbanConcSearch] = useState('');
@@ -317,6 +318,15 @@ export default function RelatoriosMetricas({ globalFilters }) {
   const axisStyle = { fill: 'var(--fg)', opacity: 0.5, fontSize: 10 };
   const gridStyle = { stroke: 'var(--border)', strokeDasharray: '3 3' };
 
+  const show = (...cats) => viewTab === 'todos' || cats.includes(viewTab);
+
+  const VIEW_TABS = [
+    { key: 'todos',        label: 'Todos' },
+    { key: 'estrategico',  label: 'Estratégico' },
+    { key: 'tatico',       label: 'Tático' },
+    { key: 'operacional',  label: 'Operacional' },
+  ];
+
   /* ────────────────────────── RENDER ────────────────────────── */
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -347,6 +357,21 @@ export default function RelatoriosMetricas({ globalFilters }) {
         </div>
       </div>
 
+      {/* ── Abas de visão ── */}
+      <div style={{ display: 'flex', gap: 4, padding: '4px', borderRadius: 10, background: 'var(--panel)', border: '1px solid var(--border)', width: 'fit-content' }}>
+        {VIEW_TABS.map((t) => (
+          <button key={t.key} onClick={() => setViewTab(t.key)} style={{
+            padding: '6px 16px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+            cursor: 'pointer', border: 'none', transition: 'all 140ms',
+            background: viewTab === t.key ? 'var(--accent)' : 'transparent',
+            color: viewTab === t.key ? '#fff' : 'var(--fg)',
+            opacity: viewTab === t.key ? 1 : 0.65,
+          }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       {/* Período aplicado */}
       {(globalFilters?.dataIni || globalFilters?.dataFim) && (
         <div style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', fontSize: 12, opacity: 0.7 }}>
@@ -367,7 +392,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
       </div>
 
       {/* ── Estratégicos: Resultados Ressarcimento ── */}
-      <SectionCard title="Resultados Ressarcimento" subtitle="Gerado (deferidos+) / Faturado (aba Faturamento) / Caixa (Concluídos)">
+      {show('estrategico') && <SectionCard title="Resultados Ressarcimento" subtitle="Gerado (deferidos+) / Faturado (aba Faturamento) / Caixa (Concluídos)">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
           {[
             { label: 'Gerado', value: safeNum(resultadosRess.gerado),   color: '#3b82f6', hint: 'Todos os processos que saíram de Ativos' },
@@ -382,10 +407,10 @@ export default function RelatoriosMetricas({ globalFilters }) {
             </div>
           ))}
         </div>
-      </SectionCard>
+      </SectionCard>}
 
       {/* ── Kanban + Status ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {show('estrategico', 'tatico') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
         {/* Kanban pie */}
         <SectionCard title="Composição Kanban" subtitle="Distribuição dos processos por coluna">
@@ -453,10 +478,10 @@ export default function RelatoriosMetricas({ globalFilters }) {
             ) : <EmptyChart title="Sem dados (Status)" hint="Verifique se os status batem com os padrões esperados." />}
           </div>
         </SectionCard>
-      </div>
+      </div>}
 
       {/* ── Tendência 30d ── */}
-      <SectionCard title="Tendência de movimentações (30 dias)" subtitle="Volume diário de movimentações registradas">
+      {show('tatico', 'operacional') && <SectionCard title="Tendência de movimentações (30 dias)" subtitle="Volume diário de movimentações registradas">
         <div style={{ height: 200 }}>
           {tendenciaChart.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
@@ -470,10 +495,10 @@ export default function RelatoriosMetricas({ globalFilters }) {
             </ResponsiveContainer>
           ) : <EmptyChart title="Sem dados (Tendência)" />}
         </div>
-      </SectionCard>
+      </SectionCard>}
 
       {/* ── Throughput semana + mês ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {show('tatico', 'operacional') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <SectionCard title="Throughput Semanal" subtitle="Novas requisições por semana">
           <div style={{ height: 200 }}>
             {hasPositive(throughputSemChart, 'total') ? (
@@ -505,10 +530,10 @@ export default function RelatoriosMetricas({ globalFilters }) {
             ) : <EmptyChart title="Sem dados" />}
           </div>
         </SectionCard>
-      </div>
+      </div>}
 
       {/* ── SLA + Aging + Créditos ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+      {show('tatico') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
 
         {/* SLA */}
         <SectionCard title="SLA" subtitle={`Últimos ${sla30d.limite_dias || 7} dias`}>
@@ -578,10 +603,10 @@ export default function RelatoriosMetricas({ globalFilters }) {
             </div>
           )}
         </SectionCard>
-      </div>
+      </div>}
 
       {/* ── Top Concessionárias + Clientes ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {show('estrategico') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <SectionCard title="Top Concessionárias" subtitle="Por valor estimado de ressarcimento">
           {topConcs.length > 0 ? topConcs.slice(0, 8).map((r, i) => (
             <HBarRow key={r.label} rank={i + 1} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxTopConc} color="#3b82f6" />
@@ -593,10 +618,10 @@ export default function RelatoriosMetricas({ globalFilters }) {
             <HBarRow key={r.label} rank={i + 1} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxTopCli} color="#10b981" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
         </SectionCard>
-      </div>
+      </div>}
 
       {/* ── Tempo médio etapa + WIP gestores ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {show('operacional') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <SectionCard title="Tempo médio por etapa" subtitle="Dias em cada etapa (dwell time)">
           {tempoMedio.length > 0 ? tempoMedio.slice(0, 10).map((r) => (
             <HBarRow key={r.etapa} label={r.etapa} value={safeNum(r.dias)} displayValue={`${safeNum(r.dias).toFixed(1)}d`} maxValue={maxTempo} color="#f59e0b" />
@@ -608,10 +633,10 @@ export default function RelatoriosMetricas({ globalFilters }) {
             <HBarRow key={r.label} label={r.label} value={safeNum(r.total)} displayValue={fmt(r.total)} maxValue={maxWip} color="#8b5cf6" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
         </SectionCard>
-      </div>
+      </div>}
 
       {/* ── Taxa de sucesso por concessionária ── */}
-      {taxaSucesso.length > 0 && (
+      {show('tatico') && taxaSucesso.length > 0 && (
         <SectionCard title="Taxa de Sucesso por Concessionária" subtitle="% de processos deferidos (mín. 2 processos concluídos)">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
             {taxaSucesso.map((r) => {
@@ -639,7 +664,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
       )}
 
       {/* ── % Sucesso por tipo + Resultados clientes ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {show('estrategico', 'tatico') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <SectionCard title="% Sucesso por Tipo de Irregularidade" subtitle="Processos que avançaram além de Ativos por tipo">
           {taxaSucessoPorTipo.length > 0 ? taxaSucessoPorTipo.map((r) => {
             const taxa = safeNum(r.taxa_pct);
@@ -678,10 +703,10 @@ export default function RelatoriosMetricas({ globalFilters }) {
             );
           }) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados de clientes ressarcidos</div>}
         </SectionCard>
-      </div>
+      </div>}
 
       {/* ── % Sucesso 1ª análise ── */}
-      {sucess1aAnalisePct > 0 && (
+      {show('tatico', 'operacional') && sucess1aAnalisePct > 0 && (
         <SectionCard title="% Sucesso na Primeira Análise" subtitle="Processos deferidos sem passar por etapa além da Distribuidora">
           <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
             <div style={{ textAlign: 'center', flexShrink: 0 }}>
@@ -703,7 +728,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
       )}
 
       {/* ── Histograma de valores + Canais ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {show('operacional') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <SectionCard title="Histograma de Valores" subtitle="Concentração de processos por faixa de valor">
           <div style={{ height: 200 }}>
             {hasPositive(valorHistChart, 'total') ? (
@@ -735,10 +760,10 @@ export default function RelatoriosMetricas({ globalFilters }) {
             ) : <EmptyChart title="Sem dados (Canais)" />}
           </div>
         </SectionCard>
-      </div>
+      </div>}
 
       {/* ── Tempo conclusão por conc + Repasse ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {show('tatico', 'operacional') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <SectionCard title="Tempo médio de conclusão" subtitle="Dias até encerramento por concessionária">
           <div style={{ height: 220 }}>
             {hasPositive(tempoConcChart, 'dias') ? (
@@ -760,7 +785,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
             <HBarRow key={r.label} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxRepasse} color="#06b6d4" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados de repasse no período.</div>}
         </SectionCard>
-      </div>
+      </div>}
 
       {/* warnings */}
       {Array.isArray(data?.warnings) && data.warnings.length > 0 && (
