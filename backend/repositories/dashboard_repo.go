@@ -998,8 +998,11 @@ func (r *DashboardRepo) TempoMedioConclusaoPorConcessionaria(ctx context.Context
       SELECT r.concessionaria AS lbl,
              AVG(DATEDIFF(concl.data_conc, r.data_criacao)) AS dias
       FROM concl
-      JOIN FT_REQUISICOES r ON r.id_requisicao = concl.id_requisicao
+      JOIN FT_REQUISICOES r  ON r.id_requisicao = concl.id_requisicao
+      JOIN FT_PROCESSOS p    ON p.id_processo   = concl.id_requisicao
       WHERE r.concessionaria IS NOT NULL AND r.concessionaria <> ''
+        AND p.id_coluna NOT IN (99)
+        AND COALESCE(p.suspenso, 0) = 0
     `
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
@@ -1036,17 +1039,19 @@ func (r *DashboardRepo) KanbanComposicao(ctx context.Context, f DashFilters, con
 	q := `
       SELECT
         CASE
-          WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'indefer' THEN 'Indeferidos'
-          WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'defer' THEN 'Deferidos'
-          WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fluxo|ressarc' THEN 'Fluxo'
-          WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fatur' THEN 'Faturamento'
-          WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'conclu|finaliz|encerr|pago|credit' THEN 'Concluidos'
-          ELSE 'Ativos'
+          WHEN p.id_etapa_processo = 11        THEN 'Indeferidos'
+          WHEN COALESCE(p.suspenso,0) = 1      THEN 'Suspensos'
+          WHEN p.id_coluna = 5                 THEN 'Concluídos'
+          WHEN p.id_coluna = 4                 THEN 'Faturamento'
+          WHEN p.id_coluna = 3                 THEN 'Fluxo'
+          WHEN p.id_coluna = 2                 THEN 'Deferidos'
+          WHEN p.id_coluna = 1                 THEN 'Ativos'
+          WHEN p.id_coluna = 6                 THEN 'Indeferidos'
+          WHEN p.id_coluna = 99               THEN 'Suspensos'
+          ELSE                                      'Ativos'
         END AS lbl,
         COUNT(*) AS tot
       FROM FT_PROCESSOS p
-      JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-      JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
       LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
       WHERE COALESCE(p.descartado,0)=0
     `
@@ -1086,6 +1091,221 @@ func (r *DashboardRepo) KanbanComposicao(ctx context.Context, f DashFilters, con
 	return out, rows.Err()
 }
 
+// ============== Taxa de sucesso por tipo de irregularidade =================
+type SucessoTipoRow struct {
+	Tipo    string
+	Total   int64
+	Sucesso int64
+	TaxaPct float64
+}
+
+func (r *DashboardRepo) TaxaSucessoPorTipo(ctx context.Context, f DashFilters) ([]SucessoTipoRow, error) {
+	q := `
+	SELECT
+	  COALESCE(NULLIF(p.nome_tipo_irregularidade,''), 'Sem tipo') AS tipo,
+	  COUNT(*) AS total,
+	  SUM(CASE WHEN p.id_coluna NOT IN (1, 6, 99) THEN 1 ELSE 0 END) AS sucesso,
+	  ROUND(100.0 * SUM(CASE WHEN p.id_coluna NOT IN (1, 6, 99) THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1) AS taxa_pct
+	FROM FT_PROCESSOS p
+	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+	WHERE 1=1
+	`
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	q += " GROUP BY p.nome_tipo_irregularidade HAVING total >= 2 ORDER BY taxa_pct DESC LIMIT 20;"
+	rows, err := r.db.Raw(q, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SucessoTipoRow
+	for rows.Next() {
+		var row SucessoTipoRow
+		if err := rows.Scan(&row.Tipo, &row.Total, &row.Sucesso, &row.TaxaPct); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// ============== Ticket médio =================
+func (r *DashboardRepo) TicketMedio(ctx context.Context, f DashFilters) (float64, error) {
+	q := `
+	SELECT COALESCE(AVG(COALESCE(credito_simples,0) + COALESCE(credito_dobro,0)), 0) AS ticket
+	FROM FT_PROCESSOS p
+	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+	WHERE (COALESCE(credito_simples,0) + COALESCE(credito_dobro,0)) > 0
+	  AND p.id_coluna NOT IN (6, 99)
+	`
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	var v sql.NullFloat64
+	res := r.db.Raw(q, args...).Scan(&v)
+	return v.Float64, res.Error
+}
+
+// ============== Taxa de processos Aneel =================
+func (r *DashboardRepo) TaxaAneel(ctx context.Context, f DashFilters) (int64, int64, error) {
+	qAneel := `
+	SELECT COUNT(DISTINCT h.id_requisicao)
+	FROM FT_HISTORICO_MOVIMENTACOES h
+	INNER JOIN FT_PROCESSOS p ON p.id_processo = h.id_requisicao
+	WHERE h.etapa_nova = 'ANEEL'
+	  AND p.id_coluna NOT IN (6, 99)
+	`
+	qTotal := `
+	SELECT COUNT(*)
+	FROM FT_PROCESSOS p
+	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+	WHERE p.id_coluna NOT IN (6, 99)
+	`
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		qAneel += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		qTotal += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	var comAneel, total sql.NullInt64
+	if res := r.db.Raw(qAneel, args...).Scan(&comAneel); res.Error != nil {
+		return 0, 0, res.Error
+	}
+	if res := r.db.Raw(qTotal, args...).Scan(&total); res.Error != nil {
+		return 0, 0, res.Error
+	}
+	return comAneel.Int64, total.Int64, nil
+}
+
+// ============== Backlog (>60 dias sem movimentação, sub_etapa <> Aguardando retorno) =================
+func (r *DashboardRepo) BacklogCount(ctx context.Context) (int64, error) {
+	q := `
+	SELECT COUNT(DISTINCT p.id_processo)
+	FROM FT_PROCESSOS p
+	LEFT JOIN (
+	  SELECT id_requisicao, MAX(data_movimentacao) AS ult_mov
+	  FROM FT_HISTORICO_MOVIMENTACOES
+	  GROUP BY id_requisicao
+	) ult ON ult.id_requisicao = p.id_processo
+	WHERE p.id_coluna NOT IN (6, 99)
+	  AND COALESCE(p.sub_etapa, '') <> 'Aguardando retorno'
+	  AND (ult.ult_mov IS NULL OR DATEDIFF(CURDATE(), DATE(ult.ult_mov)) > 60)
+	`
+	var n sql.NullInt64
+	res := r.db.Raw(q).Scan(&n)
+	return n.Int64, res.Error
+}
+
+// ============== Resultados Ressarcimento (Gerado / Faturado / Caixa) =================
+type ResultadosRessarcimentoRow struct {
+	Gerado   float64
+	Faturado float64
+	Caixa    float64
+}
+
+func (r *DashboardRepo) ResultadosRessarcimento(ctx context.Context, f DashFilters) (ResultadosRessarcimentoRow, error) {
+	q := `
+	SELECT
+	  COALESCE(SUM(CASE WHEN id_coluna IN (2,3,4,5) THEN COALESCE(credito_simples,0)+COALESCE(credito_dobro,0) ELSE 0 END), 0) AS gerado,
+	  COALESCE(SUM(CASE WHEN id_coluna = 4 THEN COALESCE(credito_simples,0)+COALESCE(credito_dobro,0) ELSE 0 END), 0) AS faturado,
+	  COALESCE(SUM(CASE WHEN id_coluna = 5 THEN COALESCE(credito_simples,0)+COALESCE(credito_dobro,0) ELSE 0 END), 0) AS caixa
+	FROM FT_PROCESSOS p
+	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+	WHERE 1=1
+	`
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	var out ResultadosRessarcimentoRow
+	err := r.db.Raw(q, args...).Row().Scan(&out.Gerado, &out.Faturado, &out.Caixa)
+	return out, err
+}
+
+// ============== Resultados por cliente (simples + dobro) =================
+type ResultadoClienteRow struct {
+	Cliente string
+	Simples float64
+	Dobro   float64
+	Total   float64
+}
+
+func (r *DashboardRepo) ResultadosPorCliente(ctx context.Context, f DashFilters, limit int) ([]ResultadoClienteRow, error) {
+	q := `
+	SELECT
+	  COALESCE(NULLIF(p.cliente,''), 'Sem cliente') AS cliente,
+	  COALESCE(SUM(p.credito_simples), 0) AS simples,
+	  COALESCE(SUM(p.credito_dobro), 0) AS dobro,
+	  COALESCE(SUM(COALESCE(p.credito_simples,0) + COALESCE(p.credito_dobro,0)), 0) AS total
+	FROM FT_PROCESSOS p
+	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+	WHERE p.id_coluna NOT IN (1, 6, 99)
+	  AND (COALESCE(p.credito_simples,0) + COALESCE(p.credito_dobro,0)) > 0
+	`
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	q += " GROUP BY p.cliente ORDER BY total DESC LIMIT ?;"
+	args = append(args, limit)
+	rows, err := r.db.Raw(q, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ResultadoClienteRow
+	for rows.Next() {
+		var row ResultadoClienteRow
+		if err := rows.Scan(&row.Cliente, &row.Simples, &row.Dobro, &row.Total); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// ============== % Sucesso primeira análise (deferidos apenas pela Distribuidora) =================
+func (r *DashboardRepo) SucessoPrimeiraAnalise(ctx context.Context, f DashFilters) (int64, int64, error) {
+	q := `
+	WITH deferidos AS (
+	  SELECT DISTINCT p.id_processo
+	  FROM FT_PROCESSOS p
+	  LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+	  WHERE p.id_coluna NOT IN (1, 6, 99)
+	  %FILTRO_DATA%
+	),
+	passou_outra_etapa AS (
+	  SELECT DISTINCT h.id_requisicao
+	  FROM FT_HISTORICO_MOVIMENTACOES h
+	  INNER JOIN deferidos d ON d.id_processo = h.id_requisicao
+	  WHERE COALESCE(h.etapa_nova, h.etapa_anterior, '') NOT IN ('Distribuidora', '')
+	    AND COALESCE(h.etapa_nova, h.etapa_anterior, '') <> ''
+	)
+	SELECT
+	  COUNT(DISTINCT d.id_processo) AS total_deferidos,
+	  COUNT(DISTINCT d.id_processo) - COUNT(DISTINCT p.id_requisicao) AS apenas_distribuidora
+	FROM deferidos d
+	LEFT JOIN passou_outra_etapa p ON p.id_requisicao = d.id_processo
+	`
+	filtroData := ""
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		filtroData = " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	q = strings.ReplaceAll(q, "%FILTRO_DATA%", filtroData)
+	var total, apenasDistrib sql.NullInt64
+	err := r.db.Raw(q, args...).Row().Scan(&total, &apenasDistrib)
+	return apenasDistrib.Int64, total.Int64, err
+}
+
 // ============== Taxa de sucesso por concessionária =================
 type SucessoConcRow struct {
 	Concessionaria string
@@ -1097,23 +1317,14 @@ type SucessoConcRow struct {
 func (r *DashboardRepo) TaxaSucessoPorConcessionaria(ctx context.Context, f DashFilters) ([]SucessoConcRow, error) {
 	q := `
 	SELECT
-	  rq.concessionaria,
+	  p.concessionaria,
 	  COUNT(*) AS total,
-	  SUM(CASE
-	    WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'indefer' THEN 0
-	    WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'defer'   THEN 1
-	    ELSE 0
-	  END) AS deferidos,
-	  ROUND(100.0 * SUM(CASE
-	    WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'indefer' THEN 0
-	    WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'defer'   THEN 1
-	    ELSE 0
-	  END) / NULLIF(COUNT(*), 0), 1) AS taxa_pct
+	  SUM(CASE WHEN p.id_coluna NOT IN (1, 6, 99) THEN 1 ELSE 0 END) AS deferidos,
+	  ROUND(100.0 * SUM(CASE WHEN p.id_coluna NOT IN (1, 6, 99) THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1) AS taxa_pct
 	FROM FT_PROCESSOS p
-	JOIN DM_ETAPAS_PROCESSO e  ON e.id_etapa_processo = p.id_etapa_processo
-	JOIN DM_KANBAN_COLUNAS k   ON k.id_coluna = e.id_coluna_kanban
-	JOIN FT_REQUISICOES rq     ON rq.id_requisicao = p.id_processo
-	WHERE rq.concessionaria IS NOT NULL AND rq.concessionaria <> ''
+	LEFT JOIN FT_REQUISICOES rq ON rq.id_requisicao = p.id_processo
+	WHERE p.concessionaria IS NOT NULL AND p.concessionaria <> ''
+	  AND p.id_coluna NOT IN (99)
 	  AND COALESCE(p.suspenso, 0) = 0
 	`
 	args := []any{}
@@ -1121,7 +1332,7 @@ func (r *DashboardRepo) TaxaSucessoPorConcessionaria(ctx context.Context, f Dash
 		q += " AND DATE(rq.data_criacao) BETWEEN ? AND ?"
 		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
 	}
-	q += " GROUP BY rq.concessionaria HAVING total >= 2 ORDER BY taxa_pct DESC LIMIT 12;"
+	q += " GROUP BY p.concessionaria HAVING total >= 2 ORDER BY taxa_pct DESC LIMIT 12;"
 
 	rows, err := r.db.Raw(q, args...).Rows()
 	if err != nil {

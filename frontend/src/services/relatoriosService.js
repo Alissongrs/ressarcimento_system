@@ -13,6 +13,16 @@ export const getRelatoriosMetricas = async (filters = {}) => {
   return data;
 };
 
+/**
+ * Busca métricas para múltiplos períodos em uma única requisição.
+ * @param {Array<{key: string, data_ini?: string, data_fim?: string, concessionarias?: string}>} reqs
+ * @returns {Promise<Record<string, object>>}
+ */
+export const getRelatoriosMetricasBatch = async (reqs) => {
+  const { data } = await api.post('/relatorios/metricas-batch', reqs);
+  return data;
+};
+
 export const getKanbanComposicao = async (filters = {}) => {
   const params = {};
   if (filters.dataIni && filters.dataFim) {

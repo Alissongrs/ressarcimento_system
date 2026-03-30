@@ -53,13 +53,10 @@ import Login from './pages/LoginPage.jsx';
 import Register from './pages/Register.jsx';
 import GestaoRequisicoes from './pages/GestaoRequisicoes.jsx';
 import ControleProcessos from './pages/ControleProcessos.jsx';
-import DetalhesRequisicao from './pages/DetalhesRequisicao.jsx';
-import ProcessoDetalhes from './pages/ProcessoDetalhes.jsx';
 import Relatorios from './pages/Relatorios.jsx';
 import CaixaDeEmail from './pages/CaixaDeEmail.jsx';
 import AnaliseDesvio from './pages/AnaliseDesvio.jsx';
 import Auditoria from './pages/Auditoria.jsx';
-import ChatRequisicao from './pages/ChatRequisicaoNew.jsx';
 import HomeGestorAdmin from './pages/HomeGestorAdmin.jsx';
 import Requisicoes from './pages/Requisicoes.jsx';
 import Historico from './pages/HistoricoFixed.jsx';
@@ -899,9 +896,6 @@ function App() {
                         )
                       }
                     />
-                    <Route path="/novo" element={<ChatRequisicao />} />
-                    <Route path="/requisicao-chat" element={<ChatRequisicao />} />
-                    <Route path="/requisicao/:id" element={<DetalhesRequisicao />} />
                     <Route path="/backlog" element={<Backlog />} />
 
                     {role === 'gestor' || role === 'admin' ? (
@@ -911,7 +905,6 @@ function App() {
                         <Route path="/gestao" element={<GestaoRequisicoes />} />
                         <Route path="/dashboard" element={<Relatorios />} />
                         <Route path="/processos" element={<ControleProcessos />} />
-                        <Route path="/processos/:id" element={<ProcessoDetalhes />} />
                         <Route path="/analise-desvio" element={<AnaliseDesvio />} />
                         <Route path="/caixa-de-email" element={<CaixaDeEmail />} />
 

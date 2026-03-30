@@ -464,6 +464,35 @@
   --shadow-soft: 0 6px 16px rgba(0,0,0,0.45);
   --shadow-medium: 0 14px 26px rgba(0,0,0,0.55);
   --shadow-elevated: 0 24px 40px rgba(0,0,0,0.65);
+
+  color-scheme: dark;
+}
+
+/* Dark-navy: força classes Tailwind de texto escuro a usar a cor clara do tema */
+[data-theme='dark-navy'] .text-black,
+[data-theme='dark-navy'] .text-gray-950,
+[data-theme='dark-navy'] .text-gray-900,
+[data-theme='dark-navy'] .text-gray-800,
+[data-theme='dark-navy'] .text-gray-700,
+[data-theme='dark-navy'] .text-gray-600,
+[data-theme='dark-navy'] .text-slate-950,
+[data-theme='dark-navy'] .text-slate-900,
+[data-theme='dark-navy'] .text-slate-800,
+[data-theme='dark-navy'] .text-slate-700,
+[data-theme='dark-navy'] .text-slate-600,
+[data-theme='dark-navy'] .text-neutral-950,
+[data-theme='dark-navy'] .text-neutral-900,
+[data-theme='dark-navy'] .text-neutral-800,
+[data-theme='dark-navy'] .text-neutral-700,
+[data-theme='dark-navy'] .text-neutral-600,
+[data-theme='dark-navy'] .text-zinc-950,
+[data-theme='dark-navy'] .text-zinc-900,
+[data-theme='dark-navy'] .text-zinc-800,
+[data-theme='dark-navy'] .text-zinc-700,
+[data-theme='dark-navy'] .text-stone-900,
+[data-theme='dark-navy'] .text-stone-800,
+[data-theme='dark-navy'] .text-stone-700 {
+  color: var(--fg) !important;
 }
 
 /* Skeleton shimmer for dark navy */

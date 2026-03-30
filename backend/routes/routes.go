@@ -432,6 +432,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/dashboard/movimentacoes", dashHandler.MovimentacoesPeriodo)
 			gestorRequired.GET("/dashboard/changes-24h", dashHandler.MovimentacoesUltimas24h)
 			gestorRequired.GET("/relatorios/metricas", handlers.GetRelatoriosMetricas)
+			gestorRequired.POST("/relatorios/metricas-batch", handlers.GetRelatoriosMetricasBatch)
 			gestorRequired.GET("/relatorios/kanban-composicao", handlers.GetKanbanComposicao)
 
 			// IA

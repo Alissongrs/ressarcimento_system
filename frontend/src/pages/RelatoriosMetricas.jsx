@@ -230,14 +230,11 @@ export default function RelatoriosMetricas({ globalFilters }) {
   const carteiraValor   = safeNum(data?.carteira_valor ?? data?.valor_em_carteira);
   const carteiraProcs   = safeNum(data?.carteira_processos ?? data?.processos_em_carteira);
   const deferidosN      = safeNum(processosCounts?.deferidos);
-  const indeferidosN    = safeNum(processosCounts?.indeferidos);
-  const ticketMedio     = totalProcessos ? valorTotal / totalProcessos : 0;
   const totalProcedente = safeNum(creditos.total_procedente);
   const onTime          = safeNum(sla30d.on_time);
   const late            = safeNum(sla30d.late);
   const totalSla        = onTime + late;
   const onTimePct       = pct(onTime, totalSla);
-  const taxaDefer       = pct(deferidosN, totalProcessos);
 
   /* kanban chart */
   const labelToKey = useMemo(() => new Map(PROCESSOS_CARDS.map((p) => [p.label, p.key])), []);
@@ -281,7 +278,16 @@ export default function RelatoriosMetricas({ globalFilters }) {
   const tempoConcChart = (tempoConcl || []).slice(0, 8).map((r) => ({ label: r.label, dias: safeNum(r.dias) }));
   const valorHistChart = (valorHist || []).map((r) => ({ label: r.label, total: safeNum(r.total) }));
 
-  const taxaSucesso = data?.taxa_sucesso_concessionarias || [];
+  const taxaSucesso           = data?.taxa_sucesso_concessionarias || [];
+  const taxaSucessoGeral      = safeNum(data?.taxa_sucesso_geral);
+  const taxaSucessoPorTipo    = data?.taxa_sucesso_por_tipo || [];
+  const ticketMedioReal       = safeNum(data?.ticket_medio);
+  const taxaAneelPct          = safeNum(data?.taxa_aneel_pct);
+  const backlogCount          = safeNum(data?.backlog_count);
+  const resultadosRess        = data?.resultados_ressarcimento || {};
+  const resultadosClientes    = data?.resultados_clientes || [];
+  const sucess1aAnalisePct    = safeNum(data?.sucesso_primeira_analise_pct);
+  const ticketMedio           = ticketMedioReal || (totalProcessos ? valorTotal / totalProcessos : 0);
 
   const maxTopConc = Math.max(1, ...topConcs.map((r) => safeNum(r.total)));
   const maxTopCli  = Math.max(1, ...topClientes.map((r) => safeNum(r.total)));
@@ -353,12 +359,30 @@ export default function RelatoriosMetricas({ globalFilters }) {
       {/* ── KPI Hero strip ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
         <KpiCard icon={Wallet}       label="Carteira (R$)"      value={fmtMM(carteiraValor)}    sub={`${fmt(carteiraProcs)} processos`} accentColor="#3b82f6" />
-        <KpiCard icon={TrendingUp}   label="Valor estimado"     value={fmtMM(valorTotal)}        sub={`Ticket: ${fmtMM(ticketMedio)}`}  accentColor="#10b981" />
-        <KpiCard icon={Award}        label="Taxa de deferimento" value={`${taxaDefer}%`}         sub={`${fmt(deferidosN)} deferidos`}   accentColor="#f59e0b" />
+        <KpiCard icon={TrendingUp}   label="Ticket médio"       value={fmtMM(ticketMedio)}       sub={`${fmt(totalProcessos)} processos`} accentColor="#10b981" />
+        <KpiCard icon={Award}        label="% Sucesso geral"    value={`${taxaSucessoGeral.toFixed(1)}%`} sub={`${fmt(deferidosN)} deferidos`} accentColor="#f59e0b" />
         <KpiCard icon={CheckCircle2} label="SLA (7 dias)"       value={`${onTimePct}%`}          sub={`no prazo — ${fmt(late)} atrasados`} accentColor={onTimePct >= 80 ? '#10b981' : onTimePct >= 60 ? '#f59e0b' : '#ef4444'} />
-        <KpiCard icon={Clock}        label="Total Processos"    value={fmt(totalProcessos)}       sub={`${fmt(totalReqs)} requisições`}  accentColor="#8b5cf6" />
-        <KpiCard icon={Users}        label="Repasse"            value={fmtMM(repasseTotal)}       sub="valor repassado total"            accentColor="#06b6d4" />
+        <KpiCard icon={Clock}        label="Backlog"            value={fmt(backlogCount)}         sub="+60 dias sem movimentação"        accentColor={backlogCount > 50 ? '#ef4444' : backlogCount > 20 ? '#f59e0b' : '#10b981'} />
+        <KpiCard icon={Users}        label="Taxa Aneel"         value={`${taxaAneelPct.toFixed(1)}%`} sub="processos que foram à Aneel" accentColor="#8b5cf6" />
       </div>
+
+      {/* ── Estratégicos: Resultados Ressarcimento ── */}
+      <SectionCard title="Resultados Ressarcimento" subtitle="Gerado (deferidos+) / Faturado (aba Faturamento) / Caixa (Concluídos)">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+          {[
+            { label: 'Gerado', value: safeNum(resultadosRess.gerado),   color: '#3b82f6', hint: 'Todos os processos que saíram de Ativos' },
+            { label: 'Faturado', value: safeNum(resultadosRess.faturado), color: '#f59e0b', hint: 'Processos em Faturamento' },
+            { label: 'Caixa', value: safeNum(resultadosRess.caixa),    color: '#10b981', hint: 'Processos Concluídos' },
+          ].map((item) => (
+            <div key={item.label} style={{ padding: '16px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--panel)', textAlign: 'center' }}>
+              <div style={{ width: '100%', height: 3, borderRadius: 3, background: item.color, marginBottom: 12 }} />
+              <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.55, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{item.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--fg)' }}>{fmtMM(item.value)}</div>
+              <div style={{ fontSize: 11, opacity: 0.45, marginTop: 4 }}>{item.hint}</div>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
 
       {/* ── Kanban + Status ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -610,6 +634,70 @@ export default function RelatoriosMetricas({ globalFilters }) {
                 </div>
               );
             })}
+          </div>
+        </SectionCard>
+      )}
+
+      {/* ── % Sucesso por tipo + Resultados clientes ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <SectionCard title="% Sucesso por Tipo de Irregularidade" subtitle="Processos que avançaram além de Ativos por tipo">
+          {taxaSucessoPorTipo.length > 0 ? taxaSucessoPorTipo.map((r) => {
+            const taxa = safeNum(r.taxa_pct);
+            const color = taxa >= 70 ? '#10b981' : taxa >= 40 ? '#f59e0b' : '#ef4444';
+            return (
+              <div key={r.label} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                  <span style={{ opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '65%' }}>{r.label}</span>
+                  <span style={{ fontWeight: 700, color, flexShrink: 0 }}>{taxa.toFixed(0)}% <span style={{ opacity: 0.45, fontWeight: 400 }}>({fmt(r.sucesso)}/{fmt(r.total)})</span></span>
+                </div>
+                <div style={{ height: 6, borderRadius: 4, background: 'var(--border)' }}>
+                  <div style={{ height: '100%', borderRadius: 4, width: `${Math.min(100, taxa)}%`, background: color, transition: 'width 400ms' }} />
+                </div>
+              </div>
+            );
+          }) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
+        </SectionCard>
+
+        <SectionCard title="Resultados por Cliente" subtitle="Valor ressarcido (simples + dobro) por cliente">
+          {resultadosClientes.length > 0 ? resultadosClientes.slice(0, 12).map((r, i) => {
+            const total = safeNum(r.total);
+            const maxCli = Math.max(1, ...resultadosClientes.map((x) => safeNum(x.total)));
+            return (
+              <div key={r.label} style={{ marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
+                  <span style={{ opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{i + 1}. {r.label}</span>
+                  <span style={{ fontWeight: 700, flexShrink: 0 }}>
+                    {fmtMM(total)}
+                    <span style={{ fontSize: 10, opacity: 0.45, marginLeft: 4 }}>S:{fmtMM(r.simples)} D:{fmtMM(r.dobro)}</span>
+                  </span>
+                </div>
+                <div style={{ height: 4, borderRadius: 3, background: 'var(--border)' }}>
+                  <div style={{ height: '100%', borderRadius: 3, width: `${(total / maxCli) * 100}%`, background: '#3b82f6', transition: 'width 400ms' }} />
+                </div>
+              </div>
+            );
+          }) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados de clientes ressarcidos</div>}
+        </SectionCard>
+      </div>
+
+      {/* ── % Sucesso 1ª análise ── */}
+      {sucess1aAnalisePct > 0 && (
+        <SectionCard title="% Sucesso na Primeira Análise" subtitle="Processos deferidos sem passar por etapa além da Distribuidora">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+            <div style={{ textAlign: 'center', flexShrink: 0 }}>
+              <div style={{ fontSize: 40, fontWeight: 800, color: sucess1aAnalisePct >= 50 ? 'var(--success)' : sucess1aAnalisePct >= 30 ? 'var(--warning)' : 'var(--danger)' }}>
+                {sucess1aAnalisePct.toFixed(1)}%
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.5 }}>dos deferidos</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ height: 10, borderRadius: 6, background: 'var(--border)' }}>
+                <div style={{ height: '100%', borderRadius: 6, width: `${Math.min(100, sucess1aAnalisePct)}%`, background: sucess1aAnalisePct >= 50 ? 'var(--success)' : sucess1aAnalisePct >= 30 ? 'var(--warning)' : 'var(--danger)', transition: 'width 500ms ease' }} />
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.55, marginTop: 8 }}>
+                Processos aprovados apenas na etapa Distribuidora, sem necessidade de escalonamento
+              </div>
+            </div>
           </div>
         </SectionCard>
       )}

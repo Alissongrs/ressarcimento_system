@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -43,7 +46,20 @@ type RelatoriosMetricasResp struct {
 	RepasseTotal           float64                  `json:"repasse_total,omitempty"`
 	RepassePorConcs        []map[string]interface{} `json:"repasse_por_concessionaria,omitempty"`
 	TaxaSucessoConcs       []map[string]interface{} `json:"taxa_sucesso_concessionarias,omitempty"`
-	Warnings               []string                 `json:"warnings,omitempty"`
+	// Novos indicadores
+	TaxaSucessoGeral          float64                  `json:"taxa_sucesso_geral"`
+	TaxaSucessoPorTipo        []map[string]interface{} `json:"taxa_sucesso_por_tipo,omitempty"`
+	TicketMedio               float64                  `json:"ticket_medio"`
+	TaxaAneelPct              float64                  `json:"taxa_aneel_pct"`
+	BacklogCount              int64                    `json:"backlog_count"`
+	ResultadosRessarcimento   struct {
+		Gerado   float64 `json:"gerado"`
+		Faturado float64 `json:"faturado"`
+		Caixa    float64 `json:"caixa"`
+	} `json:"resultados_ressarcimento"`
+	ResultadosClientes          []map[string]interface{} `json:"resultados_clientes,omitempty"`
+	SucessoPrimeiraAnalisePct   float64                  `json:"sucesso_primeira_analise_pct"`
+	Warnings                    []string                 `json:"warnings,omitempty"`
 }
 
 type KanbanComposicaoResp struct {
@@ -147,42 +163,35 @@ func GetKanbanComposicao(c *gin.Context) {
 // @Success      200  {object}  RelatoriosMetricasResp
 // @Failure      500  {object}  map[string]any
 // @Router       /api/v1/relatorios/metricas [get]
-func GetRelatoriosMetricas(c *gin.Context) {
-	if database.GormDB_App == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database nao configurado"})
-		return
-	}
-	repo := repositories.NewDashboardRepo(database.GormDB_App)
-	ctx := c.Request.Context()
-
-	var out RelatoriosMetricasResp
+// parseMetricasFilters extrai DashFilters e lista de concessionárias dos parâmetros de texto.
+func parseMetricasFilters(iniStr, fimStr, concsParam string) (repositories.DashFilters, []string, []string) {
 	f := repositories.DashFilters{}
-
-	iniStr := c.Query("data_ini")
-	fimStr := c.Query("data_fim")
+	var warns []string
 	if iniStr != "" && fimStr != "" {
 		if ini, err := parseDateBR(iniStr); err == nil {
 			if fim, err := parseDateBR(fimStr); err == nil {
 				f.Ini = ini
 				f.Fim = fim
 			} else {
-				out.Warnings = append(out.Warnings, "data_fim_invalida")
+				warns = append(warns, "data_fim_invalida")
 			}
 		} else {
-			out.Warnings = append(out.Warnings, "data_ini_invalida")
+			warns = append(warns, "data_ini_invalida")
 		}
 	}
-
-	concsParam := strings.TrimSpace(c.Query("concessionarias"))
 	var concs []string
-	if concsParam != "" {
-		for _, part := range strings.Split(concsParam, ",") {
-			part = strings.TrimSpace(part)
-			if part != "" {
-				concs = append(concs, part)
-			}
+	for _, part := range strings.Split(strings.TrimSpace(concsParam), ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			concs = append(concs, part)
 		}
 	}
+	return f, concs, warns
+}
+
+// computeMetricas executa todas as queries de métricas e retorna o resultado.
+func computeMetricas(ctx context.Context, repo *repositories.DashboardRepo, f repositories.DashFilters, concs []string) RelatoriosMetricasResp {
+	var out RelatoriosMetricasResp
 
 	if v, err := repo.TotalRequisicoesFiltered(ctx, f); err != nil {
 		out.Warnings = append(out.Warnings, "total_requisicoes")
@@ -220,23 +229,13 @@ func GetRelatoriosMetricas(c *gin.Context) {
 	if rows, err := repo.ValorEstimadoPorColuna(ctx, f); err != nil {
 		out.Warnings = append(out.Warnings, "valor_por_coluna")
 	} else {
-		colLabels := map[int64]string{
-			1: "Ativos",
-			2: "Deferidos",
-			3: "Fluxo de Ressarcimento",
-			4: "Faturamento",
-			5: "Concluídos",
-			6: "Indeferidos",
-		}
+		colLabels := map[int64]string{1: "Ativos", 2: "Deferidos", 3: "Fluxo de Ressarcimento", 4: "Faturamento", 5: "Concluídos", 6: "Indeferidos"}
 		for _, r := range rows {
 			label := colLabels[r.ColID]
 			if label == "" {
 				label = "Outros"
 			}
-			out.ValorPorColuna = append(out.ValorPorColuna, map[string]interface{}{
-				"label": label,
-				"total": r.Total,
-			})
+			out.ValorPorColuna = append(out.ValorPorColuna, map[string]interface{}{"label": label, "total": r.Total})
 		}
 	}
 
@@ -244,12 +243,9 @@ func GetRelatoriosMetricas(c *gin.Context) {
 		out.Warnings = append(out.Warnings, "processos_counts")
 	} else {
 		out.ProcessosCounts = map[string]int64{
-			"ativos":              pc.Ativos,
-			"deferidos":           pc.Deferidos,
-			"fluxo_ressarcimento": pc.Fluxo,
-			"faturamento":         pc.Faturamento,
-			"concluidos":          pc.Concluidos,
-			"indeferidos":         pc.Indeferidos,
+			"ativos": pc.Ativos, "deferidos": pc.Deferidos,
+			"fluxo_ressarcimento": pc.Fluxo, "faturamento": pc.Faturamento,
+			"concluidos": pc.Concluidos, "indeferidos": pc.Indeferidos,
 		}
 	}
 
@@ -257,10 +253,8 @@ func GetRelatoriosMetricas(c *gin.Context) {
 		out.Warnings = append(out.Warnings, "status_counts")
 	} else {
 		out.StatusCounts = map[string]int64{
-			"pendente":   sc.Pendente,
-			"em_analise": sc.EmAnalise,
-			"aprovado":   sc.Aprovado,
-			"rejeitado":  sc.Rejeitado,
+			"pendente": sc.Pendente, "em_analise": sc.EmAnalise,
+			"aprovado": sc.Aprovado, "rejeitado": sc.Rejeitado,
 		}
 	}
 
@@ -276,10 +270,7 @@ func GetRelatoriosMetricas(c *gin.Context) {
 		out.Warnings = append(out.Warnings, "tempo_medio_dias_por_etapa")
 	} else {
 		for _, r := range rows {
-			out.TempoMedioDiasPorEtapa = append(out.TempoMedioDiasPorEtapa, map[string]interface{}{
-				"etapa": r.Etapa,
-				"dias":  r.Dias,
-			})
+			out.TempoMedioDiasPorEtapa = append(out.TempoMedioDiasPorEtapa, map[string]interface{}{"etapa": r.Etapa, "dias": r.Dias})
 		}
 	}
 
@@ -287,32 +278,21 @@ func GetRelatoriosMetricas(c *gin.Context) {
 		out.Warnings = append(out.Warnings, "tendencia_30d")
 	} else {
 		for _, r := range rows {
-			out.Tendencia30d = append(out.Tendencia30d, map[string]interface{}{
-				"dia":   r.Dia.Format("2006-01-02"),
-				"total": r.Total,
-			})
+			out.Tendencia30d = append(out.Tendencia30d, map[string]interface{}{"dia": r.Dia.Format("2006-01-02"), "total": r.Total})
 		}
 	}
 
 	if ab, err := repo.AgingFiltered(ctx, f); err != nil {
 		out.Warnings = append(out.Warnings, "aging_buckets")
 	} else {
-		out.AgingBuckets = map[string]int64{
-			"0_7":     ab.B0_7,
-			"8_15":    ab.B8_15,
-			"16_30":   ab.B16_30,
-			"31_mais": ab.B31Mais,
-		}
+		out.AgingBuckets = map[string]int64{"0_7": ab.B0_7, "8_15": ab.B8_15, "16_30": ab.B16_30, "31_mais": ab.B31Mais}
 	}
 
 	if rows, err := repo.TopConcessionariasValorFiltered(ctx, 8, f); err != nil {
 		out.Warnings = append(out.Warnings, "top_concessionarias")
 	} else {
 		for _, r := range rows {
-			out.TopConcessionarias = append(out.TopConcessionarias, map[string]interface{}{
-				"label": r.Label,
-				"total": r.Total,
-			})
+			out.TopConcessionarias = append(out.TopConcessionarias, map[string]interface{}{"label": r.Label, "total": r.Total})
 		}
 	}
 
@@ -320,10 +300,7 @@ func GetRelatoriosMetricas(c *gin.Context) {
 		out.Warnings = append(out.Warnings, "top_clientes")
 	} else {
 		for _, r := range rows {
-			out.TopClientes = append(out.TopClientes, map[string]interface{}{
-				"label": r.Label,
-				"total": r.Total,
-			})
+			out.TopClientes = append(out.TopClientes, map[string]interface{}{"label": r.Label, "total": r.Total})
 		}
 	}
 
@@ -331,10 +308,7 @@ func GetRelatoriosMetricas(c *gin.Context) {
 		out.Warnings = append(out.Warnings, "throughput_semana")
 	} else {
 		for _, r := range rows {
-			out.ThroughputSemana = append(out.ThroughputSemana, map[string]interface{}{
-				"label": r.Label,
-				"total": r.Total,
-			})
+			out.ThroughputSemana = append(out.ThroughputSemana, map[string]interface{}{"label": r.Label, "total": r.Total})
 		}
 	}
 
@@ -342,10 +316,7 @@ func GetRelatoriosMetricas(c *gin.Context) {
 		out.Warnings = append(out.Warnings, "throughput_mes")
 	} else {
 		for _, r := range rows {
-			out.ThroughputMes = append(out.ThroughputMes, map[string]interface{}{
-				"label": r.Label,
-				"total": r.Total,
-			})
+			out.ThroughputMes = append(out.ThroughputMes, map[string]interface{}{"label": r.Label, "total": r.Total})
 		}
 	}
 
@@ -353,10 +324,7 @@ func GetRelatoriosMetricas(c *gin.Context) {
 		out.Warnings = append(out.Warnings, "canais_dist_30d")
 	} else {
 		for _, r := range rows {
-			out.CanaisDist30d = append(out.CanaisDist30d, map[string]interface{}{
-				"label": r.Label,
-				"total": r.Total,
-			})
+			out.CanaisDist30d = append(out.CanaisDist30d, map[string]interface{}{"label": r.Label, "total": r.Total})
 		}
 	}
 
@@ -364,10 +332,7 @@ func GetRelatoriosMetricas(c *gin.Context) {
 		out.Warnings = append(out.Warnings, "wip_gestores")
 	} else {
 		for _, r := range rows {
-			out.WIPGestores = append(out.WIPGestores, map[string]interface{}{
-				"label": r.Label,
-				"total": r.Total,
-			})
+			out.WIPGestores = append(out.WIPGestores, map[string]interface{}{"label": r.Label, "total": r.Total})
 		}
 	}
 
@@ -375,31 +340,21 @@ func GetRelatoriosMetricas(c *gin.Context) {
 		out.Warnings = append(out.Warnings, "valor_histogram")
 	} else {
 		for _, r := range rows {
-			out.ValorHistogram = append(out.ValorHistogram, map[string]interface{}{
-				"label": r.Label,
-				"total": r.Total,
-			})
+			out.ValorHistogram = append(out.ValorHistogram, map[string]interface{}{"label": r.Label, "total": r.Total})
 		}
 	}
 
 	if on, late, err := repo.SLAResumo30d(ctx, 7, f); err != nil {
 		out.Warnings = append(out.Warnings, "sla_30d")
 	} else {
-		out.SLA30d = map[string]int64{
-			"limite_dias": 7,
-			"on_time":     on,
-			"late":        late,
-		}
+		out.SLA30d = map[string]int64{"limite_dias": 7, "on_time": on, "late": late}
 	}
 
 	if rows, err := repo.TempoMedioConclusaoPorConcessionaria(ctx, f, concs); err != nil {
 		out.Warnings = append(out.Warnings, "tempo_medio_conclusao_concessionaria")
 	} else {
 		for _, r := range rows {
-			out.TempoConclusaoConcs = append(out.TempoConclusaoConcs, map[string]interface{}{
-				"label": r.Label,
-				"dias":  r.Total,
-			})
+			out.TempoConclusaoConcs = append(out.TempoConclusaoConcs, map[string]interface{}{"label": r.Label, "dias": r.Total})
 		}
 	}
 
@@ -409,10 +364,7 @@ func GetRelatoriosMetricas(c *gin.Context) {
 		var total float64
 		for _, r := range rows {
 			total += r.Total
-			out.RepassePorConcs = append(out.RepassePorConcs, map[string]interface{}{
-				"label": r.Label,
-				"total": r.Total,
-			})
+			out.RepassePorConcs = append(out.RepassePorConcs, map[string]interface{}{"label": r.Label, "total": r.Total})
 		}
 		out.RepasseTotal = total
 	}
@@ -422,13 +374,143 @@ func GetRelatoriosMetricas(c *gin.Context) {
 	} else {
 		for _, r := range rows {
 			out.TaxaSucessoConcs = append(out.TaxaSucessoConcs, map[string]interface{}{
-				"label":      r.Concessionaria,
-				"total":      r.Total,
-				"deferidos":  r.Deferidos,
-				"taxa_pct":   r.TaxaPct,
+				"label": r.Concessionaria, "total": r.Total, "deferidos": r.Deferidos, "taxa_pct": r.TaxaPct,
 			})
 		}
 	}
 
+	if pc := out.ProcessosCounts; pc != nil {
+		total := pc["ativos"] + pc["deferidos"] + pc["fluxo_ressarcimento"] + pc["faturamento"] + pc["concluidos"]
+		avanc := pc["deferidos"] + pc["fluxo_ressarcimento"] + pc["faturamento"] + pc["concluidos"]
+		if total > 0 {
+			out.TaxaSucessoGeral = float64(avanc) / float64(total) * 100
+		}
+	}
+
+	if rows, err := repo.TaxaSucessoPorTipo(ctx, f); err != nil {
+		out.Warnings = append(out.Warnings, "taxa_sucesso_por_tipo")
+	} else {
+		for _, r := range rows {
+			out.TaxaSucessoPorTipo = append(out.TaxaSucessoPorTipo, map[string]interface{}{
+				"label": r.Tipo, "total": r.Total, "sucesso": r.Sucesso, "taxa_pct": r.TaxaPct,
+			})
+		}
+	}
+
+	if v, err := repo.TicketMedio(ctx, f); err != nil {
+		out.Warnings = append(out.Warnings, "ticket_medio")
+	} else {
+		out.TicketMedio = v
+	}
+
+	if comAneel, total, err := repo.TaxaAneel(ctx, f); err != nil {
+		out.Warnings = append(out.Warnings, "taxa_aneel")
+	} else if total > 0 {
+		out.TaxaAneelPct = float64(comAneel) / float64(total) * 100
+	}
+
+	if n, err := repo.BacklogCount(ctx); err != nil {
+		out.Warnings = append(out.Warnings, "backlog_count")
+	} else {
+		out.BacklogCount = n
+	}
+
+	if res, err := repo.ResultadosRessarcimento(ctx, f); err != nil {
+		out.Warnings = append(out.Warnings, "resultados_ressarcimento")
+	} else {
+		out.ResultadosRessarcimento.Gerado = res.Gerado
+		out.ResultadosRessarcimento.Faturado = res.Faturado
+		out.ResultadosRessarcimento.Caixa = res.Caixa
+	}
+
+	if rows, err := repo.ResultadosPorCliente(ctx, f, 15); err != nil {
+		out.Warnings = append(out.Warnings, "resultados_clientes")
+	} else {
+		for _, r := range rows {
+			out.ResultadosClientes = append(out.ResultadosClientes, map[string]interface{}{
+				"label": r.Cliente, "simples": r.Simples, "dobro": r.Dobro, "total": r.Total,
+			})
+		}
+	}
+
+	if apenasDistrib, totalDefer, err := repo.SucessoPrimeiraAnalise(ctx, f); err != nil {
+		out.Warnings = append(out.Warnings, "sucesso_primeira_analise")
+	} else if totalDefer > 0 {
+		out.SucessoPrimeiraAnalisePct = float64(apenasDistrib) / float64(totalDefer) * 100
+	}
+
+	return out
+}
+
+func GetRelatoriosMetricas(c *gin.Context) {
+	if database.GormDB_App == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database nao configurado"})
+		return
+	}
+	repo := repositories.NewDashboardRepo(database.GormDB_App)
+	ctx := c.Request.Context()
+	f, concs, warns := parseMetricasFilters(c.Query("data_ini"), c.Query("data_fim"), c.Query("concessionarias"))
+	out := computeMetricas(ctx, repo, f, concs)
+	out.Warnings = append(warns, out.Warnings...)
 	c.JSON(http.StatusOK, out)
+}
+
+// GetRelatoriosMetricasBatch godoc
+// @Summary      Métricas em lote para múltiplos períodos
+// @Tags         Relatorios
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]RelatoriosMetricasResp
+// @Failure      400  {object}  map[string]any
+// @Failure      500  {object}  map[string]any
+// @Router       /api/v1/relatorios/metricas-batch [post]
+func GetRelatoriosMetricasBatch(c *gin.Context) {
+	if database.GormDB_App == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database nao configurado"})
+		return
+	}
+
+	var reqs []struct {
+		Key     string `json:"key"`
+		DataIni string `json:"data_ini"`
+		DataFim string `json:"data_fim"`
+		Concs   string `json:"concessionarias"`
+	}
+	if err := c.ShouldBindJSON(&reqs); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "payload invalido"})
+		return
+	}
+
+	repo := repositories.NewDashboardRepo(database.GormDB_App)
+	ctx := c.Request.Context()
+
+	type entry struct {
+		key string
+		val RelatoriosMetricasResp
+	}
+	results := make([]entry, len(reqs))
+
+	var wg sync.WaitGroup
+	for i, req := range reqs {
+		wg.Add(1)
+		go func(i int, req struct {
+			Key     string `json:"key"`
+			DataIni string `json:"data_ini"`
+			DataFim string `json:"data_fim"`
+			Concs   string `json:"concessionarias"`
+		}) {
+			defer wg.Done()
+			f, concs, _ := parseMetricasFilters(req.DataIni, req.DataFim, req.Concs)
+			results[i] = entry{key: req.Key, val: computeMetricas(ctx, repo, f, concs)}
+		}(i, req)
+	}
+	wg.Wait()
+
+	out := make(map[string]RelatoriosMetricasResp, len(results))
+	for _, e := range results {
+		out[e.key] = e.val
+	}
+
+	b, _ := json.Marshal(out)
+	c.Data(http.StatusOK, "application/json; charset=utf-8", b)
 }

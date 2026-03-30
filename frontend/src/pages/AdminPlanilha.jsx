@@ -33,7 +33,7 @@ import {
 import api, { withAuthToken } from '../services/apiClient';
 import { getSummary, refreshSummary } from '../services/summaryService';
 import { sendResumoFeedback } from '../services/resumoFeedbackService';
-import { getRelatoriosMetricas } from '../services/relatoriosService';
+import { getRelatoriosMetricasBatch } from '../services/relatoriosService';
 import { sendMailMessage, linkMailToProcess } from '../services/mailService';
 import { deleteHistorico } from '../services/adminPlanilhaService';
 import { getProcessoScore } from '../services/mlService';
@@ -3364,37 +3364,32 @@ export default function AdminPlanilha() {
       end: new Date(baseYear, selectedMonthIdx + 1, 0),
     };
 
-    const tasks = await Promise.allSettled([
-      getRelatoriosMetricas(),
-      getRelatoriosMetricas({
-        dataIni: formatDateBR(monthRange.start),
-        dataFim: formatDateBR(monthRange.end),
-      }),
-      getRelatoriosMetricas({
-        dataIni: formatDateBR(ytdRange.start),
-        dataFim: formatDateBR(ytdRange.end),
-      }),
-      getRelatoriosMetricas({
-        dataIni: formatDateBR(meses12Range.start),
-        dataFim: formatDateBR(meses12Range.end),
-      }),
+    const batchReqs = [
+      { key: 'all' },
+      { key: 'month', data_ini: formatDateBR(monthRange.start), data_fim: formatDateBR(monthRange.end) },
+      { key: 'ytd',   data_ini: formatDateBR(ytdRange.start),   data_fim: formatDateBR(ytdRange.end) },
+      { key: 'meses12', data_ini: formatDateBR(meses12Range.start), data_fim: formatDateBR(meses12Range.end) },
+    ];
+
+    const [batchRes, backlogRes, prazosRes] = await Promise.allSettled([
+      getRelatoriosMetricasBatch(batchReqs),
       getBacklog(),
       getProcessosComPrazo(),
     ]);
 
-    const [allRes, monthRes, ytdRes, mesesRes, backlogRes, prazosRes] = tasks;
+    const batch = batchRes.status === 'fulfilled' ? batchRes.value : {};
     const next = {
       loading: false,
-      all: allRes.status === 'fulfilled' ? allRes.value : null,
-      month: monthRes.status === 'fulfilled' ? monthRes.value : null,
-      ytd: ytdRes.status === 'fulfilled' ? ytdRes.value : null,
-      meses12: mesesRes.status === 'fulfilled' ? mesesRes.value : null,
+      all: batch.all ?? null,
+      month: batch.month ?? null,
+      ytd: batch.ytd ?? null,
+      meses12: batch.meses12 ?? null,
       backlog: backlogRes.status === 'fulfilled' ? backlogRes.value : null,
       prazos: prazosRes.status === 'fulfilled' ? prazosRes.value : null,
       error: '',
     };
 
-    if (allRes.status === 'rejected' && monthRes.status === 'rejected' && mesesRes.status === 'rejected') {
+    if (batchRes.status === 'rejected') {
       next.error = 'Falha ao carregar métricas.';
     }
 
@@ -3435,7 +3430,7 @@ export default function AdminPlanilha() {
     const handleFocus = () => syncLoadAll();
     const intervalId = window.setInterval(() => {
       syncLoadAll();
-    }, 30000);
+    }, 120000);
 
     window.addEventListener('focus', handleFocus);
 

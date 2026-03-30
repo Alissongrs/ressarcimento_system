@@ -23,6 +23,8 @@ import (
 	"ressarcimento-backend/sse"
 	"ressarcimento-backend/utils"
 
+	"sync"
+
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 	"github.com/spf13/cast"
@@ -184,6 +186,20 @@ func NewProcessosHandler(svc services.ProcessosService) *ProcessosHandler {
 	return &ProcessosHandler{svc: svc}
 }
 
+// cache global do kanban-fast (TTL 30s)
+var kanbanCache struct {
+	sync.RWMutex
+	payload   []byte
+	expiresAt time.Time
+}
+
+// InvalidateKanbanCache força o próximo request a recomputar.
+func InvalidateKanbanCache() {
+	kanbanCache.Lock()
+	kanbanCache.expiresAt = time.Time{}
+	kanbanCache.Unlock()
+}
+
 // GET /api/processos/kanban-fast
 // Retorna um mapa: { "Ativos": [...], "Deferidos": [...], ... }
 func (h *ProcessosHandler) KanbanFast(c *gin.Context) {
@@ -197,6 +213,19 @@ func (h *ProcessosHandler) KanbanFast(c *gin.Context) {
 	}
 	coluna := strings.TrimSpace(c.Query("coluna"))
 
+	// Serve do cache apenas quando não há filtros específicos
+	useCache := limit == 0 && coluna == ""
+	if useCache {
+		kanbanCache.RLock()
+		if time.Now().Before(kanbanCache.expiresAt) && len(kanbanCache.payload) > 0 {
+			payload := kanbanCache.payload
+			kanbanCache.RUnlock()
+			c.Data(http.StatusOK, "application/json; charset=utf-8", payload)
+			return
+		}
+		kanbanCache.RUnlock()
+	}
+
 	itens, err := h.svc.ListarKanbanFast(ctx, limit, coluna)
 	if err != nil {
 		log.Printf("[kanban-fast] erro na listagem: %v", err)
@@ -204,7 +233,6 @@ func (h *ProcessosHandler) KanbanFast(c *gin.Context) {
 		return
 	}
 
-	// Normaliza divergências de nomes de colunas
 	normalizeCol := func(col string) string {
 		col = strings.TrimSpace(col)
 		switch col {
@@ -226,7 +254,20 @@ func (h *ProcessosHandler) KanbanFast(c *gin.Context) {
 		resp[col] = append(resp[col], it.ToDTO())
 	}
 
-	c.JSON(http.StatusOK, gin.H{"colunas": resp})
+	payload, err := json.Marshal(gin.H{"colunas": resp})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "marshal error"})
+		return
+	}
+
+	if useCache {
+		kanbanCache.Lock()
+		kanbanCache.payload = payload
+		kanbanCache.expiresAt = time.Now().Add(30 * time.Second)
+		kanbanCache.Unlock()
+	}
+
+	c.Data(http.StatusOK, "application/json; charset=utf-8", payload)
 }
 
 /* ======================================================================
