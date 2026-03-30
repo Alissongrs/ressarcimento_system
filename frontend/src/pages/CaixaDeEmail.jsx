@@ -23,6 +23,9 @@ import {
   Minus,
   AlertTriangle,
   Clock,
+  X,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import {
   downloadMailAttachment,
@@ -73,6 +76,30 @@ const folderLabel = (name) => {
   if (s.includes('deleted') || s.includes('exclu')) return { icon: Trash2, label: 'Itens Deletados' };
   if (s.includes('outbox') || s.includes('caixa de sa?da')) return { icon: Send, label: 'Caixa de Saída' };
   return { icon: Mail, label: raw || 'Caixa' };
+};
+
+const dedupeFoldersByLabel = (items) => {
+  const seen = new Set();
+  const result = [];
+  for (const folder of items || []) {
+    const label = folderLabel(folder?.display_name).label;
+    if (seen.has(label)) continue;
+    seen.add(label);
+    result.push(folder);
+  }
+  return result;
+};
+
+const sortFoldersForUi = (items) => {
+  const list = [...(items || [])];
+  list.sort((a, b) => {
+    const aLabel = folderLabel(a?.display_name).label;
+    const bLabel = folderLabel(b?.display_name).label;
+    if (aLabel === 'Caixa de Entrada' && bLabel !== 'Caixa de Entrada') return -1;
+    if (bLabel === 'Caixa de Entrada' && aLabel !== 'Caixa de Entrada') return 1;
+    return aLabel.localeCompare(bLabel, 'pt-BR', { sensitivity: 'base' });
+  });
+  return list;
 };
 
 const formatDate = (iso) => {
@@ -276,6 +303,19 @@ const Resizer = ({ onPointerDown }) => (
 /* =========================
    MODALS (mant?m l?gica)
 ========================= */
+const COMPOSE_QUILL_MODULES = {
+  toolbar: [
+    [{ font: [] }, { size: ['small', false, 'large', 'huge'] }],
+    ['bold', 'italic', 'underline', 'strike'],
+    [{ color: [] }, { background: [] }],
+    [{ list: 'ordered' }, { list: 'bullet' }, { indent: '-1' }, { indent: '+1' }],
+    [{ align: [] }],
+    ['link', 'image'],
+    ['clean'],
+  ],
+  clipboard: { matchVisual: false },
+};
+
 const ComposeModal = ({ open, minimized, onMinimize, onClose, onSend, seed }) => {
   const [to, setTo] = useState('');
   const [cc, setCc] = useState('');
@@ -283,6 +323,38 @@ const ComposeModal = ({ open, minimized, onMinimize, onClose, onSend, seed }) =>
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [files, setFiles] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [showCcBcc, setShowCcBcc] = useState(false);
+  const fileRef  = useRef(null);
+  const quillRef = useRef(null);
+
+  // Paste images inline (like Outlook)
+  useEffect(() => {
+    const quill = quillRef.current?.getEditor();
+    if (!quill || !open || minimized) return;
+    const root = quill.root;
+    const handlePaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (!file) continue;
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            const range = quill.getSelection(true);
+            quill.insertEmbed(range?.index ?? 0, 'image', evt.target.result);
+            quill.setSelection((range?.index ?? 0) + 1);
+          };
+          reader.readAsDataURL(file);
+          break;
+        }
+      }
+    };
+    root.addEventListener('paste', handlePaste);
+    return () => root.removeEventListener('paste', handlePaste);
+  }, [open, minimized]);
 
   useEffect(() => {
     if (!open) return;
@@ -290,72 +362,185 @@ const ComposeModal = ({ open, minimized, onMinimize, onClose, onSend, seed }) =>
     setCc(seed?.cc || '');
     setBcc(seed?.bcc || '');
     setSubject(seed?.subject || '');
-    setBody(seed?.body || '');
+    setBody(withSignature(seed?.body || ''));
     setFiles([]);
+    setSending(false);
+    setShowCcBcc(!!(seed?.cc || seed?.bcc));
   }, [open, seed]);
 
   if (!open || minimized) return null;
 
+  const handleSendClick = async () => {
+    setSending(true);
+    await onSend({ to, cc, bcc, subject, body, files });
+    setSending(false);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="sap-card w-full max-w-3xl p-4 md:p-5">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-xl bg-[var(--muted)]/30 flex items-center justify-center border panel-border">
-              <Send size={18} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ paddingRight: '1.5rem', paddingBottom: 0 }}>
+      <div className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="relative z-10 flex flex-col rounded-2xl shadow-2xl overflow-hidden"
+        style={{
+          width: 680,
+          height: '88vh',
+          maxHeight: 720,
+          border: '1px solid var(--border)',
+          background: 'var(--bg)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* ── Header gradient ── */}
+        <div
+          className="flex items-center justify-between px-5 py-3 flex-shrink-0 select-none"
+          style={{ background: 'linear-gradient(135deg, #1e3a5f, #0f2340)' }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
+              <Send size={15} className="text-blue-300" />
             </div>
             <div>
-              <div className="text-lg font-bold">Novo e-mail</div>
-              <div className="text-xs opacity-70">Envie com anexos e histórico</div>
+              <div className="text-white text-sm font-semibold">Novo e-mail</div>
+              <div className="text-white/50 text-[11px]">
+                {subject ? subject : 'Sem assunto'}
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button className="btn-outline" onClick={onMinimize} type="button">
-              Minimizar
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={onMinimize}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+              title="Minimizar"
+              type="button"
+            >
+              <Minus size={13} />
             </button>
-            <button className="btn-outline" onClick={onClose} type="button">
-              Fechar
+            <button
+              onClick={onClose}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+              title="Fechar"
+              type="button"
+            >
+              <X size={13} />
             </button>
           </div>
         </div>
 
-        <div className="space-y-2">
-          <input className="input-themed w-full" placeholder="Para (separe com ;)" value={to} onChange={(e) => setTo(e.target.value)} />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <input className="input-themed w-full" placeholder="Cc" value={cc} onChange={(e) => setCc(e.target.value)} />
-            <input className="input-themed w-full" placeholder="Cco" value={bcc} onChange={(e) => setBcc(e.target.value)} />
+        {/* ── Campos ── */}
+        <div className="flex-shrink-0 border-b" style={{ borderColor: 'var(--border)' }}>
+          {/* Para */}
+          <div className="flex items-center border-b px-4" style={{ borderColor: 'var(--border)' }}>
+            <span className="text-xs opacity-40 w-16 flex-shrink-0">Para</span>
+            <input
+              className="flex-1 py-2 text-xs bg-transparent focus:outline-none"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder="destinatario@email.com; outro@email.com"
+            />
+            <button
+              type="button"
+              className="text-[11px] opacity-50 hover:opacity-90 px-2 py-1 shrink-0 flex items-center gap-1 transition-opacity"
+              onClick={() => setShowCcBcc((v) => !v)}
+            >
+              {showCcBcc ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+              Cc/Cco
+            </button>
           </div>
-          <input className="input-themed w-full" placeholder="Assunto" value={subject} onChange={(e) => setSubject(e.target.value)} />
+
+          {/* Cc / Cco — colapsável */}
+          {showCcBcc && (
+            <>
+              <div className="flex items-center border-b px-4" style={{ borderColor: 'var(--border)' }}>
+                <span className="text-xs opacity-40 w-16 flex-shrink-0">Cc</span>
+                <input
+                  className="flex-1 py-2 text-xs bg-transparent focus:outline-none"
+                  value={cc}
+                  onChange={(e) => setCc(e.target.value)}
+                  placeholder="copia@email.com"
+                />
+              </div>
+              <div className="flex items-center border-b px-4" style={{ borderColor: 'var(--border)' }}>
+                <span className="text-xs opacity-40 w-16 flex-shrink-0">Cco</span>
+                <input
+                  className="flex-1 py-2 text-xs bg-transparent focus:outline-none"
+                  value={bcc}
+                  onChange={(e) => setBcc(e.target.value)}
+                  placeholder="cco@email.com"
+                />
+              </div>
+            </>
+          )}
+
+          {/* Assunto */}
+          <div className="flex items-center px-4">
+            <span className="text-xs opacity-40 w-16 flex-shrink-0">Assunto</span>
+            <input
+              className="flex-1 py-2 text-xs bg-transparent focus:outline-none font-medium"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="Assunto do e-mail"
+            />
+          </div>
+        </div>
+
+        {/* ── Editor ── */}
+        <div className="flex-1 overflow-hidden flex flex-col min-h-0">
           <ReactQuill
+            ref={quillRef}
             theme="snow"
             value={body}
             onChange={setBody}
-            modules={QUILL_MODULES}
-            className="bg-[var(--panel)] text-[var(--fg)] rounded border panel-border"
+            modules={COMPOSE_QUILL_MODULES}
+            style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            className="flex-1 text-xs"
           />
-          <div className="rounded border panel-border bg-[var(--panel)]/20 p-2 text-xs">
-            <div className="text-[11px] uppercase font-semibold opacity-70 mb-1">Assinatura fixa</div>
-            <img src="/assinatura_complaint.png" alt="assinatura" className="max-w-[260px] h-auto" />
-          </div>
-
-          <div className="flex items-center justify-between gap-2">
-            <label className="btn-outline cursor-pointer">
-              <span className="inline-flex items-center gap-2">
-                <Paperclip size={16} />
-                Anexar arquivos
-              </span>
-              <input type="file" className="hidden" multiple onChange={(e) => setFiles(Array.from(e.target.files || []))} />
-            </label>
-            <div className="text-xs opacity-70 truncate">{files.length ? `${files.length} arquivo(s) selecionado(s)` : 'Sem anexos'}</div>
-          </div>
         </div>
 
-        <div className="flex justify-end gap-2 mt-4">
-          <button className="btn-outline" onClick={onClose} type="button">
-            Cancelar
-          </button>
-          <button className="btn-themed" onClick={() => onSend({ to, cc, bcc, subject, body, files })} type="button">
-            Enviar
+        {/* ── Rodapé ── */}
+        <div
+          className="flex items-center justify-between gap-2 px-4 py-2.5 border-t flex-shrink-0"
+          style={{ borderColor: 'var(--border)', background: 'var(--panel-bg, rgba(255,255,255,0.03))' }}
+        >
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => setFiles(Array.from(e.target.files || []))}
+            />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border hover:opacity-90 transition-opacity"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              <Paperclip size={13} />
+              {files.length > 0 ? `${files.length} arquivo(s)` : 'Anexar'}
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSendClick}
+            disabled={sending || !to.trim()}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-50 transition-all"
+            style={{ backgroundColor: '#1d4ed8' }}
+          >
+            {sending ? (
+              <>
+                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Enviando...
+              </>
+            ) : (
+              <>
+                <Send size={14} />
+                Enviar
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -1178,7 +1363,8 @@ const CaixaDeEmail = () => {
     let ignore = false;
     (async () => {
       try {
-        const list = await getMailFolders();
+        const rawList = await getMailFolders();
+        const list = sortFoldersForUi(dedupeFoldersByLabel(rawList));
         if (ignore) return;
         setFolders(list);
         const inbox = list.find((f) => String(f.display_name || '').toLowerCase().includes('inbox'));
@@ -1308,7 +1494,12 @@ const CaixaDeEmail = () => {
         setBodyHtml('');
         const detail = await getMailMessage(selectedMessage.id);
         if (!ignore) {
-          setMessageDetail(detail);
+          setMessageDetail({
+            ...selectedMessage,
+            ...detail,
+            has_attachments:
+              detail?.has_attachments ?? detail?.hasAttachments ?? selectedMessage?.has_attachments ?? false,
+          });
         }
       } catch {
         if (!ignore) setToast({ open: true, type: 'error', message: 'Falha ao carregar mensagem.' });
@@ -1322,11 +1513,20 @@ const CaixaDeEmail = () => {
     };
   }, [selectedMessage?.id]);
 
+  // AUTO-MARK AS READ when email is opened
+  useEffect(() => {
+    if (!selectedMessage?.id || selectedMessage?.is_read_local) return;
+    const t = setTimeout(() => markAsRead(selectedMessage), 800);
+    return () => clearTimeout(t);
+  }, [selectedMessage?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // LOAD ATTACHMENTS
   useEffect(() => {
     let ignore = false;
     const hasCid = /cid:/i.test(messageDetail?.body_content || '');
-    if (!messageDetail?.id || (!messageDetail.has_attachments && !hasCid)) {
+    const hasAttachments =
+      messageDetail?.has_attachments ?? messageDetail?.hasAttachments ?? selectedMessage?.has_attachments ?? false;
+    if (!messageDetail?.id || (!hasAttachments && !hasCid)) {
       setAttachments([]);
       return;
     }
@@ -1343,7 +1543,13 @@ const CaixaDeEmail = () => {
     return () => {
       ignore = true;
     };
-  }, [messageDetail?.id, messageDetail?.has_attachments, messageDetail?.body_content]);
+  }, [
+    messageDetail?.id,
+    messageDetail?.has_attachments,
+    messageDetail?.hasAttachments,
+    messageDetail?.body_content,
+    selectedMessage?.has_attachments,
+  ]);
 
   const blobToDataUrl = (blob) =>
     new Promise((resolve, reject) => {
@@ -1618,6 +1824,10 @@ const CaixaDeEmail = () => {
   }, [groupByThread, selectedMessage, grouped, getThreadKey]);
 
   const activeFolderMeta = useMemo(() => folderLabel(activeFolder?.display_name || 'Caixa'), [activeFolder?.display_name]);
+  const effectiveHasAttachments = useMemo(
+    () => messageDetail?.has_attachments ?? messageDetail?.hasAttachments ?? selectedMessage?.has_attachments ?? false,
+    [messageDetail?.has_attachments, messageDetail?.hasAttachments, selectedMessage?.has_attachments]
+  );
 
   const allSelected = useMemo(() => {
     if (!grouped.length) return false;
@@ -2415,7 +2625,7 @@ const CaixaDeEmail = () => {
                   )}
 
                   {/* attachments */}
-                  {(messageDetail?.has_attachments || /cid:/i.test(bodyHtml)) && (
+                  {(effectiveHasAttachments || /cid:/i.test(bodyHtml)) && (
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <div className="text-sm font-semibold">Anexos</div>
@@ -2462,22 +2672,22 @@ const CaixaDeEmail = () => {
         seed={composeSeed}
       />
       {composeOpen && composeMinimized && (
-        <div className="fixed left-4 bottom-20 z-50">
-          <button
-            type="button"
-            onClick={() => setComposeMinimized(false)}
-            className="sap-card px-4 py-3 border panel-border bg-[var(--panel)]/90 shadow-lg flex items-center gap-3"
-            title="Expandir novo e-mail"
-          >
-            <div className="h-9 w-9 rounded-lg bg-[var(--muted)]/30 flex items-center justify-center border panel-border">
-              <Send size={16} />
-            </div>
-            <div className="text-left">
-              <div className="text-sm font-semibold">Novo e-mail</div>
-              <div className="text-[11px] opacity-70">Clique para continuar</div>
-            </div>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setComposeMinimized(false)}
+          className="fixed bottom-4 right-6 z-[200] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border transition-colors"
+          style={{ borderColor: 'var(--border)', background: 'var(--panel)' }}
+          title="Expandir novo e-mail"
+        >
+          <div className="w-8 h-8 rounded-lg bg-blue-600/20 flex items-center justify-center">
+            <Send size={14} className="text-blue-400" />
+          </div>
+          <div className="text-left">
+            <div className="text-xs font-semibold">Novo e-mail</div>
+            <div className="text-[11px] opacity-50">Clique para continuar</div>
+          </div>
+          <ChevronUp size={13} className="opacity-40 ml-1" />
+        </button>
       )}
       <ReplyForwardModal
         open={replyOpen}
@@ -2560,4 +2770,3 @@ const CaixaDeEmail = () => {
 };
 
 export default CaixaDeEmail;
-

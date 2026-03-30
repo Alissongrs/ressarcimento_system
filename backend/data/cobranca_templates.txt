@@ -1,0 +1,54 @@
+================================================================================
+MODELOS DE REFERÊNCIA — COBRANÇA DE RETORNO
+================================================================================
+
+Estes modelos servem como referência de TOM, ESTRUTURA e LINGUAGEM para a IA.
+A IA NÃO deve copiar dados específicos (UC, cliente, datas, valores, números internos).
+Apenas utilize o estilo e abordagem abaixo como base.
+
+--------------------------------------------------------------------------------
+INSTRUÇÃO PARA A IA:
+Use os modelos abaixo para calibrar o tom e a estrutura dos e-mails gerados.
+Não copie dados específicos dos modelos — adapte ao caso real fornecido no contexto.
+--------------------------------------------------------------------------------
+
+
+[MODELO 1 — FORMAL/JURÍDICO]
+(Cole aqui seu modelo de e-mail formal. Substitua dados reais por [CAMPO] ou remova.)
+
+Exemplo de estrutura:
+Prezados,
+
+Venho, por meio desta, solicitar posicionamento referente à reclamação protocolo [número] encaminhada
+em [data], relativa à unidade consumidora [UC], ainda sem retorno por parte da distribuidora.
+
+Cumpre salientar que, nos termos do art. 126 §1º da REN ANEEL 1000/2021, a distribuidora dispõe
+de até 30 dias úteis para manifestar-se formalmente acerca de reclamações registradas por
+consumidores ou seus representantes.
+
+Diante do prazo já decorrido, solicitamos posicionamento formal em até [prazo] dias úteis,
+sob pena de adoção das medidas regulatórias e administrativas cabíveis.
+
+Atenciosamente,
+[Representante]
+
+
+[MODELO 2 — DIRETO/OBJETIVO]
+(Cole aqui seu modelo de e-mail mais direto. Substitua dados reais por [CAMPO] ou remova.)
+
+Exemplo de estrutura:
+Boa tarde,
+
+Gostaríamos de solicitar um retorno referente ao protocolo aberto em [data] para a UC [UC].
+Até o momento não recebemos nenhum posicionamento da distribuidora.
+
+Conforme a REN 1000/2021, o prazo regulatório de resposta já foi ultrapassado.
+Pedimos gentileza no retorno o mais breve possível.
+
+Obrigado,
+[Representante]
+
+
+================================================================================
+FIM DOS MODELOS
+================================================================================

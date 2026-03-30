@@ -612,6 +612,26 @@ LEFT JOIN (
 ) h ON h.id_requisicao = p.id_processo
 `)
 
+		// View para treino do Score de Progressão
+		ensureView("vw_score_progressao", `
+CREATE VIEW vw_score_progressao AS
+SELECT
+    p.id_requisicao,
+    COALESCE(p.ressarcimento_estimado, 0)                                              AS valor_estimado,
+    COALESCE(DATEDIFF(NOW(), p.data_criacao), 0)                                       AS dias_em_processamento,
+    COALESCE(pr.id_tipo_irregularidade, 0)                                             AS id_tipo_irregularidade,
+    COALESCE(pr.id_subtipo_irregularidade, 0)                                          AS id_subtipo_irregularidade,
+    CASE WHEN COALESCE(p.descricao_irregularidade, '') != '' THEN 1 ELSE 0 END         AS tem_descricao,
+    CASE WHEN COALESCE(p.link_fatura, '') != '' THEN 1 ELSE 0 END                      AS tem_link_fatura,
+    CASE WHEN pr.id_coluna IN (
+        SELECT id_coluna FROM DM_KANBAN_COLUNAS
+        WHERE nome_coluna IN ('Fluxo de Ressarcimento', 'Faturamento', 'Concluidos')
+    ) THEN 1 ELSE 0 END                                                                AS avancou
+FROM FT_REQUISICOES p
+LEFT JOIN FT_PROCESSOS pr ON p.id_requisicao = pr.id_processo
+WHERE pr.id_coluna IS NOT NULL
+  AND pr.id_coluna != 1`)
+
 		// Índices em DM_ALERTAS (se a tabela existir)
 		var hasAlertas int
 		_ = db.QueryRow(`
@@ -1040,6 +1060,80 @@ END`, strings.Join(insertCols, ", "), strings.Join(insertVals, ", "))
 			  KEY idx_mail_read_user (user_id)
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
 			return fmt.Errorf("criando mail_message_reads: %w", err)
+		}
+	}
+
+	// 17) Score de Progressão — cache por processo
+	{
+		var hasScore int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.TABLES
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME='FT_SCORE_PROGRESSAO'`,
+		).Scan(&hasScore)
+
+		if hasScore == 0 {
+			log.Println("[migrate] Criando tabela FT_SCORE_PROGRESSAO ...")
+			if _, err := db.Exec(`
+				CREATE TABLE FT_SCORE_PROGRESSAO (
+				  id_requisicao  BIGINT NOT NULL,
+				  score          FLOAT  NOT NULL,
+				  label          VARCHAR(10) NOT NULL,
+				  percentual     FLOAT  NOT NULL,
+				  calculado_em   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				  modelo_versao  VARCHAR(20) NOT NULL DEFAULT '1.0',
+				  PRIMARY KEY (id_requisicao)
+				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
+				return fmt.Errorf("criando FT_SCORE_PROGRESSAO: %w", err)
+			}
+		}
+	}
+
+	// 17b) Score de Progressão — log de treino (resultado real ao sair de Ativos)
+	{
+		var hasTrainLog int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.TABLES
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME='FT_SCORE_TRAINING_LOG'`,
+		).Scan(&hasTrainLog)
+
+		if hasTrainLog == 0 {
+			log.Println("[migrate] Criando tabela FT_SCORE_TRAINING_LOG ...")
+			if _, err := db.Exec(`
+				CREATE TABLE FT_SCORE_TRAINING_LOG (
+				  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+				  id_requisicao  BIGINT NOT NULL,
+				  avancou        TINYINT(1) NOT NULL,
+				  features_json  JSON NOT NULL,
+				  criado_em      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				  PRIMARY KEY (id),
+				  UNIQUE KEY uq_score_log_req (id_requisicao),
+				  KEY idx_score_log_avancou (avancou)
+				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
+				return fmt.Errorf("criando FT_SCORE_TRAINING_LOG: %w", err)
+			}
+		}
+	}
+
+	// 17c) Coluna score_percentual em FT_PROCESSOS (denormalização para queries diretas)
+	{
+		var hasScoreCol int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME='FT_PROCESSOS'
+			  AND COLUMN_NAME='score_percentual'`,
+		).Scan(&hasScoreCol)
+
+		if hasScoreCol == 0 {
+			log.Println("[migrate] Adicionando coluna FT_PROCESSOS.score_percentual ...")
+			if _, err := db.Exec(`ALTER TABLE FT_PROCESSOS ADD COLUMN score_percentual FLOAT NULL`); err != nil {
+				log.Printf("[migrate] aviso: falha ao adicionar score_percentual (ignorado): %v", err)
+			}
 		}
 	}
 

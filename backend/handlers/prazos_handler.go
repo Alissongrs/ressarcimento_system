@@ -219,7 +219,10 @@ SELECT
     e.etapa,
     p.sub_etapa,
     a.prazo_dias,
-    h.data_movimentacao AS data_base
+    h.data_movimentacao AS data_base,
+    COALESCE(p.uc, '')             AS uc,
+    COALESCE(p.cliente, '')        AS cliente,
+    COALESCE(p.concessionaria, '') AS concessionaria
 FROM FT_PROCESSOS p
 JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
 JOIN alvo a ON LOWER(TRIM(e.etapa)) = LOWER(TRIM(a.etapa)) COLLATE utf8mb4_unicode_ci
@@ -238,17 +241,20 @@ LIMIT ?`
 	defer rows.Close()
 
 	type row struct {
-		ID       int            `json:"id_processo"`
-		Etapa    string         `json:"etapa"`
-		SubEtapa sql.NullString `json:"sub_etapa"`
-		Prazo    int            `json:"prazo_dias"`
-		DataBase time.Time      `json:"data_base"`
+		ID            int            `json:"id_processo"`
+		Etapa         string         `json:"etapa"`
+		SubEtapa      sql.NullString `json:"sub_etapa"`
+		Prazo         int            `json:"prazo_dias"`
+		DataBase      time.Time      `json:"data_base"`
+		UC            string         `json:"uc"`
+		Cliente       string         `json:"cliente"`
+		Concessionaria string        `json:"concessionaria"`
 	}
 
 	list := make([]row, 0, 64)
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.ID, &r.Etapa, &r.SubEtapa, &r.Prazo, &r.DataBase); err != nil {
+		if err := rows.Scan(&r.ID, &r.Etapa, &r.SubEtapa, &r.Prazo, &r.DataBase, &r.UC, &r.Cliente, &r.Concessionaria); err != nil {
 			log.Printf("GetProcessosComPrazo scan error: %v", err)
 			continue
 		}
@@ -256,17 +262,20 @@ LIMIT ?`
 	}
 
 	type outItem struct {
-		ID             int     `json:"id_processo"`
-		Etapa          string  `json:"etapa"`
-		SubEtapa       string  `json:"sub_etapa"`
-		PrazoDias      int     `json:"prazo_dias"`
-		Deadline       string  `json:"deadline"`
-		DeadlineUnix   int64   `json:"deadline_unix"`
-		HorasRestantes float64 `json:"horas_restantes"`
-		DiasRestantes  float64 `json:"dias_restantes"`
-		Atrasado       bool    `json:"atrasado"`
-		DataBase       string  `json:"data_base"`
-		DataBaseUnix   int64   `json:"data_base_unix"`
+		ID              int     `json:"id_processo"`
+		Etapa           string  `json:"etapa"`
+		SubEtapa        string  `json:"sub_etapa"`
+		PrazoDias       int     `json:"prazo_dias"`
+		Deadline        string  `json:"deadline"`
+		DeadlineUnix    int64   `json:"deadline_unix"`
+		HorasRestantes  float64 `json:"horas_restantes"`
+		DiasRestantes   float64 `json:"dias_restantes"`
+		Atrasado        bool    `json:"atrasado"`
+		DataBase        string  `json:"data_base"`
+		DataBaseUnix    int64   `json:"data_base_unix"`
+		UC              string  `json:"uc"`
+		Cliente         string  `json:"cliente"`
+		Concessionaria  string  `json:"concessionaria"`
 	}
 
 	now := time.Now()
@@ -288,6 +297,9 @@ LIMIT ?`
 			Atrasado:       delta < 0,
 			DataBase:       base.Format(time.RFC3339),
 			DataBaseUnix:   base.Unix(),
+			UC:             strings.TrimSpace(r.UC),
+			Cliente:        strings.TrimSpace(r.Cliente),
+			Concessionaria: strings.TrimSpace(r.Concessionaria),
 		})
 		if delta < 0 {
 			atrasados = append(atrasados, out[len(out)-1])

@@ -30,6 +30,7 @@ import { criarAlertaProcesso } from '../services/requisicaoService';
 import api from '../services/api';
 import { confirmAction } from '../utils/confirm.js';
 import ModalEmail from '../components/ModalEmail';
+import ModalTese from '../components/ModalTese';
 
 const kanbanSteps = [
   { id: 1, label: 'ATIVOS' },
@@ -189,6 +190,7 @@ const ProcessoDetalhes = () => {
   const [faturas, setFaturas] = useState([]);
   const [anexos, setAnexos] = useState([]);
   const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showTeseModal, setShowTeseModal] = useState(false);
   // Estados de menÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ§ÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂµes removidos
   const [novaMensagemAlerta, setNovaMensagemAlerta] = useState('');
 
@@ -640,7 +642,7 @@ const ProcessoDetalhes = () => {
   });
 
   // Colar imagem no comentÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rio
-  const handlePasteComentario = (e) => {
+    const handlePasteComentario = (e) => {
     const items = e.clipboardData?.items || [];
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.indexOf('image') !== -1) {
@@ -1019,6 +1021,14 @@ const ProcessoDetalhes = () => {
               title="Novo e-mail"
             >
               <Mail size={16} /> Novo e-mail
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowTeseModal(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border panel-border panel-bg-60 hover:opacity-90 text-[var(--header-fg)] transition-smooth"
+              title="Gerar tese técnico-jurídica com IA"
+            >
+              <FileText size={16} /> Gerar Tese
             </button>
             {/* relevÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¢ncia */}
             <button
@@ -2517,11 +2527,17 @@ const ProcessoDetalhes = () => {
                         </span>
                       </div>
 
-                      <p className="text-sm text-[var(--fg)] mb-2">
-                        {extrairTextoSeguro(
-                          item.comentario,
-                        ) || 'Sem comentÃÆ’Ã†â€™Ãâ€ ââ‚¬â„¢ÃÆ’ââ‚¬Å¡Ãâ€šÂÂ¡rio'}
-                      </p>
+                      {item.tipo_movimentacao === 'EMAIL' && extrairTextoSeguro(item.comentario) ? (
+                        <div
+                          className="text-sm text-[var(--fg)] mb-2 p-3 rounded border border-[var(--border)] bg-[var(--panel)] overflow-auto"
+                          style={{ maxHeight: 300, fontSize: 13, lineHeight: 1.6 }}
+                          dangerouslySetInnerHTML={{ __html: extrairTextoSeguro(item.comentario) }}
+                        />
+                      ) : (
+                        <p className="text-sm text-[var(--fg)] mb-2">
+                          {extrairTextoSeguro(item.comentario) || 'Sem comentário'}
+                        </p>
+                      )}
 
                       <div className="text-xs opacity-70">
                         <p>
@@ -2726,6 +2742,9 @@ const ProcessoDetalhes = () => {
       )}
       {showEmailModal && (
         <ModalEmail processo={processo} onClose={() => setShowEmailModal(false)} />
+      )}
+      {showTeseModal && (
+        <ModalTese processo={processo} onClose={() => setShowTeseModal(false)} />
       )}
     </div>
   );

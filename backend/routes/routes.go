@@ -44,6 +44,11 @@ func maskTokenQuery(raw string) string {
 	return raw
 }
 
+func registerGestorHistoricoRoutes(group *gin.RouterGroup) {
+	group.POST("/processos/:id/historico/:hid/anexos", handlers.AddHistoricoAnexo)
+	group.POST("/processos/:id/historico/:hid/extrair-email", handlers.ExtrairDadosEmail)
+}
+
 func SetupRouter(gdb *gorm.DB) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -64,17 +69,17 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			path,
 		)
 	}))
-	// Não confiar em proxies por padrão
+	// NÃ£o confiar em proxies por padrÃ£o
 	if err := r.SetTrustedProxies(nil); err != nil {
 		println("[routes] aviso: falha ao definir trusted proxies:", err.Error())
 	}
 
-	// Memória p/ multipart (uploads)
+	// MemÃ³ria p/ multipart (uploads)
 	r.MaxMultipartMemory = 512 << 20 // 512MB
 
-	// Migrações básicas
+	// MigraÃ§Ãµes bÃ¡sicas
 	if err := database.RunMigrations(); err != nil {
-		println("[routes] migrações falharam:", err.Error())
+		println("[routes] migraÃ§Ãµes falharam:", err.Error())
 	}
 	sqlDB, _ := gdb.DB()
 	if sqlDB != nil {
@@ -103,13 +108,13 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			"X-Auth-Token", "X-Session-Token", "Accept", "Cache-Control",
 		},
 		AllowCredentials: true,
-		// Expor cabeçalhos úteis ao front (rate limit / auth)
+		// Expor cabeÃ§alhos Ãºteis ao front (rate limit / auth)
 		ExposeHeaders: []string{
 			"Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "WWW-Authenticate",
 		},
 	}
 
-	// Permite override de origens via env CORS_ALLOW_ORIGINS (lista separada por vírgulas)
+	// Permite override de origens via env CORS_ALLOW_ORIGINS (lista separada por vÃ­rgulas)
 	if env := strings.TrimSpace(os.Getenv("CORS_ALLOW_ORIGINS")); env != "" {
 		parts := strings.Split(env, ",")
 		cfg.AllowOrigins = make([]string, 0, len(parts))
@@ -125,7 +130,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 	// Swagger (OpenAPI) UI
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	// Liberar OPTIONS (preflight) antes de autenticação para evitar 403 em CORS
+	// Liberar OPTIONS (preflight) antes de autenticaÃ§Ã£o para evitar 403 em CORS
 	r.Use(func(c *gin.Context) {
 		if c.Request.Method == http.MethodOptions {
 			c.Status(http.StatusOK)
@@ -138,15 +143,15 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 	// Aplica a todas as rotas exceto health checks
 	r.Use(middleware.GlobalRateLimit())
 
-	// ===== COMPRESSÃO GZIP =====
+	// ===== COMPRESSÃƒO GZIP =====
 	// Comprime respostas JSON e HTML automaticamente
 	r.Use(middleware.Gzip())
 
-	// Arquivos estáticos
+	// Arquivos estÃ¡ticos
 	r.Static("/uploads", "./uploads")
 
-	// ===== SSE públicas (aliases DEV) =====
-	// Aceitam ?token= porque EventSource não envia Authorization
+	// ===== SSE pÃºblicas (aliases DEV) =====
+	// Aceitam ?token= porque EventSource nÃ£o envia Authorization
 	r.GET("/apialertasstream", middleware.AuthOrQueryToken(), handlers.StreamAlertas)
 	r.GET("/apievents", middleware.AuthOrQueryToken(), handlers.StreamGlobalEvents)
 
@@ -165,9 +170,9 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 	// ============================================================
 	apiV1 := r.Group("/api/v1")
 	{
-		// Health checks (múltiplas versões para diferentes necessidades)
+		// Health checks (mÃºltiplas versÃµes para diferentes necessidades)
 		apiV1.GET("/healthz", handlers.SimpleHealthCheck)   // Simples (ok: true)
-		apiV1.GET("/health", handlers.AdvancedHealthCheck)  // Avançado (verifica dependências)
+		apiV1.GET("/health", handlers.AdvancedHealthCheck)  // AvanÃ§ado (verifica dependÃªncias)
 		apiV1.GET("/health/live", handlers.LivenessCheck)   // Kubernetes liveness
 		apiV1.GET("/health/ready", handlers.ReadinessCheck) // Kubernetes readiness
 
@@ -177,7 +182,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 		apiV1.GET("/processos/:id/events", middleware.AuthOrQueryToken(), handlers.StreamProcessoEvents)
 		apiV1.GET("/anexos/:anexoId/download", middleware.AuthOrQueryToken(), handlers.DownloadAnexoByID)
 
-		// ===== OCR CHAT (fora do grupo autenticado padrão)
+		// ===== OCR CHAT (fora do grupo autenticado padrÃ£o)
 		// Aceita Authorization: Bearer <jwt> OU ?token=<jwt> / cookies
 		apiV1.POST("/ocr/chat",
 			middleware.AuthOrQueryToken(),
@@ -185,7 +190,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			handlers.OCRChat,
 		)
 
-		// ===== Diagnóstico simples (quem sou? / exp / role)
+		// ===== DiagnÃ³stico simples (quem sou? / exp / role)
 		apiV1.GET("/whoami", middleware.AuthOrQueryToken(), func(c *gin.Context) {
 			uid, _ := c.Get("userID")
 			userName, _ := c.Get("userName")
@@ -199,13 +204,13 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			})
 		})
 
-		// Público com rate limiting restrito para autenticação
+		// PÃºblico com rate limiting restrito para autenticaÃ§Ã£o
 		apiV1.POST("/register", middleware.AuthRateLimit(), handlers.Register)
 		apiV1.POST("/login", middleware.AuthRateLimit(), handlers.Login)
 		apiV1.GET("/uc/:numero", handlers.GetUCByNumero)
 		apiV1.GET("/uc/:numero/faturas", handlers.GetFaturasByUC)
 
-		// Alias público para faturas por unidade (Amee_Serving)
+		// Alias pÃºblico para faturas por unidade (Amee_Serving)
 		apiV1.GET("/faturas-uc", handlers.GetFaturas)
 
 		// Faturas Implantadas (por id_uc)
@@ -216,8 +221,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 
 		apiV1.GET("/departamentos", handlers.GetDepartamentos)
 
-
-		// ------------------- Autenticado (qualquer usuário) -------------------
+		// ------------------- Autenticado (qualquer usuÃ¡rio) -------------------
 		authRequired := apiV1.Group("/")
 		authRequired.Use(middleware.AuthMiddleware())
 		{
@@ -236,7 +240,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Batch meta para cards do Kanban
 			authRequired.GET("/processos/cards-meta", handlers.GetProcessosCardsMeta)
 
-			// UC: opções (unidade/empresa/concessionária)
+			// UC: opÃ§Ãµes (unidade/empresa/concessionÃ¡ria)
 			authRequired.GET("/uc/:numero/opcoes", handlers.GetUCOpcoesByNumero)
 
 			// Resumos de processo (persistidos)
@@ -253,7 +257,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Enfileirar em massa (ids, mode=changed|all, limit)
 			authRequired.POST("/resumos/enqueue", handlers.EnqueueResumos)
 
-			// Requisições
+			// RequisiÃ§Ãµes
 			authRequired.POST("/requisicoes", handlers.CreateRequisicaoPersist)
 			authRequired.GET("/requisicoes/departamento", handlers.GetRequisicoesDepartamento)
 
@@ -266,21 +270,22 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Faturas auxiliares
 			authRequired.GET("/faturas-anos", handlers.GetFaturasAnos)
 
-			// Faturas Kanban (Análise de Desvio)
+			// Faturas Kanban (AnÃ¡lise de Desvio)
 			authRequired.GET("/faturas/cache", handlers.ListFaturasCache)
 
-			// Fichas de Análise (F01–F05 + Resumo)
+			// Fichas de AnÃ¡lise (F01â€“F05 + Resumo)
 			authRequired.GET("/faturas/ficha/resumo", handlers.ListFichaResumo)
 			authRequired.GET("/faturas/ficha/01", handlers.ListFicha01)
 			authRequired.GET("/faturas/ficha/02", handlers.ListFicha02)
 			authRequired.GET("/faturas/ficha/03", handlers.ListFicha03)
 			authRequired.GET("/faturas/ficha/04", handlers.ListFicha04)
 			authRequired.GET("/faturas/ficha/05", handlers.ListFicha05)
-			authRequired.GET("/faturas/ficha/combinados", handlers.ListFichaCombinados)
 			authRequired.GET("/faturas/uc-historico", handlers.GetUCFaturas)
 			authRequired.GET("/faturas/ucs-em-processo", handlers.ListUCsEmProcesso)
 			authRequired.POST("/faturas/aisure/chat", handlers.AisureChatHandler)
+			authRequired.GET("/faturas/aisure/fetch", handlers.AisureFetchFaturaHandler)
 			authRequired.POST("/faturas/aisure/confirmar", handlers.AisureConfirmarHandler)
+			authRequired.POST("/faturas/aisure/gerar-email", handlers.GerarEmailHandler)
 
 			// Busca global
 			authRequired.GET("/search/global", handlers.SearchGlobal)
@@ -305,7 +310,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Dashboard de deferidos (autenticado)
 			authRequired.GET("/dashboard/deferidos", handlers.GetDashboardDeferidos)
 
-			// Histórico (qualquer usuário autenticado)
+			// HistÃ³rico (qualquer usuÃ¡rio autenticado)
 			authRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
 			authRequired.GET("/requisicoes/:id", handlers.GetRequisicaoByID)
 			authRequired.GET("/processos/:id/historico", handlers.GetHistoricoMovimentacoes)
@@ -315,7 +320,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 		gestorRequired := apiV1.Group("/")
 		gestorRequired.Use(middleware.AuthMiddleware(), middleware.GestorMiddleware())
 		{
-			// Requisições (triagem)
+			// RequisiÃ§Ãµes (triagem)
 			gestorRequired.GET("/requisicoes", handlers.GetAllRequisicoes)
 			gestorRequired.GET("/requisicoes/:id/faturas", handlers.GetFaturasSelecionadasByRequisicaoID)
 			gestorRequired.POST("/requisicoes/:id/update", handlers.UpdateRequisicaoCompleta)
@@ -326,7 +331,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Processos (fluxo)
 			gestorRequired.GET("/processos/kanban", handlers.GetProcessosKanban) // legado
 			gestorRequired.GET("/processos/kanban-fast", procHandler.KanbanFast) // fast
-			gestorRequired.POST("/processos/:id/historico/:hid/anexos", handlers.AddHistoricoAnexo)
+			registerGestorHistoricoRoutes(gestorRequired)
 			gestorRequired.GET("/processos/:id/deferimento", handlers.GetDeferimentoByProcesso)
 			gestorRequired.POST("/processos/:id/movimentar", handlers.MovimentarProcesso)
 			gestorRequired.POST("/processos/:id/deferimento", handlers.SalvarDeferimentoSimples)
@@ -363,6 +368,15 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.POST("/processos/:id/emails", handlers.EnviarEmailProcesso)
 			gestorRequired.GET("/processos/:id/emails", handlers.GetEmailsByProcessoID)
 			gestorRequired.POST("/processos/:id/emails/:emailId/read", handlers.MarkEmailProcessoRead)
+			gestorRequired.POST("/processos/:id/gerar-cobranca", handlers.GerarCobrancaEmailHandler)
+
+			// Tese técnico-jurídica
+			gestorRequired.GET("/processos/:id/tese", handlers.GetTeseHandler)
+			gestorRequired.POST("/processos/:id/tese/gerar", handlers.GerarTeseHandler)
+			gestorRequired.POST("/processos/:id/tese/salvar", handlers.SalvarTeseHandler)
+			gestorRequired.GET("/processos/:id/tese/pdf", handlers.PDFTeseHandler)
+			gestorRequired.POST("/processos/:id/tese/enviar-email", handlers.EnviarEmailTeseHandler)
+			gestorRequired.POST("/processos/:id/tese/gerar-email", handlers.GerarEmailTeseHandler)
 
 			// Mailbox (Microsoft Graph)
 			gestorRequired.GET("/mail/folders", handlers.MailFolders)
@@ -391,7 +405,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/filtros/concessionarias", handlers.GetConcessionariasParaFiltro)
 			gestorRequired.GET("/filtros/tensao", handlers.GetTensaoParaFiltro)
 
-			// Admin - Planilha (lista e operações em massa)
+			// Admin - Planilha (lista e operaÃ§Ãµes em massa)
 			gestorRequired.GET("/admin/planilha", handlers.AdminPlanilhaList)
 			gestorRequired.GET("/admin/planilha/export", handlers.AdminPlanilhaExport)
 			gestorRequired.POST("/admin/planilha/import", handlers.AdminPlanilhaImport)
@@ -400,7 +414,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.POST("/admin/planilha/recalcular-coluna", handlers.AdminPlanilhaRecalcularColuna)
 			gestorRequired.DELETE("/admin/historico/:id", handlers.AdminDeleteHistorico)
 
-			// Admin - Prazos (configurações de prazos por kanban/etapa)
+			// Admin - Prazos (configuraÃ§Ãµes de prazos por kanban/etapa)
 			gestorRequired.GET("/admin/prazos", handlers.GetPrazosConfig)
 			gestorRequired.POST("/admin/prazos", handlers.SavePrazosConfig)
 
@@ -409,7 +423,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.POST("/admin/alarmes", handlers.SaveAlarme)
 			gestorRequired.DELETE("/admin/alarmes/:id", handlers.DeleteAlarme)
 
-			// Admin - Editor completo (processo + módulos)
+			// Admin - Editor completo (processo + mÃ³dulos)
 			gestorRequired.POST("/admin/editor/processo", handlers.AdminEditProcesso)
 			gestorRequired.GET("/admin/editor/next-id", handlers.AdminNextProcessID)
 
@@ -422,14 +436,15 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 
 			// IA
 			gestorRequired.POST("/perguntar-ia", handlers.PerguntaIAHandler)
-			gestorRequired.GET("/ml/processo/:id", handlers.MLProcessoHandler)
-			gestorRequired.GET("/ml/status", handlers.MLStatusHandler)
 
-			// Score de Progressão (novo)
+			// Score de ProgressÃ£o
 			gestorRequired.GET("/processos/:id/score", handlers.ScoreProcessoHandler)
 			gestorRequired.POST("/admin/score/precalcular", handlers.PrecalcularScoresHandler)
 
-			// Menções
+			// Fila de aÃ§Ãµes do dia
+			gestorRequired.GET("/acoes-do-dia", handlers.GetAcoesDodia)
+
+			// MenÃ§Ãµes
 			gestorRequired.GET("/usuarios/mencoes", handlers.GetUsuariosMencoes)
 
 			// Tags
@@ -487,7 +502,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			handlers.OCRChat,
 		)
 
-		// Diagnóstico legado
+		// DiagnÃ³stico legado
 		api.GET("/whoami", middleware.AuthOrQueryToken(), func(c *gin.Context) {
 			uid, _ := c.Get("userID")
 			userName, _ := c.Get("userName")
@@ -528,7 +543,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Dashboard de deferidos (legado, autenticado)
 			authRequired.GET("/dashboard/deferidos", handlers.GetDashboardDeferidos)
 
-			// Histórico (legado, qualquer usuário autenticado)
+			// HistÃ³rico (legado, qualquer usuÃ¡rio autenticado)
 			authRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
 			authRequired.GET("/processos/:id/historico", handlers.GetHistoricoMovimentacoes)
 		}
@@ -546,7 +561,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 
 			gestorRequired.GET("/processos/kanban", handlers.GetProcessosKanban)
 			gestorRequired.GET("/processos/kanban-fast", procHandler.KanbanFast)
-			gestorRequired.POST("/processos/:id/historico/:hid/anexos", handlers.AddHistoricoAnexo)
+			registerGestorHistoricoRoutes(gestorRequired)
 			gestorRequired.GET("/processos/:id/deferimento", handlers.GetDeferimentoByProcesso)
 			gestorRequired.POST("/processos/:id/movimentar", handlers.MovimentarProcesso)
 			gestorRequired.POST("/processos/:id/comentar", handlers.ComentarProcesso)
@@ -574,6 +589,14 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/processos/:id/emails", handlers.GetEmailsByProcessoID)
 			gestorRequired.POST("/processos/:id/emails/:emailId/read", handlers.MarkEmailProcessoRead)
 
+			// Tese técnico-jurídica
+			gestorRequired.GET("/processos/:id/tese", handlers.GetTeseHandler)
+			gestorRequired.POST("/processos/:id/tese/gerar", handlers.GerarTeseHandler)
+			gestorRequired.POST("/processos/:id/tese/salvar", handlers.SalvarTeseHandler)
+			gestorRequired.GET("/processos/:id/tese/pdf", handlers.PDFTeseHandler)
+			gestorRequired.POST("/processos/:id/tese/enviar-email", handlers.EnviarEmailTeseHandler)
+			gestorRequired.POST("/processos/:id/tese/gerar-email", handlers.GerarEmailTeseHandler)
+
 			gestorRequired.GET("/faturas", handlers.GetFaturas)
 
 			gestorRequired.GET("/dashboard/stats", dashHandler.Stats)
@@ -583,9 +606,12 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 
 			gestorRequired.POST("/perguntar-ia", handlers.PerguntaIAHandler)
 
-			// Score de Progressão (novo)
+			// Score de ProgressÃ£o (novo)
 			gestorRequired.GET("/processos/:id/score", handlers.ScoreProcessoHandler)
 			gestorRequired.POST("/admin/score/precalcular", handlers.PrecalcularScoresHandler)
+
+			// Fila de aÃ§Ãµes do dia
+			gestorRequired.GET("/acoes-do-dia", handlers.GetAcoesDodia)
 
 			gestorRequired.GET("/usuarios/mencoes", handlers.GetUsuariosMencoes)
 			gestorRequired.GET("/tags", handlers.GetAllTags)

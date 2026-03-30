@@ -89,7 +89,8 @@ OPENAI_MAX_TOKENS = parse_int_env("OPENAI_MAX_TOKENS", 1500)
 OPENAI_TEMPERATURE = parse_float_env("OPENAI_TEMPERATURE", 0.1)
 
 # Ajustes de performance do OCR
-OCR_MAX_PAGES_DEFAULT = int(os.getenv("OCR_MAX_PAGES", "2") or "2")
+# 0 = sem limite explicito (processa todas as paginas)
+OCR_MAX_PAGES_DEFAULT = parse_int_env("OCR_MAX_PAGES", 0)
 OCR_DPI = int(os.getenv("OCR_DPI", "240") or "240")
 OCR_LANG = (os.getenv("OCR_LANG", "por") or "por").strip()
 OCR_FEWSHOT_PATH = (os.getenv("OCR_FEWSHOT_PATH", "") or "").strip()
@@ -764,6 +765,8 @@ ALLOWED_PROFILES = {"FAST", "BALANCED", "HIGH"}
 def pages_for_profile(profile: str) -> int:
     if profile == "FAST":
         return 1
+    if OCR_MAX_PAGES_DEFAULT <= 0:
+        return 0
     if profile == "HIGH":
         return max(OCR_MAX_PAGES_DEFAULT, 3)
     return OCR_MAX_PAGES_DEFAULT

@@ -4,6 +4,7 @@ const ThemeContext = createContext({ theme: 'light-4', setTheme: () => {} });
 
 // Temas disponíveis: Padrão (Claro D), Rosa e Azul
 const THEMES = [
+  'dark-navy',
   'light-4',
   'pink',
   'azul',
@@ -15,11 +16,11 @@ const THEMES = [
 ];
 
 export function ThemeProvider({ children }) {
-  const [theme, setThemeState] = useState('light-4');
+  const [theme, setThemeState] = useState('dark-navy');
 
   useEffect(() => {
-    const saved = localStorage.getItem('theme') || 'light-4';
-    setThemeState(THEMES.includes(saved) ? saved : 'light-4');
+    const saved = localStorage.getItem('theme') || 'dark-navy';
+    setThemeState(THEMES.includes(saved) ? saved : 'dark-navy');
   }, []);
 
   useEffect(() => {
@@ -27,7 +28,7 @@ export function ThemeProvider({ children }) {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  const setTheme = (t) => setThemeState(THEMES.includes(t) ? t : 'light-4');
+  const setTheme = (t) => setThemeState(THEMES.includes(t) ? t : 'dark-navy');
   const value = useMemo(() => ({ theme, setTheme }), [theme]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

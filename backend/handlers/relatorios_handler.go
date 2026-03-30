@@ -42,6 +42,7 @@ type RelatoriosMetricasResp struct {
 	TempoConclusaoConcs    []map[string]interface{} `json:"tempo_medio_conclusao_concessionaria,omitempty"`
 	RepasseTotal           float64                  `json:"repasse_total,omitempty"`
 	RepassePorConcs        []map[string]interface{} `json:"repasse_por_concessionaria,omitempty"`
+	TaxaSucessoConcs       []map[string]interface{} `json:"taxa_sucesso_concessionarias,omitempty"`
 	Warnings               []string                 `json:"warnings,omitempty"`
 }
 
@@ -414,6 +415,19 @@ func GetRelatoriosMetricas(c *gin.Context) {
 			})
 		}
 		out.RepasseTotal = total
+	}
+
+	if rows, err := repo.TaxaSucessoPorConcessionaria(ctx, f); err != nil {
+		out.Warnings = append(out.Warnings, "taxa_sucesso_concessionarias")
+	} else {
+		for _, r := range rows {
+			out.TaxaSucessoConcs = append(out.TaxaSucessoConcs, map[string]interface{}{
+				"label":      r.Concessionaria,
+				"total":      r.Total,
+				"deferidos":  r.Deferidos,
+				"taxa_pct":   r.TaxaPct,
+			})
+		}
 	}
 
 	c.JSON(http.StatusOK, out)

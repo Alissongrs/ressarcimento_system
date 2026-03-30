@@ -1086,7 +1086,58 @@ func (r *DashboardRepo) KanbanComposicao(ctx context.Context, f DashFilters, con
 	return out, rows.Err()
 }
 
+// ============== Taxa de sucesso por concessionária =================
+type SucessoConcRow struct {
+	Concessionaria string
+	Total          int64
+	Deferidos      int64
+	TaxaPct        float64
+}
 
+func (r *DashboardRepo) TaxaSucessoPorConcessionaria(ctx context.Context, f DashFilters) ([]SucessoConcRow, error) {
+	q := `
+	SELECT
+	  rq.concessionaria,
+	  COUNT(*) AS total,
+	  SUM(CASE
+	    WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'indefer' THEN 0
+	    WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'defer'   THEN 1
+	    ELSE 0
+	  END) AS deferidos,
+	  ROUND(100.0 * SUM(CASE
+	    WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'indefer' THEN 0
+	    WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'defer'   THEN 1
+	    ELSE 0
+	  END) / NULLIF(COUNT(*), 0), 1) AS taxa_pct
+	FROM FT_PROCESSOS p
+	JOIN DM_ETAPAS_PROCESSO e  ON e.id_etapa_processo = p.id_etapa_processo
+	JOIN DM_KANBAN_COLUNAS k   ON k.id_coluna = e.id_coluna_kanban
+	JOIN FT_REQUISICOES rq     ON rq.id_requisicao = p.id_processo
+	WHERE rq.concessionaria IS NOT NULL AND rq.concessionaria <> ''
+	  AND COALESCE(p.suspenso, 0) = 0
+	`
+	args := []any{}
+	if f.Ini != nil && f.Fim != nil {
+		q += " AND DATE(rq.data_criacao) BETWEEN ? AND ?"
+		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
+	}
+	q += " GROUP BY rq.concessionaria HAVING total >= 2 ORDER BY taxa_pct DESC LIMIT 12;"
+
+	rows, err := r.db.Raw(q, args...).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SucessoConcRow
+	for rows.Next() {
+		var row SucessoConcRow
+		if err := rows.Scan(&row.Concessionaria, &row.Total, &row.Deferidos, &row.TaxaPct); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
 
 
 

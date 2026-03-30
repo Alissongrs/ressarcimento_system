@@ -32,6 +32,9 @@ import {
   Home,
   Receipt,
   ChevronRight,
+  LayoutDashboard,
+  TrendingUp,
+  Settings2,
 } from 'lucide-react';
 
 import FeedbackModal from './components/FeedbackModal.jsx';
@@ -42,6 +45,8 @@ import PageContainer from './components/PageContainer.jsx';
 // Components
 import AlertasVencimentoModal from './components/AlertasVencimentoModal.jsx';
 import GlobalNewProcessNotifier from './components/GlobalNewProcessNotifier.jsx';
+import FloatingEmailComposer from './components/FloatingEmailComposer.jsx';
+import { EmailComposeProvider } from './context/EmailComposeContext.jsx';
 
 // Pages
 import Login from './pages/LoginPage.jsx';
@@ -118,11 +123,11 @@ function TopNav({ role, unread, mailUnread, onLogout }) {
   const navigate = useNavigate();
   const baseItems = [
     { to: '/', label: 'Início', Icon: Home },
-    { to: '/novo', label: 'Nova Requisição', Icon: PlusCircle },
-    { to: '/admin/planilha', label: 'Gerenciar Processos', Icon: Workflow },
+    { to: '/novo', label: 'Nova Requisição', Icon: FilePlus },
+    { to: '/admin/planilha', label: 'Gerenciar Processos', Icon: LayoutDashboard },
     { to: '/backlog', label: 'Backlog', Icon: Archive },
     { to: '/auditoria', label: 'Auditoria', Icon: ShieldCheck },
-    { to: '/analise-desvio', label: 'Análise de Desvio', Icon: Receipt },
+    { to: '/analise-desvio', label: 'Análise de Desvio', Icon: TrendingUp },
     { to: '/historico', label: 'Histórico', Icon: History },
     { to: '/dashboard', label: 'Métricas', Icon: BarChart3 },
   ];
@@ -552,7 +557,7 @@ function App() {
             }
             title="Gerenciar Processos"
           >
-            <FileText className="w-5 h-5" strokeWidth={1.25} />
+            <LayoutDashboard className="w-5 h-5" strokeWidth={1.25} />
             <span className={`text-sm font-medium sidebar-label ${solicitanteClass('processos')}`}>Gerenciar Processos</span>
           </NavLink>
 
@@ -600,7 +605,7 @@ function App() {
             }
             title="Análise de Desvio"
           >
-            <Workflow className="w-5 h-5" strokeWidth={1.25} />
+            <TrendingUp className="w-5 h-5" strokeWidth={1.25} />
             <span className={`text-sm font-medium sidebar-label ${solicitanteClass('analise')}`}>Análise de Desvio</span>
           </NavLink>
 
@@ -646,7 +651,7 @@ function App() {
               }
               title="Editor (Admin)"
             >
-              <FilePenLine className="sidebar-icon" strokeWidth={1.6} />
+              <Settings2 className="sidebar-icon" strokeWidth={1.6} />
               <span className="text-sm font-medium sidebar-label">Editor</span>
             </NavLink>
           )}
@@ -756,7 +761,7 @@ function App() {
             }
             title="Gerenciar Processos"
           >
-            <FileText className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <LayoutDashboard className="sidebar-icon shrink-0" strokeWidth={1.25} />
             <span className={`text-sm font-medium sidebar-label ${solicitanteClass('processos')}`}>Gerenciar Processos</span>
           </NavLink>
 
@@ -818,7 +823,7 @@ function App() {
             }
             title="Auditoria"
           >
-            <Receipt className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <ShieldCheck className="sidebar-icon shrink-0" strokeWidth={1.25} />
             <span className={`text-sm font-medium sidebar-label ${solicitanteClass('auditoria')}`}>Auditoria</span>
           </NavLink>
 
@@ -833,7 +838,7 @@ function App() {
             }
             title="Análise de Desvio"
           >
-            <Workflow className="sidebar-icon shrink-0" strokeWidth={1.25} />
+            <TrendingUp className="sidebar-icon shrink-0" strokeWidth={1.25} />
             <span className={`text-sm font-medium sidebar-label ${solicitanteClass('analise')}`}>Análise de Desvio</span>
           </NavLink>
         </nav>
@@ -862,6 +867,7 @@ function App() {
 
   return (
     <ThemeProvider>
+      <EmailComposeProvider>
       <Router>
         <RouteKeeper user={user} />
         <div className="flex min-h-screen themed-surface flex-col">
@@ -972,6 +978,7 @@ function App() {
           onClose={() => setOpenGestorVenc(false)}
         />
         <CommandPaletteHost />
+        <FloatingEmailComposer />
 
         {sessionExpired && (
           <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -1046,6 +1053,7 @@ function App() {
           }
         />
       </Router>
+      </EmailComposeProvider>
     </ThemeProvider>
   );
 }

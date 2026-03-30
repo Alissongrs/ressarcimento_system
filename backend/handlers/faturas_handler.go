@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"ressarcimento-backend/database"
 	"ressarcimento-backend/models"
 	"strconv"
@@ -12,6 +14,81 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// loadEmpresasFromTxt carrega Cod_Empresa → Rz_Social do arquivo pipe-delimitado.
+// Procura o arquivo em múltiplos caminhos candidatos.
+func loadEmpresasFromTxt() []models.EmpresaFiltro {
+	candidates := []string{
+		filepath.Join("data", "empresas.txt"),
+		filepath.Join("backend", "data", "empresas.txt"),
+		filepath.Join("..", "empresas.txt"),
+		filepath.Join("..", "..", "empresas.txt"),
+	}
+
+	var raw []byte
+	for _, p := range candidates {
+		if b, err := os.ReadFile(p); err == nil {
+			raw = b
+			break
+		}
+	}
+	if raw == nil {
+		return nil
+	}
+
+	lines := strings.Split(string(raw), "\n")
+
+	codIdx, rzIdx := -1, -1
+	var result []models.EmpresaFiltro
+
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if !strings.HasPrefix(line, "|") {
+			continue
+		}
+		// Pula linhas separadoras (|---|)
+		if strings.HasPrefix(line, "|-") {
+			continue
+		}
+
+		cells := strings.Split(line, "|")
+		// Remove célula vazia antes do primeiro pipe
+		if len(cells) > 0 && cells[0] == "" {
+			cells = cells[1:]
+		}
+		trimmed := make([]string, len(cells))
+		for i, c := range cells {
+			trimmed[i] = strings.TrimSpace(c)
+		}
+
+		// Detecta cabeçalho
+		if codIdx == -1 {
+			for i, h := range trimmed {
+				switch strings.ToLower(h) {
+				case "cod_empresa":
+					codIdx = i
+				case "rz_social":
+					rzIdx = i
+				}
+			}
+			continue
+		}
+
+		if codIdx >= len(trimmed) || rzIdx >= len(trimmed) {
+			continue
+		}
+		cod, err := strconv.Atoi(trimmed[codIdx])
+		if err != nil || cod == 0 {
+			continue
+		}
+		rz := trimmed[rzIdx]
+		if rz == "" {
+			continue
+		}
+		result = append(result, models.EmpresaFiltro{CodEmpresa: cod, RzSocial: rz})
+	}
+	return result
+}
 
 // GetFaturas busca faturas com base em filtros, agora com paginaÃÂ§ÃÂ£o.
 // @Summary Listar faturas
@@ -341,21 +418,23 @@ func GetFaturas(c *gin.Context) {
 // @Failure 500 {object} map[string]string
 // @Router /api/v1/filtros/empresas [get]
 func GetEmpresasParaFiltro(c *gin.Context) {
+	// Tenta arquivo txt primeiro (independente do DB_Consulta)
+	if empresas := loadEmpresasFromTxt(); len(empresas) > 0 {
+		c.JSON(http.StatusOK, empresas)
+		return
+	}
+
+	// Fallback: DB_Consulta
 	if database.DB_Consulta == nil {
-		fmt.Println("[GetEmpresasParaFiltro] DB_Consulta estÃÂ¡ nil (verifique DB_CONSULTA_URL)")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB_Consulta nÃÂ£o inicializado"})
+		c.JSON(http.StatusOK, []models.EmpresaFiltro{})
 		return
 	}
 
 	var empresas []models.EmpresaFiltro
-
-	// Se sua DM_Empresa nÃÂ£o tiver coluna Status, remova o WHERE.
 	query := "SELECT Cod_Empresa, Rz_Social FROM DM_Empresa WHERE Status = 'A' ORDER BY Rz_Social ASC"
-
 	rows, err := database.DB_Consulta.Query(query)
 	if err != nil {
-		fmt.Printf("[GetEmpresasParaFiltro] erro ao buscar empresas: %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar empresas: " + err.Error()})
+		c.JSON(http.StatusOK, []models.EmpresaFiltro{})
 		return
 	}
 	defer rows.Close()
@@ -363,7 +442,6 @@ func GetEmpresasParaFiltro(c *gin.Context) {
 	for rows.Next() {
 		var e models.EmpresaFiltro
 		if err := rows.Scan(&e.CodEmpresa, &e.RzSocial); err != nil {
-			fmt.Printf("[GetEmpresasParaFiltro] erro ao escanear empresa: %v\n", err)
 			continue
 		}
 		empresas = append(empresas, e)

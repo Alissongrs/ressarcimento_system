@@ -949,15 +949,31 @@ func MailMessageLinkProcess(c *gin.Context) {
 		warnings = append(warnings, attWarnings...)
 	}
 
+	// Monta cabeçalho HTML do e-mail recebido para armazenar no histórico
+	msgBodyHTML := ""
+	if strings.TrimSpace(msg.BodyContent) != "" {
+		toStr := strings.Join(msg.To, "; ")
+		fromStr := msg.FromName
+		if fromStr == "" {
+			fromStr = msg.FromEmail
+		} else {
+			fromStr = fromStr + " <" + msg.FromEmail + ">"
+		}
+		msgBodyHTML = fmt.Sprintf(
+			`<p><strong>De:</strong> %s<br><strong>Para:</strong> %s<br><strong>Assunto:</strong> %s</p><hr>%s`,
+			fromStr, toStr, msg.Subject, msg.BodyContent,
+		)
+	}
+
 	histID := int64(0)
 	if body.MoveProcess {
-		histID, err = registerEmailMoveHistory(tx, body.ProcessoID, createdBy, body.Note, body.Move.Etapa, body.Move.Sub, body.Move.Comentario)
+		histID, err = registerEmailMoveHistory(tx, body.ProcessoID, createdBy, body.Note, body.Move.Etapa, body.Move.Sub, body.Move.Comentario, msgBodyHTML)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 	} else {
-		histID, err = registerProcessHistory(tx, body.ProcessoID, createdBy, body.Note)
+		histID, err = registerProcessHistory(tx, body.ProcessoID, createdBy, body.Note, msgBodyHTML)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -2023,10 +2039,23 @@ func mailAttachmentExists(tx *gorm.DB, mailID int64, sha string) (bool, error) {
 	return count > 0, nil
 }
 
-func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note string) (int64, error) {
-	comentario := "E-mail anexado ao processo"
-	if strings.TrimSpace(note) != "" {
-		comentario = comentario + ": " + strings.TrimSpace(note)
+func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note string, emailBody ...string) (int64, error) {
+	body := ""
+	if len(emailBody) > 0 {
+		body = strings.TrimSpace(emailBody[0])
+	}
+	var comentario string
+	if body != "" {
+		if strings.TrimSpace(note) != "" {
+			comentario = "<p><em>" + strings.TrimSpace(note) + "</em></p>" + body
+		} else {
+			comentario = body
+		}
+	} else {
+		comentario = "E-mail anexado ao processo"
+		if strings.TrimSpace(note) != "" {
+			comentario = comentario + ": " + strings.TrimSpace(note)
+		}
 	}
 	var etapaAtual, subAtual sql.NullString
 	_ = queryRowGorm(tx, `
@@ -2068,7 +2097,7 @@ func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note st
 	return id, nil
 }
 
-func registerEmailMoveHistory(tx *gorm.DB, processoID int64, userID int64, note string, etapa string, sub string, moveComentario string) (int64, error) {
+func registerEmailMoveHistory(tx *gorm.DB, processoID int64, userID int64, note string, etapa string, sub string, moveComentario string, emailBody ...string) (int64, error) {
 	novaEtapa := strings.TrimSpace(etapa)
 	novaSub := strings.TrimSpace(sub)
 	if novaEtapa == "" || novaSub == "" {
@@ -2113,12 +2142,28 @@ func registerEmailMoveHistory(tx *gorm.DB, processoID int64, userID int64, note 
 		statusNome = "Em andamento"
 	}
 
-	comentario := "E-mail anexado ao processo"
-	if strings.TrimSpace(note) != "" {
-		comentario = comentario + ": " + strings.TrimSpace(note)
+	body := ""
+	if len(emailBody) > 0 {
+		body = strings.TrimSpace(emailBody[0])
 	}
-	if strings.TrimSpace(moveComentario) != "" {
-		comentario = comentario + " | " + strings.TrimSpace(moveComentario)
+	var comentario string
+	if body != "" {
+		prefix := ""
+		if strings.TrimSpace(note) != "" {
+			prefix += "<p><em>" + strings.TrimSpace(note) + "</em></p>"
+		}
+		if strings.TrimSpace(moveComentario) != "" {
+			prefix += "<p><em>" + strings.TrimSpace(moveComentario) + "</em></p>"
+		}
+		comentario = prefix + body
+	} else {
+		comentario = "E-mail anexado ao processo"
+		if strings.TrimSpace(note) != "" {
+			comentario = comentario + ": " + strings.TrimSpace(note)
+		}
+		if strings.TrimSpace(moveComentario) != "" {
+			comentario = comentario + " | " + strings.TrimSpace(moveComentario)
+		}
 	}
 
 	var userVal any

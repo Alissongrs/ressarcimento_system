@@ -149,7 +149,19 @@ func EnviarEmailProcesso(c *gin.Context) {
 		}
 	}
 	// 2. Cria um registro no histórico de movimentações (inclui status/etapas atuais)
-	comentarioHistorico := fmt.Sprintf("E-mail enviado para %s com o assunto: '%s'", input.Para, input.Assunto)
+	headerHTML := fmt.Sprintf(
+		`<p><strong>De:</strong> %s<br><strong>Para:</strong> %s%s<br><strong>Assunto:</strong> %s</p><hr>`,
+		remetenteEmailFromUser,
+		input.Para,
+		func() string {
+			if strings.TrimSpace(input.Cc) != "" {
+				return "<br><strong>Cc:</strong> " + input.Cc
+			}
+			return ""
+		}(),
+		input.Assunto,
+	)
+	comentarioHistorico := headerHTML + input.Corpo
 
 	var etapaAtual, subAtual sql.NullString
 	_ = queryRowGorm(tx, `

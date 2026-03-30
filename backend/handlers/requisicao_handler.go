@@ -213,9 +213,10 @@ func createRequisicaoPersistente(c *gin.Context) {
 				id_usuario,
 				id_tipo_irregularidade,
 				id_subtipo_irregularidade,
+				id_status,
 				data_criacao,
 				data_mudanca_status
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
 		valOrNullStr(cliente),
 		valOrNullStr(uc),
 		valOrNullStr(concessionaria),
@@ -235,7 +236,17 @@ func createRequisicaoPersistente(c *gin.Context) {
 	lastID, _ := res.LastInsertId()
 	pid := int(lastID)
 
-	// cria FT_PROCESSOS básico (etapa id=1, sub_etapa "Primeira reclamação da etapa - Em elaboração")
+	// Busca nomes de tipo/subtipo antes de criar o processo
+	tipoNome := ""
+	subtipoNome := ""
+	if strings.TrimSpace(tipoID) != "" {
+		_ = queryRowGorm(tx, "SELECT nome FROM DM_TIPO_IRREGULARIDADE WHERE id_tipo = ?", tipoID).Scan(&tipoNome)
+	}
+	if strings.TrimSpace(subtipoID) != "" {
+		_ = queryRowGorm(tx, "SELECT nome FROM DM_SUBTIPO_IRREGULARIDADE WHERE id_subtipo = ?", subtipoID).Scan(&subtipoNome)
+	}
+
+	// cria FT_PROCESSOS com todos os campos necessários
 	etapaID := 1
 	subEtapa := "Primeira reclamação da etapa - Em elaboração"
 	subID, _ := resolveSubEtapaIDGorm(tx, subEtapa)
@@ -248,32 +259,44 @@ func createRequisicaoPersistente(c *gin.Context) {
 		 WHERE e.id_etapa_processo = ?`,
 		etapaID,
 	).Scan(&colID, &colNome)
-	if _, err := execGorm(tx, `INSERT INTO FT_PROCESSOS (id_processo, id_etapa_processo, etapa, sub_etapa, id_sub_etapa_processo, id_coluna, nome_coluna, relevancia, ultima_atualizacao) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NOW())`,
-		pid, etapaID, "Distribuidora", subEtapa, nullIntToIface(subID), nullIntToIface(colID), func() interface{} {
-			if colNome.Valid {
-				return colNome.String
-			}
-			return nil
-		}()); err != nil {
+
+	colNomeIface := func() interface{} {
+		if colNome.Valid {
+			return colNome.String
+		}
+		return nil
+	}()
+
+	if _, err := execGorm(tx, `
+		INSERT INTO FT_PROCESSOS (
+			id_processo, id_etapa_processo, etapa, sub_etapa, id_sub_etapa_processo,
+			id_coluna, nome_coluna, relevancia, ultima_atualizacao,
+			uc, cliente, concessionaria,
+			id_responsavel, data_movimentacao, data_criacao,
+			ressarcimento_estimado, periodos_irregularidade, descricao_irregularidade,
+			id_tipo_irregularidade, id_subtipo_irregularidade,
+			nome_tipo_irregularidade, nome_subtipo_irregularidade
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NOW(), ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?, ?, ?, ?, ?)`,
+		pid, etapaID, "Distribuidora", subEtapa, nullIntToIface(subID),
+		nullIntToIface(colID), colNomeIface,
+		valOrNullStr(uc), valOrNullStr(cliente), valOrNullStr(concessionaria),
+		nullIntOrNil(userIDNull),
+		nullFloatOrNil(ressarcNum),
+		valOrNullStr(periodosIrregularidade), valOrNullStr(descricaoIrregularidade),
+		valOrNullStr(tipoID), valOrNullStr(subtipoID),
+		valOrNullStr(tipoNome), valOrNullStr(subtipoNome),
+	); err != nil {
 		log.Printf("Erro ao criar processo: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar processo"})
 		return
 	}
 
-	// Histórico de criaÃ§ão com todos os detalhes da requisiÃ§ão
+	// Histórico de criação com todos os detalhes da requisição
 	anexosCount := 0
 	if c.Request != nil && c.Request.MultipartForm != nil {
 		if files, ok := c.Request.MultipartForm.File["anexos"]; ok {
 			anexosCount = len(files)
 		}
-	}
-	tipoNome := ""
-	subtipoNome := ""
-	if strings.TrimSpace(tipoID) != "" {
-		_ = queryRowGorm(tx, "SELECT nome FROM DM_TIPO_IRREGULARIDADE WHERE id_tipo = ?", tipoID).Scan(&tipoNome)
-	}
-	if strings.TrimSpace(subtipoID) != "" {
-		_ = queryRowGorm(tx, "SELECT nome FROM DM_SUBTIPO_IRREGULARIDADE WHERE id_subtipo = ?", subtipoID).Scan(&subtipoNome)
 	}
 	criadoEmStr := time.Now().Format("02/01/2006, 15:04")
 	periodoStr := formatPeriodos(periodosIrregularidade)

@@ -1,33 +1,22 @@
-﻿// frontend/src/pages/RelatoriosMetricas.jsx
+// frontend/src/pages/RelatoriosMetricas.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { RefreshCcw } from 'lucide-react';
 import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
+  RefreshCcw, TrendingUp, Wallet, Award, Clock, Users,
+  BarChart2, CheckCircle2, ArrowUpRight, X,
+} from 'lucide-react';
+import {
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
+  CartesianGrid, BarChart, Bar, PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import { getRelatoriosMetricas, getKanbanComposicao } from '../services/relatoriosService.js';
 import { getConcessionariasParaFiltro } from '../services/requisicaoService.js';
 
+/* ── helpers ── */
 const safeNum = (v) => Number(v || 0) || 0;
-
-const formatNumber = (n) => safeNum(n).toLocaleString('pt-BR');
-const formatCurrency = (n) =>
-  safeNum(n).toLocaleString('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-    minimumFractionDigits: 2,
-  });
+const fmt    = (n) => safeNum(n).toLocaleString('pt-BR');
+const fmtR$  = (n) => safeNum(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
+const fmtMM  = (n) => { const v = safeNum(n); return v >= 1e6 ? `R$ ${(v / 1e6).toFixed(2)}MM` : fmtR$(v); };
+const pct    = (a, b) => (b ? Math.round((a / b) * 100) : 0);
 
 const PROCESSOS_CARDS = [
   { label: 'Ativos', key: 'ativos' },
@@ -37,14 +26,12 @@ const PROCESSOS_CARDS = [
   { label: 'Concluídos', key: 'concluidos' },
   { label: 'Indeferidos', key: 'indeferidos' },
 ];
-
 const STATUS_CARDS = [
   { label: 'Pendente', key: 'pendente' },
   { label: 'Em análise', key: 'em_analise' },
   { label: 'Aprovado', key: 'aprovado' },
   { label: 'Rejeitado', key: 'rejeitado' },
 ];
-
 const METRICAS_GUIA = {
   estrategicos: [
     'Carteira (Volumetria)',
@@ -80,19 +67,93 @@ const METRICAS_GUIA = {
   ],
 };
 
+const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316'];
 const hasPositive = (arr, key = 'total') => Array.isArray(arr) && arr.some((x) => safeNum(x?.[key]) > 0);
 
+/* ── sub-components ── */
 function EmptyChart({ title, hint }) {
   return (
-    <div className="h-full flex flex-col items-center justify-center text-xs opacity-70 gap-2">
-      <div className="font-semibold opacity-80">{title}</div>
-      <div className="text-center max-w-[320px]">
-        {hint || 'Sem dados para compor este gráfico (todos os valores vieram 0 no payload).'}
-      </div>
+    <div className="h-full flex flex-col items-center justify-center gap-2" style={{ opacity: 0.5 }}>
+      <BarChart2 size={28} />
+      <div style={{ fontSize: 12, fontWeight: 600 }}>{title}</div>
+      {hint && <div style={{ fontSize: 11, textAlign: 'center', maxWidth: 280 }}>{hint}</div>}
     </div>
   );
 }
 
+function SectionCard({ title, subtitle, children, style }) {
+  return (
+    <div style={{
+      background: 'var(--card)', border: '1px solid var(--border)',
+      borderRadius: 12, overflow: 'hidden', ...style,
+    }}>
+      <div style={{ padding: '14px 16px 0' }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--fg)' }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 11, opacity: 0.55, marginTop: 2 }}>{subtitle}</div>}
+      </div>
+      <div style={{ padding: '10px 16px 14px' }}>{children}</div>
+    </div>
+  );
+}
+
+/* horizontal bar row helper */
+function HBarRow({ label, value, displayValue, maxValue, color = 'var(--accent)', rank }) {
+  const w = maxValue > 0 ? Math.max(2, (value / maxValue) * 100) : 0;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+      {rank != null && (
+        <span style={{ width: 18, fontSize: 11, opacity: 0.45, textAlign: 'right', flexShrink: 0 }}>
+          {rank}
+        </span>
+      )}
+      <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--fg)', opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+      <div style={{ width: 100, height: 6, borderRadius: 4, background: 'var(--border)', flexShrink: 0 }}>
+        <div style={{ height: '100%', width: `${w}%`, borderRadius: 4, background: color, transition: 'width 400ms ease' }} />
+      </div>
+      <span style={{ width: 80, fontSize: 12, fontWeight: 700, textAlign: 'right', flexShrink: 0 }}>{displayValue}</span>
+    </div>
+  );
+}
+
+/* KPI hero card */
+function KpiCard({ icon: Icon, label, value, sub, accentColor = 'var(--accent)', trend }) {
+  return (
+    <div style={{
+      background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
+      padding: '16px', display: 'flex', flexDirection: 'column', gap: 8,
+      position: 'relative', overflow: 'hidden',
+    }}>
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+        background: `linear-gradient(90deg, ${accentColor}, transparent)`,
+      }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{
+          width: 34, height: 34, borderRadius: 9, flexShrink: 0,
+          background: `color-mix(in srgb, ${accentColor} 15%, transparent)`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Icon size={16} style={{ color: accentColor }} />
+        </div>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--fg)', opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          {label}
+        </span>
+        {trend != null && (
+          <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, color: trend >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+            <ArrowUpRight size={12} style={{ display: 'inline', transform: trend < 0 ? 'rotate(90deg)' : undefined }} />
+            {Math.abs(trend)}%
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--fg)', lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, opacity: 0.5 }}>{sub}</div>}
+    </div>
+  );
+}
+
+/* ── Main component ── */
 export default function RelatoriosMetricas({ globalFilters }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -100,28 +161,23 @@ export default function RelatoriosMetricas({ globalFilters }) {
   const [updatedAt, setUpdatedAt] = useState(null);
   const [metricsModalOpen, setMetricsModalOpen] = useState(false);
   const [metricsTab, setMetricsTab] = useState('estrategicos');
-
   const [concessionarias, setConcessionarias] = useState([]);
-
-  // filtro (somente para o gráfico de Kanban)
   const [kanbanConcs, setKanbanConcs] = useState([]);
   const [kanbanConcSearch, setKanbanConcSearch] = useState('');
   const [kanbanCounts, setKanbanCounts] = useState(null);
   const [kanbanLoading, setKanbanLoading] = useState(false);
-  const [kanbanSelected, setKanbanSelected] = useState(() => new Set());
+  const [kanbanSelected, setKanbanSelected] = useState(() => new Set(PROCESSOS_CARDS.map((p) => p.key)));
 
   const load = async (opts = {}) => {
     try {
       setLoading(true);
       setError('');
       const useGlobal = opts.globalFilters || globalFilters || {};
-      const useConcs = opts.concessionarias ?? [];
       const res = await getRelatoriosMetricas({
         dataIni: useGlobal?.dataIni || '',
         dataFim: useGlobal?.dataFim || '',
-        concessionarias: useConcs || [],
+        concessionarias: [],
       });
-
       setData(res || null);
       setUpdatedAt(new Date());
     } catch (e) {
@@ -131,11 +187,8 @@ export default function RelatoriosMetricas({ globalFilters }) {
     }
   };
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
+  useEffect(() => { load(); }, []); // eslint-disable-line
+  useEffect(() => { load({ globalFilters }); }, [globalFilters?.dataIni, globalFilters?.dataFim]); // eslint-disable-line
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -144,806 +197,516 @@ export default function RelatoriosMetricas({ globalFilters }) {
         const base = Array.isArray(list) ? list : [];
         const normalized = base
           .map((c) => (typeof c === 'string' ? c : c?.nome ?? c?.concessionaria ?? c?.label ?? ''))
-          .map((s) => String(s || '').trim())
-          .filter(Boolean);
-        const unique = Array.from(new Set(normalized)).sort((a, b) => a.localeCompare(b));
-        if (mounted) setConcessionarias(unique);
-      } catch {
-        if (mounted) setConcessionarias([]);
-      }
+          .map((s) => String(s || '').trim()).filter(Boolean);
+        if (mounted) setConcessionarias(Array.from(new Set(normalized)).sort((a, b) => a.localeCompare(b)));
+      } catch { if (mounted) setConcessionarias([]); }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
+  useEffect(() => { if (kanbanConcs.length === 0) setKanbanCounts(null); }, [kanbanConcs]);
 
-  useEffect(() => {
-    setKanbanSelected(new Set(PROCESSOS_CARDS.map((p) => p.key)));
-  }, []);
-
-  useEffect(() => {
-    load({ globalFilters });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [globalFilters?.dataIni, globalFilters?.dataFim]);
-
-  useEffect(() => {
-    if (kanbanConcs.length === 0) setKanbanCounts(null);
-  }, [kanbanConcs]);
-
-  // payload
+  /* ── derived data ── */
   const processosCounts = data?.processos_counts || {};
+  const statusCounts    = data?.status_counts    || {};
+  const creditos        = data?.creditos         || {};
+  const tendencia30d    = data?.tendencia_30d    || [];
+  const agingBuckets    = data?.aging_buckets    || {};
+  const tempoMedio      = data?.tempo_medio_dias_por_etapa || [];
+  const topConcs        = data?.top_concessionarias || [];
+  const topClientes     = data?.top_clientes       || [];
+  const throughputSem   = data?.throughput_semana  || [];
+  const throughputMes   = data?.throughput_mes     || [];
+  const canaisDist      = data?.canais_dist_30d    || [];
+  const wipGestores     = data?.wip_gestores        || [];
+  const valorHist       = data?.valor_histogram     || [];
+  const sla30d          = data?.sla_30d             || {};
+  const tempoConcl      = data?.tempo_medio_conclusao_concessionaria || [];
+  const repasseConcs    = data?.repasse_por_concessionaria || [];
+  const repasseTotal    = safeNum(data?.repasse_total);
+
+  const totalProcessos  = safeNum(data?.total_processos);
+  const totalReqs       = safeNum(data?.total_requisicoes);
+  const valorTotal      = safeNum(data?.valor_total_ressarcimento);
+  const carteiraValor   = safeNum(data?.carteira_valor ?? data?.valor_em_carteira);
+  const carteiraProcs   = safeNum(data?.carteira_processos ?? data?.processos_em_carteira);
+  const deferidosN      = safeNum(processosCounts?.deferidos);
+  const indeferidosN    = safeNum(processosCounts?.indeferidos);
+  const ticketMedio     = totalProcessos ? valorTotal / totalProcessos : 0;
+  const totalProcedente = safeNum(creditos.total_procedente);
+  const onTime          = safeNum(sla30d.on_time);
+  const late            = safeNum(sla30d.late);
+  const totalSla        = onTime + late;
+  const onTimePct       = pct(onTime, totalSla);
+  const taxaDefer       = pct(deferidosN, totalProcessos);
+
+  /* kanban chart */
+  const labelToKey = useMemo(() => new Map(PROCESSOS_CARDS.map((p) => [p.label, p.key])), []);
   const kanbanItems = Array.isArray(kanbanCounts?.items) ? kanbanCounts.items : null;
-  const labelToKey = useMemo(
-    () => new Map(PROCESSOS_CARDS.map((p) => [p.label, p.key])),
-    [],
-  );
+  const totalKanban = kanbanItems
+    ? kanbanItems.reduce((s, it) => s + safeNum(it.total), 0)
+    : PROCESSOS_CARDS.reduce((s, p) => s + safeNum(processosCounts[p.key]), 0);
 
-  const statusCounts = data?.status_counts || {};
-  const creditos = data?.creditos || {};
-  const tendencia30d = data?.tendencia_30d || [];
-  const agingBuckets = data?.aging_buckets || {};
-  const tempoMedio = data?.tempo_medio_dias_por_etapa || [];
+  const kanbanPercentData = useMemo(() => {
+    const items = kanbanItems
+      ? kanbanItems
+          .filter((it) => { const k = labelToKey.get(it.label); return k ? kanbanSelected.has(k) : false; })
+          .map((it) => {
+            const total = safeNum(it.total);
+            const p = it.percent != null ? Number(it.percent) : totalKanban ? (total / totalKanban) * 100 : 0;
+            return { key: labelToKey.get(it.label), label: it.label, total, percent: p };
+          })
+      : PROCESSOS_CARDS.filter((p) => kanbanSelected.has(p.key)).map((p) => {
+          const total = safeNum(processosCounts[p.key]);
+          return { key: p.key, label: p.label, total, percent: totalKanban ? (total / totalKanban) * 100 : 0 };
+        });
+    return items.sort((a, b) => b.total - a.total);
+  }, [kanbanSelected, kanbanItems, labelToKey, processosCounts, totalKanban]);
 
-  const topConcessionarias = data?.top_concessionarias || [];
-  const topClientes = data?.top_clientes || [];
-  const throughputSemana = data?.throughput_semana || [];
-  const throughputMes = data?.throughput_mes || [];
-  const canaisDist = data?.canais_dist_30d || [];
-  const wipGestores = data?.wip_gestores || [];
-  const valorHistogram = data?.valor_histogram || [];
-  const sla30d = data?.sla_30d || {};
-  const tempoConclusaoConcs = data?.tempo_medio_conclusao_concessionaria || [];
-
-  const repassePorConcs = data?.repasse_por_concessionaria || [];
-  const repasseTotal = safeNum(data?.repasse_total);
-
-  // datasets
-  const tendenciaChart = tendencia30d.map((t) => ({ dia: t.dia, total: safeNum(t.total) }));
-  const trendMax = Math.max(1, ...tendencia30d.map((t) => safeNum(t.total)));
-
-  // Status com %
   const totalStatus = STATUS_CARDS.reduce((s, x) => s + safeNum(statusCounts[x.key]), 0);
   const statusChart = STATUS_CARDS.map((s) => {
     const total = safeNum(statusCounts[s.key]);
     return { label: s.label, total, percent: totalStatus ? (total / totalStatus) * 100 : 0 };
   });
-
-  // Créditos com %
   const totalCreditos = safeNum(creditos.simples_total) + safeNum(creditos.dobro_total);
   const creditosChart = [
-    {
-      label: 'Simples',
-      total: safeNum(creditos.simples_total),
-      percent: totalCreditos ? (safeNum(creditos.simples_total) / totalCreditos) * 100 : 0,
-    },
-    {
-      label: 'Dobro',
-      total: safeNum(creditos.dobro_total),
-      percent: totalCreditos ? (safeNum(creditos.dobro_total) / totalCreditos) * 100 : 0,
-    },
+    { label: 'Simples', total: safeNum(creditos.simples_total), percent: totalCreditos ? (safeNum(creditos.simples_total) / totalCreditos) * 100 : 0 },
+    { label: 'Dobro',   total: safeNum(creditos.dobro_total),   percent: totalCreditos ? (safeNum(creditos.dobro_total)   / totalCreditos) * 100 : 0 },
   ];
+  const totalCanais = canaisDist.reduce((s, x) => s + safeNum(x.total), 0);
+  const canaisChart = canaisDist.map((r) => ({ label: r.label, total: safeNum(r.total), percent: totalCanais ? (safeNum(r.total) / totalCanais) * 100 : 0 }));
 
-  // Canais com %
-  const totalCanais = (canaisDist || []).reduce((s, x) => s + safeNum(x.total), 0);
-  const canaisChart = (canaisDist || []).map((r) => {
-    const total = safeNum(r.total);
-    return { label: r.label, total, percent: totalCanais ? (total / totalCanais) * 100 : 0 };
-  });
+  const tendenciaChart = tendencia30d.map((t) => ({ dia: t.dia, total: safeNum(t.total) }));
+  const throughputSemChart = [...(throughputSem || [])].reverse().map((r) => ({ label: r.label, total: safeNum(r.total) }));
+  const throughputMesChart = [...(throughputMes || [])].reverse().map((r) => ({ label: r.label, total: safeNum(r.total) }));
+  const tempoConcChart = (tempoConcl || []).slice(0, 8).map((r) => ({ label: r.label, dias: safeNum(r.dias) }));
+  const valorHistChart = (valorHist || []).map((r) => ({ label: r.label, total: safeNum(r.total) }));
 
-  // Kanban composição
-  const totalKanban = kanbanItems
-    ? kanbanItems.reduce((sum, it) => sum + safeNum(it.total), 0)
-    : PROCESSOS_CARDS.reduce((sum, p) => sum + safeNum(processosCounts[p.key]), 0);
+  const taxaSucesso = data?.taxa_sucesso_concessionarias || [];
 
-  const kanbanPercentData = useMemo(() => {
-    const items = kanbanItems
-      ? kanbanItems
-          .filter((it) => {
-            const key = labelToKey.get(it.label);
-            return key ? kanbanSelected.has(key) : false;
-          })
-          .map((it) => {
-            const total = safeNum(it.total);
-            const percent =
-              it.percent != null
-                ? Number(it.percent)
-                : totalKanban
-                ? (total / totalKanban) * 100
-                : 0;
-            return { key: labelToKey.get(it.label), label: it.label, total, percent };
-          })
-      : PROCESSOS_CARDS.filter((p) => kanbanSelected.has(p.key)).map((p) => {
-          const total = safeNum(processosCounts[p.key]);
-          const percent = totalKanban ? (total / totalKanban) * 100 : 0;
-          return { key: p.key, label: p.label, total, percent };
-        });
-    return items.sort((a, b) => b.total - a.total);
-  }, [kanbanSelected, kanbanItems, labelToKey, processosCounts, totalKanban]);
-
-  const kanbanPieData = kanbanPercentData.map((k) => ({ label: k.label, total: k.total, percent: k.percent }));
-
-  const renderKanbanPercentLabel = (props) => {
-    const pct = safeNum(props?.payload?.percent);
-    if (pct < 4) return null;
-    return `${pct.toFixed(0)}%`;
-  };
-
-  // KPIs
-  const totalProcessos = safeNum(data?.total_processos);
-  const totalRequisicoes = safeNum(data?.total_requisicoes);
-  const valorTotal = safeNum(data?.valor_total_ressarcimento);
-  const carteiraValor = safeNum(data?.carteira_valor ?? data?.valor_em_carteira);
-  const carteiraProcessos = safeNum(data?.carteira_processos ?? data?.processos_em_carteira);
-
-  const deferidosN = safeNum(processosCounts?.deferidos);
-  const indeferidosN = safeNum(processosCounts?.indeferidos);
-  const taxaDeferimento = totalProcessos ? deferidosN / totalProcessos : 0;
-  const taxaIndeferimento = totalProcessos ? indeferidosN / totalProcessos : 0;
-
-  const ticketMedioPorProcesso = totalProcessos ? valorTotal / totalProcessos : 0;
-  const ticketMedioPorRequisicao = totalRequisicoes ? valorTotal / totalRequisicoes : 0;
-
-  const totalProcedente = safeNum(creditos.total_procedente);
-  const pctDobroNoProcedente = totalProcedente ? safeNum(creditos.dobro_total) / totalProcedente : 0;
-  const pctRepasseNoProcedente = totalProcedente ? repasseTotal / totalProcedente : 0;
-  const repasseMedioPorProcesso = totalProcessos ? repasseTotal / totalProcessos : 0;
-
-  const onTime = safeNum(sla30d.on_time);
-  const late = safeNum(sla30d.late);
-  const totalSla = onTime + late;
-  const onTimePct = totalSla ? Math.round((onTime / totalSla) * 100) : 0;
-
-  const cardsTop = useMemo(
-    () => [
-      { label: 'Carteira (Volumetria)', value: formatNumber(carteiraProcessos) },
-      { label: 'Carteira (R$MM)', value: formatCurrency(carteiraValor) },
-      { label: 'Total de Processos', value: formatNumber(totalProcessos) },
-      { label: 'Total de Requisições', value: formatNumber(totalRequisicoes) },
-      { label: 'Valor Total Estimado', value: formatCurrency(valorTotal) },
-      { label: 'Créditos Simples', value: formatCurrency(creditos.simples_total) },
-      { label: 'Créditos em Dobro', value: formatCurrency(creditos.dobro_total) },
-      { label: 'Total Procedente', value: formatCurrency(creditos.total_procedente) },
-      { label: 'Ticket médio (por processo)', value: formatCurrency(ticketMedioPorProcesso) },
-      { label: 'Ticket médio (por requisição)', value: formatCurrency(ticketMedioPorRequisicao) },
-      { label: '% Deferimento', value: `${Math.round(taxaDeferimento * 100)}%` },
-      { label: '% Indeferimento', value: `${Math.round(taxaIndeferimento * 100)}%` },
-      { label: '% Dobro (do procedente)', value: `${Math.round(pctDobroNoProcedente * 100)}%` },
-      { label: '% Repasse (do procedente)', value: `${Math.round(pctRepasseNoProcedente * 100)}%` },
-      { label: 'Repasse médio (por processo)', value: formatCurrency(repasseMedioPorProcesso) },
-    ],
-    [
-      totalProcessos,
-      totalRequisicoes,
-      valorTotal,
-      creditos,
-      ticketMedioPorProcesso,
-      ticketMedioPorRequisicao,
-      taxaDeferimento,
-      taxaIndeferimento,
-      pctDobroNoProcedente,
-      pctRepasseNoProcedente,
-      repasseMedioPorProcesso,
-      carteiraProcessos,
-      carteiraValor,
-    ],
-  );
-
-  const tempoConclusaoChart = (tempoConclusaoConcs || []).map((r) => ({
-    label: r.label,
-    dias: safeNum(r.dias),
-  }));
-
-  const repasseChart = (repassePorConcs || []).map((r) => ({
-    label: r.label,
-    total: safeNum(r.total),
-  }));
-
-  const repasseRows = useMemo(() => {
-    const base = (repasseChart || []).filter((x) => x && x.label);
-    const total = base.reduce((s, x) => s + safeNum(x.total), 0);
-    const sorted = base.slice().sort((a, b) => safeNum(b.total) - safeNum(a.total));
-    return { total, rows: sorted };
-  }, [repasseChart]);
-
-  const kanbanConcsLabel = kanbanConcs.length ? `${kanbanConcs.length} selecionada(s)` : 'sem filtro';
+  const maxTopConc = Math.max(1, ...topConcs.map((r) => safeNum(r.total)));
+  const maxTopCli  = Math.max(1, ...topClientes.map((r) => safeNum(r.total)));
+  const maxWip     = Math.max(1, ...wipGestores.map((r) => safeNum(r.total)));
+  const maxTempo   = Math.max(1, ...tempoMedio.map((r) => safeNum(r.dias)));
+  const maxRepasse = Math.max(1, ...repasseConcs.map((r) => safeNum(r.total)));
 
   const filteredKanbanConcs = useMemo(() => {
     const term = kanbanConcSearch.trim().toLowerCase();
-    if (!term) return concessionarias;
-    return concessionarias.filter((c) => c.toLowerCase().includes(term));
+    return term ? concessionarias.filter((c) => c.toLowerCase().includes(term)) : concessionarias;
   }, [concessionarias, kanbanConcSearch]);
 
   const applyKanbanConcs = async () => {
     setKanbanLoading(true);
     try {
-      const res = await getKanbanComposicao({
-        dataIni: globalFilters?.dataIni || '',
-        dataFim: globalFilters?.dataFim || '',
-        concessionarias: kanbanConcs,
-      });
+      const res = await getKanbanComposicao({ dataIni: globalFilters?.dataIni || '', dataFim: globalFilters?.dataFim || '', concessionarias: kanbanConcs });
       setKanbanCounts(res || null);
-    } catch {
-      setKanbanCounts(null);
-    } finally {
-      setKanbanLoading(false);
-    }
+    } catch { setKanbanCounts(null); }
+    finally { setKanbanLoading(false); }
   };
 
-  const pieColors = ['#4f83ff', '#20c997', '#f6c343', '#ff7a7a', '#8f6bff', '#4dd4ff', '#ffb86b'];
+  const pieTooltip = (totalRef) => ({ formatter: (v, _n, props) => {
+    const p = safeNum(props?.payload?.percent);
+    return [`${fmt(v)} (${p.toFixed(1)}%)`, 'Total'];
+  }, contentStyle: { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 } });
 
-  const getLegendPayload = (entry) => entry?.payload?.payload || entry?.payload || {};
-  const getTotalFromLegendEntry = (entry) => safeNum(getLegendPayload(entry)?.total);
+  const axisStyle = { fill: 'var(--fg)', opacity: 0.5, fontSize: 10 };
+  const gridStyle = { stroke: 'var(--border)', strokeDasharray: '3 3' };
 
+  /* ────────────────────────── RENDER ────────────────────────── */
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* ── Header ── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <h2 className="text-lg font-semibold">Métricas</h2>
-          <div className="text-xs opacity-70">
-            {updatedAt ? `Atualizado em ${updatedAt.toLocaleString('pt-BR')}` : 'Carregando...'}
+          <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--fg)' }}>Métricas</div>
+          <div style={{ fontSize: 11, opacity: 0.5, marginTop: 2 }}>
+            {loading ? 'Atualizando...' : updatedAt ? `Atualizado ${updatedAt.toLocaleString('pt-BR')}` : ''}
           </div>
         </div>
-
-        <div className="flex items-center gap-2">
+        <div style={{ display: 'flex', gap: 8 }}>
           <button
-            type="button"
             onClick={() => setMetricsModalOpen(true)}
-            className="px-3 py-2 rounded-md border border-[var(--border)] hover:bg-[var(--menu-hover)] text-sm"
+            style={{ padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, border: '1px solid var(--border)', background: 'transparent', color: 'var(--fg)', cursor: 'pointer' }}
           >
             Guia de Métricas
           </button>
-
           <button
-            type="button"
             onClick={() => load({ globalFilters })}
-            className="flex items-center gap-2 px-3 py-2 rounded-md border border-[var(--border)] hover:bg-[var(--menu-hover)]"
             disabled={loading}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, border: '1px solid var(--border)', background: loading ? 'var(--panel)' : 'linear-gradient(135deg,#1d4ed8,#3b82f6)', color: loading ? 'var(--fg)' : '#fff', cursor: loading ? 'not-allowed' : 'pointer' }}
           >
-            <RefreshCcw size={14} />
+            <RefreshCcw size={13} className={loading ? 'animate-spin' : ''} />
             {loading ? 'Atualizando...' : 'Atualizar'}
           </button>
         </div>
       </div>
 
-      <div className="p-4 rounded-lg border panel-border panel-bg-60 space-y-2">
-        <div className="text-sm font-semibold">Filtros da página</div>
-        <div className="text-xs opacity-70">
-          Período aplicado:{' '}
-          {globalFilters?.dataIni && globalFilters?.dataFim
-            ? `${globalFilters.dataIni} até ${globalFilters.dataFim}`
-            : 'sem filtro de data'}
+      {/* Período aplicado */}
+      {(globalFilters?.dataIni || globalFilters?.dataFim) && (
+        <div style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', fontSize: 12, opacity: 0.7 }}>
+          Período: {globalFilters.dataIni} → {globalFilters.dataFim}
         </div>
+      )}
+
+      {error && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
+
+      {/* ── KPI Hero strip ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+        <KpiCard icon={Wallet}       label="Carteira (R$)"      value={fmtMM(carteiraValor)}    sub={`${fmt(carteiraProcs)} processos`} accentColor="#3b82f6" />
+        <KpiCard icon={TrendingUp}   label="Valor estimado"     value={fmtMM(valorTotal)}        sub={`Ticket: ${fmtMM(ticketMedio)}`}  accentColor="#10b981" />
+        <KpiCard icon={Award}        label="Taxa de deferimento" value={`${taxaDefer}%`}         sub={`${fmt(deferidosN)} deferidos`}   accentColor="#f59e0b" />
+        <KpiCard icon={CheckCircle2} label="SLA (7 dias)"       value={`${onTimePct}%`}          sub={`no prazo — ${fmt(late)} atrasados`} accentColor={onTimePct >= 80 ? '#10b981' : onTimePct >= 60 ? '#f59e0b' : '#ef4444'} />
+        <KpiCard icon={Clock}        label="Total Processos"    value={fmt(totalProcessos)}       sub={`${fmt(totalReqs)} requisições`}  accentColor="#8b5cf6" />
+        <KpiCard icon={Users}        label="Repasse"            value={fmtMM(repasseTotal)}       sub="valor repassado total"            accentColor="#06b6d4" />
       </div>
 
-      {error && <div className="text-sm text-red-500">{error}</div>}
+      {/* ── Kanban + Status ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
-      {metricsModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-3xl rounded-xl border panel-border bg-[var(--card)] p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-lg font-semibold">Guia de Métricas</div>
-                <div className="text-xs opacity-70">
-                  Selecione a categoria para ver a lista completa de métricas solicitadas.
+        {/* Kanban pie */}
+        <SectionCard title="Composição Kanban" subtitle="Distribuição dos processos por coluna">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ height: 260 }}>
+              {kanbanSelected.size > 0 && hasPositive(kanbanPercentData, 'total') ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={kanbanPercentData} dataKey="total" nameKey="label" innerRadius={60} outerRadius={100} paddingAngle={2} labelLine={false}>
+                      {kanbanPercentData.map((e, i) => <Cell key={e.label} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip {...pieTooltip(totalKanban)} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : <EmptyChart title="Sem dados (Kanban)" />}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {PROCESSOS_CARDS.map((p, i) => {
+                const v = safeNum(processosCounts[p.key]);
+                return (
+                  <label key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12 }}>
+                    <input type="checkbox" checked={kanbanSelected.has(p.key)} onChange={(e) => setKanbanSelected((prev) => { const n = new Set(prev); e.target.checked ? n.add(p.key) : n.delete(p.key); return n; })} />
+                    <span style={{ width: 10, height: 10, borderRadius: 3, flexShrink: 0, background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                    <span style={{ flex: 1, opacity: 0.8 }}>{p.label}</span>
+                    <span style={{ fontWeight: 700 }}>{fmt(v)}</span>
+                  </label>
+                );
+              })}
+              {/* Filtro concessionária */}
+              <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+                <div style={{ fontSize: 11, opacity: 0.5, marginBottom: 4 }}>Filtrar por concessionária</div>
+                <input type="text" value={kanbanConcSearch} onChange={(e) => setKanbanConcSearch(e.target.value)}
+                  placeholder="Buscar..." style={{ width: '100%', padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--fg)', fontSize: 11, marginBottom: 4 }} />
+                <div style={{ maxHeight: 80, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {filteredKanbanConcs.map((c) => (
+                    <label key={c} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={kanbanConcs.includes(c)} onChange={(e) => { if (e.target.checked) setKanbanConcs((p) => [...p, c]); else setKanbanConcs((p) => p.filter((x) => x !== c)); }} />
+                      <span style={{ truncate: true }}>{c}</span>
+                    </label>
+                  ))}
+                </div>
+                <button onClick={applyKanbanConcs} disabled={kanbanLoading} style={{ marginTop: 6, padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, border: '1px solid var(--accent)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer' }}>
+                  {kanbanLoading ? 'Aplicando...' : 'Aplicar filtro'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </SectionCard>
+
+        {/* Status pie */}
+        <SectionCard title="Status das Requisições" subtitle="Distribuição por status de triagem">
+          <div style={{ height: 260 }}>
+            {hasPositive(statusChart, 'total') ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={statusChart} dataKey="total" nameKey="label" innerRadius={60} outerRadius={100} paddingAngle={2}>
+                    {statusChart.map((e, i) => <Cell key={e.label} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip {...pieTooltip(totalStatus)} />
+                  <Legend layout="vertical" align="right" verticalAlign="middle"
+                    formatter={(v, e) => { const t = safeNum(e?.payload?.payload?.total); const p = totalStatus ? (t / totalStatus * 100).toFixed(1) : 0; return `${v} — ${fmt(t)} (${p}%)`; }}
+                    wrapperStyle={{ fontSize: 11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : <EmptyChart title="Sem dados (Status)" hint="Verifique se os status batem com os padrões esperados." />}
+          </div>
+        </SectionCard>
+      </div>
+
+      {/* ── Tendência 30d ── */}
+      <SectionCard title="Tendência de movimentações (30 dias)" subtitle="Volume diário de movimentações registradas">
+        <div style={{ height: 200 }}>
+          {tendenciaChart.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={tendenciaChart} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid {...gridStyle} />
+                <XAxis dataKey="dia" tick={axisStyle} minTickGap={20} />
+                <YAxis tick={axisStyle} />
+                <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v) => fmt(v)} />
+                <Line type="monotone" dataKey="total" stroke="#3b82f6" strokeWidth={2.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : <EmptyChart title="Sem dados (Tendência)" />}
+        </div>
+      </SectionCard>
+
+      {/* ── Throughput semana + mês ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <SectionCard title="Throughput Semanal" subtitle="Novas requisições por semana">
+          <div style={{ height: 200 }}>
+            {hasPositive(throughputSemChart, 'total') ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={throughputSemChart.slice(-12)} margin={{ top: 4, right: 8, left: 0, bottom: 20 }}>
+                  <CartesianGrid {...gridStyle} />
+                  <XAxis dataKey="label" tick={axisStyle} angle={-30} height={40} interval={0} />
+                  <YAxis tick={axisStyle} />
+                  <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v) => fmt(v)} />
+                  <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : <EmptyChart title="Sem dados" />}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Throughput Mensal" subtitle="Novas requisições por mês">
+          <div style={{ height: 200 }}>
+            {hasPositive(throughputMesChart, 'total') ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={throughputMesChart.slice(-12)} margin={{ top: 4, right: 8, left: 0, bottom: 20 }}>
+                  <CartesianGrid {...gridStyle} />
+                  <XAxis dataKey="label" tick={axisStyle} angle={-30} height={40} interval={0} />
+                  <YAxis tick={axisStyle} />
+                  <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v) => fmt(v)} />
+                  <Bar dataKey="total" fill="#10b981" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : <EmptyChart title="Sem dados" />}
+          </div>
+        </SectionCard>
+      </div>
+
+      {/* ── SLA + Aging + Créditos ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+
+        {/* SLA */}
+        <SectionCard title="SLA" subtitle={`Últimos ${sla30d.limite_dias || 7} dias`}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 36, fontWeight: 800, color: onTimePct >= 80 ? 'var(--success)' : onTimePct >= 60 ? 'var(--warning)' : 'var(--danger)' }}>
+                {onTimePct}%
+              </div>
+              <div style={{ fontSize: 11, opacity: 0.5 }}>dentro do prazo</div>
+            </div>
+            <div style={{ height: 8, borderRadius: 6, background: 'var(--border)' }}>
+              <div style={{ height: '100%', borderRadius: 6, width: `${onTimePct}%`, background: onTimePct >= 80 ? 'var(--success)' : onTimePct >= 60 ? 'var(--warning)' : 'var(--danger)', transition: 'width 500ms ease' }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+              <span style={{ color: 'var(--success)' }}>✓ {fmt(onTime)} no prazo</span>
+              <span style={{ color: 'var(--danger)' }}>✗ {fmt(late)} atrasados</span>
+            </div>
+          </div>
+        </SectionCard>
+
+        {/* Aging */}
+        <SectionCard title="Aging (sem movimentação)" subtitle="Distribuição por tempo parado">
+          {[
+            { label: '0 – 7 dias',   value: safeNum(agingBuckets['0_7']),    color: '#10b981' },
+            { label: '8 – 15 dias',  value: safeNum(agingBuckets['8_15']),   color: '#f59e0b' },
+            { label: '16 – 30 dias', value: safeNum(agingBuckets['16_30']),  color: '#f97316' },
+            { label: '31+ dias',     value: safeNum(agingBuckets['31_mais']), color: '#ef4444' },
+          ].map((b) => {
+            const total = safeNum(agingBuckets['0_7']) + safeNum(agingBuckets['8_15']) + safeNum(agingBuckets['16_30']) + safeNum(agingBuckets['31_mais']);
+            const w = total ? (b.value / total) * 100 : 0;
+            return (
+              <div key={b.label} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+                  <span style={{ opacity: 0.7 }}>{b.label}</span>
+                  <span style={{ fontWeight: 700, color: b.color }}>{fmt(b.value)}</span>
+                </div>
+                <div style={{ height: 6, borderRadius: 4, background: 'var(--border)' }}>
+                  <div style={{ height: '100%', borderRadius: 4, width: `${w}%`, background: b.color, transition: 'width 400ms' }} />
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setMetricsModalOpen(false)}
-                className="px-3 py-1.5 rounded-md border panel-border panel-bg-60 hover:opacity-90 text-sm"
-              >
-                Fechar
-              </button>
-            </div>
+            );
+          })}
+        </SectionCard>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {[
-                { key: 'estrategicos', label: 'Estratégicos' },
-                { key: 'taticos', label: 'Táticos' },
-                { key: 'operacionais', label: 'Operacionais' },
-              ].map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => setMetricsTab(item.key)}
-                  className={`px-3 py-2 rounded-md border text-sm ${
-                    metricsTab === item.key
-                      ? 'bg-[var(--menu-hover)] border-[var(--menu-hover)]'
-                      : 'panel-border panel-bg-60'
-                  }`}
-                >
-                  {item.label}
+        {/* Créditos */}
+        <SectionCard title="Composição de Créditos" subtitle="Simples vs Dobro">
+          <div style={{ height: 160 }}>
+            {hasPositive(creditosChart, 'total') ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={creditosChart} dataKey="total" nameKey="label" innerRadius={45} outerRadius={70} paddingAngle={3}>
+                    {creditosChart.map((e, i) => <Cell key={e.label} fill={PIE_COLORS[i]} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+                    formatter={(v) => { const p = totalCreditos ? (v / totalCreditos * 100).toFixed(1) : 0; return [`${fmtR$(v)} (${p}%)`, 'Valor']; }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : <EmptyChart title="Sem dados (Créditos)" />}
+          </div>
+          {totalProcedente > 0 && (
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4, fontSize: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ opacity: 0.6 }}>Total procedente</span>
+                <span style={{ fontWeight: 700 }}>{fmtR$(totalProcedente)}</span>
+              </div>
+            </div>
+          )}
+        </SectionCard>
+      </div>
+
+      {/* ── Top Concessionárias + Clientes ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <SectionCard title="Top Concessionárias" subtitle="Por valor estimado de ressarcimento">
+          {topConcs.length > 0 ? topConcs.slice(0, 8).map((r, i) => (
+            <HBarRow key={r.label} rank={i + 1} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxTopConc} color="#3b82f6" />
+          )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
+        </SectionCard>
+
+        <SectionCard title="Top Clientes" subtitle="Por valor estimado de ressarcimento">
+          {topClientes.length > 0 ? topClientes.slice(0, 8).map((r, i) => (
+            <HBarRow key={r.label} rank={i + 1} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxTopCli} color="#10b981" />
+          )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
+        </SectionCard>
+      </div>
+
+      {/* ── Tempo médio etapa + WIP gestores ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <SectionCard title="Tempo médio por etapa" subtitle="Dias em cada etapa (dwell time)">
+          {tempoMedio.length > 0 ? tempoMedio.slice(0, 10).map((r) => (
+            <HBarRow key={r.etapa} label={r.etapa} value={safeNum(r.dias)} displayValue={`${safeNum(r.dias).toFixed(1)}d`} maxValue={maxTempo} color="#f59e0b" />
+          )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
+        </SectionCard>
+
+        <SectionCard title="WIP por Gestor" subtitle="Processos ativos em andamento por responsável">
+          {wipGestores.length > 0 ? wipGestores.slice(0, 10).map((r) => (
+            <HBarRow key={r.label} label={r.label} value={safeNum(r.total)} displayValue={fmt(r.total)} maxValue={maxWip} color="#8b5cf6" />
+          )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
+        </SectionCard>
+      </div>
+
+      {/* ── Taxa de sucesso por concessionária ── */}
+      {taxaSucesso.length > 0 && (
+        <SectionCard title="Taxa de Sucesso por Concessionária" subtitle="% de processos deferidos (mín. 2 processos concluídos)">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
+            {taxaSucesso.map((r) => {
+              const taxa = safeNum(r.taxa_pct);
+              const color = taxa >= 70 ? '#10b981' : taxa >= 40 ? '#f59e0b' : '#ef4444';
+              return (
+                <div key={r.label} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--panel)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>
+                      {r.label}
+                    </span>
+                    <span style={{ fontSize: 14, fontWeight: 800, color, flexShrink: 0 }}>{taxa.toFixed(0)}%</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 4, background: 'var(--border)', marginBottom: 4 }}>
+                    <div style={{ height: '100%', borderRadius: 4, width: `${Math.min(100, taxa)}%`, background: color, transition: 'width 400ms' }} />
+                  </div>
+                  <div style={{ fontSize: 11, opacity: 0.5 }}>
+                    {fmt(r.deferidos)} deferidos / {fmt(r.total)} processos
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+      )}
+
+      {/* ── Histograma de valores + Canais ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <SectionCard title="Histograma de Valores" subtitle="Concentração de processos por faixa de valor">
+          <div style={{ height: 200 }}>
+            {hasPositive(valorHistChart, 'total') ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={valorHistChart} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+                  <CartesianGrid {...gridStyle} />
+                  <XAxis dataKey="label" tick={axisStyle} />
+                  <YAxis tick={axisStyle} />
+                  <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v) => fmt(v)} />
+                  <Bar dataKey="total" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : <EmptyChart title="Sem dados (Histograma)" />}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Canais de Comunicação (30 dias)" subtitle="Distribuição de movimentações por canal">
+          <div style={{ height: 200 }}>
+            {hasPositive(canaisChart, 'total') ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={canaisChart} dataKey="total" nameKey="label" innerRadius={50} outerRadius={85} paddingAngle={3}>
+                    {canaisChart.map((e, i) => <Cell key={e.label} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip {...pieTooltip(totalCanais)} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : <EmptyChart title="Sem dados (Canais)" />}
+          </div>
+        </SectionCard>
+      </div>
+
+      {/* ── Tempo conclusão por conc + Repasse ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <SectionCard title="Tempo médio de conclusão" subtitle="Dias até encerramento por concessionária">
+          <div style={{ height: 220 }}>
+            {hasPositive(tempoConcChart, 'dias') ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={tempoConcChart} layout="vertical" margin={{ top: 4, right: 60, left: 0, bottom: 4 }}>
+                  <CartesianGrid {...gridStyle} horizontal={false} />
+                  <XAxis type="number" tick={axisStyle} />
+                  <YAxis type="category" dataKey="label" tick={axisStyle} width={80} />
+                  <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v) => `${safeNum(v).toFixed(1)} dias`} />
+                  <Bar dataKey="dias" fill="#f97316" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : <EmptyChart title="Sem dados (Conclusão por concessionária)" />}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Repasse por Concessionária" subtitle={`Total: ${fmtMM(repasseTotal)}`}>
+          {repasseConcs.length > 0 ? repasseConcs.slice(0, 8).map((r) => (
+            <HBarRow key={r.label} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxRepasse} color="#06b6d4" />
+          )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados de repasse no período.</div>}
+        </SectionCard>
+      </div>
+
+      {/* warnings */}
+      {Array.isArray(data?.warnings) && data.warnings.length > 0 && (
+        <div style={{ fontSize: 11, opacity: 0.5 }}>Avisos: {data.warnings.join(' | ')}</div>
+      )}
+
+      {/* ── Modal Guia de Métricas ── */}
+      {metricsModalOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setMetricsModalOpen(false); }}>
+          <div style={{ width: '100%', maxWidth: 680, maxHeight: '90vh', overflow: 'auto', borderRadius: 14, background: 'var(--card)', border: '1px solid var(--border)', padding: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>Guia de Métricas</div>
+                <div style={{ fontSize: 12, opacity: 0.5 }}>Selecione a categoria para ver as métricas</div>
+              </div>
+              <button onClick={() => setMetricsModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg)', opacity: 0.6 }}><X size={18} /></button>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+              {[{ key: 'estrategicos', label: 'Estratégicos' }, { key: 'taticos', label: 'Táticos' }, { key: 'operacionais', label: 'Operacionais' }].map((t) => (
+                <button key={t.key} onClick={() => setMetricsTab(t.key)} style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid', borderColor: metricsTab === t.key ? 'var(--accent)' : 'var(--border)', background: metricsTab === t.key ? 'rgba(59,130,246,0.12)' : 'transparent', color: metricsTab === t.key ? 'var(--accent)' : 'var(--fg)' }}>
+                  {t.label}
                 </button>
               ))}
             </div>
-
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {METRICAS_GUIA[metricsTab].map((item) => (
-                <div key={`${metricsTab}-${item}`} className="rounded-md border panel-border panel-bg-60 p-3">
+                <div key={item} style={{ padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', fontSize: 12 }}>
                   {item}
                 </div>
               ))}
             </div>
           </div>
         </div>
-      )}
-
-      {/* KPI cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {cardsTop.map((c) => (
-          <div key={c.label} className="p-4 rounded-lg border panel-border panel-bg-60">
-            <div className="text-xs uppercase opacity-70">{c.label}</div>
-            <div className="text-2xl font-semibold mt-1">{c.value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Kanban composição + Status */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-1">Composição de Processos (Kanban)</div>
-          <div className="text-xs opacity-70 mb-3">
-            Mostra a porcentagem de cada coluna para compor os processos. Filtro aplicado: {kanbanConcsLabel}
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <div className="h-[300px]">
-              {kanbanSelected.size === 0 ? (
-                <EmptyChart title="Nenhuma coluna selecionada" hint="Marque ao menos uma coluna para ver o gráfico." />
-              ) : hasPositive(kanbanPieData, 'total') ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={kanbanPieData}
-                      dataKey="total"
-                      nameKey="label"
-                      innerRadius={60}
-                      outerRadius={110}
-                      paddingAngle={2}
-                      labelLine={false}
-                      label={renderKanbanPercentLabel}
-                    >
-                      {kanbanPieData.map((entry, idx) => (
-                        <Cell key={`kanban-cell-${entry.label}`} fill={pieColors[idx % pieColors.length]} />
-                      ))}
-                    </Pie>
-
-                    <Tooltip
-                      formatter={(v, _name, props) => {
-                        const pct = safeNum(props?.payload?.percent);
-                        return [`${formatNumber(v)} (${pct.toFixed(1)}%)`, 'Total'];
-                      }}
-                    />
-
-                    <Legend
-                      layout="vertical"
-                      align="right"
-                      verticalAlign="middle"
-                      formatter={(value, entry) => {
-                        const tot = getTotalFromLegendEntry(entry);
-                        const pct = totalKanban ? (tot / totalKanban) * 100 : 0;
-                        return `${value} — ${formatNumber(tot)} (${pct.toFixed(1)}%)`;
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyChart
-                  title="Sem dados (Kanban)"
-                  hint="O payload veio com processos_counts zerado. Se Total de Processos aparece > 0, provavelmente a query do backend está retornando 0 para os counts."
-                />
-              )}
-            </div>
-
-            <div>
-              <div className="text-xs opacity-70 mb-2">Colunas incluídas</div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                {PROCESSOS_CARDS.map((p) => (
-                  <label key={`kanban-${p.key}`} className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={kanbanSelected.has(p.key)}
-                      onChange={(e) => {
-                        setKanbanSelected((prev) => {
-                          const next = new Set(prev);
-                          if (e.target.checked) next.add(p.key);
-                          else next.delete(p.key);
-                          return next;
-                        });
-                      }}
-                    />
-                    <span className="opacity-80">{p.label}</span>
-                  </label>
-                ))}
-              </div>
-
-              <div className="mt-3 space-y-1 text-sm">
-                {kanbanPercentData.map((k) => (
-                  <div key={`kanban-row-${k.key}`} className="flex items-center justify-between">
-                    <span className="opacity-80">{k.label}</span>
-                    <span className="font-semibold">
-                      {formatNumber(k.total)} <span className="opacity-70">({k.percent.toFixed(1)}%)</span>
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4">
-                <div className="text-xs opacity-70 mb-2">Concessionárias (filtro apenas para este gráfico)</div>
-
-                <div className="flex flex-wrap gap-2 mb-2">
-                  <input
-                    type="text"
-                    value={kanbanConcSearch}
-                    onChange={(e) => setKanbanConcSearch(e.target.value)}
-                    placeholder="Buscar concessionária"
-                    className="px-3 py-2 border panel-border panel-bg-60 text-[var(--fg)] rounded w-full sm:w-56 text-xs"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() => setKanbanConcs(concessionarias)}
-                    className="px-3 py-2 rounded-md border panel-border panel-bg-60 hover:opacity-90 text-xs"
-                  >
-                    Selecionar todas
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setKanbanConcs([])}
-                    className="px-3 py-2 rounded-md border panel-border panel-bg-60 hover:opacity-90 text-xs"
-                  >
-                    Limpar seleção
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={applyKanbanConcs}
-                    className="px-3 py-2 rounded-md border panel-border panel-bg-60 hover:opacity-90 text-xs"
-                    disabled={kanbanLoading}
-                  >
-                    {kanbanLoading ? 'Aplicando...' : 'Aplicar'}
-                  </button>
-                </div>
-
-                <div className="max-h-32 overflow-auto grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  {filteredKanbanConcs.map((c) => (
-                    <label key={`kanban-conc-${c}`} className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={kanbanConcs.includes(c)}
-                        onChange={(e) => {
-                          if (e.target.checked) setKanbanConcs((prev) => [...prev, c]);
-                          else setKanbanConcs((prev) => prev.filter((x) => x !== c));
-                        }}
-                      />
-                      <span className="truncate">{c}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Status */}
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">Status das requisições</div>
-          <div className="h-[300px]">
-            {hasPositive(statusChart, 'total') ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={statusChart} dataKey="total" nameKey="label" innerRadius={60} outerRadius={110} paddingAngle={2}>
-                    {statusChart.map((entry, idx) => (
-                      <Cell key={`status-${entry.label}`} fill={pieColors[idx % pieColors.length]} />
-                    ))}
-                  </Pie>
-
-                  <Tooltip
-                    formatter={(v, _name, props) => {
-                      const pct = safeNum(props?.payload?.percent);
-                      return [`${formatNumber(v)} (${pct.toFixed(1)}%)`, 'Total'];
-                    }}
-                  />
-
-                  <Legend
-                    layout="vertical"
-                    align="right"
-                    verticalAlign="middle"
-                    formatter={(value, entry) => {
-                      const tot = getTotalFromLegendEntry(entry);
-                      const pct = totalStatus ? (tot / totalStatus) * 100 : 0;
-                      return `${value} — ${formatNumber(tot)} (${pct.toFixed(1)}%)`;
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyChart
-                title="Sem dados (Status)"
-                hint="O payload veio com status_counts zerado. Verifique se a regex do backend está batendo com os seus status reais."
-              />
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Tendência */}
-      <div className="p-4 rounded-lg border panel-border panel-bg-60">
-        <div className="text-sm font-semibold mb-3">Tendência 30 dias (movimentações)</div>
-        <div className="h-[240px]">
-          {Array.isArray(tendenciaChart) && tendenciaChart.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={tendenciaChart} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="dia" tick={{ fontSize: 10 }} minTickGap={16} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v) => formatNumber(v)} />
-                <Line type="monotone" dataKey="total" stroke="var(--accent)" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <EmptyChart title="Sem dados (Tendência)" hint="Sem linhas para o período/30 dias." />
-          )}
-        </div>
-      </div>
-
-      {/* Créditos + SLA/aging + etc */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Créditos */}
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">Composição de Créditos</div>
-          <div className="h-[240px]">
-            {hasPositive(creditosChart, 'total') ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={creditosChart} dataKey="total" nameKey="label" innerRadius={55} outerRadius={95} paddingAngle={2}>
-                    {creditosChart.map((entry, idx) => (
-                      <Cell key={`cred-${entry.label}`} fill={pieColors[idx % pieColors.length]} />
-                    ))}
-                  </Pie>
-
-                  <Tooltip
-                    formatter={(v) => {
-                      const vv = safeNum(v);
-                      const pct = totalCreditos ? (vv / totalCreditos) * 100 : 0;
-                      return [`${formatCurrency(vv)} (${pct.toFixed(1)}%)`, 'Valor'];
-                    }}
-                  />
-
-                  <Legend
-                    layout="vertical"
-                    align="right"
-                    verticalAlign="middle"
-                    formatter={(value, entry) => {
-                      const tot = getTotalFromLegendEntry(entry);
-                      const pct = totalCreditos ? (tot / totalCreditos) * 100 : 0;
-                      return `${value} — ${formatCurrency(tot)} (${pct.toFixed(1)}%)`;
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyChart title="Sem dados (Créditos)" />
-            )}
-          </div>
-        </div>
-
-        {/* SLA */}
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">SLA (últimos {sla30d.limite_dias || 7} dias)</div>
-          <div className="text-sm mb-2">
-            No prazo: <strong>{formatNumber(onTime)}</strong> | Atrasados: <strong>{formatNumber(late)}</strong>
-          </div>
-          <div className="h-2 rounded-full bg-[var(--border)]/60">
-            <div className="h-2 rounded-full bg-green-500" style={{ width: `${onTimePct}%` }} />
-          </div>
-          <div className="text-xs opacity-70 mt-1">{onTimePct}% dentro do prazo</div>
-
-          <div className="mt-4 text-xs opacity-70">
-            Aging: 0-7 {formatNumber(agingBuckets['0_7'])} | 8-15 {formatNumber(agingBuckets['8_15'])} | 16-30{' '}
-            {formatNumber(agingBuckets['16_30'])} | 31+ {formatNumber(agingBuckets['31_mais'])}
-          </div>
-        </div>
-      </div>
-
-      {/* Canais (pie) + Histograma */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">Canais (30 dias)</div>
-          <div className="h-[240px]">
-            {hasPositive(canaisChart, 'total') ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={canaisChart} dataKey="total" nameKey="label" innerRadius={50} outerRadius={95} paddingAngle={2}>
-                    {canaisChart.map((entry, idx) => (
-                      <Cell key={`canal-${entry.label}`} fill={pieColors[idx % pieColors.length]} />
-                    ))}
-                  </Pie>
-
-                  <Tooltip
-                    formatter={(v, _name, props) => {
-                      const pct = safeNum(props?.payload?.percent);
-                      return [`${formatNumber(v)} (${pct.toFixed(1)}%)`, 'Total'];
-                    }}
-                  />
-
-                  <Legend
-                    layout="vertical"
-                    align="right"
-                    verticalAlign="middle"
-                    formatter={(value, entry) => {
-                      const tot = getTotalFromLegendEntry(entry);
-                      const pct = totalCanais ? (tot / totalCanais) * 100 : 0;
-                      return `${value} — ${formatNumber(tot)} (${pct.toFixed(1)}%)`;
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyChart title="Sem dados (Canais)" />
-            )}
-          </div>
-        </div>
-
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">Histograma de valores</div>
-          <div className="space-y-2 text-sm">
-            {valorHistogram.map((r, idx) => (
-              <div key={`${r.label}-${idx}`} className="flex items-center justify-between">
-                <span className="opacity-80">{r.label}</span>
-                <span className="font-semibold">{formatNumber(r.total)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Tempo médio + WIP */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">Tempo médio por etapa (dias)</div>
-          <div className="space-y-2 text-sm">
-            {tempoMedio.slice(0, 10).map((r, idx) => (
-              <div key={`${r.etapa}-${idx}`} className="flex items-center justify-between">
-                <span className="opacity-80">{r.etapa}</span>
-                <span className="font-semibold">{safeNum(r.dias).toFixed(1)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">WIP por gestor</div>
-          <div className="space-y-2 text-sm">
-            {wipGestores.slice(0, 10).map((r, idx) => (
-              <div key={`${r.label}-${idx}`} className="flex items-center justify-between">
-                <span className="opacity-80">{r.label}</span>
-                <span className="font-semibold">{formatNumber(r.total)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Conclusão + Repasse */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">Tempo médio de conclusão por concessionária</div>
-          <div className="h-[260px]">
-            {hasPositive(tempoConclusaoChart, 'dias') ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={tempoConclusaoChart.slice(0, 10)} margin={{ top: 10, right: 12, left: 0, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={0} angle={-15} height={40} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v) => `${safeNum(v).toFixed(1)} dias`} />
-                  <Bar dataKey="dias" fill="var(--accent)" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <EmptyChart title="Sem dados (Conclusão por concessionária)" />
-            )}
-          </div>
-        </div>
-
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-1">Repasse</div>
-          <div className="text-2xl font-semibold mb-2">{formatCurrency(repasseTotal)}</div>
-          <div className="text-xs opacity-70 mb-3">Valor total de repasse + empresas que compõem esse valor</div>
-
-          <div className="space-y-1 text-sm max-h-64 overflow-auto">
-            {repasseRows.rows.map((r) => {
-              const pct = repasseRows.total ? (safeNum(r.total) / repasseRows.total) * 100 : 0;
-              return (
-                <div key={`rep-${r.label}`} className="flex items-center justify-between gap-2">
-                  <span className="truncate opacity-80">{r.label}</span>
-                  <span className="font-semibold">
-                    {formatCurrency(r.total)} <span className="opacity-70">({pct.toFixed(1)}%)</span>
-                  </span>
-                </div>
-              );
-            })}
-            {repasseRows.rows.length === 0 && <div className="text-xs opacity-70">Sem dados de repasse no período.</div>}
-          </div>
-        </div>
-      </div>
-
-      {/* Tops */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">Top Concessionárias (valor)</div>
-          <div className="space-y-2 text-sm">
-            {topConcessionarias.slice(0, 10).map((r, idx) => (
-              <div key={`${r.label}-${idx}`} className="flex items-center justify-between">
-                <span className="opacity-80">{r.label}</span>
-                <span className="font-semibold">{formatCurrency(r.total)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">Top Clientes (valor)</div>
-          <div className="space-y-2 text-sm">
-            {topClientes.slice(0, 10).map((r, idx) => (
-              <div key={`${r.label}-${idx}`} className="flex items-center justify-between">
-                <span className="opacity-80">{r.label}</span>
-                <span className="font-semibold">{formatCurrency(r.total)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Throughput (texto, como estava) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">Throughput semanal</div>
-          <div className="space-y-2 text-sm">
-            {(throughputSemana || []).slice(0, 10).map((r, idx) => (
-              <div key={`${r.label}-${idx}`} className="flex items-center justify-between">
-                <span className="opacity-80">{r.label}</span>
-                <span className="font-semibold">{formatNumber(r.total)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="p-4 rounded-lg border panel-border panel-bg-60">
-          <div className="text-sm font-semibold mb-3">Throughput mensal</div>
-          <div className="space-y-2 text-sm">
-            {(throughputMes || []).slice(0, 10).map((r, idx) => (
-              <div key={`${r.label}-${idx}`} className="flex items-center justify-between">
-                <span className="opacity-80">{r.label}</span>
-                <span className="font-semibold">{formatNumber(r.total)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Tendência mini */}
-      <div className="p-4 rounded-lg border panel-border panel-bg-60">
-        <div className="text-sm font-semibold mb-3">Tendência 30 dias (últimos 12 pontos)</div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
-          {tendencia30d.slice(-12).map((t) => {
-            const width = Math.max(4, Math.round((safeNum(t.total) / trendMax) * 100));
-            return (
-              <div key={t.dia} className="flex items-center gap-2">
-                <span className="w-16 opacity-70">{t.dia}</span>
-                <div className="flex-1 h-2 rounded-full bg-[var(--border)]/60">
-                  <div className="h-2 rounded-full bg-[var(--accent)]" style={{ width: `${width}%` }} />
-                </div>
-                <span className="w-10 text-right">{formatNumber(t.total)}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {Array.isArray(data?.warnings) && data.warnings.length > 0 && (
-        <div className="text-xs opacity-70">Avisos: {data.warnings.join(' | ')}</div>
       )}
     </div>
   );

@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -232,11 +234,109 @@ func filtroFicha(ficha string) string {
 		return " AND flag_f04 = 1"
 	case "f05":
 		return " AND flag_f05 = 1"
-	case "combinados":
-		return " AND qtd_regras > 1"
 	default:
 		return ""
 	}
+}
+
+func escapeLike(value string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(value)
+}
+
+func buildFichaFilters(c *gin.Context) (string, []interface{}) {
+	var sb strings.Builder
+	args := make([]interface{}, 0, 12)
+
+	if fichaList := strings.TrimSpace(c.Query("fichas")); fichaList != "" {
+		parts := strings.Split(fichaList, ",")
+		valid := make([]string, 0, len(parts))
+		for _, part := range parts {
+			normalized := strings.ToUpper(strings.TrimSpace(part))
+			switch normalized {
+			case "F01":
+				valid = append(valid, "flag_f01 = 1")
+			case "F02":
+				valid = append(valid, "flag_f02 = 1")
+			case "F03":
+				valid = append(valid, "flag_f03 = 1")
+			case "F04":
+				valid = append(valid, "flag_f04 = 1")
+			case "F05":
+				valid = append(valid, "flag_f05 = 1")
+			}
+		}
+		if len(valid) > 0 {
+			sb.WriteString(" AND (")
+			sb.WriteString(strings.Join(valid, " OR "))
+			sb.WriteString(")")
+		}
+	}
+
+	if uc := strings.TrimSpace(c.Query("uc")); uc != "" {
+		sb.WriteString(" AND LOWER(COALESCE(UC, '')) LIKE ? ESCAPE '\\'")
+		args = append(args, "%"+strings.ToLower(escapeLike(uc))+"%")
+	}
+
+	if cliente := strings.TrimSpace(c.Query("cliente")); cliente != "" {
+		sb.WriteString(" AND LOWER(COALESCE(RAZAO_SOCIAL, '')) LIKE ? ESCAPE '\\'")
+		args = append(args, "%"+strings.ToLower(escapeLike(cliente))+"%")
+	}
+
+	if distribuidora := strings.TrimSpace(c.Query("distribuidora")); distribuidora != "" {
+		sb.WriteString(" AND Concessionaria = ?")
+		args = append(args, distribuidora)
+	}
+
+	if periodoInicio := strings.TrimSpace(c.Query("periodo_inicio")); periodoInicio != "" {
+		sb.WriteString(" AND COALESCE(Mes_Ref, '') >= ?")
+		args = append(args, periodoInicio)
+	}
+
+	if periodoFim := strings.TrimSpace(c.Query("periodo_fim")); periodoFim != "" {
+		sb.WriteString(" AND COALESCE(Mes_Ref, '') <= ?")
+		args = append(args, periodoFim)
+	}
+
+	if valorMin := strings.TrimSpace(c.Query("valor_min")); valorMin != "" {
+		if parsed, err := strconv.ParseFloat(valorMin, 64); err == nil {
+			sb.WriteString(" AND COALESCE(RS_Total_Fatura, 0) >= ?")
+			args = append(args, parsed)
+		}
+	}
+
+	if valorMax := strings.TrimSpace(c.Query("valor_max")); valorMax != "" {
+		if parsed, err := strconv.ParseFloat(valorMax, 64); err == nil {
+			sb.WriteString(" AND COALESCE(RS_Total_Fatura, 0) <= ?")
+			args = append(args, parsed)
+		}
+	}
+
+	if desvioMin := strings.TrimSpace(c.Query("desvio_min")); desvioMin != "" {
+		if parsed, err := strconv.ParseFloat(desvioMin, 64); err == nil {
+			sb.WriteString(" AND COALESCE(desvio_pct_max, 0) >= ?")
+			args = append(args, parsed)
+		}
+	}
+
+	if busca := strings.TrimSpace(c.Query("search")); busca != "" {
+		pattern := "%" + strings.ToLower(escapeLike(busca)) + "%"
+		sb.WriteString(" AND (")
+		sb.WriteString(strings.Join([]string{
+			"LOWER(COALESCE(CAST(UC AS CHAR), '')) LIKE ? ESCAPE '\\'",
+			"LOWER(COALESCE(RAZAO_SOCIAL, '')) LIKE ? ESCAPE '\\'",
+			"LOWER(COALESCE(Concessionaria, '')) LIKE ? ESCAPE '\\'",
+			"LOWER(COALESCE(Mes_Ref, '')) LIKE ? ESCAPE '\\'",
+			"LOWER(COALESCE(fichas_aplicadas, '')) LIKE ? ESCAPE '\\'",
+			"LOWER(COALESCE(detalhamento, '')) LIKE ? ESCAPE '\\'",
+		}, " OR "))
+		sb.WriteString(")")
+		for i := 0; i < 6; i++ {
+			args = append(args, pattern)
+		}
+	}
+
+	return sb.String(), args
 }
 
 // queryFichaSQL lê de fichas_anomalias_cache no db_ressarcimento (cache local).
@@ -265,18 +365,22 @@ func queryFichaSQL(c *gin.Context, ficha string) {
 	}
 
 	filtro := filtroFicha(ficha)
-	base := "FROM fichas_anomalias_cache WHERE 1=1" + filtro
+	filtroExtra, filtroArgs := buildFichaFilters(c)
+	base := "FROM fichas_anomalias_cache WHERE 1=1" + filtro + filtroExtra
 
 	// Contagem total
 	var total int64
-	_ = sqlDB.QueryRow("SELECT COUNT(*) " + base).Scan(&total)
+	countQuery := "SELECT COUNT(*) " + base
+	countRow := sqlDB.QueryRow(countQuery, filtroArgs...)
+	_ = countRow.Scan(&total)
 
 	// Dados paginados
 	dataSQL := "SELECT * " + base +
 		" ORDER BY qtd_regras DESC, COALESCE(desvio_pct_max,0) DESC LIMIT ? OFFSET ?"
-	rows, err := sqlDB.Query(dataSQL, limit, offset)
+	queryArgs := append(append([]interface{}{}, filtroArgs...), limit, offset)
+	rows, err := sqlDB.Query(dataSQL, queryArgs...)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao consultar: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("erro ao consultar: %v", err)})
 		return
 	}
 	defer rows.Close()
@@ -323,12 +427,11 @@ func queryFichaSQL(c *gin.Context, ficha string) {
 	})
 }
 
-func ListFicha01(c *gin.Context)        { queryFichaSQL(c, "f01") }
-func ListFicha02(c *gin.Context)        { queryFichaSQL(c, "f02") }
-func ListFicha03(c *gin.Context)        { queryFichaSQL(c, "f03") }
-func ListFicha04(c *gin.Context)        { queryFichaSQL(c, "f04") }
-func ListFicha05(c *gin.Context)        { queryFichaSQL(c, "f05") }
-func ListFichaCombinados(c *gin.Context) { queryFichaSQL(c, "combinados") }
+func ListFicha01(c *gin.Context) { queryFichaSQL(c, "f01") }
+func ListFicha02(c *gin.Context) { queryFichaSQL(c, "f02") }
+func ListFicha03(c *gin.Context) { queryFichaSQL(c, "f03") }
+func ListFicha04(c *gin.Context) { queryFichaSQL(c, "f04") }
+func ListFicha05(c *gin.Context) { queryFichaSQL(c, "f05") }
 
 // ListFichaResumo retorna contagem de anomalias por ficha a partir do cache local.
 func ListFichaResumo(c *gin.Context) {
@@ -343,7 +446,7 @@ func ListFichaResumo(c *gin.Context) {
 		return
 	}
 
-	var total, f01, f02, f03, f04, f05, comb int64
+	var total, f01, f02, f03, f04, f05 int64
 	err = sqlDB.QueryRow(`
 		SELECT
 		  COUNT(*),
@@ -351,21 +454,19 @@ func ListFichaResumo(c *gin.Context) {
 		  SUM(flag_f02),
 		  SUM(flag_f03),
 		  SUM(flag_f04),
-		  SUM(flag_f05),
-		  SUM(CASE WHEN qtd_regras > 1 THEN 1 ELSE 0 END)
-		FROM fichas_anomalias_cache`).Scan(&total, &f01, &f02, &f03, &f04, &f05, &comb)
+		  SUM(flag_f05)
+		FROM fichas_anomalias_cache`).Scan(&total, &f01, &f02, &f03, &f04, &f05)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao consultar resumo"})
 		return
 	}
 
 	resumo := []gin.H{
-		{"key": "f01",       "nome": "F01 – Divergência de Fórmula", "total": f01},
-		{"key": "f02",       "nome": "F02 – Desvio de Média",        "total": f02},
-		{"key": "f03",       "nome": "F03 – Acúmulo de Consumo",     "total": f03},
-		{"key": "f04",       "nome": "F04 – Troca de Medidor",       "total": f04},
-		{"key": "f05",       "nome": "F05 – Quebra de Leitura",      "total": f05},
-		{"key": "combinados","nome": "Combinados (2+ fichas)",        "total": comb},
+		{"key": "f01", "nome": "F01 – Divergência de Fórmula", "total": f01},
+		{"key": "f02", "nome": "F02 – Desvio de Média", "total": f02},
+		{"key": "f03", "nome": "F03 – Acúmulo de Consumo", "total": f03},
+		{"key": "f04", "nome": "F04 – Troca de Medidor", "total": f04},
+		{"key": "f05", "nome": "F05 – Quebra de Leitura", "total": f05},
 	}
 
 	c.JSON(http.StatusOK, gin.H{"fichas": resumo, "total_detectadas": total})

@@ -1,7 +1,163 @@
-import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+﻿import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import apiClient from '../services/apiClient';
+import * as pdfjsLib from 'pdfjs-dist';
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).href;
 
-/* ─── Chat AISURE ─────────────────────────────────────────────── */
+const ANALISE_DESVIO_RESULTS_KEY = 'analise_desvio_confirm_results_v1';
+const ANALISE_DESVIO_BATCH_HISTORY_KEY = 'analise_desvio_batch_history_v1';
+const REMOTE_FATURA_CACHE = new Map();
+const TRANSIENT_AI_ERROR_RE = /(upstream_unavailable|timeout|temporar|overloaded|rate limit|connection reset|bad gateway|service unavailable)/i;
+
+/* Converte todas as páginas de um PDF em imagens PNG (base64) via canvas */
+async function pdfToImages(file, scale = 2.0) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const totalPages = pdf.numPages;
+  const pages = [];
+  for (let i = 1; i <= totalPages; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    const dataUrl = canvas.toDataURL('image/png');
+    pages.push({ base64: dataUrl.split(',')[1], mime: 'image/png', previewUrl: dataUrl, pageNum: i });
+  }
+  return { pages, totalPages, name: file.name };
+}
+
+async function fileToImageData(file) {
+  const dataUrl = await new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => res(ev.target.result);
+    reader.onerror = () => rej(new Error('Falha ao ler arquivo'));
+    reader.readAsDataURL(file);
+  });
+  const base64 = String(dataUrl).split(',')[1];
+  return {
+    pages: [{ base64, mime: file.type || 'image/jpeg', previewUrl: dataUrl, pageNum: 1 }],
+    totalPages: 1,
+    name: file.name,
+  };
+}
+
+async function detectRemoteFileKind(blob, filename = '', contentType = '') {
+  const lowerName = String(filename || '').toLowerCase();
+  const lowerType = String(contentType || blob?.type || '').toLowerCase();
+
+  if (lowerType.includes('pdf') || lowerName.endsWith('.pdf')) return 'pdf';
+  if (lowerType.startsWith('image/')) return 'image';
+  if (/\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(lowerName)) return 'image';
+
+  const head = await blob.slice(0, 16).arrayBuffer();
+  const bytes = new Uint8Array(head);
+  const ascii = Array.from(bytes).map(b => String.fromCharCode(b)).join('');
+
+  if (ascii.startsWith('%PDF-')) return 'pdf';
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'image';
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image';
+  if (ascii.startsWith('RIFF') && ascii.includes('WEBP')) return 'image';
+  if ((bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46)) return 'image';
+
+  return '';
+}
+
+function getRowFaturaLink(row) {
+  return String(row?.Link ?? row?.link ?? '').trim();
+}
+
+function isTransientAisureError(error) {
+  const msg = String(error?.response?.data?.error || error?.message || error || '');
+  return TRANSIENT_AI_ERROR_RE.test(msg);
+}
+
+function readStoredJson(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredJson(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function appendBatchHistory(entry) {
+  const current = readStoredJson(ANALISE_DESVIO_BATCH_HISTORY_KEY, []);
+  const next = [entry, ...current].slice(0, 20);
+  writeStoredJson(ANALISE_DESVIO_BATCH_HISTORY_KEY, next);
+}
+
+async function loadFaturaDataFromLink(link) {
+  const trimmed = String(link || '').trim();
+  if (!trimmed) return null;
+  if (REMOTE_FATURA_CACHE.has(trimmed)) return REMOTE_FATURA_CACHE.get(trimmed);
+
+  const res = await apiClient.get('/api/v1/faturas/aisure/fetch', {
+    params: { url: trimmed },
+    responseType: 'blob',
+  });
+  const contentType = String(res.headers?.['content-type'] || '').toLowerCase();
+  const disposition = String(res.headers?.['content-disposition'] || '');
+  const nameMatch = disposition.match(/filename="?([^"]+)"?/i);
+  const guessedName = nameMatch?.[1] || (contentType.includes('pdf') ? 'fatura.pdf' : 'fatura.jpg');
+  const blob = new Blob([res.data], { type: res.data?.type || contentType || 'application/octet-stream' });
+  const detectedKind = await detectRemoteFileKind(blob, guessedName, contentType);
+  const normalizedType =
+    detectedKind === 'pdf' ? 'application/pdf' :
+    detectedKind === 'image' ? (blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg') :
+    (blob.type || contentType || 'application/octet-stream');
+  const file = new File([blob], guessedName, { type: normalizedType });
+
+  let data = null;
+  if (detectedKind === 'pdf') data = await pdfToImages(file);
+  else if (detectedKind === 'image') data = await fileToImageData(file);
+  else throw new Error(`tipo de arquivo não suportado: ${blob.type || contentType || 'desconhecido'}`);
+  REMOTE_FATURA_CACHE.set(trimmed, data);
+  return data;
+}
+
+async function runAisureConfirm({ uc, fichas, detalhe, row, faturaData }) {
+  const body = {
+    uc,
+    fichas,
+    detalhamento: detalhe,
+    row_data: Object.fromEntries(Object.entries(row || {}).map(([k, v]) => [k, String(v ?? '')])),
+    fatura_link: getRowFaturaLink(row),
+  };
+  if (faturaData?.pages?.length) {
+    body.fatura_images = faturaData.pages.map(p => ({ base64: p.base64, mime: p.mime }));
+  }
+  const res = await apiClient.post('/api/v1/faturas/aisure/confirmar', body);
+  return {
+    confirmado: res.data.confirmado,
+    analise: res.data.analise,
+    calcFinanceiro: res.data.calculo_financeiro || null,
+  };
+}
+
+async function runAisureConfirmWithRetry(payload, maxAttempts = 2) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await runAisureConfirm(payload);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientAisureError(error) || attempt >= maxAttempts) break;
+    }
+  }
+  throw lastError;
+}
+
+/* Chat AISURE */
 function AisurePanel() {
   const [messages, setMessages] = useState([
     {
@@ -302,24 +458,23 @@ function AisurePanel() {
           </button>
         </div>
         <p className="text-xs opacity-30 mt-1.5 text-center">
-          📎 Anexe regras · Enter para enviar · Shift+Enter nova linha · Contexto ao vivo F01–F05
+          📎 Anexe regras · Enter para enviar · Shift+Enter nova linha · Contexto ao vivo F01-F05
         </p>
       </div>
     </div>
   );
 }
 
-/* ─── Fichas cadastradas ──────────────────────────────────────── */
+/* Fichas cadastradas */
 const FICHAS = [
   { id: 'f01',       label: 'F01',       nome: 'Divergência de Fórmula', endpoint: '/api/v1/faturas/ficha/01',        cor: '#1a56db' },
   { id: 'f02',       label: 'F02',       nome: 'Desvio de Média',        endpoint: '/api/v1/faturas/ficha/02',        cor: '#0e9f6e' },
   { id: 'f03',       label: 'F03',       nome: 'Acúmulo de Consumo',     endpoint: '/api/v1/faturas/ficha/03',        cor: '#c27803' },
   { id: 'f04',       label: 'F04',       nome: 'Troca de Medidor',       endpoint: '/api/v1/faturas/ficha/04',        cor: '#9061f9' },
   { id: 'f05',       label: 'F05',       nome: 'Quebra de Leitura',      endpoint: '/api/v1/faturas/ficha/05',        cor: '#e02424' },
-  { id: 'combinados',label: 'Combinados',nome: '2+ Fichas',              endpoint: '/api/v1/faturas/ficha/combinados',cor: '#7c3aed' },
 ];
 
-/* ─── Helpers ────────────────────────────────────────────────── */
+/* Helpers */
 const fmt = (v) => (v == null || v === '' ? '-' : String(v));
 
 function cellVal(v) {
@@ -330,7 +485,7 @@ function cellVal(v) {
   return s;
 }
 
-/* ─── Resumo ─────────────────────────────────────────────────── */
+/* Resumo */
 function ResumoPanel({ onSelectTab }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -444,13 +599,14 @@ function ResumoPanel({ onSelectTab }) {
   );
 }
 
-/* ─── Renderiza resultado da análise AISURE ──────────────────── */
-function AnaliseResultado({ analise, confirmado }) {
+/* Renderiza resultado da análise AISURE */
+function AnaliseResultado({ analise, confirmado, calcFinanceiro }) {
+  const [showCalc, setShowCalc] = useState(false);
   if (!analise) return null;
 
-  // Colorize cada linha do resultado estruturado
   const lines = analise.split('\n');
-  const prioColor = { CRÍTICO: '#ef4444', ALTO: '#f97316', MÉDIO: '#eab308', BAIXO: '#22c55e' };
+  const prioColor = { CRITICO: '#ef4444', ALTO: '#f97316', MEDIO: '#eab308', BAIXO: '#22c55e' };
+  const calcLines = calcFinanceiro ? calcFinanceiro.split('\n') : [];
 
   return (
     <div className="rounded-lg border border-[var(--border)] overflow-hidden text-xs font-mono">
@@ -465,23 +621,24 @@ function AnaliseResultado({ analise, confirmado }) {
       <div className="px-3 py-2 space-y-0.5 overflow-auto max-h-64 bg-[var(--panel)]">
         {lines.map((line, i) => {
           const upper = line.toUpperCase();
-          let color = 'inherit';
+          let color = '#1e293b';
           let weight = 'normal';
-          if (/^F0[1-5]\s*—/.test(line)) {
+          if (/^F0[1-5]\s*[—:-]/.test(line)) {
             if (line.includes('Confirmado') && !line.includes('Não confirmado')) color = '#4ade80';
             else if (line.includes('Não confirmado')) color = '#f87171';
             weight = '600';
           } else if (upper.startsWith('PRIORIDADE:')) {
-            const prio = Object.keys(prioColor).find(p => upper.includes(p));
+            const normalizedUpper = upper.normalize('NFD').replace(/[\\u0300-\\u036f]/g, ''); const prio = Object.keys(prioColor).find(p => normalizedUpper.includes(p));
             color = prio ? prioColor[prio] : '#facc15';
             weight = '700';
           } else if (upper.startsWith('TOTAL DE FICHAS')) {
-            color = '#93c5fd';
+            color = '#1d4ed8';
             weight = '600';
           } else if (upper.startsWith('UC:') || upper.startsWith('MÊS') || upper.startsWith('CONCESS')) {
-            color = '#e2e8f0';
+            color = '#0f172a';
+            weight = '600';
           } else if (upper.startsWith('FICHAS DETECTADAS')) {
-            color = '#facc15';
+            color = '#92400e';
             weight = '700';
           }
           return (
@@ -491,37 +648,79 @@ function AnaliseResultado({ analise, confirmado }) {
           );
         })}
       </div>
+
+      {/* Seção de cálculo financeiro - colapsável */}
+      {calcFinanceiro && (
+        <div className="border-t border-[var(--border)]">
+          <button
+            onClick={() => setShowCalc(v => !v)}
+            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold hover:bg-[var(--panel)] transition-colors"
+            style={{ color: '#60a5fa' }}
+          >
+            <span>Cálculo Financeiro Estimado</span>
+            <span style={{ fontSize: '10px' }}>{showCalc ? '▲' : '▼'}</span>
+          </button>
+          {showCalc && (
+            <div className="px-3 py-2 space-y-0.5 overflow-auto max-h-80 bg-[var(--panel)]">
+              {calcLines.map((line, i) => {
+                const lower = line.toLowerCase();
+                let color = '#1e293b';
+                let weight = 'normal';
+                if (lower.includes('valor_total_estimado_recuperavel_max')) {
+                  color = '#1d4ed8'; weight = '700';
+                } else if (lower.includes('valor_total_estimado_recuperavel_min')) {
+                  color = '#15803d'; weight = '700';
+                } else if (lower.includes('valor_cobrado_a_maior') || lower.includes('valor_potencial_devolucao_em_dobro')) {
+                  color = '#c2410c'; weight = '600';
+                } else if (lower.includes('calculo_financeiro') || lower.includes('10.')) {
+                  color = '#92400e'; weight = '700';
+                } else if (lower.includes('nivel_de_confianca') || lower.includes('11.')) {
+                  color = '#6d28d9'; weight = '600';
+                } else if (lower.includes('classificacao_final') || lower.includes('conclusao_final') || lower.includes('proxima_acao') || lower.includes('12.') || lower.includes('13.') || lower.includes('14.')) {
+                  color = '#1e293b'; weight = '600';
+                }
+                return (
+                  <div key={i} style={{ color, fontWeight: weight, lineHeight: '1.5' }}>
+                    {line || '\u00a0'}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-/* ─── Modal de análise IA por linha ─────────────────────────── */
+/* Modal de análise IA por linha */
 function ConfirmIAModal({ modal, onClose, onResult, onCriar }) {
-  const [faturaText, setFaturaText] = useState('');
-  const [uploading, setUploading]   = useState(false);
-  const [fileName, setFileName]     = useState('');
+  const [faturaData, setFaturaData] = useState(null); // { pages, totalPages, name }
+  const [converting, setConverting] = useState(false);
   const [analyzing, setAnalyzing]   = useState(false);
   const [result, setResult]         = useState(modal.initialResult ?? null);
+  const [autoLoadError, setAutoLoadError] = useState('');
   const fileRef = useRef(null);
+  const autoStartedRef = useRef(false);
 
   const handleFile = useCallback(async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
-    setUploading(true);
+    setConverting(true);
+    setAutoLoadError('');
     try {
-      const form = new FormData();
-      form.append('files', file);
-      const res = await apiClient.post('/api/v1/chat/upload', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      const text = res.data?.files?.[0]?.text ?? '';
-      setFaturaText(text);
-      setFileName(text ? file.name : file.name + ' (sem OCR — IA usará dados do banco)');
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        const data = await pdfToImages(file);
+        setFaturaData(data);
+      } else {
+        setFaturaData(await fileToImageData(file));
+      }
     } catch {
-      setFileName('Erro ao carregar arquivo');
+      setFaturaData(null);
+      alert('Não foi possível processar o arquivo. Tente outro formato.');
     } finally {
-      setUploading(false);
+      setConverting(false);
     }
   }, []);
 
@@ -529,28 +728,61 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar }) {
     setAnalyzing(true);
     setResult(null);
     try {
-      const res = await apiClient.post('/api/v1/faturas/aisure/confirmar', {
+      const r = await runAisureConfirmWithRetry({
         uc: modal.uc,
         fichas: modal.fichas,
-        detalhamento: modal.detalhe,
-        fatura_text: faturaText,
-        row_data: Object.fromEntries(Object.entries(modal.row).map(([k, v]) => [k, String(v ?? '')])),
+        detalhe: modal.detalhe,
+        row: modal.row,
+        faturaData,
       });
-      const r = { confirmado: res.data.confirmado, analise: res.data.analise };
       setResult(r);
       onResult?.(modal.rowIdx, r);
-    } catch {
-      setResult({ erro: true, analise: 'Erro ao conectar com o AISURE.' });
+    } catch (e) {
+      const msg = e?.response?.data?.error || e?.message || 'Erro ao conectar com o AISURE.';
+      setResult({ erro: true, analise: msg });
     } finally {
       setAnalyzing(false);
     }
-  }, [modal, faturaText, onResult]);
+  }, [modal, faturaData, onResult]);
+
+  const loadFaturaFromLink = useCallback(async () => {
+    const link = getRowFaturaLink(modal.row);
+    if (!link) return false;
+
+    setConverting(true);
+    setAutoLoadError('');
+    try {
+      setFaturaData(await loadFaturaDataFromLink(link));
+      return true;
+    } catch (e) {
+      const msg = e?.response?.data?.error || e?.message || 'Falha ao baixar a fatura pelo link.';
+      setAutoLoadError(String(msg));
+      setFaturaData(null);
+      return false;
+    } finally {
+      setConverting(false);
+    }
+  }, [modal.row]);
+
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (modal.initialResult) return;
+    autoStartedRef.current = true;
+    loadFaturaFromLink();
+  }, [loadFaturaFromLink, modal.initialResult]);
+
+  useEffect(() => {
+    if (modal.initialResult) return;
+    if (result || analyzing || converting) return;
+    if (!faturaData?.pages?.length) return;
+    handleAnalyze();
+  }, [modal.initialResult, result, analyzing, converting, faturaData, handleAnalyze]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="w-full max-w-xl bg-[var(--bg)] rounded-xl shadow-2xl flex flex-col border border-[var(--border)]"
-        style={{ maxHeight: '90vh' }}
+        className="w-full max-w-3xl bg-[var(--bg)] rounded-xl shadow-2xl flex flex-col border border-[var(--border)]"
+        style={{ maxHeight: '92vh' }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -563,7 +795,7 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar }) {
               <svg className="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd"/>
               </svg>
-              Análise de Anomalia — AISURE
+              Análise de Anomalia - AISURE
             </div>
             <div className="text-white/50 text-xs font-mono mt-0.5">UC {modal.uc}</div>
           </div>
@@ -594,28 +826,72 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar }) {
           )}
 
           {result && !analyzing && (
-            <AnaliseResultado analise={result.analise} confirmado={result.confirmado} />
+            <AnaliseResultado analise={result.analise} confirmado={result.confirmado} calcFinanceiro={result.calcFinanceiro} />
           )}
 
-          {/* Upload da fatura — oculto se já há resultado */}
+          {/* Upload da fatura - oculto se já há resultado */}
           {!result && !analyzing && (
             <div>
               <p className="text-xs opacity-60 mb-2">
-                Anexe a fatura (PDF, imagem) para análise completa. Sem anexo a IA usa os dados do banco.
+                Ao abrir, o sistema tenta baixar automaticamente a fatura do link da linha, converter em imagens e enviar direto para a IA.
+                Se falhar, você ainda pode anexar a fatura manualmente.
               </p>
-              <button
-                onClick={() => fileRef.current?.click()}
-                disabled={uploading}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-[var(--border)] text-xs hover:bg-[var(--panel)] transition-colors w-full justify-center"
-              >
-                {uploading ? (
-                  <><svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Carregando...</>
-                ) : fileName ? (
-                  <><span className="text-green-400">✓</span> {fileName} <span className="opacity-40">(trocar)</span></>
-                ) : (
-                  <><svg className="w-3.5 h-3.5 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg> Anexar fatura (opcional)</>
-                )}
-              </button>
+
+              {autoLoadError && (
+                <div className="mb-2 text-xs text-red-400 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2">
+                  {autoLoadError}
+                </div>
+              )}
+
+              {converting ? (
+                <div className="flex items-center gap-2 text-xs opacity-60 py-3 justify-center border border-dashed border-[var(--border)] rounded-lg">
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                  Convertendo PDF em imagens...
+                </div>
+              ) : faturaData ? (
+                <div className="rounded-lg border border-green-500/40 overflow-hidden">
+                  {/* Thumbnails das páginas */}
+                  <div className={`grid gap-1 p-2 bg-black/20 ${faturaData.pages.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                    {faturaData.pages.map(p => (
+                      <img
+                        key={p.pageNum}
+                        src={p.previewUrl}
+                        alt={`Página ${p.pageNum}`}
+                        className="w-full object-contain max-h-40 rounded"
+                      />
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--panel)] text-xs">
+                    <span className="text-green-400 flex items-center gap-1.5">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
+                      </svg>
+                      {faturaData.name}
+                      {faturaData.totalPages > 1 && (
+                        <span className="opacity-50">
+                          · {faturaData.pages.length}/{faturaData.totalPages} pág
+                        </span>
+                      )}
+                    </span>
+                    <button onClick={() => setFaturaData(null)} className="opacity-50 hover:opacity-100 text-red-400">
+                      remover
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-[var(--border)] text-xs hover:bg-[var(--panel)] transition-colors w-full justify-center"
+                >
+                  <svg className="w-3.5 h-3.5 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                  </svg>
+                  Anexar fatura (PDF, PNG, JPG, WEBP)
+                </button>
+              )}
               <input ref={fileRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" className="hidden" onChange={handleFile}/>
             </div>
           )}
@@ -651,7 +927,7 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar }) {
           ) : (
             <button
               onClick={handleAnalyze}
-              disabled={uploading || analyzing}
+              disabled={analyzing || converting}
               className="px-4 py-2 text-sm rounded-lg text-white font-semibold flex items-center gap-2 disabled:opacity-50"
               style={{ backgroundColor: '#1e3a5f' }}
             >
@@ -667,7 +943,290 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar }) {
   );
 }
 
-/* ─── Modal de criação de requisição a partir da análise IA ──── */
+function BulkConfirmModal({ jobs, onClose, onItemResult, onFinished }) {
+  const [items, setItems] = useState(() => jobs.map(job => ({
+    ...job,
+    status: 'pending',
+    message: 'Aguardando na fila',
+    result: null,
+  })));
+  const [running, setRunning] = useState(true);
+  const [cancelRequested, setCancelRequested] = useState(false);
+
+  const buildSummary = useCallback((currentItems) => ({
+    finishedAt: new Date().toISOString(),
+    total: currentItems.length,
+    processed: currentItems.filter(item => item.status === 'done' || item.status === 'error' || item.status === 'cancelled').length,
+    confirmed: currentItems.filter(item => item.status === 'done' && item.result?.confirmado).length,
+    notConfirmed: currentItems.filter(item => item.status === 'done' && item.result && !item.result?.confirmado).length,
+    errors: currentItems.filter(item => item.status === 'error').length,
+    cancelled: currentItems.filter(item => item.status === 'cancelled').length,
+  }), []);
+
+  const reprocessItem = useCallback(async (item) => {
+    setItems(prev => prev.map(current => current.key === item.key ? {
+      ...current,
+      status: 'loading',
+      message: 'Reprocessando...',
+      result: null,
+    } : current));
+    onItemResult?.(item.rowIdx, { loading: true });
+
+    try {
+      const link = getRowFaturaLink(item.row);
+      const faturaData = link ? await loadFaturaDataFromLink(link) : null;
+      const result = await runAisureConfirmWithRetry({
+        uc: item.uc,
+        fichas: item.fichas,
+        detalhe: item.detalhe,
+        row: item.row,
+        faturaData,
+      });
+      setItems(prev => prev.map(current => current.key === item.key ? {
+        ...current,
+        status: 'done',
+        message: result.confirmado ? 'Anomalia confirmada' : 'Anomalia não confirmada',
+        result,
+      } : current));
+      onItemResult?.(item.rowIdx, result);
+    } catch (e) {
+      const msg = e?.response?.data?.error || e?.message || 'Erro ao conectar com o AISURE.';
+      const result = { erro: true, analise: msg };
+      setItems(prev => prev.map(current => current.key === item.key ? {
+        ...current,
+        status: 'error',
+        message: msg,
+        result,
+      } : current));
+      onItemResult?.(item.rowIdx, result);
+    }
+  }, [onItemResult]);
+
+  const reprocessFailed = useCallback(async () => {
+    const failedItems = items.filter(item => item.status === 'error');
+    for (const item of failedItems) {
+      await reprocessItem(item);
+    }
+  }, [items, reprocessItem]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      let currentItems = jobs.map(job => ({
+        ...job,
+        status: 'pending',
+        message: 'Aguardando',
+        result: null,
+      }));
+
+      for (let idx = 0; idx < jobs.length; idx++) {
+        const job = jobs[idx];
+        if (cancelled) break;
+        if (cancelRequested) {
+          currentItems = currentItems.map((item, i) => (
+            i >= idx && item.status === 'pending'
+              ? { ...item, status: 'cancelled', message: 'Cancelado antes do processamento' }
+              : item
+          ));
+          setItems(currentItems);
+          break;
+        }
+
+        currentItems = currentItems.map((item, i) => i === idx ? { ...item, status: 'loading', message: `Baixando e analisando... (${idx + 1}/${jobs.length})` } : item);
+        setItems(currentItems);
+        onItemResult?.(job.rowIdx, { loading: true });
+
+        try {
+          const link = getRowFaturaLink(job.row);
+          const faturaData = link ? await loadFaturaDataFromLink(link) : null;
+          const result = await runAisureConfirmWithRetry({
+            uc: job.uc,
+            fichas: job.fichas,
+            detalhe: job.detalhe,
+            row: job.row,
+            faturaData,
+          });
+          if (cancelled) break;
+          currentItems = currentItems.map((item, i) => i === idx ? {
+            ...item,
+            status: 'done',
+            message: result.confirmado ? 'Anomalia confirmada' : 'Anomalia não confirmada',
+            result,
+          } : item);
+          setItems(currentItems);
+          onItemResult?.(job.rowIdx, result);
+        } catch (e) {
+          const msg = e?.response?.data?.error || e?.message || 'Erro ao conectar com o AISURE.';
+          if (cancelled) break;
+          const result = { erro: true, analise: msg };
+          currentItems = currentItems.map((item, i) => i === idx ? {
+            ...item,
+            status: 'error',
+            message: msg,
+            result,
+          } : item);
+          setItems(currentItems);
+          onItemResult?.(job.rowIdx, result);
+        }
+      }
+
+      if (!cancelled) {
+        setRunning(false);
+        onFinished?.(buildSummary(currentItems));
+      }
+    }
+
+    run();
+    return () => { cancelled = true; };
+  }, [jobs, onItemResult, cancelRequested, onFinished, buildSummary]);
+
+  const completed = items.filter(item => item.status === 'done' || item.status === 'error' || item.status === 'cancelled').length;
+  const summary = buildSummary(items);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={!running ? onClose : undefined}>
+      <div
+        className="w-full max-w-3xl bg-[var(--bg)] rounded-xl shadow-2xl flex flex-col border border-[var(--border)]"
+        style={{ maxHeight: '88vh' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div
+          className="flex items-center justify-between px-5 py-3 rounded-t-xl flex-shrink-0"
+          style={{ background: 'linear-gradient(135deg, #1e3a5f, #0f2340)' }}
+        >
+          <div>
+            <div className="text-white font-bold text-sm">Análise em lote - AISURE</div>
+            <div className="text-white/60 text-xs">{completed}/{items.length} processados</div>
+          </div>
+          <button onClick={onClose} disabled={running} className="text-white/50 hover:text-white disabled:opacity-30">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-5 py-4 border-b border-[var(--border)] text-xs opacity-70">
+          O processamento ocorre em fila, uma linha por vez. Para ver o resultado completo da análise, clique no símbolo da própria linha na tabela depois que o processamento terminar.
+        </div>
+
+        <div className="px-5 py-3 border-b border-[var(--border)] text-xs flex gap-4 text-slate-300">
+          <span>Confirmadas: {summary.confirmed}</span>
+          <span>Não confirmadas: {summary.notConfirmed}</span>
+          <span>Erros: {summary.errors}</span>
+          <span>Canceladas: {summary.cancelled}</span>
+        </div>
+
+        <div className="flex-1 overflow-auto px-5 py-4 space-y-2">
+          {items.map(item => (
+            <div key={item.key} className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-3 text-xs">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5">
+                  {item.status === 'loading' ? (
+                    <svg className="animate-spin w-4 h-4 text-yellow-400" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                  ) : item.status === 'done' ? (
+                    <span className={item.result?.confirmado ? 'text-green-400' : 'text-yellow-400'}>{item.result?.confirmado ? '✓' : '•'}</span>
+                  ) : item.status === 'cancelled' ? (
+                    <span className="text-slate-400">∅</span>
+                  ) : item.status === 'error' ? (
+                    <span className="text-red-400">✕</span>
+                  ) : (
+                    <span className="text-slate-400">•</span>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-[var(--fg)]">
+                    UC {item.uc || '-'} <span className="opacity-50 ml-2">{item.fichas || '-'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="opacity-70">{item.message}</span>
+                    {!running && item.status === 'error' && (
+                      <button
+                        onClick={() => reprocessItem(item)}
+                        className="text-xs px-2 py-0.5 rounded border border-yellow-500/40 text-yellow-300 hover:bg-yellow-500/10"
+                      >
+                        Reprocessar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-[var(--border)] flex-shrink-0">
+          <span className="text-xs opacity-60">
+            {running ? (cancelRequested ? 'Cancelando fila...' : 'Processando seleção...') : 'Processamento concluído.'}
+          </span>
+          <div className="flex items-center gap-2">
+            {!running && summary.errors > 0 && (
+              <button
+                onClick={reprocessFailed}
+                className="px-4 py-2 text-sm rounded-lg border border-yellow-500/40 text-yellow-300 hover:bg-yellow-500/10"
+              >
+                Reprocessar falhas
+              </button>
+            )}
+            {running && (
+              <button
+                onClick={() => setCancelRequested(true)}
+                disabled={cancelRequested}
+                className="px-4 py-2 text-sm rounded-lg border border-red-500/40 text-red-300 hover:bg-red-500/10 disabled:opacity-40"
+              >
+                Cancelar fila
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              disabled={running}
+              className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-[var(--panel)] disabled:opacity-40"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Dados estáticos tipo/subtipo irregularidade */
+const TIPOS_IRREG = [
+  { id: 1, nome: 'CADASTRO' }, { id: 2, nome: 'COMPENSAÇÃO' }, { id: 3, nome: 'CONSUMO' },
+  { id: 4, nome: 'DÚVIDA' }, { id: 5, nome: 'FATURAMENTO' }, { id: 6, nome: 'IMPOSTOENCARGO' },
+  { id: 7, nome: 'LEITURA' }, { id: 8, nome: 'PID' }, { id: 9, nome: 'PLEITO GERAL' },
+  { id: 10, nome: 'QUALIDADE' }, { id: 11, nome: 'SCEE' }, { id: 12, nome: 'SERVIÇO' }, { id: 13, nome: 'TOI' },
+];
+const SUBTIPOS_IRREG = [
+  { id: 35, idTipo: 1, nome: 'Troca de titularidade' }, { id: 36, idTipo: 1, nome: 'Troca média mensal para média horária' },
+  { id: 4,  idTipo: 2, nome: 'Compensação' },
+  { id: 1,  idTipo: 3, nome: 'Alteração' }, { id: 5, idTipo: 3, nome: 'Elevado' }, { id: 6, idTipo: 3, nome: 'Reduzido' },
+  { id: 10, idTipo: 4, nome: 'Dúvida' },
+  { id: 13, idTipo: 5, nome: 'Acima da média' }, { id: 3, idTipo: 5, nome: 'Cobrança de 2,5%' },
+  { id: 7,  idTipo: 5, nome: 'Custo mínimo' }, { id: 8, idTipo: 5, nome: 'Demanda' },
+  { id: 9,  idTipo: 5, nome: 'DMCR' }, { id: 12, idTipo: 5, nome: 'Faturado por média' },
+  { id: 22, idTipo: 5, nome: 'Multas e juros' }, { id: 14, idTipo: 5, nome: 'Tarifa indevida' },
+  { id: 16, idTipo: 5, nome: 'Unidade fechada' },
+  { id: 15, idTipo: 6, nome: 'CDE indevido' }, { id: 2, idTipo: 6, nome: 'CIP' },
+  { id: 17, idTipo: 6, nome: 'ICMS' }, { id: 18, idTipo: 6, nome: 'Outros impostos' },
+  { id: 11, idTipo: 7, nome: 'Erro de leitura' }, { id: 20, idTipo: 7, nome: 'Medidor queimado' },
+  { id: 21, idTipo: 7, nome: 'Memória de massa' }, { id: 25, idTipo: 7, nome: 'Reativo' },
+  { id: 26, idTipo: 7, nome: 'Regularização de acesso' }, { id: 29, idTipo: 7, nome: 'Sem leitura' },
+  { id: 37, idTipo: 7, nome: 'Violação de lacre' },
+  { id: 19, idTipo: 8, nome: 'Pedido de indenização' },
+  { id: 23, idTipo: 9, nome: 'Pleito geral' },
+  { id: 24, idTipo: 10, nome: 'Qualidade de fornecimento' }, { id: 33, idTipo: 10, nome: 'Reclamação de tensão' },
+  { id: 27, idTipo: 11, nome: 'Saldo incorreto' },
+  { id: 32, idTipo: 12, nome: 'Agrupamento' }, { id: 28, idTipo: 12, nome: 'Sem fornecimento' },
+  { id: 30, idTipo: 12, nome: 'Serviços' }, { id: 31, idTipo: 12, nome: 'Solicitação de fatura' },
+  { id: 34, idTipo: 13, nome: 'TOI' },
+];
+
+/* Modal de criação de requisição a partir da análise IA */
 const MESES_ABREV = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 const MESES_FULL  = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
@@ -681,29 +1240,156 @@ function extractPriority(analise) {
   return m ? m[1].toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') : null;
 }
 
+/* Extrai seção numerada do calcFinanceiro (ex: campo 4, 5, 6...) */
+function extractCalcSection(text, num) {
+  if (!text) return '';
+  const re = new RegExp(`^${num}\\.\\s*[^:]+:\\s*([\\s\\S]*?)(?=^\\d+\\.|$)`, 'im');
+  const m = text.match(re);
+  return m ? m[1].trim().substring(0, 800) : '';
+}
+
+/* Extrai id|nome dos campos 15/16 */
+function extractTipoSubtipoSugerido(calcFinanceiro) {
+  const result = { tipo: '', subtipo: '' };
+  if (!calcFinanceiro) return result;
+  const mTipo = calcFinanceiro.match(/15\.\s*tipo_irregularidade_sugerido\s*:\s*(\d+)/i);
+  const mSub  = calcFinanceiro.match(/16\.\s*subtipo_irregularidade_sugerido\s*:\s*(\d+)/i);
+  if (mTipo) result.tipo = mTipo[1];
+  if (mSub)  result.subtipo = mSub[1];
+  return result;
+}
+
+/* Auto-sugestão de tipo/subtipo baseada nas fichas detectadas */
+function suggestTipoSubtipo(fichas) {
+  const f = String(fichas || '').toUpperCase();
+  if (f.includes('F02')) return { tipo: '5', subtipo: '13' }; // FATURAMENTO / Acima da média
+  if (f.includes('F03')) return { tipo: '5', subtipo: '12' }; // FATURAMENTO / Faturado por média
+  if (f.includes('F01') || f.includes('F04') || f.includes('F05')) return { tipo: '7', subtipo: '11' }; // LEITURA / Erro de leitura
+  return { tipo: '', subtipo: '' };
+}
+
+function extractValorEstimado(calcFinanceiro) {
+  if (!calcFinanceiro) return '';
+  // Tenta valor_total_estimado_recuperavel_min primeiro
+  const patterns = [
+    /valor_total_estimado_recuperavel_min\s*:\s*R?\$?\s*([\d\.]+(?:,\d+)?)/i,
+    /valor_total_estimado_recuperavel_max\s*:\s*R?\$?\s*([\d\.]+(?:,\d+)?)/i,
+    /valor_cobrado_a_maior_estimado\s*:\s*R?\$?\s*([\d\.]+(?:,\d+)?)/i,
+  ];
+  for (const re of patterns) {
+    const m = calcFinanceiro.match(re);
+    if (m) return m[1].replace(/\./g, '').replace(',', '.');
+  }
+  return '';
+}
+
+/* Tela de sucesso */
+function SuccessPane({ modal, periods, onClose }) {
+  const periodoStr = periods
+    .filter(p => p.mes && p.ano)
+    .map(p => `${MESES_ABREV[Number(p.mes)] || p.mes}/${p.ano}`)
+    .join(', ');
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Confirmação */}
+      <div className="flex flex-col items-center gap-4 p-8 text-center">
+        <div className="w-14 h-14 rounded-full bg-green-500/20 flex items-center justify-center">
+          <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
+          </svg>
+        </div>
+        <div>
+          <div className="text-lg font-bold">Requisição criada!</div>
+          <div className="text-xs opacity-50 mt-1">UC {modal.uc}{periodoStr ? ' · ' + periodoStr : ''}</div>
+          <div className="text-xs opacity-40 mt-2">Acesse a planilha para acompanhar o processo.</div>
+        </div>
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-[var(--panel)] mt-2">
+          Fechar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
   const row = modal.row ?? {};
+  const cf  = result?.calcFinanceiro || '';
+
+  // Determina tipo/subtipo inicial: AI (campos 15/16) > fichas > vazio
+  const aiSuggestion     = extractTipoSubtipoSugerido(cf);
+  const fichasSuggestion = suggestTipoSubtipo(modal.fichas);
+  const initTipo    = aiSuggestion.tipo    || fichasSuggestion.tipo    || '';
+  const initSubtipo = aiSuggestion.subtipo || fichasSuggestion.subtipo || '';
+
+  // Descrição pré-preenchida a partir dos campos 4 (resumo), 5 (inconsistências), 6 (hipótese)
+  function buildDescricao() {
+    const resumo      = extractCalcSection(cf, 4);
+    const inconsist   = extractCalcSection(cf, 5);
+    const hipotese    = extractCalcSection(cf, 6);
+    const parts = [];
+    if (resumo)    parts.push('RESUMO EXECUTIVO:\n' + resumo);
+    if (inconsist) parts.push('INCONSISTÊNCIAS ENCONTRADAS:\n' + inconsist);
+    if (hipotese)  parts.push('HIPÓTESE DE RESSARCIMENTO:\n' + hipotese);
+    return parts.join('\n\n') || result?.analise || modal.detalhe || '';
+  }
 
   const initPeriodo = parseMesRef(row.Mes_Ref);
 
   const [fields, setFields] = useState({
     uc:                      modal.uc || '',
-    cliente:                 row.RAZAO_SOCIAL || '',
+    cliente:                 '',
     razaoSocialFatura:       row.RAZAO_SOCIAL || '',
     concessionaria:          row.Concessionaria || '',
     cnpj:                    '',
     linkFatura:              row.Link || '',
-    ressarcimentoEstimado:   String(row.RS_Total_Fatura || '').replace(/[^\d,\.]/g, '') || '',
-    descricaoIrregularidade: result?.analise || modal.detalhe || '',
+    ressarcimentoEstimado:   extractValorEstimado(cf) || String(row.RS_Total_Fatura || '').replace(/[^\d,\.]/g, '') || '',
+    descricaoIrregularidade: buildDescricao(),
     problemaIdentificado:    modal.fichas || '',
   });
-  const [mes, setMes]       = useState(initPeriodo.mes);
-  const [ano, setAno]       = useState(initPeriodo.ano);
+  const [idTipo,    setIdTipo]    = useState(initTipo);
+  const [idSubtipo, setIdSubtipo] = useState(initSubtipo);
+  const [periods,   setPeriods]   = useState([
+    { mes: String(initPeriodo.mes || ''), ano: String(initPeriodo.ano || '') }
+  ]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError]   = useState('');
   const [createdId, setCreatedId] = useState(null);
 
+  // Busca nome da empresa pelo Cod_Empresa
+  useEffect(() => {
+    const cod = row.Cod_Empresa;
+    if (!cod) return;
+    apiClient.get('/api/v1/filtros/empresas')
+      .then(res => {
+        const lista = res.data ?? [];
+        const found = lista.find(e => String(e.cod_empresa) === String(cod));
+        if (found?.rz_social) {
+          setFields(prev => ({ ...prev, cliente: found.rz_social }));
+        }
+      })
+      .catch(() => {});
+  }, [row.Cod_Empresa]);
+
+  // Quando tipo muda, limpa subtipo se não pertencer ao tipo
+  useEffect(() => {
+    if (idSubtipo && idTipo) {
+      const valid = SUBTIPOS_IRREG.find(s => String(s.id) === String(idSubtipo) && String(s.idTipo) === String(idTipo));
+      if (!valid) setIdSubtipo('');
+    }
+  }, [idTipo]);
+
   const set = (k) => (e) => setFields(prev => ({ ...prev, [k]: e.target.value }));
+
+  const subtiposFiltrados = idTipo
+    ? SUBTIPOS_IRREG.filter(s => String(s.idTipo) === String(idTipo))
+    : SUBTIPOS_IRREG;
+
+  // Gerenciamento de períodos
+  const addPeriod = () => setPeriods(prev => [...prev, { mes: '', ano: '' }]);
+  const removePeriod = (i) => setPeriods(prev => prev.filter((_, idx) => idx !== i));
+  const setPeriodField = (i, field, val) =>
+    setPeriods(prev => prev.map((p, idx) => idx === i ? { ...p, [field]: val } : p));
 
   const priority = extractPriority(result?.analise);
   const prioColor = { CRITICO: '#ef4444', ALTO: '#f97316', MEDIO: '#eab308', BAIXO: '#22c55e' };
@@ -715,8 +1401,11 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
     if (!fields.cliente)                 missing.push('Cliente');
     if (!fields.concessionaria)          missing.push('Concessionária');
     if (!fields.descricaoIrregularidade) missing.push('Descrição');
-    if (!mes || !ano)                    missing.push('Período');
     if (!fields.ressarcimentoEstimado)   missing.push('Valor estimado');
+    const validPeriods = periods.filter(p => p.mes && p.ano);
+    if (validPeriods.length === 0)       missing.push('Período');
+    if (!idTipo)                         missing.push('Tipo de irregularidade');
+    if (!idSubtipo)                      missing.push('Subtipo de irregularidade');
     if (missing.length) { setError('Preencha: ' + missing.join(', ')); return; }
 
     setSubmitting(true);
@@ -733,7 +1422,9 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
       form.append('ressarcimentoEstimado',
         fields.ressarcimentoEstimado.replace(/\./g, '').replace(',', '.'));
       form.append('periodosIrregularidade',
-        JSON.stringify([{ mes: String(mes), ano: String(ano) }]));
+        JSON.stringify(validPeriods.map(p => ({ mes: String(p.mes), ano: String(p.ano) }))));
+      if (idTipo)    form.append('idTipoIrregularidade',    String(idTipo));
+      if (idSubtipo) form.append('idSubtipoIrregularidade', String(idSubtipo));
 
       const res = await apiClient.post('/api/v1/requisicoes', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -747,15 +1438,16 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
     } finally {
       setSubmitting(false);
     }
-  }, [fields, mes, ano, onSuccess]);
+  }, [fields, periods, idTipo, idSubtipo, onSuccess]);
 
-  const inputCls = 'w-full px-3 py-1.5 text-xs rounded border border-[var(--border)] bg-[var(--bg)] focus:outline-none focus:ring-1 focus:ring-blue-500';
-  const labelCls = 'block text-xs opacity-60 mb-0.5';
+  const inputCls  = 'w-full px-3 py-1.5 text-xs rounded border border-[var(--border)] bg-[var(--bg)] focus:outline-none focus:ring-1 focus:ring-blue-500';
+  const selectCls = inputCls + ' cursor-pointer';
+  const labelCls  = 'block text-xs opacity-60 mb-0.5';
 
   return (
     <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/70" onClick={onClose}>
       <div
-        className="w-full max-w-2xl bg-[var(--bg)] rounded-xl shadow-2xl flex flex-col border border-[var(--border)]"
+        className="w-full max-w-4xl bg-[var(--bg)] rounded-xl shadow-2xl flex flex-col border border-[var(--border)]"
         style={{ maxHeight: '92vh' }}
         onClick={e => e.stopPropagation()}
       >
@@ -782,23 +1474,11 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
 
         {/* Sucesso */}
         {createdId ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
-            <div className="w-14 h-14 rounded-full bg-green-500/20 flex items-center justify-center">
-              <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
-              </svg>
-            </div>
-            <div>
-              <div className="text-lg font-bold">Requisição criada!</div>
-              {createdId !== true && (
-                <div className="text-sm opacity-60 mt-1">Req #{createdId}</div>
-              )}
-              <div className="text-xs opacity-50 mt-2">Acesse a planilha para acompanhar o processo.</div>
-            </div>
-            <button onClick={onClose} className="px-5 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-[var(--panel)]">
-              Fechar
-            </button>
-          </div>
+          <SuccessPane
+            modal={modal}
+            periods={periods}
+            onClose={onClose}
+          />
         ) : (
           <>
             {/* Sumário */}
@@ -819,6 +1499,7 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
 
             {/* Formulário */}
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+
               {/* Linha 1: UC + Concessionária */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -843,29 +1524,12 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
                 </div>
               </div>
 
-              {/* Linha 3: CNPJ + Período */}
+              {/* Linha 3: CNPJ + Link + Valor */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className={labelCls}>CNPJ</label>
                   <input className={inputCls} value={fields.cnpj} onChange={set('cnpj')} placeholder="00.000.000/0000-00"/>
                 </div>
-                <div>
-                  <label className={labelCls}>Mês da irregularidade *</label>
-                  <select className={inputCls} value={mes} onChange={e => setMes(e.target.value)}>
-                    <option value="">Mês</option>
-                    {MESES_FULL.slice(1).map((m, i) => (
-                      <option key={i+1} value={i+1}>{m}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>Ano *</label>
-                  <input className={inputCls} value={ano} onChange={e => setAno(e.target.value)} placeholder="2025" maxLength={4}/>
-                </div>
-              </div>
-
-              {/* Linha 4: Link + Valor */}
-              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>Link da Fatura</label>
                   <input className={inputCls} value={fields.linkFatura} onChange={set('linkFatura')} placeholder="https://..."/>
@@ -873,6 +1537,92 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
                 <div>
                   <label className={labelCls}>Ressarcimento Estimado (R$) *</label>
                   <input className={inputCls} value={fields.ressarcimentoEstimado} onChange={set('ressarcimentoEstimado')} placeholder="0,00"/>
+                </div>
+              </div>
+
+              {/* Linha 4: Tipo + Subtipo de Irregularidade */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>
+                    Tipo de Irregularidade
+                    {initTipo && <span className="ml-1 text-green-400/70">(sugerido pela IA)</span>}
+                  </label>
+                  <select className={selectCls} value={idTipo} onChange={e => setIdTipo(e.target.value)}>
+                    <option value="">Selecione o tipo...</option>
+                    {TIPOS_IRREG.map(t => (
+                      <option key={t.id} value={t.id}>{t.nome}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>
+                    Subtipo de Irregularidade
+                    {initSubtipo && <span className="ml-1 text-green-400/70">(sugerido pela IA)</span>}
+                  </label>
+                  <select className={selectCls} value={idSubtipo} onChange={e => setIdSubtipo(e.target.value)} disabled={!idTipo}>
+                    <option value="">Selecione o subtipo...</option>
+                    {subtiposFiltrados.map(s => (
+                      <option key={s.id} value={s.id}>{s.nome}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Linha 5: Períodos da irregularidade */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className={labelCls + ' mb-0'}>Períodos da irregularidade *</label>
+                  <button
+                    type="button"
+                    onClick={addPeriod}
+                    className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+                    </svg>
+                    Adicionar período
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {periods.map((p, i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <div className="flex-1">
+                        {i === 0 && <span className="block text-xs opacity-40 mb-0.5">Mês</span>}
+                        <select
+                          className={inputCls}
+                          value={p.mes}
+                          onChange={e => setPeriodField(i, 'mes', e.target.value)}
+                        >
+                          <option value="">Selecione o mês</option>
+                          {MESES_FULL.slice(1).map((m, mi) => (
+                            <option key={mi+1} value={mi+1}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="w-28">
+                        {i === 0 && <span className="block text-xs opacity-40 mb-0.5">Ano</span>}
+                        <input
+                          className={inputCls}
+                          value={p.ano}
+                          onChange={e => setPeriodField(i, 'ano', e.target.value)}
+                          placeholder="Ex: 2025"
+                          maxLength={4}
+                        />
+                      </div>
+                      {periods.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removePeriod(i)}
+                          className="text-red-400/70 hover:text-red-400 flex-shrink-0"
+                          title="Remover período"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -884,10 +1634,13 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
 
               {/* Descrição */}
               <div>
-                <label className={labelCls}>Descrição da irregularidade * <span className="opacity-40">(pré-preenchida com análise da IA — edite se necessário)</span></label>
+                <label className={labelCls}>
+                  Descrição da irregularidade *
+                  {cf && <span className="opacity-40 ml-1">(pré-preenchida pela IA - edite se necessário)</span>}
+                </label>
                 <textarea
                   className={inputCls + ' resize-y'}
-                  rows={6}
+                  rows={7}
                   value={fields.descricaoIrregularidade}
                   onChange={set('descricaoIrregularidade')}
                   placeholder="Descreva a irregularidade detectada..."
@@ -906,18 +1659,20 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
               <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-[var(--panel)]">
                 Cancelar
               </button>
-              <button
-                onClick={handleSubmit}
-                disabled={submitting}
-                className="px-5 py-2 text-sm rounded-lg text-white font-semibold flex items-center gap-2 disabled:opacity-50"
-                style={{ backgroundColor: '#166534' }}
-              >
-                {submitting ? (
-                  <><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Criando...</>
-                ) : (
-                  <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg> Criar Requisição</>
-                )}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSubmit}
+                  disabled={submitting}
+                  className="px-4 py-2 text-sm rounded-lg text-white font-semibold flex items-center gap-2 disabled:opacity-50"
+                  style={{ backgroundColor: '#166534' }}
+                >
+                  {submitting ? (
+                    <><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Criando...</>
+                  ) : (
+                    <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg> Criar Requisição</>
+                  )}
+                </button>
+              </div>
             </div>
           </>
         )}
@@ -926,7 +1681,7 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
   );
 }
 
-/* ─── Drawer histórico de faturas da UC ──────────────────────── */
+/* Drawer histórico de faturas da UC */
 function UCHistoricoDrawer({ uc, onClose }) {
   const [rows, setRows]     = useState([]);
   const [cols, setCols]     = useState([]);
@@ -1008,39 +1763,72 @@ function UCHistoricoDrawer({ uc, onClose }) {
   );
 }
 
-/* ─── Painel de Ficha ─────────────────────────────────────────── */
-function FichaPanel({ ficha, ucsEmProcesso }) {
+/* Painel de Ficha */
+function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
+  const PAGE_SIZE = 100;
   const [cols, setCols]       = useState([]);
   const [rows, setRows]       = useState([]);
   const [total, setTotal]     = useState(0);
   const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded]   = useState(false);
   const [error, setError]     = useState('');
   const [search, setSearch]   = useState('');
-  const [confirmMap, setConfirmMap] = useState({}); // rowIdx → { loading, confirmado, analise }
+  const [currentPage, setCurrentPage] = useState(1);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({
+    uc: '', cliente: '', distribuidora: '',
+    fichas: [],           // ['F01','F02',...]
+    valorMin: '', valorMax: '',
+    desvioMin: '',
+    periodoInicio: '', periodoFim: '',
+  });
+  const [confirmMap, setConfirmMap] = useState({}); // rowIdx -> { loading, confirmado, analise }
+  const [selectedRows, setSelectedRows] = useState(new Set());
   const [ucDrawer, setUcDrawer]     = useState(null);
+  const [bulkModal, setBulkModal]   = useState(null);
+  const [batchHistory, setBatchHistory] = useState(() => readStoredJson(ANALISE_DESVIO_BATCH_HISTORY_KEY, []));
   const theadRef = useRef(null);
 
   const ucSet = useMemo(() => new Set((ucsEmProcesso ?? []).map(String)), [ucsEmProcesso]);
 
+  const totalPages = useMemo(() => Math.max(1, Math.ceil((Number(total) || 0) / PAGE_SIZE)), [total]);
+
   const load = useCallback(async () => {
-    if (loaded) return;
     setLoading(true);
     setError('');
     try {
-      const res = await apiClient.get(ficha.endpoint, { params: { limit: 5000, offset: 0 } });
+      const res = await apiClient.get(ficha.endpoint, {
+        params: {
+          limit: PAGE_SIZE,
+          offset: (currentPage - 1) * PAGE_SIZE,
+          search: search.trim() || undefined,
+          uc: filters.uc.trim() || undefined,
+          cliente: filters.cliente.trim() || undefined,
+          distribuidora: filters.distribuidora || undefined,
+          fichas: filters.fichas.length ? filters.fichas.join(',') : undefined,
+          valor_min: filters.valorMin || undefined,
+          valor_max: filters.valorMax || undefined,
+          desvio_min: filters.desvioMin || undefined,
+          periodo_inicio: filters.periodoInicio || undefined,
+          periodo_fim: filters.periodoFim || undefined,
+        },
+      });
       setCols(res.data?.columns ?? []);
       setRows(res.data?.rows ?? []);
       setTotal(res.data?.total ?? 0);
-      setLoaded(true);
     } catch {
       setError('Erro ao carregar dados da ficha.');
     } finally {
       setLoading(false);
     }
-  }, [ficha.endpoint, loaded]);
+  }, [ficha.endpoint, currentPage, search, filters]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [ficha.endpoint]);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filters]);
 
   /* Coluna que representa a UC nessa ficha */
   const ucCol = useMemo(() => {
@@ -1048,32 +1836,133 @@ function FichaPanel({ ficha, ucsEmProcesso }) {
     return cols.find(c => /^uc$/i.test(c) || /^id_uc$/i.test(c) || /^num_uc$/i.test(c)) ?? null;
   }, [cols]);
 
-  /* Filtro client-side */
-  const filtered = useMemo(() => {
-    if (!search.trim()) return rows;
-    const q = search.trim().toLowerCase();
-    return rows.filter(row =>
-      Object.values(row).some(v => v != null && String(v).toLowerCase().includes(q))
-    );
-  }, [rows, search]);
+  /* Listas para dropdowns de filtros */
+  const distribuidorasOpcoes = useMemo(() => {
+    const s = new Set(rows.map(r => String(r.Concessionaria ?? '')).filter(Boolean));
+    return [...s].sort();
+  }, [rows]);
 
-  /* Separa linhas: em processo primeiro */
-  const { emProcesso, normais } = useMemo(() => {
-    if (!ucCol || ucSet.size === 0) return { emProcesso: [], normais: filtered };
-    const ep = [];
-    const n  = [];
+  const activeFiltersCount = useMemo(() => {
+    let n = 0;
+    if (filters.uc)            n++;
+    if (filters.cliente)       n++;
+    if (filters.distribuidora) n++;
+    if (filters.fichas.length) n++;
+    if (filters.valorMin || filters.valorMax) n++;
+    if (filters.desvioMin)     n++;
+    if (filters.periodoInicio || filters.periodoFim) n++;
+    return n;
+  }, [filters]);
+
+  const setFilter = useCallback((k, v) => setFilters(prev => ({ ...prev, [k]: v })), []);
+  const toggleFicha = useCallback((f) => setFilters(prev => ({
+    ...prev,
+    fichas: prev.fichas.includes(f) ? prev.fichas.filter(x => x !== f) : [...prev.fichas, f],
+  })), []);
+  const clearFilters = useCallback(() => setFilters({
+    uc: '', cliente: '', distribuidora: '', fichas: [],
+    valorMin: '', valorMax: '', desvioMin: '',
+    periodoInicio: '', periodoFim: '',
+  }), []);
+
+  const visiblePageNumbers = useMemo(() => {
+    const radius = 3;
+    const start = Math.max(1, currentPage - radius);
+    const end = Math.min(totalPages, currentPage + radius);
+    const pages = [];
+    for (let p = start; p <= end; p++) pages.push(p);
+    return pages;
+  }, [currentPage, totalPages]);
+
+  const filtered = rows;
+
+  const [discardedSet, setDiscardedSet] = useState(new Set()); // Set<"UC_MesRef_Empresa">
+
+  const rowKey = useCallback((row) =>
+    `${row[ucCol] ?? ''}_${row['Mes_Ref'] ?? ''}_${row['Cod_Empresa'] ?? ''}`,
+  [ucCol]);
+
+  const toggleDiscard = useCallback((row) => {
+    const key = rowKey(row);
+    setDiscardedSet(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, [rowKey]);
+
+  const toggleSelected = useCallback((row) => {
+    const key = rowKey(row);
+    setSelectedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, [rowKey]);
+
+  /* Separa em 3 grupos: ativos -> em processo -> descartados */
+  const { normais, emProcesso, descartados } = useMemo(() => {
+    const ep = [], n = [], d = [];
     for (const r of filtered) {
-      const v = r[ucCol];
+      if (discardedSet.has(rowKey(r))) { d.push(r); continue; }
+      const v = ucCol ? r[ucCol] : null;
       if (v != null && ucSet.has(String(v))) ep.push(r);
       else n.push(r);
     }
-    return { emProcesso: ep, normais: n };
-  }, [filtered, ucCol, ucSet]);
+    return { normais: n, emProcesso: ep, descartados: d };
+  }, [filtered, ucCol, ucSet, discardedSet, rowKey]);
 
-  const allRows = [...emProcesso, ...normais];
+  const emProcessoStart  = normais.length;
+  const descartadosStart = normais.length + emProcesso.length;
+  const allRows = [...normais, ...emProcesso, ...descartados];
+  const selectableRows = useMemo(() => allRows.slice(0, descartadosStart), [allRows, descartadosStart]);
+  const selectedCount = useMemo(
+    () => selectableRows.reduce((acc, row) => acc + (selectedRows.has(rowKey(row)) ? 1 : 0), 0),
+    [selectableRows, selectedRows, rowKey],
+  );
+  const allSelectableSelected = selectableRows.length > 0 && selectedCount === selectableRows.length;
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedRows(prev => {
+      const next = new Set(prev);
+      if (allSelectableSelected) {
+        selectableRows.forEach(row => next.delete(rowKey(row)));
+      } else {
+        selectableRows.forEach(row => next.add(rowKey(row)));
+      }
+      return next;
+    });
+  }, [allSelectableSelected, selectableRows, rowKey]);
 
   const [confirmModal, setConfirmModal] = useState(null); // { rowIdx, row, uc, fichas, detalhe }
   const [criarReqData, setCriarReqData] = useState(null); // { modal, result }
+
+  useEffect(() => {
+    const stored = readStoredJson(ANALISE_DESVIO_RESULTS_KEY, {});
+    const nextMap = {};
+    allRows.forEach((row, rowIdx) => {
+      const storedItem = stored[rowKey(row)];
+      if (storedItem) nextMap[rowIdx] = storedItem;
+    });
+    setConfirmMap(prev => {
+      const prevNonLoading = Object.fromEntries(
+        Object.entries(prev).filter(([, value]) => !value?.loading)
+      );
+      return { ...nextMap, ...prevNonLoading };
+    });
+  }, [allRows, rowKey]);
+
+  useEffect(() => {
+    const stored = readStoredJson(ANALISE_DESVIO_RESULTS_KEY, {});
+    const next = { ...stored };
+    allRows.forEach((row, rowIdx) => {
+      const value = confirmMap[rowIdx];
+      if (value && !value.loading) next[rowKey(row)] = value;
+    });
+    writeStoredJson(ANALISE_DESVIO_RESULTS_KEY, next);
+  }, [confirmMap, allRows, rowKey]);
 
   const openConfirmModal = useCallback((rowIdx, row, initialResult = null) => {
     const uc      = ucCol ? String(row[ucCol] ?? '') : '';
@@ -1084,6 +1973,29 @@ function FichaPanel({ ficha, ucsEmProcesso }) {
 
   const handleConfirmResult = useCallback((rowIdx, result) => {
     setConfirmMap(prev => ({ ...prev, [rowIdx]: result }));
+  }, []);
+
+  const openBulkModal = useCallback(() => {
+    const jobs = allRows.flatMap((row, rowIdx) => {
+      if (rowIdx >= descartadosStart) return [];
+      if (!selectedRows.has(rowKey(row))) return [];
+      const uc = ucCol ? String(row[ucCol] ?? '') : '';
+      return [{
+        key: rowKey(row),
+        rowIdx,
+        row,
+        uc,
+        fichas: String(row['fichas_aplicadas'] ?? ''),
+        detalhe: String(row['detalhamento'] ?? ''),
+      }];
+    });
+    if (!jobs.length) return;
+    setBulkModal({ jobs });
+  }, [allRows, descartadosStart, selectedRows, rowKey, ucCol]);
+
+  const handleBatchFinished = useCallback((summary) => {
+    appendBatchHistory(summary);
+    setBatchHistory(readStoredJson(ANALISE_DESVIO_BATCH_HISTORY_KEY, []));
   }, []);
 
   if (loading) {
@@ -1125,23 +2037,265 @@ function FichaPanel({ ficha, ucsEmProcesso }) {
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd"/>
             </svg>
-            {emProcesso.length} UC{emProcesso.length > 1 ? 's' : ''} em processo
+            {emProcesso.length} em processo
           </div>
         )}
 
+        {discardedSet.size > 0 && (
+          <div className="flex items-center gap-1.5 text-xs text-gray-400 px-2 py-1 rounded border border-[var(--border)]">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+            {discardedSet.size} descartado{discardedSet.size > 1 ? 's' : ''}
+          </div>
+        )}
+
+        <button
+          onClick={() => setShowFilters(v => !v)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border transition-colors ${
+            activeFiltersCount > 0
+              ? 'border-blue-500 text-blue-400 bg-blue-500/10'
+              : 'border-[var(--border)] hover:bg-[var(--panel)]'
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/>
+          </svg>
+          Filtros{activeFiltersCount > 0 ? ` (${activeFiltersCount})` : ''}
+        </button>
+
+        {selectedCount > 0 && (
+          <>
+            <button
+              onClick={openBulkModal}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-yellow-500/40 bg-yellow-500/10 text-yellow-300 hover:bg-yellow-500/20"
+            >
+              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd"/>
+              </svg>
+              Analisar selecionados ({selectedCount})
+            </button>
+            <button
+              onClick={() => setSelectedRows(new Set())}
+              className="text-xs opacity-60 hover:opacity-100"
+            >
+              limpar seleção
+            </button>
+          </>
+        )}
+
+        {batchHistory.length > 0 && (
+          <span className="text-xs opacity-50">
+            último lote: {batchHistory[0]?.processed ?? 0}/{batchHistory[0]?.total ?? 0} · {batchHistory[0]?.confirmed ?? 0} confirmadas · {batchHistory[0]?.errors ?? 0} erros
+          </span>
+        )}
+
         <span className="text-xs opacity-50 ml-auto">
-          {filtered.length.toLocaleString('pt-BR')} / {total.toLocaleString('pt-BR')} registros
+          página {currentPage} de {totalPages} · {filtered.length.toLocaleString('pt-BR')} nesta página · {Number(total).toLocaleString('pt-BR')} total
         </span>
       </div>
 
+      {/* Painel de filtros estruturados */}
+      {showFilters && (
+        <div className="border-b border-[var(--border)] bg-[var(--panel)] px-4 py-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            {/* UC */}
+            <div>
+              <label className="block opacity-50 mb-0.5">UC</label>
+              <input
+                type="text"
+                value={filters.uc}
+                onChange={e => setFilter('uc', e.target.value)}
+                placeholder="Código da UC..."
+                className="w-full px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg)] focus:outline-none focus:ring-1"
+              />
+            </div>
+            {/* Cliente */}
+            <div>
+              <label className="block opacity-50 mb-0.5">Cliente</label>
+              <input
+                type="text"
+                value={filters.cliente}
+                onChange={e => setFilter('cliente', e.target.value)}
+                placeholder="Nome ou código..."
+                className="w-full px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg)] focus:outline-none focus:ring-1"
+              />
+            </div>
+            {/* Distribuidora */}
+            <div>
+              <label className="block opacity-50 mb-0.5">Distribuidora</label>
+              <select
+                value={filters.distribuidora}
+                onChange={e => setFilter('distribuidora', e.target.value)}
+                className="w-full px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg)] focus:outline-none"
+              >
+                <option value="">Todas</option>
+                {distribuidorasOpcoes.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            {/* Período */}
+            <div>
+              <label className="block opacity-50 mb-0.5">Período (de → até)</label>
+              <div className="flex gap-1">
+                <input
+                  type="month"
+                  value={filters.periodoInicio}
+                  onChange={e => setFilter('periodoInicio', e.target.value)}
+                  className="flex-1 px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg)] focus:outline-none"
+                />
+                <input
+                  type="month"
+                  value={filters.periodoFim}
+                  onChange={e => setFilter('periodoFim', e.target.value)}
+                  className="flex-1 px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg)] focus:outline-none"
+                />
+              </div>
+            </div>
+            {/* Valor da fatura */}
+            <div>
+              <label className="block opacity-50 mb-0.5">Valor da fatura (R$)</label>
+              <div className="flex gap-1 items-center">
+                <input
+                  type="number"
+                  value={filters.valorMin}
+                  onChange={e => setFilter('valorMin', e.target.value)}
+                  placeholder="Mín"
+                  className="w-full px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg)] focus:outline-none"
+                />
+                <span className="opacity-30">—</span>
+                <input
+                  type="number"
+                  value={filters.valorMax}
+                  onChange={e => setFilter('valorMax', e.target.value)}
+                  placeholder="Máx"
+                  className="w-full px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg)] focus:outline-none"
+                />
+              </div>
+            </div>
+            {/* Desvio */}
+            <div>
+              <label className="block opacity-50 mb-0.5">Desvio mínimo (%)</label>
+              <input
+                type="number"
+                value={filters.desvioMin}
+                onChange={e => setFilter('desvioMin', e.target.value)}
+                placeholder="Ex: 1500"
+                className="w-full px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg)] focus:outline-none"
+              />
+            </div>
+            {/* Erro identificado */}
+            <div className="col-span-2">
+              <label className="block opacity-50 mb-1">Erro identificado</label>
+              <div className="flex gap-2 flex-wrap">
+                {['F01','F02','F03','F04','F05'].map(f => (
+                  <button
+                    key={f}
+                    onClick={() => toggleFicha(f)}
+                    className={`px-2.5 py-0.5 rounded-full border text-xs font-semibold transition-colors ${
+                      filters.fichas.includes(f)
+                        ? 'border-blue-500 bg-blue-500/20 text-blue-300'
+                        : 'border-[var(--border)] hover:bg-[var(--panel)]'
+                    }`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Valor estimado e Prioridade - em desenvolvimento */}
+            <div className="col-span-2 flex items-end gap-2 opacity-40">
+              <div className="flex-1">
+                <label className="block mb-0.5">Valor estimado <span className="text-xs">(em desenvolvimento)</span></label>
+                <input disabled placeholder="—" className="w-full px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg)] cursor-not-allowed"/>
+              </div>
+              <div className="flex-1">
+                <label className="block mb-0.5">Prioridade <span className="text-xs">(em desenvolvimento)</span></label>
+                <input disabled placeholder="—" className="w-full px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg)] cursor-not-allowed"/>
+              </div>
+            </div>
+          </div>
+          {activeFiltersCount > 0 && (
+            <button
+              onClick={clearFilters}
+              className="mt-2 text-xs text-red-400 hover:opacity-80 underline"
+            >
+              Limpar todos os filtros ({activeFiltersCount})
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Tabela Excel */}
       <div className="flex-1 overflow-auto">
+        <div className="sticky top-0 z-20 px-4 py-2 border-b border-[var(--border)] bg-[var(--bg)] flex items-center gap-2 overflow-x-auto">
+          <button
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1 || loading}
+            className="px-2.5 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--panel)] disabled:opacity-40"
+          >
+            Anterior
+          </button>
+          {visiblePageNumbers[0] > 1 && (
+            <>
+              <button
+                onClick={() => setCurrentPage(1)}
+                disabled={loading}
+                className="px-2.5 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--panel)] disabled:opacity-40"
+              >
+                1
+              </button>
+              {visiblePageNumbers[0] > 2 && <span className="text-xs opacity-40">...</span>}
+            </>
+          )}
+          {visiblePageNumbers.map(page => (
+            <button
+              key={page}
+              onClick={() => setCurrentPage(page)}
+              disabled={loading}
+              className="px-2.5 py-1 text-xs rounded border disabled:opacity-40"
+              style={page === currentPage
+                ? { backgroundColor: ficha.cor, borderColor: ficha.cor, color: '#fff' }
+                : {}
+              }
+            >
+              {page}
+            </button>
+          ))}
+          {visiblePageNumbers[visiblePageNumbers.length - 1] < totalPages && (
+            <>
+              {visiblePageNumbers[visiblePageNumbers.length - 1] < totalPages - 1 && <span className="text-xs opacity-40">...</span>}
+              <button
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={loading}
+                className="px-2.5 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--panel)] disabled:opacity-40"
+              >
+                {totalPages}
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages || loading}
+            className="px-2.5 py-1 text-xs rounded border border-[var(--border)] hover:bg-[var(--panel)] disabled:opacity-40"
+          >
+            Próxima
+          </button>
+        </div>
+
         {cols.length === 0 ? (
           <div className="p-8 text-sm opacity-50 text-center">Nenhum dado encontrado para esta ficha.</div>
         ) : (
           <table className="min-w-full text-xs border-collapse" style={{ fontFamily: 'Consolas, "Courier New", monospace' }}>
             <thead ref={theadRef} className="sticky top-0 z-10">
               <tr style={{ backgroundColor: '#1e3a5f', color: '#fff' }}>
+                <th className="px-2 py-2 text-center font-semibold border-r border-[#2d5080] w-8 select-none">
+                  <input
+                    type="checkbox"
+                    checked={allSelectableSelected}
+                    onChange={toggleSelectAll}
+                    disabled={selectableRows.length === 0}
+                  />
+                </th>
                 <th className="px-2 py-2 text-center font-semibold border-r border-[#2d5080] w-8 select-none">#</th>
                 <th className="px-2 py-2 text-center font-semibold border-r border-[#2d5080] w-16 select-none">IA</th>
                 {cols.map(col => (
@@ -1158,22 +2312,31 @@ function FichaPanel({ ficha, ucsEmProcesso }) {
               {allRows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={cols.length + 2}
+                    colSpan={cols.length + 3}
                     className="px-4 py-8 text-center opacity-50"
                   >
                     Nenhum resultado para "{search}"
                   </td>
                 </tr>
               ) : allRows.map((row, rowIdx) => {
-                const ucVal = ucCol ? row[ucCol] : null;
-                const isEmProcesso = ucVal != null && ucSet.has(String(ucVal));
-                const isEven = rowIdx % 2 === 0;
-                const cfm = confirmMap[rowIdx];
+                const ucVal      = ucCol ? row[ucCol] : null;
+                const isEmProcesso = rowIdx >= emProcessoStart && rowIdx < descartadosStart && ucVal != null && ucSet.has(String(ucVal));
+                const isDescartado = rowIdx >= descartadosStart;
+                const isEven     = rowIdx % 2 === 0;
+                const cfm        = confirmMap[rowIdx];
+                const isSelected = selectedRows.has(rowKey(row));
+
+                // Separadores de grupo
+                const isSepEmProcesso  = rowIdx === emProcessoStart  && emProcesso.length  > 0;
+                const isSepDescartados = rowIdx === descartadosStart && descartados.length > 0;
 
                 let rowStyle = {};
                 let rowClass = 'border-b transition-colors cursor-pointer ';
 
-                if (isEmProcesso) {
+                if (isDescartado) {
+                  rowStyle = { opacity: 0.4, backgroundColor: 'var(--bg)' };
+                  rowClass += 'border-[var(--border)]';
+                } else if (isEmProcesso) {
                   rowStyle = { backgroundColor: '#1e3a5f', color: '#e2e8f0' };
                   rowClass += 'hover:opacity-90';
                 } else if (isEven) {
@@ -1181,59 +2344,112 @@ function FichaPanel({ ficha, ucsEmProcesso }) {
                 } else {
                   rowClass += 'bg-[var(--panel)] hover:brightness-95 border-[var(--border)]';
                 }
+                if (isSelected && !isDescartado && !isEmProcesso) {
+                  rowStyle = { ...rowStyle, backgroundColor: 'rgba(250, 204, 21, 0.08)' };
+                }
+
+                const borderCol = isEmProcesso ? '#2d5080' : 'var(--border)';
 
                 return (
+                  <React.Fragment key={rowIdx}>
+                    {/* Separador: início das linhas em processo */}
+                    {isSepEmProcesso && (
+                      <tr>
+                        <td colSpan={cols.length + 3} className="px-3 py-1 text-xs font-semibold select-none" style={{ backgroundColor: '#1e3a5f', color: '#93c5fd', borderBottom: '1px solid #2d5080' }}>
+                          Em processo ({emProcesso.length})
+                        </td>
+                      </tr>
+                    )}
+                    {/* Separador: início das linhas descartadas */}
+                    {isSepDescartados && (
+                      <tr>
+                        <td colSpan={cols.length + 3} className="px-3 py-1 text-xs font-semibold select-none" style={{ backgroundColor: 'var(--panel)', color: '#6b7280', borderBottom: '1px solid var(--border)' }}>
+                          Descartados ({descartados.length})
+                          <button
+                            className="ml-3 text-xs underline opacity-60 hover:opacity-100 font-normal"
+                            onClick={() => setDiscardedSet(new Set())}
+                          >
+                            limpar todos
+                          </button>
+                        </td>
+                      </tr>
+                    )}
                   <tr
-                    key={rowIdx}
                     className={rowClass}
                     style={rowStyle}
-                    onClick={() => ucVal && setUcDrawer(String(ucVal))}
+                    onClick={() => !isDescartado && ucVal && setUcDrawer(String(ucVal))}
                   >
                     <td
                       className="px-2 py-1 text-center border-r select-none"
-                      style={isEmProcesso
-                        ? { color: '#94a3b8', borderColor: '#2d5080' }
-                        : { color: '#9ca3af', borderColor: 'var(--border)' }
-                      }
+                      style={{ borderColor: borderCol }}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {!isDescartado && (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelected(row)}
+                        />
+                      )}
+                    </td>
+                    <td
+                      className="px-2 py-1 text-center border-r select-none"
+                      style={{ color: '#9ca3af', borderColor: borderCol }}
                     >
                       {rowIdx + 1}
                     </td>
-                    {/* Célula IA */}
+                    {/* Célula IA + Descarte */}
                     <td
                       className="px-1 py-1 text-center border-r"
-                      style={isEmProcesso ? { borderColor: '#2d5080' } : { borderColor: 'var(--border)' }}
+                      style={{ borderColor: borderCol }}
                       onClick={e => e.stopPropagation()}
                     >
-                      {cfm?.loading ? (
-                        <svg className="animate-spin w-3.5 h-3.5 mx-auto text-yellow-500" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                        </svg>
-                      ) : cfm?.erro ? (
-                        <span title="Erro ao consultar IA" className="text-red-400 cursor-pointer" onClick={() => openConfirmModal(rowIdx, row)}>✕</span>
-                      ) : cfm?.confirmado === true ? (
+                      <div className="flex items-center justify-center gap-0.5">
+                        {!isDescartado && (
+                          cfm?.loading ? (
+                            <svg className="animate-spin w-3.5 h-3.5 text-yellow-500" viewBox="0 0 24 24" fill="none" title="Processando análise">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                            </svg>
+                          ) : cfm?.erro ? (
+                            <span title={`Erro na análise: ${String(cfm?.analise || 'falha ao consultar IA')}`} className="text-red-400 cursor-pointer" onClick={() => openConfirmModal(rowIdx, row)}>✕</span>
+                          ) : cfm?.confirmado === true ? (
+                            <button title="Anomalia confirmada - clique para ver a análise" onClick={() => openConfirmModal(rowIdx, row, cfm)} className="text-green-500 font-bold hover:opacity-80">✓</button>
+                          ) : cfm?.confirmado === false ? (
+                            <button title="Anomalia não confirmada - clique para ver a análise" onClick={() => openConfirmModal(rowIdx, row, cfm)} className="text-red-400 hover:opacity-80">✗</button>
+                          ) : (
+                            <button
+                              title={selectedCount > 0 && isSelected ? `Analisar lote selecionado (${selectedCount})` : 'Analisar com IA'}
+                              onClick={() => selectedCount > 0 && isSelected ? openBulkModal() : openConfirmModal(rowIdx, row)}
+                              className="inline-flex items-center justify-center w-5 h-5 rounded text-yellow-400 hover:bg-yellow-400/20 transition-colors"
+                            >
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd"/>
+                              </svg>
+                            </button>
+                          )
+                        )}
+                        {/* Botão descarte / restaurar */}
                         <button
-                          title="Ver análise"
-                          onClick={() => openConfirmModal(rowIdx, row, cfm)}
-                          className="text-green-500 font-bold hover:opacity-80 transition-opacity"
-                        >✓</button>
-                      ) : cfm?.confirmado === false ? (
-                        <button
-                          title="Ver análise"
-                          onClick={() => openConfirmModal(rowIdx, row, cfm)}
-                          className="text-red-400 hover:opacity-80 transition-opacity"
-                        >✗</button>
-                      ) : (
-                        <button
-                          title="Analisar com IA"
-                          onClick={() => openConfirmModal(rowIdx, row)}
-                          className="inline-flex items-center justify-center w-6 h-6 rounded text-yellow-400 hover:bg-yellow-400/20 transition-colors"
+                          title={isDescartado ? 'Restaurar' : 'Descartar'}
+                          onClick={() => toggleDiscard(row)}
+                          className={`inline-flex items-center justify-center w-5 h-5 rounded transition-colors ${
+                            isDescartado
+                              ? 'text-green-500 hover:bg-green-500/20'
+                              : 'text-gray-500 hover:bg-red-500/20 hover:text-red-400'
+                          }`}
                         >
-                          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd"/>
-                          </svg>
+                          {isDescartado ? (
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                          ) : (
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                          )}
                         </button>
-                      )}
+                      </div>
                     </td>
                     {cols.map(col => {
                       const v = row[col];
@@ -1253,13 +2469,14 @@ function FichaPanel({ ficha, ucsEmProcesso }) {
                               className="text-blue-400 underline hover:text-blue-300"
                               title={String(v)}
                             >
-                              Ver fatura ↗
+                              Ver fatura →
                             </a>
                           ) : cellVal(v)}
                         </td>
                       );
                     })}
                   </tr>
+                  </React.Fragment>
                 );
               })}
             </tbody>
@@ -1283,7 +2500,7 @@ function FichaPanel({ ficha, ucsEmProcesso }) {
             </span>
           )}
           <span className="mr-3 text-yellow-400/70">⚡ clique em linha para ver faturas · ⚡ botão IA para confirmar</span>
-          Total: <strong className="text-white">{filtered.length.toLocaleString('pt-BR')}</strong> linhas
+          Página: <strong className="text-white">{filtered.length.toLocaleString('pt-BR')}</strong> linhas · Total geral: <strong className="text-white">{Number(total).toLocaleString('pt-BR')}</strong>
         </span>
       </div>
 
@@ -1301,8 +2518,17 @@ function FichaPanel({ ficha, ucsEmProcesso }) {
         <CriarRequisicaoModal
           modal={criarReqData.modal}
           result={criarReqData.result}
-          onClose={() => setCriarReqData(null)}
-          onSuccess={() => setCriarReqData(null)}
+          onClose={() => { setCriarReqData(null); refreshUcs?.(); }}
+          onSuccess={() => { refreshUcs?.(); }}
+        />
+      )}
+
+      {bulkModal && (
+        <BulkConfirmModal
+          jobs={bulkModal.jobs}
+          onClose={() => setBulkModal(null)}
+          onItemResult={handleConfirmResult}
+          onFinished={handleBatchFinished}
         />
       )}
 
@@ -1314,17 +2540,19 @@ function FichaPanel({ ficha, ucsEmProcesso }) {
   );
 }
 
-/* ─── Componente principal ────────────────────────────────────── */
+/* Componente principal */
 export default function AnaliseDesvio() {
   const [activeTab, setActiveTab] = useState('resumo');
   const [ucsEmProcesso, setUcsEmProcesso] = useState([]);
 
-  /* Carrega UCs em processo uma vez */
-  useEffect(() => {
+  /* Carrega UCs em processo */
+  const refreshUcsEmProcesso = useCallback(() => {
     apiClient.get('/api/v1/faturas/ucs-em-processo')
       .then(r => setUcsEmProcesso(r.data?.ucs ?? []))
       .catch(() => {});
   }, []);
+
+  useEffect(() => { refreshUcsEmProcesso(); }, [refreshUcsEmProcesso]);
 
   const handleSelectTab = useCallback((tabId) => setActiveTab(tabId), []);
 
@@ -1422,6 +2650,7 @@ export default function AnaliseDesvio() {
                 <FichaPanel
                   ficha={f}
                   ucsEmProcesso={ucsEmProcesso}
+                  refreshUcs={refreshUcsEmProcesso}
                 />
               </div>
             ) : null
@@ -1431,3 +2660,13 @@ export default function AnaliseDesvio() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+

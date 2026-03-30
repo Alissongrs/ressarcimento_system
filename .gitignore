@@ -24,6 +24,15 @@ backend/server.exe
 backend/server.log
 backend/.sql_cache/
 backend/uploads/
+backend/.query_history.json
+
+# Python cache
+**/__pycache__/
+*.pyc
+*.pyo
+
+# MCP (configuração local)
+.mcp.json
 
 # Frontend build/deps
 frontend/node_modules/
