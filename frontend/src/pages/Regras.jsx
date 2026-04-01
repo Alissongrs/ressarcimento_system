@@ -46,7 +46,7 @@ export default function Regras() {
       const msg = await interpretRule(natText);
       // Tenta extrair JSON
       const m = String(msg || '').trim();
-      const start = m.search(/[\[{]/);
+      const start = m.search(/[[{]/);
       if (start >= 0) {
         const jsonStr = m.slice(start);
         const obj = JSON.parse(jsonStr);

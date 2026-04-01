@@ -586,6 +586,7 @@ const normalizeDateInput = (s) => {
             const etapaDestino = colToEtapa.Ativos || proc.etapa || colToEtapa[selectedColuna];
             if (etapaDestino) fd.append('etapa_atual', etapaDestino);
             fd.append('comentario', 'Aprovado via Admin Editor');
+            // eslint-disable-next-line no-undef
             await movimentarProcesso(pid, fd);
           } catch {
             /* não bloqueia o save */

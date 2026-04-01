@@ -908,6 +908,7 @@ const ControleProcessos = () => {
       }
 
       // Se o campo de histórico estiver preenchido, restringe aos hits do histórico (hoje desativado)
+      // eslint-disable-next-line no-constant-condition, no-constant-binary-expression
       if (false && String(deferredHistorySearch || '').trim() !== '') {
         if (!historyMatches.has(String(proc.__id || proc.id))) return false;
       }
@@ -1306,6 +1307,7 @@ Deixe em branco para não registrar.`
                 </div>
               )}
 
+              {/* eslint-disable-next-line no-constant-binary-expression */}
               {false && (
                 <div className="w-full sm:w-[480px]">
                   <input

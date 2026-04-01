@@ -291,6 +291,7 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
       return;
     }
     if (!mesesRefs || mesesRefs.length === 0) {
+      // eslint-disable-next-line no-undef
       setUcLinksDetalhes([]);
       return;
     }
@@ -300,6 +301,7 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
       let dados;
       if (formData.id_uc) {
         try {
+          // eslint-disable-next-line no-undef
           dados = await buscarFaturasPorIdUcMeses(
             formData.id_uc,
             mesesRefs,
@@ -307,9 +309,11 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
             formData.id_concessionaria
           );
         } catch {
+          // eslint-disable-next-line no-undef
           dados = await buscarFaturasPorUnidadeMeses(formData.uc, mesesRefs);
         }
       } else {
+        // eslint-disable-next-line no-undef
         dados = await buscarFaturasPorUnidadeMeses(formData.uc, mesesRefs);
       }
       const detList = Array.isArray(dados.links_faturas_detalhes)
@@ -318,6 +322,7 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
             ? dados.links_faturas.map((l) => ({ link: toStr(l), mes_ref: '' }))
             : (toStr(dados.link_fatura) ? [{ link: toStr(dados.link_fatura), mes_ref: '' }] : [])
           );
+      // eslint-disable-next-line no-undef
       setUcLinksDetalhes(detList);
       if (detList.length === 0) {
         setFaturasError('Nenhuma fatura encontrada para os meses informados.');

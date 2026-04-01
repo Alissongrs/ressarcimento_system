@@ -468,6 +468,7 @@ const ultimaDataISO = useMemo(() => {
       )}
 
       {/* FITA: Vencido – desativada */}
+      {/* eslint-disable-next-line no-constant-binary-expression */}
       {false && alertaVencido && (
         <div className="absolute -left-2 -top-2 flex items-center gap-1 rounded-md bg-red-600 text-white text-[10px] px-2 py-0.5 shadow">
           <AlertTriangle size={12} /> Vencido
@@ -497,6 +498,7 @@ const ultimaDataISO = useMemo(() => {
           </div>
         </div>
         {/* valor estimado movido para lista abaixo */}
+        {/* eslint-disable-next-line no-constant-binary-expression */}
       {false && processo?.__alarmeFromCustom && sev && (
             <span
               className={[ 'px-1.5 py-0.5 rounded border text-[10px]',
@@ -506,6 +508,7 @@ const ultimaDataISO = useMemo(() => {
             >{sev}</span>
           )}
                       <div className="flex items-center gap-2 shrink-0 w-[72px] justify-end">
+          {/* eslint-disable-next-line no-constant-binary-expression */}
           {false && (
           <div
             className={[

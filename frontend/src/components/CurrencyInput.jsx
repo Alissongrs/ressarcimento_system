@@ -53,7 +53,7 @@ export function CurrencyInput({
     const input = e.target.value;
 
     // Remove tudo exceto dígitos e vírgula/ponto
-    let cleaned = input.replace(/[^\d,\.]/g, '');
+    let cleaned = input.replace(/[^\d,.]/g, '');
 
     // Permite apenas uma vírgula ou ponto
     const commaCount = (cleaned.match(/,/g) || []).length;

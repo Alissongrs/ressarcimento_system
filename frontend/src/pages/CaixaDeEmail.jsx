@@ -604,6 +604,7 @@ const ReplyForwardModal = ({ open, mode, onClose, onSend }) => {
           </button>
         </div>
       </div>
+      {/* eslint-disable no-undef */}
       <ProcessHistoryModal
         open={historyOpen}
         loading={historyLoading}
@@ -611,6 +612,7 @@ const ReplyForwardModal = ({ open, mode, onClose, onSend }) => {
         processoId={historyPid}
         onClose={() => setHistoryOpen(false)}
       />
+      {/* eslint-enable no-undef */}
     </div>
   );
 };

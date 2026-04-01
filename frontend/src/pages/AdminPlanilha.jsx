@@ -1284,10 +1284,21 @@ function ProcessoDrawer({
   activeTab,
 }) {
   const [emailExtract, setEmailExtract] = useState({});
+  const [docConfirmOpen, setDocConfirmOpen] = useState(false);
   const currentRow = row || {};
   const { pid, header, category } = currentRow;
   const safeHeader = header || {};
   const anexos = Array.isArray(anexosData) ? anexosData : [];
+
+  // Condição para exibir o banner de ofício CEMIG
+  const docUC = pickFirst(safeHeader, ['uc', 'UC', 'Uc'], '');
+  const docConc = pickFirst(safeHeader, ['concessionaria', 'Concessionaria'], '');
+  const docEtapa = pickFirst(safeHeader, ['etapa_atual', 'etapa', 'sub_etapa'], '');
+  const showDocBanner =
+    activeTab === 'ATIVOS' &&
+    docConc.toLowerCase().includes('cemig') &&
+    (docEtapa.toLowerCase().includes('distribuidora') || docEtapa.toLowerCase().includes('ouvidoria'));
+  const docFilename = `Ouvidoria ${docUC} - ${docConc}.docx`;
 
   const historySource =
     Array.isArray(historyItems) && historyItems.length > 0
@@ -1996,6 +2007,20 @@ function ProcessoDrawer({
               }
               onSaveEstimado={() => handleSaveProcesso(pid, header, 'deferimento')}
             />
+
+            {showDocBanner && (
+              <div className="mt-3 flex items-center gap-2 rounded border border-[var(--accent)] bg-[var(--accent)]/10 px-3 py-2 text-xs">
+                <FileText size={14} className="shrink-0 text-[var(--accent)]" />
+                <span className="flex-1 font-medium text-[var(--accent)]">Ofício disponível — {docFilename}</span>
+                <button
+                  type="button"
+                  className="btn-outline text-xs"
+                  onClick={() => setDocConfirmOpen(true)}
+                >
+                  Baixar
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -2017,6 +2042,7 @@ function ProcessoDrawer({
               Score
             </button>
           )}
+
         </div>
 
         <div className="mt-4 flex-1 overflow-hidden">
@@ -2295,6 +2321,56 @@ function ProcessoDrawer({
           )}
         </div>
       </div>
+
+      {/* Modal de confirmação de download do ofício */}
+      {docConfirmOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setDocConfirmOpen(false)} />
+          <div className="relative w-full max-w-sm bg-[var(--panel)] border border-[var(--panel-border)] rounded-lg shadow-xl p-5">
+            <div className="text-base font-bold mb-1">Baixar ofício</div>
+            <div className="text-sm opacity-80 mb-4">
+              Deseja baixar o documento <span className="font-medium">{docFilename}</span>?
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn-outline text-sm"
+                onClick={() => setDocConfirmOpen(false)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-themed text-sm"
+                onClick={async () => {
+                  setDocConfirmOpen(false);
+                  try {
+                    const token = (localStorage.getItem('userToken') || '')
+                      .replace(/^['"]+|['"]+$/g, '')
+                      .trim();
+                    const base = (import.meta?.env?.VITE_API_BASE || '/api/v1').trim();
+                    const resp = await fetch(`${base}/processos/${pid}/documento`, {
+                      headers: token ? { Authorization: `Bearer ${token}` } : {},
+                    });
+                    if (!resp.ok) throw new Error('Erro ao baixar documento');
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = docFilename;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  } catch (err) {
+                    console.error('[documento]', err);
+                  }
+                }}
+              >
+                Baixar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2673,6 +2749,7 @@ function MovePane({
               setToast({ open: true, type: 'error', text: err?.message || 'Erro ao mover processo.' });
               notifyNetworkChange(err);
               if (typeof stopSuccess === 'function') stopSuccess();
+              // eslint-disable-next-line no-undef
               setSaveModal({ open: false, mensagem: '' });
             } finally {
               if (typeof stopQuick === 'function') stopQuick();

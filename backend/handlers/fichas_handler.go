@@ -245,9 +245,9 @@ func escapeLike(value string) string {
 	return replacer.Replace(value)
 }
 
-func buildFichaFilters(c *gin.Context) (string, []interface{}) {
+func buildFichaFilters(c *gin.Context) (string, []any) {
 	var sb strings.Builder
-	args := make([]interface{}, 0, 12)
+	args := make([]any, 0, 12)
 
 	if fichaList := strings.TrimSpace(c.Query("fichas")); fichaList != "" {
 		parts := strings.Split(fichaList, ",")
@@ -383,7 +383,7 @@ func queryFichaSQL(c *gin.Context, ficha string) {
 		LIMIT 1
 	) AS cliente ` + base +
 		" ORDER BY f.qtd_regras DESC, COALESCE(f.desvio_pct_max,0) DESC LIMIT ? OFFSET ?"
-	queryArgs := append(append([]interface{}{}, filtroArgs...), limit, offset)
+	queryArgs := append(append([]any{}, filtroArgs...), limit, offset)
 	rows, err := sqlDB.Query(dataSQL, queryArgs...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("erro ao consultar: %v", err)})
@@ -397,17 +397,17 @@ func queryFichaSQL(c *gin.Context, ficha string) {
 		return
 	}
 
-	var result []map[string]interface{}
+	var result []map[string]any
 	for rows.Next() {
-		vals := make([]interface{}, len(cols))
-		ptrs := make([]interface{}, len(cols))
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
 		for i := range vals {
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
 			continue
 		}
-		row := make(map[string]interface{}, len(cols))
+		row := make(map[string]any, len(cols))
 		for i, col := range cols {
 			v := vals[i]
 			if b, ok := v.([]byte); ok {
@@ -421,7 +421,7 @@ func queryFichaSQL(c *gin.Context, ficha string) {
 		result = append(result, row)
 	}
 	if result == nil {
-		result = []map[string]interface{}{}
+		result = []map[string]any{}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -577,17 +577,17 @@ func GetUCFaturas(c *gin.Context) {
 	defer rows.Close()
 
 	cols, _ := rows.Columns()
-	var result []map[string]interface{}
+	var result []map[string]any
 	for rows.Next() {
-		vals := make([]interface{}, len(cols))
-		ptrs := make([]interface{}, len(cols))
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
 		for i := range vals {
 			ptrs[i] = &vals[i]
 		}
 		if rows.Scan(ptrs...) != nil {
 			continue
 		}
-		row := make(map[string]interface{}, len(cols))
+		row := make(map[string]any, len(cols))
 		for i, col := range cols {
 			v := vals[i]
 			if b, ok := v.([]byte); ok {
@@ -601,7 +601,7 @@ func GetUCFaturas(c *gin.Context) {
 		result = append(result, row)
 	}
 	if result == nil {
-		result = []map[string]interface{}{}
+		result = []map[string]any{}
 	}
 	c.JSON(http.StatusOK, gin.H{"columns": cols, "rows": result})
 }

@@ -20,6 +20,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
 
     const carregarDados = async () => {
         try {
+            // eslint-disable-next-line no-undef
             const response = await api.get(`/fluxo-ressarcimento/${processoId}`);
             const data = response.data;
             

@@ -1730,11 +1730,11 @@ function extractValorEstimado(text) {
   if (!text) return '';
   const patterns = [
     // Novo formato
-    /Valor Estimado Simples\s*:\s*R?\$?\s*([\d\.]+(?:,\d+)?)/i,
+    /Valor Estimado Simples\s*:\s*R?\$?\s*([\d.]+(?:,\d+)?)/i,
     // Formato antigo (fallback)
-    /valor_total_estimado_recuperavel_min\s*:\s*R?\$?\s*([\d\.]+(?:,\d+)?)/i,
-    /valor_total_estimado_recuperavel_max\s*:\s*R?\$?\s*([\d\.]+(?:,\d+)?)/i,
-    /valor_cobrado_a_maior_estimado\s*:\s*R?\$?\s*([\d\.]+(?:,\d+)?)/i,
+    /valor_total_estimado_recuperavel_min\s*:\s*R?\$?\s*([\d.]+(?:,\d+)?)/i,
+    /valor_total_estimado_recuperavel_max\s*:\s*R?\$?\s*([\d.]+(?:,\d+)?)/i,
+    /valor_cobrado_a_maior_estimado\s*:\s*R?\$?\s*([\d.]+(?:,\d+)?)/i,
   ];
   for (const re of patterns) {
     const m = text.match(re);
@@ -1822,7 +1822,7 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
     concessionaria:          row.Concessionaria || '',
     cnpj:                    '',
     linkFatura:              row.Link || '',
-    ressarcimentoEstimado:   extractValorEstimado(textSource) || String(row.RS_Total_Fatura || '').replace(/[^\d,\.]/g, '') || '',
+    ressarcimentoEstimado:   extractValorEstimado(textSource) || String(row.RS_Total_Fatura || '').replace(/[^\d,.]/g, '') || '',
     descricaoIrregularidade: buildDescricao(),
     problemaIdentificado:    modal.fichas || '',
   });
