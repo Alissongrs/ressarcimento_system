@@ -1,4 +1,4 @@
-﻿package handlers
+package handlers
 
 import (
 	"database/sql"
@@ -418,35 +418,58 @@ func GetFaturas(c *gin.Context) {
 // @Failure 500 {object} map[string]string
 // @Router /api/v1/filtros/empresas [get]
 func GetEmpresasParaFiltro(c *gin.Context) {
-	// Tenta arquivo txt primeiro (independente do DB_Consulta)
-	if empresas := loadEmpresasFromTxt(); len(empresas) > 0 {
+	var empresas []models.EmpresaFiltro
+
+	// Fonte principal: Tab_Empresa no banco de faturas, associando Cod_Empresa -> Rz_Social.
+	if database.GormDB_Faturas != nil {
+		rows, err := queryGorm(database.GormDB_Faturas, `
+			SELECT Cod_Empresa, Rz_Social
+			FROM Tab_Empresa
+			WHERE COALESCE(Status, 'A') = 'A'
+			  AND COALESCE(Rz_Social, '') <> ''
+			ORDER BY Rz_Social ASC`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var e models.EmpresaFiltro
+				if err := rows.Scan(&e.CodEmpresa, &e.RzSocial); err != nil {
+					continue
+				}
+				empresas = append(empresas, e)
+			}
+			if len(empresas) > 0 {
+				c.JSON(http.StatusOK, empresas)
+				return
+			}
+		}
+	}
+
+	// Fallback antigo: DM_Empresa no banco de consulta.
+	if database.DB_Consulta != nil {
+		rows, err := database.DB_Consulta.Query("SELECT Cod_Empresa, Rz_Social FROM DM_Empresa WHERE Status = 'A' ORDER BY Rz_Social ASC")
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var e models.EmpresaFiltro
+				if err := rows.Scan(&e.CodEmpresa, &e.RzSocial); err != nil {
+					continue
+				}
+				empresas = append(empresas, e)
+			}
+			if len(empresas) > 0 {
+				c.JSON(http.StatusOK, empresas)
+				return
+			}
+		}
+	}
+
+	// Último fallback: arquivo local.
+	if empresas = loadEmpresasFromTxt(); len(empresas) > 0 {
 		c.JSON(http.StatusOK, empresas)
 		return
 	}
 
-	// Fallback: DB_Consulta
-	if database.DB_Consulta == nil {
-		c.JSON(http.StatusOK, []models.EmpresaFiltro{})
-		return
-	}
-
-	var empresas []models.EmpresaFiltro
-	query := "SELECT Cod_Empresa, Rz_Social FROM DM_Empresa WHERE Status = 'A' ORDER BY Rz_Social ASC"
-	rows, err := database.DB_Consulta.Query(query)
-	if err != nil {
-		c.JSON(http.StatusOK, []models.EmpresaFiltro{})
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var e models.EmpresaFiltro
-		if err := rows.Scan(&e.CodEmpresa, &e.RzSocial); err != nil {
-			continue
-		}
-		empresas = append(empresas, e)
-	}
-	c.JSON(http.StatusOK, empresas)
+	c.JSON(http.StatusOK, []models.EmpresaFiltro{})
 }
 
 // GetConcessionariasParaFiltro busca todas as concessionÃÂ¡rias para preencher a caixa suspensa.

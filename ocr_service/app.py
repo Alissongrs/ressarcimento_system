@@ -922,11 +922,13 @@ def _call_openai(prompt: str) -> str:
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY não configurada para OpenAI.")
 
+    _tokens_val = min(4096, OPENAI_MAX_TOKENS)
+    _tokens_key = "max_completion_tokens" if OPENAI_OCR_MODEL.startswith(("o1", "o3", "o4")) else "max_tokens"
     payload = {
         "model": OPENAI_OCR_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": OPENAI_TEMPERATURE,
-        "max_tokens": min(4096, OPENAI_MAX_TOKENS),
+        _tokens_key: _tokens_val,
     }
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
@@ -1326,27 +1328,37 @@ async def ocr_analyze(files: List[UploadFile] = File(...)):
             data = await fh.read()
             fname = fh.filename or "arquivo_sem_nome"
 
-            if fname.lower().endswith(".pdf"):
-                images = pdf_to_images(data)
+            is_pdf = fname.lower().endswith(".pdf")
+
+            # Para PDFs: tenta pdfminer primeiro (PDFs nativos/digitais)
+            texto_ocr = ""
+            if is_pdf:
+                texto_ocr = extract_pdf_text_from_bytes(data, max_pages=20)
+
+            # Se pdfminer não extraiu texto suficiente, usa OCR por imagem
+            if len(texto_ocr.strip()) < 50:
+                if is_pdf:
+                    images = pdf_to_images(data)
+                else:
+                    img = Image.open(io.BytesIO(data)).convert("RGB")
+                    images = [img]
+
+                textos = []
+                for img in images:
+                    img_p = preprocess_image(img, "BALANCED")
+                    texto = tesseract_extract_text(img_p)
+                    if texto:
+                        textos.append(texto)
+                texto_ocr = "\n".join(textos).strip()
             else:
-                img = Image.open(io.BytesIO(data)).convert("RGB")
-                images = [img]
-
-            textos = []
-            for img in images:
-                img_p = preprocess_image(img, "BALANCED")
-                texto = tesseract_extract_text(img_p)
-                if texto:
-                    textos.append(texto)
-
-            texto_ocr = "\n".join(textos).strip()
+                images = []
             model_version = f"{LLM_PROVIDER}:{LLM_MODEL}" if LLM_PROVIDER != "openai" else f"openai:{OPENAI_OCR_MODEL}"
             llm_json = extract_structured_llm(texto_ocr) if texto_ocr else {"erro": "ocr_vazio"}
             interpreted = build_interpreted_payload(texto_ocr, llm_json if isinstance(llm_json, dict) else {}, model_version)
             enriched = {
                 "file_name": fname,
                 "raw_text": texto_ocr,
-                "pages_used": len(images),
+                "pages_used": len(images) if images else 1,
                 "status": "success",
             }
             if isinstance(interpreted, dict):

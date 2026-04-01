@@ -244,26 +244,22 @@ func (r *DashboardRepo) ProcessosCounts(ctx context.Context, f DashFilters) (Pro
 // Valor estimado por coluna de Kanban (com mesmas regras do ProcessosCounts)
 func (r *DashboardRepo) ValorEstimadoPorColuna(ctx context.Context, f DashFilters) ([]ColunaValorRow, error) {
 	q := `
-        WITH base AS (
-          SELECT
-            CASE
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'ativo' THEN 1
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'defer' THEN 2
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fluxo|ressarc' THEN 3
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'fatur' THEN 4
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'conclu|finaliz|encerr|pago|credit' THEN 5
-              WHEN LOWER(COALESCE(k.nome_coluna,'')) REGEXP 'indefer|improced|rejeit' THEN 6
-              ELSE 1
-            END AS col_id,
-            COALESCE(r.ressarcimento_estimado, 0) AS valor
-          FROM FT_PROCESSOS p
-          LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-          LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-          LEFT JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-          WHERE 1=1
-        )
-        SELECT col_id, COALESCE(SUM(valor),0) AS total
-        FROM base
+        SELECT
+          CASE
+            WHEN p.id_etapa_processo = 11          THEN 6
+            WHEN COALESCE(p.suspenso,0) = 1        THEN 99
+            WHEN p.id_coluna = 5                   THEN 5
+            WHEN p.id_coluna = 4                   THEN 4
+            WHEN p.id_coluna = 3                   THEN 3
+            WHEN p.id_coluna = 2                   THEN 2
+            WHEN p.id_coluna = 6                   THEN 6
+            WHEN p.id_coluna = 99                  THEN 99
+            ELSE                                        1
+          END AS col_id,
+          COALESCE(SUM(r.ressarcimento_estimado), 0) AS total
+        FROM FT_PROCESSOS p
+        LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+        WHERE 1=1
         GROUP BY col_id
         ORDER BY col_id;
     `
@@ -1159,7 +1155,7 @@ func (r *DashboardRepo) TaxaAneel(ctx context.Context, f DashFilters) (int64, in
 	`
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
-		qAneel += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
+		qAneel += " AND DATE(p.data_criacao) BETWEEN ? AND ?"
 		qTotal += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
 		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
 	}
