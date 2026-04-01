@@ -282,6 +282,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.GET("/faturas/ficha/05", handlers.ListFicha05)
 			authRequired.GET("/faturas/uc-historico", handlers.GetUCFaturas)
 			authRequired.GET("/faturas/ucs-em-processo", handlers.ListUCsEmProcesso)
+			authRequired.GET("/faturas/ficha/processo-vinculado", handlers.GetProcessoVinculado)
 			authRequired.POST("/faturas/aisure/chat", handlers.AisureChatHandler)
 			authRequired.GET("/faturas/aisure/fetch", handlers.AisureFetchFaturaHandler)
 			authRequired.POST("/faturas/aisure/confirmar", handlers.AisureConfirmarHandler)

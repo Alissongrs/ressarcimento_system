@@ -606,6 +606,80 @@ func GetUCFaturas(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"columns": cols, "rows": result})
 }
 
+// processoVinculadoItem representa um processo vinculado a uma UC.
+type processoVinculadoItem struct {
+	IDProcesso              int64  `json:"id_processo"`
+	Etapa                   string `json:"etapa"`
+	SubEtapa                string `json:"sub_etapa"`
+	UltimaMovimentacao      string `json:"ultima_movimentacao"`
+	PeriosIrregularidade    string `json:"periodos_irregularidade"`
+	DescricaoIrregularidade string `json:"descricao_irregularidade"`
+}
+
+// GET /api/v1/faturas/ficha/processo-vinculado?uc=XXXX
+// GetProcessoVinculado busca processos vinculados a uma UC no banco principal.
+func GetProcessoVinculado(c *gin.Context) {
+	uc := strings.TrimSpace(c.Query("uc"))
+	if uc == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "uc obrigatório"})
+		return
+	}
+	dbApp := database.GormDB_App
+	if dbApp == nil {
+		c.JSON(http.StatusOK, gin.H{"processos": []processoVinculadoItem{}})
+		return
+	}
+	sqlDB, err := dbApp.DB()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"processos": []processoVinculadoItem{}})
+		return
+	}
+
+	query := `
+		SELECT
+			p.id_processo,
+			COALESCE(e.etapa, '') AS etapa,
+			COALESCE(p.sub_etapa, '') AS sub_etapa,
+			COALESCE(
+				(SELECT DATE_FORMAT(MAX(h.data_movimentacao), '%d/%m/%Y %H:%i')
+				 FROM FT_HISTORICO_MOVIMENTACOES h
+				 WHERE h.id_requisicao = p.id_processo),
+				''
+			) AS ultima_movimentacao,
+			COALESCE(p.periodos_irregularidade, '') AS periodos_irregularidade,
+			COALESCE(p.descricao_irregularidade, '') AS descricao_irregularidade
+		FROM FT_PROCESSOS p
+		LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+		WHERE TRIM(p.uc) = TRIM(?)
+		ORDER BY p.data_criacao DESC
+	`
+	rows, err := sqlDB.QueryContext(c.Request.Context(), query, uc)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"processos": []processoVinculadoItem{}})
+		return
+	}
+	defer rows.Close()
+
+	var processos []processoVinculadoItem
+	for rows.Next() {
+		var item processoVinculadoItem
+		if err := rows.Scan(
+			&item.IDProcesso,
+			&item.Etapa,
+			&item.SubEtapa,
+			&item.UltimaMovimentacao,
+			&item.PeriosIrregularidade,
+			&item.DescricaoIrregularidade,
+		); err == nil {
+			processos = append(processos, item)
+		}
+	}
+	if processos == nil {
+		processos = []processoVinculadoItem{}
+	}
+	c.JSON(http.StatusOK, gin.H{"processos": processos})
+}
+
 // ListUCsEmProcesso retorna todas as UCs que possuem requisições no banco principal.
 func ListUCsEmProcesso(c *gin.Context) {
 	dbApp := database.GormDB_App

@@ -2269,6 +2269,17 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [ucDrawer, setUcDrawer]     = useState(null);
   const [detailRow, setDetailRow]   = useState(null);
+  const [processoVinculado, setProcessoVinculado] = useState(null); // { loading, processos[] }
+
+  const openDetailRow = useCallback((row) => {
+    setDetailRow(row);
+    setProcessoVinculado({ loading: true, processos: [] });
+    const uc = String(row?.UC ?? '').trim();
+    if (!uc) { setProcessoVinculado({ loading: false, processos: [] }); return; }
+    apiClient.get('/api/v1/faturas/ficha/processo-vinculado', { params: { uc } })
+      .then(r => setProcessoVinculado({ loading: false, processos: r.data?.processos ?? [] }))
+      .catch(() => setProcessoVinculado({ loading: false, processos: [] }));
+  }, []);
   const [bulkModal, setBulkModal]   = useState(null);
   const [batchHistory, setBatchHistory] = useState(() => readStoredJson(ANALISE_DESVIO_BATCH_HISTORY_KEY, []));
   const theadRef = useRef(null);
@@ -2948,7 +2959,7 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
                         {!isDescartado && (
                           <button
                             title="Ver detalhes da anomalia"
-                            onClick={(e) => { e.stopPropagation(); setDetailRow(row); }}
+                            onClick={(e) => { e.stopPropagation(); openDetailRow(row); }}
                             className="inline-flex items-center justify-center w-5 h-5 rounded text-blue-400 hover:bg-blue-400/20 transition-colors"
                           >
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3094,7 +3105,7 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
 
       {/* Drawer de detalhe da anomalia */}
       {detailRow && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={() => setDetailRow(null)}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={() => { setDetailRow(null); setProcessoVinculado(null); }}>
           <div className="absolute inset-0 bg-black/60" />
           <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-[var(--panel)] border border-[var(--panel-border)] rounded-xl shadow-2xl p-5"
             onClick={e => e.stopPropagation()}>
@@ -3105,7 +3116,7 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
                   UC {detailRow.UC} · {detailRow.Concessionaria} · {String(detailRow.Mes_Ref ?? '').slice(0, 7)}
                 </div>
               </div>
-              <button onClick={() => setDetailRow(null)} className="text-gray-400 hover:text-white text-lg leading-none ml-4">✕</button>
+              <button onClick={() => { setDetailRow(null); setProcessoVinculado(null); }} className="text-gray-400 hover:text-white text-lg leading-none ml-4">✕</button>
             </div>
 
             <div className="space-y-3 text-xs">
@@ -3183,6 +3194,74 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
                   <div className="whitespace-pre-wrap opacity-90 leading-relaxed">{detailRow.detalhamento}</div>
                 </div>
               )}
+
+              {/* Processos vinculados */}
+              <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                <div className="opacity-60 font-semibold mb-2 flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                  </svg>
+                  Processos Vinculados
+                </div>
+                {processoVinculado?.loading ? (
+                  <div className="flex items-center gap-2 opacity-50">
+                    <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    Buscando...
+                  </div>
+                ) : processoVinculado?.processos?.length ? (
+                  <div className="space-y-3">
+                    {processoVinculado.processos.map(proc => (
+                      <div key={proc.id_processo} className="rounded-md border border-blue-500/20 bg-blue-500/5 p-2.5 space-y-1.5">
+                        {/* Link do processo */}
+                        <div className="flex items-center justify-between">
+                          <a
+                            href={`/processos/${proc.id_processo}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1.5 font-bold text-blue-400 hover:text-blue-300 transition-colors"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                            </svg>
+                            PROC-{String(proc.id_processo).padStart(3, '0')}
+                          </a>
+                        </div>
+                        {/* Etapa / Sub-etapa */}
+                        {(proc.etapa || proc.sub_etapa) && (
+                          <div className="flex flex-wrap gap-x-4 gap-y-1">
+                            {proc.etapa && (
+                              <span><span className="opacity-50">Etapa: </span><span className="font-medium text-[var(--fg)]">{proc.etapa}</span></span>
+                            )}
+                            {proc.sub_etapa && (
+                              <span><span className="opacity-50">Sub-etapa: </span><span className="font-medium text-[var(--fg)]">{proc.sub_etapa}</span></span>
+                            )}
+                          </div>
+                        )}
+                        {/* Última movimentação */}
+                        {proc.ultima_movimentacao && (
+                          <div><span className="opacity-50">Última mov.: </span><span className="font-mono text-green-400">{proc.ultima_movimentacao}</span></div>
+                        )}
+                        {/* Períodos de irregularidade */}
+                        {proc.periodos_irregularidade && (
+                          <div><span className="opacity-50">Períodos: </span><span className="font-mono">{proc.periodos_irregularidade}</span></div>
+                        )}
+                        {/* Descrição da irregularidade */}
+                        {proc.descricao_irregularidade && (
+                          <div>
+                            <div className="opacity-50 mb-0.5">Descrição:</div>
+                            <div className="whitespace-pre-wrap opacity-90 leading-relaxed">{proc.descricao_irregularidade}</div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="opacity-40 italic">Nenhum processo encontrado para esta UC.</div>
+                )}
+              </div>
 
               {/* Link fatura */}
               {detailRow.Link && /^https?:\/\//i.test(String(detailRow.Link)) && (
