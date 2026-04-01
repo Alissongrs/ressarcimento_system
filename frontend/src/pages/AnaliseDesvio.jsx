@@ -98,6 +98,22 @@ function appendBatchHistory(entry) {
   writeStoredJson(ANALISE_DESVIO_BATCH_HISTORY_KEY, next);
 }
 
+/* Extrai texto de um File (PDF ou imagem) usando o mesmo endpoint do chat */
+async function extractFaturaText(file) {
+  const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const isImg = file.type.startsWith('image/') || /\.(png|jpg|jpeg|webp)$/i.test(file.name);
+  if (!isPDF && !isImg) throw new Error(`tipo de arquivo não suportado: ${file.type || file.name}`);
+  const imgData = isPDF ? await pdfToImages(file) : await fileToImageData(file);
+  const res = await apiClient.post('/api/v1/chat/extract-pdf', {
+    name: file.name,
+    images: imgData.pages.map(p => ({ base64: p.base64, mime: p.mime })),
+  });
+  return {
+    name: res.data?.name ?? file.name,
+    text: String(res.data?.text ?? '').trim(),
+  };
+}
+
 async function loadFaturaDataFromLink(link) {
   const trimmed = String(link || '').trim();
   if (!trimmed) return null;
@@ -112,17 +128,9 @@ async function loadFaturaDataFromLink(link) {
   const nameMatch = disposition.match(/filename="?([^"]+)"?/i);
   const guessedName = nameMatch?.[1] || (contentType.includes('pdf') ? 'fatura.pdf' : 'fatura.jpg');
   const blob = new Blob([res.data], { type: res.data?.type || contentType || 'application/octet-stream' });
-  const detectedKind = await detectRemoteFileKind(blob, guessedName, contentType);
-  const normalizedType =
-    detectedKind === 'pdf' ? 'application/pdf' :
-    detectedKind === 'image' ? (blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg') :
-    (blob.type || contentType || 'application/octet-stream');
-  const file = new File([blob], guessedName, { type: normalizedType });
+  const file = new File([blob], guessedName, { type: blob.type || contentType || 'application/octet-stream' });
 
-  let data = null;
-  if (detectedKind === 'pdf') data = await pdfToImages(file);
-  else if (detectedKind === 'image') data = await fileToImageData(file);
-  else throw new Error(`tipo de arquivo não suportado: ${blob.type || contentType || 'desconhecido'}`);
+  const data = await extractFaturaText(file);
   REMOTE_FATURA_CACHE.set(trimmed, data);
   return data;
 }
@@ -135,8 +143,8 @@ async function runAisureConfirm({ uc, fichas, detalhe, row, faturaData }) {
     row_data: Object.fromEntries(Object.entries(row || {}).map(([k, v]) => [k, String(v ?? '')])),
     fatura_link: getRowFaturaLink(row),
   };
-  if (faturaData?.pages?.length) {
-    body.fatura_images = faturaData.pages.map(p => ({ base64: p.base64, mime: p.mime }));
+  if (faturaData?.text) {
+    body.fatura_text = faturaData.text;
   }
   const res = await apiClient.post('/api/v1/faturas/aisure/confirmar', body);
   return {
@@ -1069,7 +1077,7 @@ function AnaliseResultado({ analise, confirmado, calcFinanceiro }) {
 
 /* Modal de análise IA por linha */
 function ConfirmIAModal({ modal, onClose, onResult, onCriar, onSavedResult }) {
-  const [faturaData, setFaturaData] = useState(null); // { pages, totalPages, name }
+  const [faturaData, setFaturaData] = useState(null); // { name, text }
   const [converting, setConverting] = useState(false);
   const [analyzing, setAnalyzing]   = useState(false);
   const [result, setResult]         = useState(modal.initialResult ?? null);
@@ -1099,12 +1107,7 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar, onSavedResult }) {
     setConverting(true);
     setAutoLoadError('');
     try {
-      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        const data = await pdfToImages(file);
-        setFaturaData(data);
-      } else {
-        setFaturaData(await fileToImageData(file));
-      }
+      setFaturaData(await extractFaturaText(file));
     } catch {
       setFaturaData(null);
       alert('Não foi possível processar o arquivo. Tente outro formato.');
@@ -1163,7 +1166,7 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar, onSavedResult }) {
   useEffect(() => {
     if (modal.initialResult) return;
     if (result || analyzing || converting) return;
-    if (!faturaData?.pages?.length) return;
+    if (!faturaData?.text) return;
     handleAnalyze();
   }, [modal.initialResult, result, analyzing, converting, faturaData, handleAnalyze]);
 
@@ -1273,8 +1276,8 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar, onSavedResult }) {
           {!result && !analyzing && (
             <div>
               <p className="text-xs opacity-60 mb-2">
-                Ao abrir, o sistema tenta baixar automaticamente a fatura do link da linha, converter em imagens e enviar direto para a IA.
-                Se falhar, você ainda pode anexar a fatura manualmente.
+                Ao abrir, o sistema tenta baixar automaticamente a fatura e extrair o texto — o mesmo processo do anexo manual.
+                Se falhar, você pode anexar a fatura manualmente abaixo.
               </p>
 
               {autoLoadError && (
@@ -1289,37 +1292,22 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar, onSavedResult }) {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                   </svg>
-                  Convertendo PDF em imagens...
+                  Baixando fatura e extraindo texto...
                 </div>
               ) : faturaData ? (
-                <div className="rounded-lg border border-green-500/40 overflow-hidden">
-                  {/* Thumbnails das páginas */}
-                  <div className={`grid gap-1 p-2 bg-black/20 ${faturaData.pages.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                    {faturaData.pages.map(p => (
-                      <img
-                        key={p.pageNum}
-                        src={p.previewUrl}
-                        alt={`Página ${p.pageNum}`}
-                        className="w-full object-contain max-h-40 rounded"
-                      />
-                    ))}
-                  </div>
-                  <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--panel)] text-xs">
-                    <span className="text-green-400 flex items-center gap-1.5">
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
-                      </svg>
-                      {faturaData.name}
-                      {faturaData.totalPages > 1 && (
-                        <span className="opacity-50">
-                          · {faturaData.pages.length}/{faturaData.totalPages} pág
-                        </span>
-                      )}
-                    </span>
-                    <button onClick={() => setFaturaData(null)} className="opacity-50 hover:opacity-100 text-red-400">
-                      remover
-                    </button>
-                  </div>
+                <div className="rounded-lg border border-green-500/40 bg-[var(--panel)] flex items-center justify-between px-3 py-2.5 text-xs">
+                  <span className="flex items-center gap-2 text-green-400 font-medium min-w-0">
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    <span className="truncate">{faturaData.name}</span>
+                    <svg className="w-3.5 h-3.5 flex-shrink-0 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
+                    </svg>
+                  </span>
+                  <button onClick={() => setFaturaData(null)} className="ml-2 flex-shrink-0 opacity-50 hover:opacity-100 text-red-400">
+                    remover
+                  </button>
                 </div>
               ) : (
                 <button
@@ -1429,6 +1417,9 @@ function BulkConfirmModal({ jobs, onClose, onItemResult, onFinished }) {
     try {
       const link = getRowFaturaLink(item.row);
       const faturaData = link ? await loadFaturaDataFromLink(link) : null;
+      if (faturaData?.name) {
+        setItems(prev => prev.map(current => current.key === item.key ? { ...current, message: 'Analisando...', fileName: faturaData.name } : current));
+      }
       const result = await runAisureConfirmWithRetry({
         uc: item.uc,
         fichas: item.fichas,
@@ -1440,6 +1431,7 @@ function BulkConfirmModal({ jobs, onClose, onItemResult, onFinished }) {
         ...current,
         status: 'done',
         message: result.confirmado ? 'Anomalia confirmada' : 'Anomalia não confirmada',
+        fileName: faturaData?.name || current.fileName,
         result,
       } : current));
       onItemResult?.(item.rowIdx, result);
@@ -1487,13 +1479,17 @@ function BulkConfirmModal({ jobs, onClose, onItemResult, onFinished }) {
           break;
         }
 
-        currentItems = currentItems.map((item, i) => i === idx ? { ...item, status: 'loading', message: `Baixando e analisando... (${idx + 1}/${jobs.length})` } : item);
+        currentItems = currentItems.map((item, i) => i === idx ? { ...item, status: 'loading', message: `Baixando fatura... (${idx + 1}/${jobs.length})` } : item);
         setItems(currentItems);
         onItemResult?.(job.rowIdx, { loading: true });
 
         try {
           const link = getRowFaturaLink(job.row);
           const faturaData = link ? await loadFaturaDataFromLink(link) : null;
+          if (faturaData?.name) {
+            currentItems = currentItems.map((item, i) => i === idx ? { ...item, message: `Analisando... (${idx + 1}/${jobs.length})`, fileName: faturaData.name } : item);
+            setItems(currentItems);
+          }
           const result = await runAisureConfirmWithRetry({
             uc: job.uc,
             fichas: job.fichas,
@@ -1506,6 +1502,7 @@ function BulkConfirmModal({ jobs, onClose, onItemResult, onFinished }) {
             ...item,
             status: 'done',
             message: result.confirmado ? 'Anomalia confirmada' : 'Anomalia não confirmada',
+            fileName: faturaData?.name || item.fileName,
             result,
           } : item);
           setItems(currentItems);
@@ -1595,8 +1592,16 @@ function BulkConfirmModal({ jobs, onClose, onItemResult, onFinished }) {
                   <div className="font-semibold text-[var(--fg)]">
                     UC {item.uc || '-'} <span className="opacity-50 ml-2">{item.fichas || '-'}</span>
                   </div>
-                  <div className="flex items-center gap-2 mt-0.5">
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                     <span className="opacity-70">{item.message}</span>
+                    {item.fileName && (
+                      <span className="flex items-center gap-1 text-green-400/80">
+                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        {item.fileName}
+                      </span>
+                    )}
                     {!running && item.status === 'error' && (
                       <button
                         onClick={() => reprocessItem(item)}
