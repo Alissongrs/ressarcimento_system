@@ -5,13 +5,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"ressarcimento-backend/database"
 )
 
-// fichaUnificadaSQL é a query principal com todas as regras F01–F05 inlined.
+// fichaUnificadaSQL é a query principal com todas as regras F01—F05 inlined.
 // Variáveis @session foram substituídas por literais.
 const fichaUnificadaSQL = `
 WITH
@@ -366,7 +367,7 @@ func queryFichaSQL(c *gin.Context, ficha string) {
 
 	filtro := filtroFicha(ficha)
 	filtroExtra, filtroArgs := buildFichaFilters(c)
-	base := "FROM fichas_anomalias_cache WHERE 1=1" + filtro + filtroExtra
+	base := "FROM fichas_anomalias_cache f WHERE 1=1" + filtro + filtroExtra
 
 	// Contagem total
 	var total int64
@@ -374,9 +375,14 @@ func queryFichaSQL(c *gin.Context, ficha string) {
 	countRow := sqlDB.QueryRow(countQuery, filtroArgs...)
 	_ = countRow.Scan(&total)
 
-	// Dados paginados
-	dataSQL := "SELECT * " + base +
-		" ORDER BY qtd_regras DESC, COALESCE(desvio_pct_max,0) DESC LIMIT ? OFFSET ?"
+	// Dados paginados — cliente via Tab_Empresa.Rz_Social (join por Cod_Empresa)
+	dataSQL := `SELECT f.*, (
+		SELECT e.Rz_Social
+		FROM Tab_Empresa e
+		WHERE e.Cod_Empresa = f.Cod_Empresa
+		LIMIT 1
+	) AS cliente ` + base +
+		" ORDER BY f.qtd_regras DESC, COALESCE(f.desvio_pct_max,0) DESC LIMIT ? OFFSET ?"
 	queryArgs := append(append([]interface{}{}, filtroArgs...), limit, offset)
 	rows, err := sqlDB.Query(dataSQL, queryArgs...)
 	if err != nil {
@@ -433,6 +439,71 @@ func ListFicha03(c *gin.Context) { queryFichaSQL(c, "f03") }
 func ListFicha04(c *gin.Context) { queryFichaSQL(c, "f04") }
 func ListFicha05(c *gin.Context) { queryFichaSQL(c, "f05") }
 
+type salvarResultadoIAReq struct {
+	ID                         int64    `json:"id"`
+	ResultadoIA                string   `json:"resultado_ia"`
+	ValorRessarcimentoEstimado *float64 `json:"valor_ressarcimento_estimado"`
+}
+
+func SalvarResultadoIAFicha(c *gin.Context) {
+	var in salvarResultadoIAReq
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "payload inválido"})
+		return
+	}
+	if in.ID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id obrigatório"})
+		return
+	}
+
+	resultado := strings.TrimSpace(in.ResultadoIA)
+	if resultado == "" && in.ValorRessarcimentoEstimado == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "informe resultado_ia ou valor_ressarcimento_estimado"})
+		return
+	}
+
+	db := database.GormDB_App
+	if db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "banco local não disponível"})
+		return
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao obter conexão"})
+		return
+	}
+
+	if in.ValorRessarcimentoEstimado != nil {
+		_, err = sqlDB.Exec(`
+			UPDATE fichas_anomalias_cache
+			   SET resultado_ia = ?,
+			       valor_ressarcimento_estimado = ?,
+			       resultado_salvo_em = NOW()
+			 WHERE id = ?`,
+			resultado, *in.ValorRessarcimentoEstimado, in.ID)
+	} else {
+		_, err = sqlDB.Exec(`
+			UPDATE fichas_anomalias_cache
+			   SET resultado_ia = ?,
+			       resultado_salvo_em = NOW()
+			 WHERE id = ?`,
+			resultado, in.ID)
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("erro ao salvar resultado: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"ok":                           true,
+		"id":                           in.ID,
+		"resultado_ia":                 resultado,
+		"valor_ressarcimento_estimado": in.ValorRessarcimentoEstimado,
+		"resultado_salvo_em":           time.Now(),
+	})
+}
+
 // ListFichaResumo retorna contagem de anomalias por ficha a partir do cache local.
 func ListFichaResumo(c *gin.Context) {
 	db := database.GormDB_App
@@ -462,11 +533,11 @@ func ListFichaResumo(c *gin.Context) {
 	}
 
 	resumo := []gin.H{
-		{"key": "f01", "nome": "F01 – Divergência de Fórmula", "total": f01},
-		{"key": "f02", "nome": "F02 – Desvio de Média", "total": f02},
-		{"key": "f03", "nome": "F03 – Acúmulo de Consumo", "total": f03},
-		{"key": "f04", "nome": "F04 – Troca de Medidor", "total": f04},
-		{"key": "f05", "nome": "F05 – Quebra de Leitura", "total": f05},
+		{"key": "f01", "nome": "F01 — Divergência de Fórmula", "total": f01},
+		{"key": "f02", "nome": "F02 — Desvio de Média", "total": f02},
+		{"key": "f03", "nome": "F03 — Acúmulo de Consumo", "total": f03},
+		{"key": "f04", "nome": "F04 — Troca de Medidor", "total": f04},
+		{"key": "f05", "nome": "F05 — Quebra de Leitura", "total": f05},
 	}
 
 	c.JSON(http.StatusOK, gin.H{"fichas": resumo, "total_detectadas": total})

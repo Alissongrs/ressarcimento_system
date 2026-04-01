@@ -153,6 +153,7 @@ NÃ£o invente dados â€” use apenas o que estÃ¡ no contexto fornecido.`
 
 var reUC = regexp.MustCompile(`\b\d{6,12}\b`)
 var reAisureTotalConfirmadas = regexp.MustCompile(`(?im)total\s+de\s+fichas\s+confirmadas\s*:\s*(\d+)`)
+var reAisureFichasConfirmadas = regexp.MustCompile(`(?im)fichas\s+confirmadas\s*:\s*(\d+)`)
 var reAisureLinhaConfirmada = regexp.MustCompile(`(?im)^f0[1-5]\b.*\bconfirmado\b`)
 var reAisureLinhaNaoConfirmada = regexp.MustCompile(`(?im)^f0[1-5]\b.*\b(nÃ£o|nao)\s+confirmado\b`)
 
@@ -302,6 +303,11 @@ func aisureParseConfirmado(answer string) bool {
 			return n > 0
 		}
 	}
+	if m := reAisureFichasConfirmadas.FindStringSubmatch(text); len(m) == 2 {
+		if n, err := strconv.Atoi(strings.TrimSpace(m[1])); err == nil {
+			return n > 0
+		}
+	}
 
 	lines := reAisureLinhaConfirmada.FindAllString(text, -1)
 	confirmedCount := 0
@@ -320,6 +326,17 @@ func aisureOpenAIModel() string {
 		return v
 	}
 	return "gpt-4o-mini"
+}
+
+// aisureTokensKey retorna "max_completion_tokens" para modelos que não aceitam
+// "max_tokens" (família o1/o3/o4 e gpt-5+), e "max_tokens" para os demais.
+func aisureTokensKey(model string) string {
+	for _, prefix := range []string{"o1", "o3", "o4", "gpt-5"} {
+		if strings.HasPrefix(model, prefix) {
+			return "max_completion_tokens"
+		}
+	}
+	return "max_tokens"
 }
 
 func callAisureOpenAI(ctx context.Context, history []aisureMsg, question, ctxStr string, systemPromptOverride ...string) (string, error) {
@@ -349,10 +366,10 @@ func callAisureOpenAI(ctx context.Context, history []aisureMsg, question, ctxStr
 	msgs = append(msgs, oaiMsg{Role: "user", Content: question})
 
 	reqBody := map[string]interface{}{
-		"model":       model,
-		"messages":    msgs,
-		"temperature": 0.3,
-		"max_tokens":  1024,
+		"model":                model,
+		"messages":             msgs,
+		"temperature":          0.3,
+		aisureTokensKey(model): 1024,
 	}
 
 	payload, err := json.Marshal(reqBody)
@@ -429,10 +446,10 @@ func callAisureOpenAIVision(ctx context.Context, question, ctxStr string, images
 	}
 
 	reqBody := map[string]interface{}{
-		"model":       model,
-		"messages":    msgs,
-		"temperature": 0.3,
-		"max_tokens":  2048,
+		"model":                model,
+		"messages":             msgs,
+		"temperature":          0.3,
+		aisureTokensKey(model): 4096,
 	}
 
 	payload, err := json.Marshal(reqBody)
@@ -517,9 +534,35 @@ func aisureResolveFaturaLink(in aisureConfirmarReq) string {
 
 func aisureFirstNonEmpty(m map[string]string, keys ...string) string {
 	for _, k := range keys {
-		if v := strings.TrimSpace(m[k]); v != "" {
+		v := strings.TrimSpace(m[k])
+		if v != "" && strings.ToLower(v) != "null" && strings.ToLower(v) != "undefined" {
 			return v
 		}
+	}
+	return ""
+}
+
+// aisureDetectRuralTag verifica se qualquer campo do RowData contém "RURAL" ou "IRRIGANTE"
+// e retorna a tag correspondente ("RURAL", "IRRIGANTE" ou "").
+func aisureDetectRuralTag(m map[string]string) string {
+	hasIrrigante := false
+	hasRural := false
+	for _, v := range m {
+		upper := strings.ToUpper(v)
+		if strings.Contains(upper, "IRRIGANTE") {
+			hasIrrigante = true
+		}
+		if strings.Contains(upper, "RURAL") {
+			hasRural = true
+		}
+	}
+	switch {
+	case hasIrrigante && hasRural:
+		return "RURAL / IRRIGANTE"
+	case hasIrrigante:
+		return "IRRIGANTE"
+	case hasRural:
+		return "RURAL"
 	}
 	return ""
 }
@@ -764,21 +807,27 @@ func AisureConfirmarHandler(c *gin.Context) {
 		}
 	}
 
+	// Detecta RURAL/IRRIGANTE para alertar a IA explicitamente
+	ruralTag := aisureDetectRuralTag(in.RowData)
+
 	// Monta contexto com dados da linha
 	var rowCtx strings.Builder
 	rowCtx.WriteString("=== DADOS DO SISTEMA PARA ESTA FATURA ===\n")
-	rowCtx.WriteString(fmt.Sprintf("Fichas detectadas automaticamente: %s\n", in.Fichas))
-	rowCtx.WriteString(fmt.Sprintf("Detalhamento automÃ¡tico: %s\n", in.Detalhamento))
+	if ruralTag != "" {
+		fmt.Fprintf(&rowCtx, "ATENCAO: CLIENTE %s - aplique regras de RURAL/IRRIGANTE e destaque obrigatoriamente no cabecalho da saida.\n\n", ruralTag)
+	}
+	fmt.Fprintf(&rowCtx, "Fichas detectadas automaticamente: %s\n", in.Fichas)
+	fmt.Fprintf(&rowCtx, "Detalhamento automático: %s\n", in.Detalhamento)
 	rowCtx.WriteString("=== CAMPOS NORMALIZADOS DO SISTEMA ===\n")
-	rowCtx.WriteString(fmt.Sprintf("UC: %s\n", strings.TrimSpace(in.UC)))
-	rowCtx.WriteString(fmt.Sprintf("Nome do Cliente: %s\n", aisureFirstNonEmpty(in.RowData, "RAZAO_SOCIAL", "Razao_Social", "cliente", "Cliente", "nome_cliente", "Nome do Cliente", "Nome_do_Cliente")))
-	rowCtx.WriteString(fmt.Sprintf("MÃªs de ReferÃªncia: %s\n", aisureFirstNonEmpty(in.RowData, "Mes_Ref", "mes_ref", "MÃªs de ReferÃªncia", "Mes de Referencia")))
-	rowCtx.WriteString(fmt.Sprintf("ConcessionÃ¡ria: %s\n", aisureFirstNonEmpty(in.RowData, "Concessionaria", "concessionaria")))
-	rowCtx.WriteString(fmt.Sprintf("Classe: %s\n", aisureFirstNonEmpty(in.RowData, "Classe", "classe", "Classe_Tarifaria", "classe_tarifaria")))
-	rowCtx.WriteString(fmt.Sprintf("Modalidade TarifÃ¡ria: %s\n", aisureFirstNonEmpty(in.RowData, "Modalidade_Tarifaria", "modalidade_tarifaria", "Modalidade TarifÃ¡ria", "Modalidade Tarifaria")))
-	rowCtx.WriteString(fmt.Sprintf("Grupo de TensÃ£o: %s\n", aisureFirstNonEmpty(in.RowData, "Tp_Tensao", "tp_tensao", "Grupo de TensÃ£o", "Grupo de Tensao")))
-	rowCtx.WriteString(fmt.Sprintf("Medidor: %s\n", aisureFirstNonEmpty(in.RowData, "NroMedidor", "nro_medidor", "medidor", "Medidor")))
-	rowCtx.WriteString(fmt.Sprintf("Link da Fatura: %s\n", aisureResolveFaturaLink(in)))
+	fmt.Fprintf(&rowCtx, "UC: %s\n", strings.TrimSpace(in.UC))
+	fmt.Fprintf(&rowCtx, "Nome do Cliente: %s\n", aisureFirstNonEmpty(in.RowData, "RAZAO_SOCIAL", "Razao_Social", "cliente", "Cliente", "nome_cliente", "Nome do Cliente", "Nome_do_Cliente"))
+	fmt.Fprintf(&rowCtx, "Mês de Referência: %s\n", aisureFirstNonEmpty(in.RowData, "Mes_Ref", "mes_ref", "Mês de Referência", "Mes de Referencia"))
+	fmt.Fprintf(&rowCtx, "Concessionária: %s\n", aisureFirstNonEmpty(in.RowData, "Concessionaria", "concessionaria"))
+	fmt.Fprintf(&rowCtx, "Classe: %s\n", aisureFirstNonEmpty(in.RowData, "Classe", "classe", "Classe_Tarifaria", "classe_tarifaria"))
+	fmt.Fprintf(&rowCtx, "Modalidade Tarifária: %s\n", aisureFirstNonEmpty(in.RowData, "Modalidade_Tarifaria", "modalidade_tarifaria", "Modalidade Tarifária", "Modalidade Tarifaria"))
+	fmt.Fprintf(&rowCtx, "Grupo de Tensão: %s\n", aisureFirstNonEmpty(in.RowData, "Tp_Tensao", "tp_tensao", "Grupo de Tensão", "Grupo de Tensao"))
+	fmt.Fprintf(&rowCtx, "Medidor: %s\n", aisureFirstNonEmpty(in.RowData, "NroMedidor", "nro_medidor", "medidor", "Medidor"))
+	fmt.Fprintf(&rowCtx, "Link da Fatura: %s\n", aisureResolveFaturaLink(in))
 	for k, v := range in.RowData {
 		fmt.Fprintf(&rowCtx, "%s: %s\n", k, v)
 	}
@@ -803,35 +852,15 @@ func AisureConfirmarHandler(c *gin.Context) {
 
 	ctxStr := rowCtx.String() + "\n" + ucCtx.String()
 
-	// Monta pergunta adequada ao tipo de entrada disponÃ­vel
+	// Monta pergunta — formato de saída definido exclusivamente pelo prompt_confirmar.txt (system prompt).
 	var question string
 	switch {
 	case len(images) > 0:
-		question = fmt.Sprintf(
-			"As imagens anexadas sÃ£o as pÃ¡ginas da fatura da UC %s.\n\n"+
-				"1. Leia todos os dados da fatura nas imagens (leituras, consumo por posto, medidor, constante, valor total, datas).\n"+
-				"2. Compare com o histÃ³rico do banco de dados fornecido no contexto.\n"+
-				"3. Aplique as fichas F01 a F05 conforme as regras, usando TANTO os dados lidos das imagens QUANTO o histÃ³rico do banco.\n"+
-				"4. Responda ESTRITAMENTE no formato obrigatÃ³rio definido no system prompt.\n\n"+
-				"REGRAS DE SAÃDA:\n"+
-				"- NÃƒO use markdown (sem ###, sem **, sem -, sem listas com bullet).\n"+
-				"- NÃƒO adicione seÃ§Ãµes, tÃ­tulos ou texto fora do formato especificado.\n"+
-				"- Siga EXATAMENTE o template: UC, MÃªs de referÃªncia, ConcessionÃ¡ria, FICHAS DETECTADAS (F01 a F05), TOTAL DE FICHAS CONFIRMADAS, PRIORIDADE.\n"+
-				"- Cada ficha deve ser uma linha no formato: F0X â€” [Confirmado/NÃ£o confirmado] | Segmento: [P/FP/R] | Detalhe: [...]",
-			in.UC,
-		)
+		question = fmt.Sprintf("Fatura UC %s: leia todos os dados nas imagens e aplique F01-F05 conforme as regras do system prompt. Use o historico do banco no contexto para F02/F03/F04/F05. Responda EXATAMENTE no formato do system prompt.", in.UC)
 	case strings.TrimSpace(in.FaturaText) != "":
-		question = fmt.Sprintf(
-			"Analise a fatura da UC %s abaixo e aplique as fichas F01 a F05 conforme as regras.\n\n"+
-				"=== CONTEÃšDO DA FATURA (extraÃ­do do documento) ===\n%s",
-			in.UC, in.FaturaText,
-		)
+		question = fmt.Sprintf("Fatura UC %s. Aplique F01-F05 conforme regras do system prompt. Conteudo da fatura: %s", in.UC, in.FaturaText)
 	default:
-		question = fmt.Sprintf(
-			"Analise os dados da fatura da UC %s disponÃ­veis no sistema e aplique as fichas F01 a F05.\n"+
-				"Use o histÃ³rico de leituras e consumo para verificar cada ficha sinalizada.",
-			in.UC,
-		)
+		question = fmt.Sprintf("Fatura UC %s: aplique F01-F05 com os dados do contexto conforme regras do system prompt.", in.UC)
 	}
 
 	// Única chamada de IA — usa somente prompt_confirmar.txt.
@@ -897,7 +926,7 @@ func AisureChatHandler(c *gin.Context) {
 		fichasCtxStr += attachSb.String()
 	}
 
-	answer, err := callAisureOpenAI(ctx, in.History, in.Question, fichasCtxStr, loadAisureRules())
+	answer, err := callAisureOpenAI(ctx, in.History, in.Question, fichasCtxStr, loadConfirmarPrompt())
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "falha ao chamar IA: " + err.Error()})
 		return

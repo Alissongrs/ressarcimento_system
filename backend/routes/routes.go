@@ -285,6 +285,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.POST("/faturas/aisure/chat", handlers.AisureChatHandler)
 			authRequired.GET("/faturas/aisure/fetch", handlers.AisureFetchFaturaHandler)
 			authRequired.POST("/faturas/aisure/confirmar", handlers.AisureConfirmarHandler)
+			authRequired.POST("/faturas/analise-resultado/salvar", handlers.SalvarResultadoIAFicha)
 			authRequired.POST("/faturas/aisure/gerar-email", handlers.GerarEmailHandler)
 
 			// Busca global
@@ -296,6 +297,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.POST("/chat/rag", handlers.ChatRAGHandler)
 			authRequired.POST("/chat/feedback", handlers.CreateChatFeedback)
 			authRequired.POST("/chat/upload", handlers.ChatUploadHandler)
+			authRequired.POST("/chat/extract-pdf", handlers.ChatExtractPDFHandler)
 			authRequired.POST("/chat/learn", handlers.ChatLearnHandler)
 			authRequired.POST("/chat/sessions", handlers.CreateChatSession)
 			authRequired.GET("/chat/sessions", handlers.ListChatSessions)
@@ -377,6 +379,9 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/processos/:id/tese/pdf", handlers.PDFTeseHandler)
 			gestorRequired.POST("/processos/:id/tese/enviar-email", handlers.EnviarEmailTeseHandler)
 			gestorRequired.POST("/processos/:id/tese/gerar-email", handlers.GerarEmailTeseHandler)
+
+			// Documento (template DOCX)
+			gestorRequired.GET("/processos/:id/documento", handlers.GerarDocumentoHandler)
 
 			// Mailbox (Microsoft Graph)
 			gestorRequired.GET("/mail/folders", handlers.MailFolders)
@@ -597,6 +602,9 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/processos/:id/tese/pdf", handlers.PDFTeseHandler)
 			gestorRequired.POST("/processos/:id/tese/enviar-email", handlers.EnviarEmailTeseHandler)
 			gestorRequired.POST("/processos/:id/tese/gerar-email", handlers.GerarEmailTeseHandler)
+
+			// Documento (template DOCX)
+			gestorRequired.GET("/processos/:id/documento", handlers.GerarDocumentoHandler)
 
 			gestorRequired.GET("/faturas", handlers.GetFaturas)
 

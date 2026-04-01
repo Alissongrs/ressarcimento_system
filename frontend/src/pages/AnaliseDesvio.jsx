@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import apiClient from '../services/apiClient';
+import { addChatMessage, createChatSession, deleteChatSession, listChatMessages, listChatSessions } from '../services/chatService.js';
 import * as pdfjsLib from 'pdfjs-dist';
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -10,6 +11,7 @@ const ANALISE_DESVIO_RESULTS_KEY = 'analise_desvio_confirm_results_v1';
 const ANALISE_DESVIO_BATCH_HISTORY_KEY = 'analise_desvio_batch_history_v1';
 const REMOTE_FATURA_CACHE = new Map();
 const TRANSIENT_AI_ERROR_RE = /(upstream_unavailable|timeout|temporar|overloaded|rate limit|connection reset|bad gateway|service unavailable)/i;
+const AISURE_SESSION_PREFIX = 'AISURE_DESVIO: ';
 
 /* Converte todas as páginas de um PDF em imagens PNG (base64) via canvas */
 async function pdfToImages(file, scale = 2.0) {
@@ -159,16 +161,22 @@ async function runAisureConfirmWithRetry(payload, maxAttempts = 2) {
 
 /* Chat AISURE */
 function AisurePanel() {
+  const initialAssistantMessage = useMemo(() => ({
+    role: 'assistant',
+    content: 'Olá! Sou o **AISURE**, assistente de análise de anomalias em faturas de energia.\n\nPosso responder perguntas como:\n- "Qual UC tem mais ocorrências na F02?"\n- "Analise a UC 48341497 nas fichas de irregularidade"\n- "Explique o que é desvio de média"\n\nVocê também pode **anexar um documento de regras** (PDF, TXT, CSV) usando o botão 📎 abaixo.\n\nComo posso ajudar?',
+  }), []);
   const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      content: 'Olá! Sou o **AISURE**, assistente de análise de anomalias em faturas de energia.\n\nPosso responder perguntas como:\n- "Qual UC tem mais ocorrências na F02?"\n- "Analise a UC 48341497 nas fichas de irregularidade"\n- "Explique o que é desvio de média"\n\nVocê também pode **anexar um documento de regras** (PDF, TXT, CSV) usando o botão 📎 abaixo.\n\nComo posso ajudar?',
-    },
+    initialAssistantMessage,
   ]);
   const [input, setInput]           = useState('');
   const [loading, setLoading]       = useState(false);
-  const [attachments, setAttachments] = useState([]);   // [{ name, text }]
+  const [attachments, setAttachments] = useState([]);   // [{ name, text, previewUrl?, isImage? }]
   const [uploading, setUploading]   = useState(false);
+  const [sessions, setSessions] = useState([]);
+  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const [loadingSessionMessages, setLoadingSessionMessages] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const fileInputRef = useRef(null);
   const bottomRef = useRef(null);
 
@@ -176,12 +184,76 @@ function AisurePanel() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  /* Upload de arquivo */
-  const handleFileChange = useCallback(async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
+  const reloadSessions = useCallback(async (preferredId = null) => {
+    setLoadingSessions(true);
+    try {
+      const res = await listChatSessions();
+      const nextSessions = (res?.sessions ?? []).filter((session) =>
+        String(session?.title || '').startsWith(AISURE_SESSION_PREFIX),
+      );
+      setSessions(nextSessions);
+      if (preferredId) {
+        setActiveSessionId(preferredId);
+      } else if (!activeSessionId && nextSessions.length > 0) {
+        setActiveSessionId(nextSessions[0].id);
+      }
+    } catch {
+      setSessions([]);
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, [activeSessionId]);
 
+  useEffect(() => {
+    reloadSessions();
+  }, [reloadSessions]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setMessages([initialAssistantMessage]);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingSessionMessages(true);
+    listChatMessages(activeSessionId)
+      .then((res) => {
+        if (cancelled) return;
+        const loaded = (res?.messages ?? []).map((m) => ({ role: m.role, content: m.content }));
+        setMessages(loaded.length > 0 ? loaded : [initialAssistantMessage]);
+      })
+      .catch(() => {
+        if (!cancelled) setMessages([initialAssistantMessage]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSessionMessages(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, initialAssistantMessage]);
+
+  const handleNewChat = useCallback(() => {
+    setActiveSessionId(null);
+    setAttachments([]);
+    setMessages([initialAssistantMessage]);
+    setInput('');
+  }, [initialAssistantMessage]);
+
+  const handleDeleteSession = useCallback(async (sessionId) => {
+    try {
+      await deleteChatSession(sessionId);
+      setSessions(prev => prev.filter(s => s.id !== sessionId));
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+        setAttachments([]);
+        setMessages([initialAssistantMessage]);
+      }
+    } catch {}
+  }, [activeSessionId, initialAssistantMessage]);
+
+  const ingestAttachmentFile = useCallback(async (file, sourceLabel = 'arquivo') => {
     setUploading(true);
     setMessages(prev => [...prev, {
       role: 'system',
@@ -189,41 +261,87 @@ function AisurePanel() {
     }]);
 
     try {
-      const form = new FormData();
-      form.append('files', file);
-      const res = await apiClient.post('/api/v1/chat/upload', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      const uploaded = res.data?.files ?? [];
-      const newAtts = uploaded
-        .filter(f => f.text)
-        .map(f => ({ name: f.name, text: f.text }));
+      const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      const isImage = file.type.startsWith('image/') || /\.(png|jpg|jpeg|webp)$/i.test(file.name);
 
-      if (newAtts.length === 0) {
+      let extractedText = '';
+      let attachName = file.name;
+      let previewUrl = '';
+
+      if (isPDF || isImage) {
+        // Converte PDF/imagem para base64 e extrai texto via OpenAI vision
+        const data = isPDF ? await pdfToImages(file) : await fileToImageData(file);
+        if (isImage) {
+          previewUrl = data.pages?.[0]?.previewUrl || '';
+        }
+        const res = await apiClient.post('/api/v1/chat/extract-pdf', {
+          name: file.name,
+          images: data.pages.map(p => ({ base64: p.base64, mime: p.mime })),
+        });
+        extractedText = res.data?.text ?? '';
+        attachName = res.data?.name ?? file.name;
+      } else {
+        // Arquivos texto: fluxo original via multipart
+        const form = new FormData();
+        form.append('files', file);
+        const res = await apiClient.post('/api/v1/chat/upload', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        const uploaded = res.data?.files ?? [];
+        extractedText = uploaded[0]?.text ?? '';
+        attachName = uploaded[0]?.name ?? file.name;
+      }
+
+      if (!extractedText.trim()) {
         setMessages(prev => [...prev, {
           role: 'error',
-          content: `Não foi possível extrair texto de **${file.name}**. Tente um arquivo .txt, .csv ou .pdf.`,
+          content: `Não foi possível extrair texto de **${file.name}**.`,
         }]);
         return;
       }
 
       setAttachments(prev => {
         const names = new Set(prev.map(a => a.name));
-        return [...prev, ...newAtts.filter(a => !names.has(a.name))];
+        if (names.has(attachName)) return prev;
+        return [...prev, { name: attachName, text: extractedText, previewUrl, isImage }];
       });
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Arquivo **${newAtts[0].name}** carregado com sucesso! O conteúdo será usado como contexto em todas as respostas desta sessão.\n\nPode perguntar sobre as regras ou pedir que eu as aplique aos dados das fichas.`,
+        content: `${sourceLabel === 'print' ? 'Print' : 'Arquivo'} **${attachName}** carregado com sucesso! O conteúdo será usado como contexto em todas as respostas desta sessão.\n\nPode perguntar sobre os dados ou pedir análise.`,
       }]);
     } catch {
       setMessages(prev => [...prev, {
         role: 'error',
-        content: `Erro ao fazer upload de **${file.name}**.`,
+        content: `Erro ao processar **${file.name}**.`,
       }]);
     } finally {
       setUploading(false);
     }
   }, []);
+
+  /* Upload de arquivo */
+  const handleFileChange = useCallback(async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    await ingestAttachmentFile(file, 'arquivo');
+  }, [ingestAttachmentFile]);
+
+  const handlePaste = useCallback(async (e) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const imageItems = items.filter(item => item.kind === 'file' && item.type.startsWith('image/'));
+    if (imageItems.length === 0) return;
+
+    e.preventDefault();
+    for (let i = 0; i < imageItems.length; i++) {
+      const file = imageItems[i].getAsFile();
+      if (!file) continue;
+      const ext = file.type.split('/')[1] || 'png';
+      const namedFile = new File([file], `print-${Date.now()}-${i + 1}.${ext}`, { type: file.type || 'image/png' });
+      // eslint-disable-next-line no-await-in-loop
+      await ingestAttachmentFile(namedFile, 'print');
+    }
+  }, [ingestAttachmentFile]);
 
   const removeAttachment = useCallback((name) => {
     setAttachments(prev => prev.filter(a => a.name !== name));
@@ -242,19 +360,35 @@ function AisurePanel() {
     setLoading(true);
 
     try {
+      let sessionId = activeSessionId;
+      if (!sessionId) {
+        const created = await createChatSession({ title: `${AISURE_SESSION_PREFIX}${q.slice(0, 80)}` });
+        sessionId = created?.id;
+        if (sessionId) {
+          setActiveSessionId(sessionId);
+          await reloadSessions(sessionId);
+        }
+      }
+      if (sessionId) {
+        await addChatMessage({ id: sessionId, role: 'user', content: q });
+      }
       const res = await apiClient.post('/api/v1/faturas/aisure/chat', {
         question: q,
         history,
         attachments,
       });
       setMessages(prev => [...prev, { role: 'assistant', content: res.data.answer }]);
+      if (sessionId) {
+        await addChatMessage({ id: sessionId, role: 'assistant', content: res.data.answer });
+        await reloadSessions(sessionId);
+      }
     } catch (e) {
       const msg = e?.response?.data?.error ?? 'Erro ao conectar com o AISURE.';
       setMessages(prev => [...prev, { role: 'error', content: msg }]);
     } finally {
       setLoading(false);
     }
-  }, [input, loading, messages, attachments]);
+  }, [input, loading, messages, attachments, activeSessionId, reloadSessions]);
 
   const onKey = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -263,204 +397,429 @@ function AisurePanel() {
     }
   };
 
-  /* Renderiza markdown simples: **negrito**, listas, quebras de linha */
+  /* Renderiza markdown: **negrito**, `código`, #headers, listas, separadores, blocos de código */
   const renderText = (text) => {
     const lines = text.split('\n');
-    return lines.map((line, i) => {
-      // Negrito
-      const parts = line.split(/\*\*(.*?)\*\*/g);
-      const rendered = parts.map((p, j) =>
-        j % 2 === 1 ? <strong key={j}>{p}</strong> : <span key={j}>{p}</span>
-      );
-      // Lista
-      if (line.startsWith('- ') || line.startsWith('• ')) {
-        return <li key={i} className="ml-4 list-disc">{rendered.slice(1)}</li>;
+    const result = [];
+    let codeBlock = [];
+    let inCode = false;
+    let listItems = [];
+
+    const flushList = (key) => {
+      if (listItems.length === 0) return;
+      result.push(<ul key={`ul-${key}`} className="ml-4 my-1 space-y-0.5 list-disc">{listItems}</ul>);
+      listItems = [];
+    };
+
+    const renderInline = (line, key) => {
+      // bold + inline code
+      const parts = line.split(/(\*\*.*?\*\*|`[^`]+`)/g);
+      return parts.map((p, j) => {
+        if (p.startsWith('**') && p.endsWith('**')) return <strong key={j}>{p.slice(2, -2)}</strong>;
+        if (p.startsWith('`') && p.endsWith('`')) return <code key={j} className="px-1 py-0.5 rounded text-[0.75em] font-mono" style={{ background: 'rgba(30,58,95,0.12)', color: '#1e3a5f' }}>{p.slice(1, -1)}</code>;
+        return <span key={j}>{p}</span>;
+      });
+    };
+
+    lines.forEach((line, i) => {
+      if (line.startsWith('```')) {
+        if (inCode) {
+          result.push(
+            <pre key={`code-${i}`} className="my-2 rounded-lg text-xs font-mono overflow-x-auto p-3" style={{ background: '#0f2340', color: '#a5d6f7', lineHeight: 1.5 }}>
+              {codeBlock.join('\n')}
+            </pre>
+          );
+          codeBlock = [];
+          inCode = false;
+        } else {
+          flushList(i);
+          inCode = true;
+        }
+        return;
       }
-      return <p key={i} className={line === '' ? 'my-1' : ''}>{rendered}</p>;
+      if (inCode) { codeBlock.push(line); return; }
+
+      if (line.startsWith('### ')) {
+        flushList(i);
+        result.push(<h3 key={i} className="font-bold text-sm mt-3 mb-1" style={{ color: '#1e3a5f' }}>{renderInline(line.slice(4), i)}</h3>);
+      } else if (line.startsWith('## ')) {
+        flushList(i);
+        result.push(<h2 key={i} className="font-bold text-base mt-3 mb-1 border-b pb-0.5" style={{ color: '#1e3a5f', borderColor: '#1e3a5f33' }}>{renderInline(line.slice(3), i)}</h2>);
+      } else if (line.startsWith('# ')) {
+        flushList(i);
+        result.push(<h1 key={i} className="font-bold text-lg mt-3 mb-1" style={{ color: '#1e3a5f' }}>{renderInline(line.slice(2), i)}</h1>);
+      } else if (/^\d+\.\s/.test(line)) {
+        flushList(i);
+        result.push(<ol key={`ol-${i}`} className="ml-4 list-decimal"><li className="text-sm leading-relaxed">{renderInline(line.replace(/^\d+\.\s/, ''), i)}</li></ol>);
+      } else if (line.startsWith('- ') || line.startsWith('• ')) {
+        listItems.push(<li key={i} className="text-sm leading-relaxed">{renderInline(line.slice(2), i)}</li>);
+      } else if (line.match(/^---+$/)) {
+        flushList(i);
+        result.push(<hr key={i} className="my-2 border-[var(--border)]" />);
+      } else if (line === '') {
+        flushList(i);
+        result.push(<div key={i} className="h-1.5" />);
+      } else {
+        flushList(i);
+        result.push(<p key={i} className="text-sm leading-relaxed">{renderInline(line, i)}</p>);
+      }
     });
+    flushList('end');
+    return result;
   };
 
   const SUGGESTIONS = [
-    'Quais UCs aparecem em mais de uma ficha?',
-    'Explique o que é Divergência de Fórmula (F01)',
-    'Quantos registros tem cada ficha?',
-    'Como identificar acúmulo de consumo?',
+    { icon: '🔍', text: 'Quais UCs aparecem em mais de uma ficha?' },
+    { icon: '📋', text: 'Explique o que é Divergência de Fórmula (F01)' },
+    { icon: '📊', text: 'Quantos registros tem cada ficha?' },
+    { icon: '⚡', text: 'Como identificar acúmulo de consumo?' },
   ];
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div
-        className="flex items-center gap-3 px-5 py-3 border-b border-[var(--border)]"
-        style={{ background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2340 100%)' }}
+    <div className="flex h-full overflow-hidden">
+      <aside
+        className={`border-r border-[var(--border)] flex flex-col flex-shrink-0 transition-all duration-200 ${
+          sidebarOpen ? 'w-64' : 'w-12'
+        }`}
+        style={{ background: 'linear-gradient(180deg, #0f1e33 0%, #0a1628 100%)' }}
       >
-        <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-white/10">
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-          </svg>
+        {/* Sidebar header */}
+        <div className="flex items-center justify-between px-2 py-3 border-b" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+          {sidebarOpen && (
+            <div className="pl-1">
+              <div className="text-xs font-semibold text-white/80 tracking-wide uppercase">Histórico</div>
+            </div>
+          )}
+          <button
+            onClick={() => setSidebarOpen(v => !v)}
+            className={`rounded-lg flex items-center justify-center transition-colors hover:bg-white/10 text-white/50 hover:text-white/90 ${sidebarOpen ? 'w-7 h-7' : 'w-8 h-8 mx-auto'}`}
+            title={sidebarOpen ? 'Recolher' : 'Expandir histórico'}
+          >
+            <svg className={`w-4 h-4 transition-transform ${sidebarOpen ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/>
+            </svg>
+          </button>
         </div>
-        <div>
-          <div className="text-white font-bold text-sm tracking-wide">AISURE</div>
-          <div className="text-white/50 text-xs">Análise inteligente de anomalias em faturas</div>
-        </div>
-        <div className="ml-auto flex items-center gap-1.5 text-xs text-white/60">
-          <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"/>
-          GPT-4o-mini · contexto ao vivo das fichas
-        </div>
-      </div>
 
-      {/* Mensagens */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        {/* Novo chat */}
+        <div className="px-2 py-2 border-b" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+          <button
+            onClick={handleNewChat}
+            className={`w-full rounded-lg flex items-center gap-2 transition-colors text-white/70 hover:text-white hover:bg-white/10 ${
+              sidebarOpen ? 'px-3 py-2 text-xs' : 'justify-center py-2'
+            }`}
+            title="Novo chat"
+          >
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
+            </svg>
+            {sidebarOpen && <span className="font-medium">Novo chat</span>}
+          </button>
+        </div>
+
+        {/* Sessions list */}
+        <div className="flex-1 overflow-y-auto py-2 px-1.5 space-y-0.5">
+          {loadingSessions ? (
+            <div className="text-xs text-white/30 px-2 py-2">{sidebarOpen ? 'Carregando...' : '···'}</div>
+          ) : sessions.length === 0 ? (
+            sidebarOpen && <div className="text-xs text-white/30 px-2 py-4 text-center leading-relaxed">Nenhuma conversa<br/>salva ainda</div>
+          ) : sessions.map((session) => {
+            const title = String(session.title || '').replace(AISURE_SESSION_PREFIX, '').trim() || `Sessão ${session.id.slice(0, 6)}`;
+            const isActive = activeSessionId === session.id;
+            return (
+              <div key={session.id} className={`group rounded-lg transition-colors ${isActive ? 'bg-white/15' : 'hover:bg-white/8'}`}>
+                <button
+                  onClick={() => { setAttachments([]); setActiveSessionId(session.id); }}
+                  className={`w-full text-left transition-colors ${sidebarOpen ? 'px-2.5 py-2' : 'flex justify-center py-2'}`}
+                  title={title}
+                >
+                  {sidebarOpen ? (
+                    <span className={`block text-xs truncate font-medium ${isActive ? 'text-white' : 'text-white/60 group-hover:text-white/80'}`}>
+                      {title}
+                    </span>
+                  ) : (
+                    <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-blue-400' : 'bg-white/20'}`} />
+                  )}
+                </button>
+                {sidebarOpen && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteSession(session.id); }}
+                    className="hidden group-hover:block text-[10px] text-white/30 hover:text-red-400 px-2.5 pb-1.5 transition-colors"
+                    title="Excluir"
+                  >
+                    excluir
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </aside>
+
+      <div className="flex-1 flex flex-col min-h-0">
+        {/* Header */}
+        <div
+          className="flex items-center gap-3 px-5 py-3 flex-shrink-0"
+          style={{
+            background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2340 100%)',
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+          }}
+        >
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg" style={{ background: 'rgba(255,255,255,0.12)' }}>
+            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+            </svg>
+          </div>
+          <div>
+            <div className="text-white font-bold text-sm tracking-widest uppercase">AISURE</div>
+            <div className="text-white/40 text-[11px]">Análise de anomalias em faturas · F01–F05</div>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.55)' }}>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0"/>
+              GPT-4o
+            </span>
+          </div>
+        </div>
+
+        {/* Mensagens */}
+        <div className="flex-1 overflow-y-auto min-h-0 px-4 py-5 space-y-5" style={{ background: 'var(--bg)' }}>
+        {loadingSessionMessages && (
+          <div className="text-xs text-center opacity-40 py-2">Carregando conversa...</div>
+        )}
         {messages.map((m, i) => (
           m.role === 'system' ? (
             <div key={i} className="flex justify-center">
-              <span className="text-xs opacity-40 italic px-3 py-1 bg-[var(--panel)] rounded-full">
+              <span className="text-[11px] opacity-40 italic px-3 py-1 rounded-full" style={{ background: 'rgba(30,58,95,0.08)' }}>
                 {renderText(m.content)}
               </span>
             </div>
           ) : (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div key={i} className={`flex items-end gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {m.role !== 'user' && (
               <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold mr-2 flex-shrink-0 mt-0.5"
-                style={{ background: m.role === 'error' ? '#dc2626' : '#1e3a5f' }}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 shadow-sm"
+                style={{ background: m.role === 'error' ? '#dc2626' : 'linear-gradient(135deg,#1e3a5f,#0f2340)' }}
               >
-                {m.role === 'error' ? '!' : 'AI'}
+                {m.role === 'error' ? '!' : (
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                  </svg>
+                )}
               </div>
             )}
             <div
-              className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+              className={`max-w-[78%] rounded-2xl px-4 py-3 shadow-sm ${
                 m.role === 'user'
-                  ? 'text-white rounded-tr-sm'
+                  ? 'rounded-br-sm text-white text-sm'
                   : m.role === 'error'
-                  ? 'bg-red-50 border border-red-200 text-red-700 rounded-tl-sm'
-                  : 'bg-[var(--panel)] border border-[var(--border)] text-[var(--fg)] rounded-tl-sm'
+                  ? 'rounded-bl-sm border border-red-200 text-red-700 text-sm'
+                  : 'rounded-bl-sm border text-[var(--fg)]'
               }`}
-              style={m.role === 'user' ? { backgroundColor: '#1e3a5f' } : {}}
+              style={
+                m.role === 'user'
+                  ? { background: 'linear-gradient(135deg,#1e3a5f,#0f2340)' }
+                  : m.role === 'error'
+                  ? { background: '#fff5f5' }
+                  : { background: 'var(--panel)', borderColor: 'var(--border)' }
+              }
             >
               {m.role === 'user' ? (
-                <span>{m.content}</span>
+                <span className="text-sm leading-relaxed whitespace-pre-wrap">{m.content}</span>
               ) : (
-                <div className="prose prose-sm max-w-none">{renderText(m.content)}</div>
+                <div>{renderText(m.content)}</div>
               )}
             </div>
+            {m.role === 'user' && (
+              <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-white shadow-sm" style={{ background: '#374151' }}>
+                U
+              </div>
+            )}
           </div>
           )
         ))}
 
         {loading && (
-          <div className="flex justify-start">
-            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold mr-2 flex-shrink-0 mt-0.5" style={{ backgroundColor: '#1e3a5f' }}>AI</div>
-            <div className="bg-[var(--panel)] border border-[var(--border)] rounded-2xl rounded-tl-sm px-4 py-3">
-              <div className="flex gap-1 items-center">
-                <span className="w-2 h-2 rounded-full bg-[#1e3a5f] animate-bounce" style={{ animationDelay: '0ms' }}/>
-                <span className="w-2 h-2 rounded-full bg-[#1e3a5f] animate-bounce" style={{ animationDelay: '150ms' }}/>
-                <span className="w-2 h-2 rounded-full bg-[#1e3a5f] animate-bounce" style={{ animationDelay: '300ms' }}/>
+          <div className="flex items-end gap-2 justify-start">
+            <div className="w-7 h-7 rounded-full flex items-center justify-center shadow-sm flex-shrink-0" style={{ background: 'linear-gradient(135deg,#1e3a5f,#0f2340)' }}>
+              <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+              </svg>
+            </div>
+            <div className="rounded-2xl rounded-bl-sm border px-4 py-3 shadow-sm" style={{ background: 'var(--panel)', borderColor: 'var(--border)' }}>
+              <div className="flex gap-1 items-center h-4">
+                <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: '#1e3a5f', animationDelay: '0ms' }}/>
+                <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: '#1e3a5f', animationDelay: '160ms' }}/>
+                <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: '#1e3a5f', animationDelay: '320ms' }}/>
               </div>
             </div>
           </div>
         )}
 
         <div ref={bottomRef} />
-      </div>
-
-      {/* Sugestões (só quando há apenas 1 mensagem) */}
-      {messages.length === 1 && !loading && (
-        <div className="px-4 pb-2 flex flex-wrap gap-2">
-          {SUGGESTIONS.map((s, i) => (
-            <button
-              key={i}
-              onClick={() => { setInput(s); }}
-              className="text-xs px-3 py-1.5 rounded-full border border-[var(--border)] hover:bg-[var(--panel)] transition-colors"
-            >
-              {s}
-            </button>
-          ))}
         </div>
-      )}
 
-      {/* Arquivos anexados */}
-      {attachments.length > 0 && (
-        <div className="px-4 pt-2 flex flex-wrap gap-2 border-t border-[var(--border)]">
-          {attachments.map(a => (
-            <div
-              key={a.name}
-              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border"
-              style={{ borderColor: '#1e3a5f', color: '#1e3a5f', backgroundColor: '#e8f0fe' }}
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-              </svg>
-              <span className="max-w-[160px] truncate font-medium">{a.name}</span>
+        {/* Sugestões (só quando há apenas 1 mensagem) */}
+        {messages.length === 1 && !loading && (
+          <div className="px-4 pb-3 pt-1 grid grid-cols-2 gap-2">
+            {SUGGESTIONS.map((s, i) => (
               <button
-                onClick={() => removeAttachment(a.name)}
-                className="ml-0.5 opacity-60 hover:opacity-100 rounded-full"
+                key={i}
+                onClick={() => { setInput(s.text); }}
+                className="flex items-start gap-2 text-left rounded-xl border px-3 py-2.5 hover:border-[#1e3a5f] hover:bg-[#1e3a5f]/5 transition-all group"
+                style={{ borderColor: 'var(--border)' }}
               >
-                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/>
-                </svg>
+                <span className="text-base leading-none mt-0.5">{s.icon}</span>
+                <span className="text-xs text-[var(--fg)] opacity-70 group-hover:opacity-100 leading-snug">{s.text}</span>
               </button>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
 
-      {/* Input */}
-      <div className="px-4 pb-4 pt-2 border-t border-[var(--border)]">
-        {/* Input oculto de arquivo */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".txt,.csv,.pdf,.md,.json"
-          className="hidden"
-          onChange={handleFileChange}
-        />
+        {/* Arquivos anexados */}
+        {attachments.length > 0 && (
+          <div className="px-4 py-2 flex flex-wrap gap-1.5 border-t" style={{ borderColor: 'var(--border)', background: 'rgba(30,58,95,0.04)' }}>
+            {attachments.map(a => (
+              <div
+                key={a.name}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium"
+                style={{ borderColor: 'rgba(30,58,95,0.3)', color: '#1e3a5f', backgroundColor: 'rgba(30,58,95,0.07)' }}
+              >
+                {a.previewUrl ? (
+                  <img src={a.previewUrl} alt={a.name} className="w-5 h-5 rounded object-cover" style={{ border: '1px solid rgba(30,58,95,0.2)' }} />
+                ) : (
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                  </svg>
+                )}
+                <span className="max-w-[150px] truncate">{a.name}</span>
+                <button onClick={() => removeAttachment(a.name)} className="ml-0.5 opacity-50 hover:opacity-100 flex-shrink-0" title="Remover">
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/>
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
-        <div className="flex gap-2 items-end">
-          {/* Botão de anexar */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading || loading}
-            title="Anexar documento de regras (PDF, TXT, CSV)"
-            className="flex-shrink-0 w-10 h-10 rounded-xl border border-[var(--border)] flex items-center justify-center hover:bg-[var(--panel)] disabled:opacity-40 transition-all"
-          >
-            {uploading ? (
-              <svg className="w-4 h-4 animate-spin opacity-60" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-              </svg>
-            ) : (
+        {/* Input */}
+        <div className="px-4 pb-4 pt-3 border-t flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
+          <input ref={fileInputRef} type="file" accept=".txt,.csv,.pdf,.md,.json" className="hidden" onChange={handleFileChange} />
+
+          <div className="flex gap-2 items-end rounded-2xl border px-2 py-2 focus-within:ring-2 focus-within:ring-[#1e3a5f]/40 transition-all" style={{ borderColor: 'var(--border)', background: 'var(--panel)' }}>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || loading}
+              title="Anexar PDF, imagem ou texto"
+              className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors hover:bg-[#1e3a5f]/10 disabled:opacity-30"
+              style={{ color: '#1e3a5f' }}
+            >
+              {uploading ? (
+                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                </svg>
+              )}
+            </button>
+
+            <textarea
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={onKey}
+              onPaste={handlePaste}
+              rows={1}
+              placeholder="Pergunte sobre fichas, UCs, anomalias... (Ctrl+V para colar print)"
+              className="flex-1 resize-none bg-transparent text-sm focus:outline-none leading-relaxed py-1 text-[var(--fg)] placeholder:text-[var(--fg)]/30"
+              style={{ maxHeight: 120 }}
+            />
+
+            <button
+              onClick={send}
+              disabled={!input.trim() || loading}
+              className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center text-white transition-all disabled:opacity-30"
+              style={{ background: input.trim() && !loading ? 'linear-gradient(135deg,#1e3a5f,#0f2340)' : '#94a3b8' }}
+            >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
               </svg>
-            )}
-          </button>
-
-          <textarea
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={onKey}
-            rows={1}
-            placeholder="Pergunte sobre as fichas, UCs ou anomalias... (Enter para enviar)"
-            className="flex-1 resize-none rounded-xl border border-[var(--border)] bg-[var(--bg)] px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a5f] leading-relaxed"
-            style={{ maxHeight: 120 }}
-          />
-          <button
-            onClick={send}
-            disabled={!input.trim() || loading}
-            className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-white disabled:opacity-40 transition-all"
-            style={{ backgroundColor: '#1e3a5f' }}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
-            </svg>
-          </button>
+            </button>
+          </div>
+          <p className="text-[10px] opacity-25 mt-1.5 text-center">
+            Enter envia · Shift+Enter nova linha · Ctrl+V cola imagem · Contexto F01–F05 ao vivo
+          </p>
         </div>
-        <p className="text-xs opacity-30 mt-1.5 text-center">
-          📎 Anexe regras · Enter para enviar · Shift+Enter nova linha · Contexto ao vivo F01-F05
-        </p>
       </div>
+    </div>
+  );
+}
+
+/* Colunas visíveis na tabela principal — na ordem de exibição */
+const TABLE_COLS = [
+  'UC', 'cliente', 'Concessionaria', 'Mes_Ref', 'Tp_Tensao',
+  'RS_Total_Fatura', 'valor_ressarcimento_estimado', 'fichas_aplicadas', 'qtd_regras', 'peso_alerta_max',
+  'segmentos', 'desvio_pct_max', 'dif_pct_alerta_f02', 'status_alerta_f02', 'Link',
+];
+
+const COL_LABELS = {
+  UC: 'UC', cliente: 'Cliente', Concessionaria: 'Distribuidora',
+  Mes_Ref: 'Mês Ref', Tp_Tensao: 'Tensão', RS_Total_Fatura: 'Valor Fatura',
+  valor_ressarcimento_estimado: 'Valor Ressarc.',
+  fichas_aplicadas: 'Fichas', qtd_regras: 'Qtd', peso_alerta_max: 'Peso',
+  segmentos: 'Seg.', desvio_pct_max: 'Desvio %', dif_pct_alerta_f02: 'Desvio Seg.',
+  status_alerta_f02: 'Status F02', Link: 'Link',
+};
+
+function DesvioBar({ value }) {
+  const pct = parseFloat(value);
+  if (isNaN(pct) || pct === 0) return <span className="text-gray-400">-</span>;
+  const abs = Math.min(Math.abs(pct), 500);
+  const color = pct >= 200 ? '#ef4444' : pct >= 100 ? '#f97316' : pct >= 50 ? '#eab308' : '#22c55e';
+  return (
+    <div className="flex items-center gap-1.5 min-w-[90px]">
+      <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+        <div style={{ width: `${(abs / 500) * 100}%`, backgroundColor: color }} className="h-full rounded-full" />
+      </div>
+      <span style={{ color }} className="font-mono font-semibold text-xs whitespace-nowrap">
+        {pct > 0 ? '+' : ''}{pct.toFixed(1)}%
+      </span>
+    </div>
+  );
+}
+
+function PesoBadge({ value }) {
+  const n = parseInt(value, 10);
+  if (isNaN(n) || n === 0) return <span className="text-gray-400">-</span>;
+  const colors = ['', '#22c55e', '#eab308', '#f97316', '#ef4444', '#dc2626'];
+  const labels = ['', '1 Baixo', '2 Médio', '3 Alto', '4 Crítico', '5 Urgente'];
+  const color = colors[n] ?? '#94a3b8';
+  return (
+    <span style={{ backgroundColor: color + '22', color, border: `1px solid ${color}55` }}
+      className="px-1.5 py-0.5 rounded text-xs font-semibold whitespace-nowrap">
+      {labels[n] ?? n}
+    </span>
+  );
+}
+
+function FichasBadge({ value }) {
+  if (!value) return <span className="text-gray-400">-</span>;
+  const fichas = String(value).split(/[\s|,]+/).filter(Boolean);
+  const colors = { F01: '#1a56db', F02: '#0e9f6e', F03: '#c27803', F04: '#9061f9', F05: '#e02424' };
+  return (
+    <div className="flex flex-wrap gap-0.5">
+      {fichas.map(f => (
+        <span key={f}
+          style={{ backgroundColor: (colors[f] ?? '#6b7280') + '33', color: colors[f] ?? '#94a3b8', border: `1px solid ${(colors[f] ?? '#6b7280')}55` }}
+          className="px-1 py-0 rounded text-xs font-bold">
+          {f}
+        </span>
+      ))}
     </div>
   );
 }
@@ -477,12 +836,16 @@ const FICHAS = [
 /* Helpers */
 const fmt = (v) => (v == null || v === '' ? '-' : String(v));
 
-function cellVal(v) {
+function formatCurrencyBRL(v) {
+  const num = Number(v);
+  if (v == null || v === '' || Number.isNaN(num)) return '-';
+  return `R$ ${num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function cellVal(v, col = '') {
   if (v == null || v === '') return '-';
-  const s = String(v);
-  // Tenta formatar como BRL se parecer valor monetário
-  if (/^rs_|^vl_|^valor|^total|^preco/i.test('')) return s;
-  return s;
+  if (col === 'valor_ressarcimento_estimado') return formatCurrencyBRL(v);
+  return String(v);
 }
 
 /* Resumo */
@@ -623,15 +986,20 @@ function AnaliseResultado({ analise, confirmado, calcFinanceiro }) {
           const upper = line.toUpperCase();
           let color = '#1e293b';
           let weight = 'normal';
+          let bg = 'transparent';
+          const isBoldLine = line.startsWith('**') && line.endsWith('**');
+          const displayLine = isBoldLine ? line.slice(2, -2) : line;
+
           if (/^F0[1-5]\s*[—:-]/.test(line)) {
             if (line.includes('Confirmado') && !line.includes('Não confirmado')) color = '#4ade80';
             else if (line.includes('Não confirmado')) color = '#f87171';
             weight = '600';
           } else if (upper.startsWith('PRIORIDADE:')) {
-            const normalizedUpper = upper.normalize('NFD').replace(/[\\u0300-\\u036f]/g, ''); const prio = Object.keys(prioColor).find(p => normalizedUpper.includes(p));
+            const normalizedUpper = upper.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            const prio = Object.keys(prioColor).find(p => normalizedUpper.includes(p));
             color = prio ? prioColor[prio] : '#facc15';
             weight = '700';
-          } else if (upper.startsWith('TOTAL DE FICHAS')) {
+          } else if (upper.startsWith('TOTAL DE FICHAS') || upper.startsWith('FICHAS CONFIRMADAS')) {
             color = '#1d4ed8';
             weight = '600';
           } else if (upper.startsWith('UC:') || upper.startsWith('MÊS') || upper.startsWith('CONCESS')) {
@@ -640,10 +1008,16 @@ function AnaliseResultado({ analise, confirmado, calcFinanceiro }) {
           } else if (upper.startsWith('FICHAS DETECTADAS')) {
             color = '#92400e';
             weight = '700';
+          } else if (isBoldLine && upper.includes('DOBRO')) {
+            color = '#fbbf24';
+            weight = '700';
+            bg = 'rgba(251,191,36,0.08)';
+          } else if (isBoldLine) {
+            weight = '700';
           }
           return (
-            <div key={i} style={{ color, fontWeight: weight, lineHeight: '1.5' }}>
-              {line || '\u00a0'}
+            <div key={i} style={{ color, fontWeight: weight, lineHeight: '1.5', background: bg, borderRadius: bg !== 'transparent' ? '3px' : undefined, padding: bg !== 'transparent' ? '1px 4px' : undefined }}>
+              {displayLine || '\u00a0'}
             </div>
           );
         })}
@@ -694,14 +1068,29 @@ function AnaliseResultado({ analise, confirmado, calcFinanceiro }) {
 }
 
 /* Modal de análise IA por linha */
-function ConfirmIAModal({ modal, onClose, onResult, onCriar }) {
+function ConfirmIAModal({ modal, onClose, onResult, onCriar, onSavedResult }) {
   const [faturaData, setFaturaData] = useState(null); // { pages, totalPages, name }
   const [converting, setConverting] = useState(false);
   const [analyzing, setAnalyzing]   = useState(false);
   const [result, setResult]         = useState(modal.initialResult ?? null);
   const [autoLoadError, setAutoLoadError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [estimatedValue, setEstimatedValue] = useState(() => {
+    const raw = modal?.row?.valor_ressarcimento_estimado;
+    return raw == null || raw === '' ? '' : String(raw).replace('.', ',');
+  });
   const fileRef = useRef(null);
   const autoStartedRef = useRef(false);
+
+  useEffect(() => {
+    if (!result) return;
+    if (estimatedValue) return;
+    const extracted = extractValorEstimado(result.calcFinanceiro || result.analise || '');
+    if (extracted) {
+      setEstimatedValue(String(extracted).replace('.', ','));
+    }
+  }, [result, estimatedValue]);
 
   const handleFile = useCallback(async (e) => {
     const file = e.target.files?.[0];
@@ -778,6 +1167,43 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar }) {
     handleAnalyze();
   }, [modal.initialResult, result, analyzing, converting, faturaData, handleAnalyze]);
 
+  const handleSaveResult = useCallback(async () => {
+    const rowId = Number(modal?.row?.id || 0);
+    if (!rowId || !result?.analise) return;
+
+    setSaving(true);
+    setSaveError('');
+    try {
+      const normalizedValue = String(estimatedValue || '').trim();
+      const parsedValue = normalizedValue === ''
+        ? null
+        : Number(normalizedValue.replace(/\./g, '').replace(',', '.'));
+
+      const payload = {
+        id: rowId,
+        resultado_ia: result.analise,
+      };
+      if (parsedValue != null && !Number.isNaN(parsedValue)) {
+        payload.valor_ressarcimento_estimado = parsedValue;
+      }
+
+      const res = await apiClient.post('/api/v1/faturas/analise-resultado/salvar', payload);
+      const savedValue = res.data?.valor_ressarcimento_estimado;
+      const savedAt = res.data?.resultado_salvo_em || new Date().toISOString();
+
+      onSavedResult?.(modal.rowIdx, {
+        resultado_ia: result.analise,
+        valor_ressarcimento_estimado: savedValue ?? null,
+        resultado_salvo_em: savedAt,
+      });
+      onClose();
+    } catch (e) {
+      setSaveError(e?.response?.data?.error || 'Erro ao guardar resultado.');
+    } finally {
+      setSaving(false);
+    }
+  }, [estimatedValue, modal?.row?.id, modal.rowIdx, onClose, onSavedResult, result]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
@@ -826,7 +1252,21 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar }) {
           )}
 
           {result && !analyzing && (
-            <AnaliseResultado analise={result.analise} confirmado={result.confirmado} calcFinanceiro={result.calcFinanceiro} />
+            <div className="space-y-3">
+              <AnaliseResultado analise={result.analise} confirmado={result.confirmado} calcFinanceiro={result.calcFinanceiro} />
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-3">
+                <label className="block text-xs opacity-60 mb-1">Valor de Ressarcimento Estimado (editável)</label>
+                <input
+                  value={estimatedValue}
+                  onChange={(e) => setEstimatedValue(e.target.value)}
+                  placeholder="0,00"
+                  className="w-full px-3 py-2 text-sm rounded border border-[var(--border)] bg-[var(--bg)] focus:outline-none focus:ring-1 focus:ring-[#1e3a5f]"
+                />
+                {saveError && (
+                  <div className="text-xs text-red-400 mt-2">{saveError}</div>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Upload da fatura - oculto se já há resultado */}
@@ -905,6 +1345,12 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar }) {
           {result ? (
             <div className="flex items-center gap-2">
               <button
+                onClick={onClose}
+                className="px-3 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-[var(--panel)]"
+              >
+                Descartar resultado
+              </button>
+              <button
                 onClick={() => { setResult(null); }}
                 className="px-3 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-[var(--panel)] flex items-center gap-1.5"
               >
@@ -912,6 +1358,14 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar }) {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
                 </svg>
                 Reanalisar
+              </button>
+              <button
+                onClick={handleSaveResult}
+                disabled={saving}
+                className="px-4 py-2 text-sm rounded-lg text-white font-semibold flex items-center gap-2 disabled:opacity-50"
+                style={{ backgroundColor: '#1e3a5f' }}
+              >
+                {saving ? 'Guardando...' : 'Guardar resultado'}
               </button>
               <button
                 onClick={() => { onCriar?.(modal, result); onClose(); }}
@@ -1248,14 +1702,18 @@ function extractCalcSection(text, num) {
   return m ? m[1].trim().substring(0, 800) : '';
 }
 
-/* Extrai id|nome dos campos 15/16 */
-function extractTipoSubtipoSugerido(calcFinanceiro) {
+/* Extrai tipo/subtipo do novo formato (Tipo de Irregularidade: id | nome) */
+function extractTipoSubtipoSugerido(text) {
   const result = { tipo: '', subtipo: '' };
-  if (!calcFinanceiro) return result;
-  const mTipo = calcFinanceiro.match(/15\.\s*tipo_irregularidade_sugerido\s*:\s*(\d+)/i);
-  const mSub  = calcFinanceiro.match(/16\.\s*subtipo_irregularidade_sugerido\s*:\s*(\d+)/i);
-  if (mTipo) result.tipo = mTipo[1];
-  if (mSub)  result.subtipo = mSub[1];
+  if (!text) return result;
+  // Novo formato: "Tipo de Irregularidade: 5 | FATURAMENTO"
+  const mTipo = text.match(/Tipo de Irregularidade\s*:\s*(\d+)/i);
+  const mSub  = text.match(/Subtipo de Irregularidade\s*:\s*(\d+)/i);
+  // Fallback formato antigo
+  const mTipoOld = text.match(/15\.\s*tipo_irregularidade_sugerido\s*:\s*(\d+)/i);
+  const mSubOld  = text.match(/16\.\s*subtipo_irregularidade_sugerido\s*:\s*(\d+)/i);
+  result.tipo    = (mTipo || mTipoOld)?.[1] || '';
+  result.subtipo = (mSub  || mSubOld)?.[1]  || '';
   return result;
 }
 
@@ -1268,19 +1726,32 @@ function suggestTipoSubtipo(fichas) {
   return { tipo: '', subtipo: '' };
 }
 
-function extractValorEstimado(calcFinanceiro) {
-  if (!calcFinanceiro) return '';
-  // Tenta valor_total_estimado_recuperavel_min primeiro
+function extractValorEstimado(text) {
+  if (!text) return '';
   const patterns = [
+    // Novo formato
+    /Valor Estimado Simples\s*:\s*R?\$?\s*([\d\.]+(?:,\d+)?)/i,
+    // Formato antigo (fallback)
     /valor_total_estimado_recuperavel_min\s*:\s*R?\$?\s*([\d\.]+(?:,\d+)?)/i,
     /valor_total_estimado_recuperavel_max\s*:\s*R?\$?\s*([\d\.]+(?:,\d+)?)/i,
     /valor_cobrado_a_maior_estimado\s*:\s*R?\$?\s*([\d\.]+(?:,\d+)?)/i,
   ];
   for (const re of patterns) {
-    const m = calcFinanceiro.match(re);
+    const m = text.match(re);
     if (m) return m[1].replace(/\./g, '').replace(',', '.');
   }
   return '';
+}
+
+function buildSavedResultFromRow(row) {
+  const analise = String(row?.resultado_ia || '').trim();
+  if (!analise) return null;
+  const confirmedCount = Number((analise.match(/Fichas Confirmadas\s*:\s*(\d+)/i) || [])[1] || 0);
+  return {
+    analise,
+    confirmado: confirmedCount > 0,
+    calcFinanceiro: null,
+  };
 }
 
 /* Tela de sucesso */
@@ -1314,24 +1785,32 @@ function SuccessPane({ modal, periods, onClose }) {
 
 function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
   const row = modal.row ?? {};
-  const cf  = result?.calcFinanceiro || '';
+  // Fonte de texto: novo formato usa analise; fallback para calcFinanceiro (formato antigo)
+  const analiseText = result?.analise || '';
+  const cf          = result?.calcFinanceiro || '';
+  const textSource  = analiseText || cf;
 
-  // Determina tipo/subtipo inicial: AI (campos 15/16) > fichas > vazio
-  const aiSuggestion     = extractTipoSubtipoSugerido(cf);
+  // Determina tipo/subtipo inicial: IA (analise) > fichas > vazio
+  const aiSuggestion     = extractTipoSubtipoSugerido(textSource);
   const fichasSuggestion = suggestTipoSubtipo(modal.fichas);
   const initTipo    = aiSuggestion.tipo    || fichasSuggestion.tipo    || '';
   const initSubtipo = aiSuggestion.subtipo || fichasSuggestion.subtipo || '';
 
-  // Descrição pré-preenchida a partir dos campos 4 (resumo), 5 (inconsistências), 6 (hipótese)
+  // Descrição pré-preenchida: novo formato usa a analise completa; formato antigo usa seções numeradas
   function buildDescricao() {
-    const resumo      = extractCalcSection(cf, 4);
-    const inconsist   = extractCalcSection(cf, 5);
-    const hipotese    = extractCalcSection(cf, 6);
-    const parts = [];
-    if (resumo)    parts.push('RESUMO EXECUTIVO:\n' + resumo);
-    if (inconsist) parts.push('INCONSISTÊNCIAS ENCONTRADAS:\n' + inconsist);
-    if (hipotese)  parts.push('HIPÓTESE DE RESSARCIMENTO:\n' + hipotese);
-    return parts.join('\n\n') || result?.analise || modal.detalhe || '';
+    // Formato antigo com seções numeradas
+    const resumo    = extractCalcSection(cf, 4);
+    const inconsist = extractCalcSection(cf, 5);
+    const hipotese  = extractCalcSection(cf, 6);
+    if (resumo || inconsist || hipotese) {
+      const parts = [];
+      if (resumo)    parts.push('RESUMO EXECUTIVO:\n' + resumo);
+      if (inconsist) parts.push('INCONSISTÊNCIAS ENCONTRADAS:\n' + inconsist);
+      if (hipotese)  parts.push('HIPÓTESE DE RESSARCIMENTO:\n' + hipotese);
+      return parts.join('\n\n');
+    }
+    // Novo formato: usa a análise completa
+    return analiseText || modal.detalhe || '';
   }
 
   const initPeriodo = parseMesRef(row.Mes_Ref);
@@ -1339,11 +1818,11 @@ function CriarRequisicaoModal({ modal, result, onClose, onSuccess }) {
   const [fields, setFields] = useState({
     uc:                      modal.uc || '',
     cliente:                 '',
-    razaoSocialFatura:       row.RAZAO_SOCIAL || '',
+    razaoSocialFatura:       row.cliente || row.RAZAO_SOCIAL || '',
     concessionaria:          row.Concessionaria || '',
     cnpj:                    '',
     linkFatura:              row.Link || '',
-    ressarcimentoEstimado:   extractValorEstimado(cf) || String(row.RS_Total_Fatura || '').replace(/[^\d,\.]/g, '') || '',
+    ressarcimentoEstimado:   extractValorEstimado(textSource) || String(row.RS_Total_Fatura || '').replace(/[^\d,\.]/g, '') || '',
     descricaoIrregularidade: buildDescricao(),
     problemaIdentificado:    modal.fichas || '',
   });
@@ -1784,6 +2263,7 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
   const [confirmMap, setConfirmMap] = useState({}); // rowIdx -> { loading, confirmado, analise }
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [ucDrawer, setUcDrawer]     = useState(null);
+  const [detailRow, setDetailRow]   = useState(null);
   const [bulkModal, setBulkModal]   = useState(null);
   const [batchHistory, setBatchHistory] = useState(() => readStoredJson(ANALISE_DESVIO_BATCH_HISTORY_KEY, []));
   const theadRef = useRef(null);
@@ -1916,7 +2396,7 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
 
   const emProcessoStart  = normais.length;
   const descartadosStart = normais.length + emProcesso.length;
-  const allRows = [...normais, ...emProcesso, ...descartados];
+  const allRows = useMemo(() => [...normais, ...emProcesso, ...descartados], [normais, emProcesso, descartados]);
   const selectableRows = useMemo(() => allRows.slice(0, descartadosStart), [allRows, descartadosStart]);
   const selectedCount = useMemo(
     () => selectableRows.reduce((acc, row) => acc + (selectedRows.has(rowKey(row)) ? 1 : 0), 0),
@@ -1968,12 +2448,42 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
     const uc      = ucCol ? String(row[ucCol] ?? '') : '';
     const fichas  = String(row['fichas_aplicadas'] ?? '');
     const detalhe = String(row['detalhamento'] ?? '');
-    setConfirmModal({ rowIdx, row, uc, fichas, detalhe, initialResult });
+    setConfirmModal({
+      rowIdx,
+      row,
+      uc,
+      fichas,
+      detalhe,
+      initialResult: initialResult || buildSavedResultFromRow(row),
+    });
   }, [ucCol]);
 
   const handleConfirmResult = useCallback((rowIdx, result) => {
     setConfirmMap(prev => ({ ...prev, [rowIdx]: result }));
   }, []);
+
+  const handleSavedResult = useCallback((rowIdx, saved) => {
+    const row = allRows[rowIdx];
+    if (!row) return;
+
+    setRows(prev => prev.map(item => {
+      if (String(item.id ?? '') !== String(row.id ?? '')) return item;
+      return {
+        ...item,
+        resultado_ia: saved.resultado_ia ?? item.resultado_ia,
+        valor_ressarcimento_estimado: saved.valor_ressarcimento_estimado ?? item.valor_ressarcimento_estimado,
+        resultado_salvo_em: saved.resultado_salvo_em ?? item.resultado_salvo_em,
+      };
+    }));
+
+    const hydrated = {
+      ...(confirmMap[rowIdx] || buildSavedResultFromRow(row) || {}),
+      analise: saved.resultado_ia ?? confirmMap[rowIdx]?.analise ?? row.resultado_ia ?? '',
+      confirmado: (confirmMap[rowIdx]?.confirmado ?? buildSavedResultFromRow({ resultado_ia: saved.resultado_ia })?.confirmado ?? false),
+      calcFinanceiro: confirmMap[rowIdx]?.calcFinanceiro ?? null,
+    };
+    setConfirmMap(prev => ({ ...prev, [rowIdx]: hydrated }));
+  }, [allRows, confirmMap]);
 
   const openBulkModal = useCallback(() => {
     const jobs = allRows.flatMap((row, rowIdx) => {
@@ -2298,12 +2808,12 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
                 </th>
                 <th className="px-2 py-2 text-center font-semibold border-r border-[#2d5080] w-8 select-none">#</th>
                 <th className="px-2 py-2 text-center font-semibold border-r border-[#2d5080] w-16 select-none">IA</th>
-                {cols.map(col => (
+                {TABLE_COLS.filter(c => cols.includes(c)).map(col => (
                   <th
                     key={col}
                     className="px-3 py-2 text-left font-semibold whitespace-nowrap border-r border-[#2d5080] last:border-r-0"
                   >
-                    {col}
+                    {COL_LABELS[col] ?? col}
                   </th>
                 ))}
               </tr>
@@ -2312,7 +2822,7 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
               {allRows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={cols.length + 3}
+                    colSpan={TABLE_COLS.filter(c => cols.includes(c)).length + 3}
                     className="px-4 py-8 text-center opacity-50"
                   >
                     Nenhum resultado para "{search}"
@@ -2429,6 +2939,18 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
                             </button>
                           )
                         )}
+                        {/* Botão detalhe */}
+                        {!isDescartado && (
+                          <button
+                            title="Ver detalhes da anomalia"
+                            onClick={(e) => { e.stopPropagation(); setDetailRow(row); }}
+                            className="inline-flex items-center justify-center w-5 h-5 rounded text-blue-400 hover:bg-blue-400/20 transition-colors"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                          </button>
+                        )}
                         {/* Botão descarte / restaurar */}
                         <button
                           title={isDescartado ? 'Restaurar' : 'Descartar'}
@@ -2451,27 +2973,54 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
                         </button>
                       </div>
                     </td>
-                    {cols.map(col => {
+                    {TABLE_COLS.filter(c => cols.includes(c)).map(col => {
                       const v = row[col];
-                      const isLink = /^https?:\/\//i.test(String(v ?? ''));
-                      return (
-                        <td
-                          key={col}
-                          className="px-3 py-1 whitespace-nowrap border-r last:border-r-0"
-                          style={isEmProcesso ? { borderColor: '#2d5080' } : { borderColor: 'var(--border)' }}
-                        >
-                          {isLink ? (
-                            <a
-                              href={String(v)}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={e => e.stopPropagation()}
-                              className="text-blue-400 underline hover:text-blue-300"
-                              title={String(v)}
+                      let cell;
+                      if (col === 'Link') {
+                        const isLink = /^https?:\/\//i.test(String(v ?? ''));
+                        cell = isLink ? (
+                          <a href={String(v)} target="_blank" rel="noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="text-blue-400 underline hover:text-blue-300" title={String(v)}>
+                            Ver fatura →
+                          </a>
+                        ) : <span className="text-gray-400">-</span>;
+                      } else if (col === 'desvio_pct_max') {
+                        cell = <DesvioBar value={v} />;
+                      } else if (col === 'peso_alerta_max') {
+                        cell = <PesoBadge value={v} />;
+                      } else if (col === 'fichas_aplicadas') {
+                        cell = <FichasBadge value={v} />;
+                      } else if (col === 'qtd_regras') {
+                        const n = parseInt(v, 10);
+                        const color = n >= 3 ? '#ef4444' : n === 2 ? '#f97316' : n === 1 ? '#eab308' : '#6b7280';
+                        cell = <span style={{ color }} className="font-bold font-mono">{n > 0 ? n : '-'}</span>;
+                      } else if (col === 'RS_Total_Fatura') {
+                        const num = parseFloat(v);
+                        cell = isNaN(num) ? <span className="text-gray-400">-</span>
+                          : <span>R$ {num.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>;
+                      } else if (col === 'valor_ressarcimento_estimado') {
+                        cell = v == null || v === ''
+                          ? <span className="text-gray-400">-</span>
+                          : (
+                            <span
+                              className="font-medium"
+                              title={row.resultado_salvo_em ? `Salvo em ${new Date(row.resultado_salvo_em).toLocaleString('pt-BR')}` : 'Resultado salvo'}
                             >
-                              Ver fatura →
-                            </a>
-                          ) : cellVal(v)}
+                              {formatCurrencyBRL(v)}
+                            </span>
+                          );
+                      } else if (col === 'dif_pct_alerta_f02') {
+                        cell = v ? <span className="text-orange-400 font-mono text-xs">{String(v)}</span> : <span className="text-gray-400">-</span>;
+                      } else if (col === 'status_alerta_f02') {
+                        cell = v ? <span className="text-yellow-300 text-xs font-mono">{String(v)}</span> : <span className="text-gray-400">-</span>;
+                      } else {
+                        cell = cellVal(v, col);
+                      }
+                      return (
+                        <td key={col} className="px-3 py-1 whitespace-nowrap border-r last:border-r-0"
+                          style={isEmProcesso ? { borderColor: '#2d5080' } : { borderColor: 'var(--border)' }}>
+                          {cell}
                         </td>
                       );
                     })}
@@ -2510,6 +3059,7 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
           modal={confirmModal}
           onClose={() => setConfirmModal(null)}
           onResult={handleConfirmResult}
+          onSavedResult={handleSavedResult}
           onCriar={(modal, result) => setCriarReqData({ modal, result })}
         />
       )}
@@ -2535,6 +3085,112 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
       {/* Drawer de histórico da UC */}
       {ucDrawer && (
         <UCHistoricoDrawer uc={ucDrawer} onClose={() => setUcDrawer(null)} />
+      )}
+
+      {/* Drawer de detalhe da anomalia */}
+      {detailRow && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={() => setDetailRow(null)}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-[var(--panel)] border border-[var(--panel-border)] rounded-xl shadow-2xl p-5"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <div className="text-base font-bold">{detailRow.cliente || 'Detalhes da Anomalia'}</div>
+                <div className="text-xs opacity-60 mt-0.5">
+                  UC {detailRow.UC} · {detailRow.Concessionaria} · {String(detailRow.Mes_Ref ?? '').slice(0, 7)}
+                </div>
+              </div>
+              <button onClick={() => setDetailRow(null)} className="text-gray-400 hover:text-white text-lg leading-none ml-4">✕</button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              {/* Fichas + Peso */}
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+                <div className="flex-1">
+                  <div className="opacity-60 mb-1 font-semibold">Fichas Aplicadas</div>
+                  <FichasBadge value={detailRow.fichas_aplicadas} />
+                </div>
+                <div className="text-right">
+                  <div className="opacity-60 mb-1 font-semibold">Severidade</div>
+                  <PesoBadge value={detailRow.peso_alerta_max} />
+                </div>
+                <div className="text-right">
+                  <div className="opacity-60 mb-1 font-semibold">Qtd Regras</div>
+                  {(() => {
+                    const n = parseInt(detailRow.qtd_regras, 10);
+                    const color = n >= 3 ? '#ef4444' : n === 2 ? '#f97316' : '#eab308';
+                    return <span style={{ color }} className="font-bold font-mono text-sm">{n}</span>;
+                  })()}
+                </div>
+              </div>
+
+              {/* F02 — Desvio */}
+              {(detailRow.desvio_pct_max || detailRow.status_alerta_f02 || detailRow.dif_pct_alerta_f02) && (
+                <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                  <div className="opacity-60 font-semibold mb-2" style={{ color: '#0e9f6e' }}>F02 — Desvio de Média</div>
+                  {detailRow.desvio_pct_max != null && (
+                    <div className="mb-2"><span className="opacity-60">Desvio máximo: </span><DesvioBar value={detailRow.desvio_pct_max} /></div>
+                  )}
+                  {detailRow.dif_pct_alerta_f02 && (
+                    <div className="mb-1"><span className="opacity-60">Por segmento: </span><span className="text-orange-400 font-mono">{detailRow.dif_pct_alerta_f02}</span></div>
+                  )}
+                  {detailRow.status_alerta_f02 && (
+                    <div className="mb-1"><span className="opacity-60">Status: </span><span className="text-yellow-300 font-mono">{detailRow.status_alerta_f02}</span></div>
+                  )}
+                  {detailRow.peso_alerta_f02_detalhe && (
+                    <div><span className="opacity-60">Peso por seg.: </span><span className="font-mono">{detailRow.peso_alerta_f02_detalhe}</span></div>
+                  )}
+                </div>
+              )}
+
+              {/* F03 — Acúmulo */}
+              {detailRow.qtd_meses_f03 && (
+                <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                  <div className="opacity-60 font-semibold mb-2" style={{ color: '#c27803' }}>F03 — Acúmulo de Consumo</div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div><span className="opacity-60">Meses fixos: </span><span className="font-bold">{detailRow.qtd_meses_f03}</span></div>
+                    <div><span className="opacity-60">Valor fixo: </span><span className="font-mono">{detailRow.valor_fixo_f03} kWh</span></div>
+                    <div><span className="opacity-60">Consumo atual: </span><span className="font-mono">{detailRow.consumo_atual_f03} kWh</span></div>
+                  </div>
+                </div>
+              )}
+
+              {/* F04 — Troca de medidor */}
+              {detailRow.detalhe_f04 && (
+                <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                  <div className="opacity-60 font-semibold mb-1" style={{ color: '#9061f9' }}>F04 — Troca de Medidor</div>
+                  <div className="font-mono whitespace-pre-wrap opacity-90">{detailRow.detalhe_f04}</div>
+                </div>
+              )}
+
+              {/* F05 — Quebra de leitura */}
+              {detailRow.detalhe_f05 && (
+                <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                  <div className="opacity-60 font-semibold mb-1" style={{ color: '#e02424' }}>F05 — Quebra de Leitura</div>
+                  <div className="font-mono whitespace-pre-wrap opacity-90">{detailRow.detalhe_f05}</div>
+                </div>
+              )}
+
+              {/* Detalhamento completo */}
+              {detailRow.detalhamento && (
+                <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                  <div className="opacity-60 font-semibold mb-1">Detalhamento</div>
+                  <div className="whitespace-pre-wrap opacity-90 leading-relaxed">{detailRow.detalhamento}</div>
+                </div>
+              )}
+
+              {/* Link fatura */}
+              {detailRow.Link && /^https?:\/\//i.test(String(detailRow.Link)) && (
+                <div className="pt-1">
+                  <a href={String(detailRow.Link)} target="_blank" rel="noreferrer"
+                    className="text-blue-400 underline hover:text-blue-300">
+                    Abrir fatura →
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -2640,7 +3296,7 @@ export default function AnaliseDesvio() {
             <ResumoPanel onSelectTab={handleSelectTab} />
           </div>
         ) : activeTab === 'aisure' ? (
-          <div className="h-full">
+          <div className="h-full overflow-hidden">
             <AisurePanel />
           </div>
         ) : (
@@ -2660,13 +3316,3 @@ export default function AnaliseDesvio() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-

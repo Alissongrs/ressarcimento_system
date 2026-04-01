@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -182,7 +183,12 @@ func ChatUploadHandler(c *gin.Context) {
 	if len(ocrFiles) > 0 {
 		ocrTexts, ocrErr := callOCR(ocrFiles)
 		if ocrErr != nil {
-			// OCR indisponível — retorna arquivos sem texto extraído (não é fatal)
+			// OCR indisponível — marca texto com aviso para o frontend não bloquear
+			for i := range out {
+				if isOCRFile(out[i].Name) && out[i].Text == "" {
+					out[i].Text = fmt.Sprintf("[Arquivo: %s — extração de texto indisponível. Descreva o conteúdo manualmente na pergunta.]", out[i].Name)
+				}
+			}
 			c.JSON(http.StatusOK, chatUploadResponse{Files: out})
 			return
 		}
@@ -211,8 +217,46 @@ func ChatUploadHandler(c *gin.Context) {
 					}
 				}
 			}
+			// OCR retornou sem texto para este arquivo — aplica aviso
+			if isOCRFile(out[i].Name) && strings.TrimSpace(out[i].Text) == "" {
+				out[i].Text = fmt.Sprintf("[Arquivo: %s — não foi possível extrair texto automaticamente. Descreva o conteúdo na pergunta.]", out[i].Name)
+			}
 		}
 	}
 
 	c.JSON(http.StatusOK, chatUploadResponse{Files: out})
+}
+
+// chatExtractRequest recebe imagens base64 (páginas de um PDF) para extração via OpenAI vision.
+type chatExtractRequest struct {
+	Images []faturaImageItem `json:"images"`
+	Name   string            `json:"name"`
+}
+
+// POST /api/v1/chat/extract-pdf
+// ChatExtractPDFHandler extrai texto de imagens usando OpenAI vision.
+func ChatExtractPDFHandler(c *gin.Context) {
+	var in chatExtractRequest
+	if err := c.ShouldBindJSON(&in); err != nil || len(in.Images) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "imagens obrigatórias"})
+		return
+	}
+
+	question := "Extraia TODO o texto visível neste documento (fatura de energia elétrica). " +
+		"Inclua todos os campos: leituras, consumo, valores, datas, dados do cliente, medidor, constante. " +
+		"Retorne apenas o texto extraído, sem comentários adicionais."
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	text, err := callAisureOpenAIVision(ctx, question, "", in.Images)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "falha ao extrair texto com IA: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"name": in.Name,
+		"text": strings.TrimSpace(text),
+	})
 }
