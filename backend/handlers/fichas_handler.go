@@ -677,7 +677,31 @@ func GetProcessoVinculado(c *gin.Context) {
 	if processos == nil {
 		processos = []processoVinculadoItem{}
 	}
-	c.JSON(http.StatusOK, gin.H{"processos": processos})
+
+	// Busca links das faturas por período (GormDB_Faturas)
+	faturaLinks := map[string]string{}
+	if dbFat := database.GormDB_Faturas; dbFat != nil {
+		if sqlFat, err2 := dbFat.DB(); err2 == nil {
+			fatRows, err2 := sqlFat.QueryContext(c.Request.Context(),
+				`SELECT DATE_FORMAT(Mes_Ref, '%Y-%m') AS periodo, MAX(Link) AS link
+				 FROM fichas_anomalias_cache
+				 WHERE TRIM(UC) = TRIM(?) AND Link IS NOT NULL AND Link != ''
+				 GROUP BY periodo`,
+				uc,
+			)
+			if err2 == nil {
+				defer fatRows.Close()
+				for fatRows.Next() {
+					var periodo, link string
+					if fatRows.Scan(&periodo, &link) == nil && periodo != "" {
+						faturaLinks[periodo] = link
+					}
+				}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"processos": processos, "fatura_links": faturaLinks})
 }
 
 // ListUCsEmProcesso retorna todas as UCs que possuem requisições no banco principal.

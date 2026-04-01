@@ -1210,7 +1210,7 @@ function ConfirmIAModal({ modal, onClose, onResult, onCriar, onSavedResult }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="w-full max-w-3xl bg-[var(--bg)] rounded-xl shadow-2xl flex flex-col border border-[var(--border)]"
+        className="w-full max-w-4xl bg-[var(--bg)] rounded-xl shadow-2xl flex flex-col border border-[var(--border)]"
         style={{ maxHeight: '92vh' }}
         onClick={e => e.stopPropagation()}
       >
@@ -1692,6 +1692,18 @@ const MESES_FULL  = ['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','J
 function parseMesRef(mesRef) {
   const parts = String(mesRef || '').split('-');
   return { ano: parts[0] || '', mes: parts[1] ? String(parseInt(parts[1], 10)) : '' };
+}
+
+const MESES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+
+/* Formata "2025-05-01T00:00:00-03:00" → "Mai/2025" */
+function formatMesRef(v) {
+  const s = String(v || '').trim();
+  if (!s) return '-';
+  const m = s.match(/^(\d{4})-(\d{2})/);
+  if (!m) return s.slice(0, 7);
+  const mes = parseInt(m[2], 10);
+  return `${MESES_PT[mes - 1] ?? m[2]}/${m[1]}`;
 }
 
 function extractPriority(analise) {
@@ -2277,8 +2289,12 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
     const uc = String(row?.UC ?? '').trim();
     if (!uc) { setProcessoVinculado({ loading: false, processos: [] }); return; }
     apiClient.get('/api/v1/faturas/ficha/processo-vinculado', { params: { uc } })
-      .then(r => setProcessoVinculado({ loading: false, processos: r.data?.processos ?? [] }))
-      .catch(() => setProcessoVinculado({ loading: false, processos: [] }));
+      .then(r => setProcessoVinculado({
+        loading: false,
+        processos: r.data?.processos ?? [],
+        fatura_links: r.data?.fatura_links ?? {},
+      }))
+      .catch(() => setProcessoVinculado({ loading: false, processos: [], fatura_links: {} }));
   }, []);
   const [bulkModal, setBulkModal]   = useState(null);
   const [batchHistory, setBatchHistory] = useState(() => readStoredJson(ANALISE_DESVIO_BATCH_HISTORY_KEY, []));
@@ -3026,6 +3042,8 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
                               {formatCurrencyBRL(v)}
                             </span>
                           );
+                      } else if (col === 'Mes_Ref') {
+                        cell = <span className="font-mono">{formatMesRef(v)}</span>;
                       } else if (col === 'dif_pct_alerta_f02') {
                         cell = v ? <span className="text-orange-400 font-mono text-xs">{String(v)}</span> : <span className="text-gray-400">-</span>;
                       } else if (col === 'status_alerta_f02') {
@@ -3107,13 +3125,13 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
       {detailRow && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={() => { setDetailRow(null); setProcessoVinculado(null); }}>
           <div className="absolute inset-0 bg-black/60" />
-          <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-[var(--panel)] border border-[var(--panel-border)] rounded-xl shadow-2xl p-5"
+          <div className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-[var(--panel)] border border-[var(--panel-border)] rounded-xl shadow-2xl p-5"
             onClick={e => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-4">
               <div>
                 <div className="text-base font-bold">{detailRow.cliente || 'Detalhes da Anomalia'}</div>
                 <div className="text-xs opacity-60 mt-0.5">
-                  UC {detailRow.UC} · {detailRow.Concessionaria} · {String(detailRow.Mes_Ref ?? '').slice(0, 7)}
+                  UC {detailRow.UC} · {detailRow.Concessionaria} · {formatMesRef(detailRow.Mes_Ref)}
                 </div>
               </div>
               <button onClick={() => { setDetailRow(null); setProcessoVinculado(null); }} className="text-gray-400 hover:text-white text-lg leading-none ml-4">✕</button>
@@ -3245,9 +3263,36 @@ function FichaPanel({ ficha, ucsEmProcesso, refreshUcs }) {
                           <div><span className="opacity-50">Última mov.: </span><span className="font-mono text-green-400">{proc.ultima_movimentacao}</span></div>
                         )}
                         {/* Períodos de irregularidade */}
-                        {proc.periodos_irregularidade && (
-                          <div><span className="opacity-50">Períodos: </span><span className="font-mono">{proc.periodos_irregularidade}</span></div>
-                        )}
+                        {proc.periodos_irregularidade && (() => {
+                          let periodos = [];
+                          try { periodos = JSON.parse(proc.periodos_irregularidade); } catch { /* não é JSON */ }
+                          if (Array.isArray(periodos) && periodos.length > 0) {
+                            return (
+                              <div>
+                                <span className="opacity-50">Períodos: </span>
+                                <div className="flex flex-wrap gap-1.5 mt-1">
+                                  {periodos.map((p, i) => {
+                                    const mes = parseInt(p.mes, 10);
+                                    const label = `${MESES_PT[mes - 1] ?? String(p.mes).padStart(2,'0')}/${p.ano}`;
+                                    const key = `${p.ano}-${String(p.mes).padStart(2, '0')}`;
+                                    const link = processoVinculado?.fatura_links?.[key];
+                                    return link ? (
+                                      <a key={i} href={link} target="_blank" rel="noreferrer"
+                                        className="px-2 py-0.5 rounded text-xs bg-blue-500/15 text-blue-300 hover:bg-blue-500/30 border border-blue-500/30 font-mono transition-colors">
+                                        {label} →
+                                      </a>
+                                    ) : (
+                                      <span key={i} className="px-2 py-0.5 rounded text-xs bg-white/5 font-mono border border-white/10">
+                                        {label}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          }
+                          return <div><span className="opacity-50">Períodos: </span><span className="font-mono">{proc.periodos_irregularidade}</span></div>;
+                        })()}
                         {/* Descrição da irregularidade */}
                         {proc.descricao_irregularidade && (
                           <div>
