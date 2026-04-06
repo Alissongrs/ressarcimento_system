@@ -632,7 +632,25 @@ LEFT JOIN FT_PROCESSOS pr ON p.id_requisicao = pr.id_processo
 WHERE pr.id_coluna IS NOT NULL
   AND pr.id_coluna != 1`)
 
-		// Índices em DM_ALERTAS (se a tabela existir)
+		// Tabela de alertas manuais por processo/usuário
+		if _, err := db.Exec(`
+			CREATE TABLE IF NOT EXISTS FT_ALERTAS (
+				id_alerta      BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+				id_usuario     BIGINT       NOT NULL,
+				id_processo    BIGINT       NULL,
+				mensagem       TEXT         NOT NULL,
+				lido           TINYINT(1)   NOT NULL DEFAULT 0,
+				acknowledged   TINYINT(1)   NOT NULL DEFAULT 0,
+				data_criacao   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				data_alerta    DATE         NULL,
+				INDEX idx_ft_alertas_usuario_lido (id_usuario, lido, data_criacao DESC),
+				INDEX idx_ft_alertas_processo (id_processo),
+				INDEX idx_ft_alertas_data (data_alerta)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
+			log.Printf("[migrate] WARN FT_ALERTAS: %v", err)
+		}
+
+		// Índices em DM_ALERTAS (legado, se a tabela existir)
 		var hasAlertas int
 		_ = db.QueryRow(`
 			SELECT COUNT(1)
@@ -938,6 +956,44 @@ END`, strings.Join(insertCols, ", "), strings.Join(insertVals, ", "))
 			    ON DELETE CASCADE ON UPDATE CASCADE
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
 			return fmt.Errorf("criando process_mail_links: %w", err)
+		}
+	}
+	{
+		var hasMailGraphMessageID int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME = 'FT_HISTORICO_MOVIMENTACOES'
+			  AND COLUMN_NAME = 'mail_graph_message_id'`,
+		).Scan(&hasMailGraphMessageID)
+		if hasMailGraphMessageID == 0 {
+			log.Println("[migrate] Adicionando coluna mail_graph_message_id em FT_HISTORICO_MOVIMENTACOES ...")
+			if _, err := db.Exec(`
+				ALTER TABLE FT_HISTORICO_MOVIMENTACOES
+				ADD COLUMN mail_graph_message_id VARCHAR(200) NULL
+			`); err != nil {
+				return fmt.Errorf("criando coluna mail_graph_message_id: %w", err)
+			}
+		}
+	}
+	{
+		var idxCount int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.STATISTICS
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME = 'FT_HISTORICO_MOVIMENTACOES'
+			  AND INDEX_NAME = 'idx_historico_mail_graph_message'`,
+		).Scan(&idxCount)
+		if idxCount == 0 {
+			log.Println("[migrate] Criando índice idx_historico_mail_graph_message ...")
+			if _, err := db.Exec(`
+				CREATE INDEX idx_historico_mail_graph_message
+				ON FT_HISTORICO_MOVIMENTACOES (mail_graph_message_id)
+			`); err != nil {
+				return fmt.Errorf("criando índice idx_historico_mail_graph_message: %w", err)
+			}
 		}
 	}
 	// 10) Flags para vw_processos_desvio_media_kwh_fponta (tabela)
