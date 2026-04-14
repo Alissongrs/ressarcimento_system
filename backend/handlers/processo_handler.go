@@ -1,4 +1,4 @@
-﻿// backend/handlers/processo_handler.go
+// backend/handlers/processo_handler.go
 package handlers
 
 import (
@@ -668,7 +668,7 @@ func MovimentarProcesso(c *gin.Context) {
 
 	if valorEstimadoNum.Valid {
 		// Coluna existe em FT_REQUISICOES (id_requisicao = id_processo)
-		if _, err2 := execGorm(tx, 
+		if _, err2 := execGorm(tx,
 			"UPDATE FT_REQUISICOES SET ressarcimento_estimado = ? WHERE id_requisicao = ?",
 			valorEstimadoNum.Float64, processoID,
 		); err2 != nil {
@@ -731,7 +731,7 @@ func MovimentarProcesso(c *gin.Context) {
 			subProvided = true
 			subMudou = true
 			subID, _ := resolveSubEtapaIDGorm(tx, novaSubEtapaNome)
-			if _, err = execGorm(tx, 
+			if _, err = execGorm(tx,
 				`UPDATE FT_PROCESSOS
 				 SET sub_etapa = ?, id_sub_etapa_processo = ?, ultima_atualizacao = NOW()
 				 WHERE id_processo = ?`,
@@ -854,7 +854,7 @@ func MovimentarProcesso(c *gin.Context) {
 		if len(canaisSelecionados) > 0 {
 			if lastID, e2 := res.LastInsertId(); e2 == nil {
 				for _, nome := range canaisSelecionados {
-					if _, e3 := execGorm(tx, 
+					if _, e3 := execGorm(tx,
 						`INSERT INTO FT_HISTORICO_CANAIS (id_historico, id_canal)
 								SELECT ?, id_canal FROM DM_CANAIS_COMUNICACAO WHERE nome = ?`,
 						lastID, nome,
@@ -905,14 +905,24 @@ func MovimentarProcesso(c *gin.Context) {
 					 WHERE e.id_etapa_processo = ?`,
 					nextEtapaID,
 				).Scan(&colID, &colNome)
-				_, _ = execGorm(tx, 
+				_, _ = execGorm(tx,
 					`UPDATE FT_PROCESSOS
 					 SET id_etapa_processo = ?, sub_etapa = NULL, id_sub_etapa_processo = NULL,
 					     id_coluna = ?, nome_coluna = ?, ultima_atualizacao = NOW()
 					 WHERE id_processo = ?`,
 					nextEtapaID,
-					func() interface{} { if colID.Valid { return colID.Int64 }; return nil }(),
-					func() interface{} { if colNome.Valid { return colNome.String }; return nil }(),
+					func() interface{} {
+						if colID.Valid {
+							return colID.Int64
+						}
+						return nil
+					}(),
+					func() interface{} {
+						if colNome.Valid {
+							return colNome.String
+						}
+						return nil
+					}(),
 					processoID,
 				)
 				// Insere histórico de avanço automático
@@ -987,7 +997,7 @@ func MovimentarProcesso(c *gin.Context) {
 				_ = os.MkdirAll("uploads/", os.ModePerm)
 				for _, file := range files {
 					filename := filepath.Base(file.Filename)
-						filePath := filepath.Join("uploads/", fmt.Sprintf("%d-gestor-%d-%s", processoID, time.Now().Unix(), filename))
+					filePath := filepath.Join("uploads/", fmt.Sprintf("%d-gestor-%d-%s", processoID, time.Now().Unix(), filename))
 					if err := c.SaveUploadedFile(file, filePath); err != nil {
 						log.Printf("[MOV-ANEXO] save error (proc=%d file=%s): %v", processoID, filename, err)
 						c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar anexo do gestor"})
@@ -1008,7 +1018,7 @@ func MovimentarProcesso(c *gin.Context) {
 
 	// Commit (mesmo se não tiver histórico — evita handler sem resposta)
 	if err := tx.Commit().Error; err != nil {
-    log.Printf("[DEBUG-MOV] commit error (proc=%d): %v", processoID, err)
+		log.Printf("[DEBUG-MOV] commit error (proc=%d): %v", processoID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar a transação"})
 		return
 	}
@@ -1109,14 +1119,14 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 		DataUpload string `json:"data_upload,omitempty"`
 	}
 
-
 	rows, err := queryGorm(database.GormDB_App, `
-        SELECT
-            h.id_historico,
-            h.id_usuario_gestor,
-            h.status_anterior,
-            h.status_novo,
-            h.etapa_anterior,
+          SELECT
+              h.id_historico,
+              h.id_usuario_gestor,
+              COALESCE(h.mail_graph_message_id, '') AS mail_graph_message_id,
+              h.status_anterior,
+              h.status_novo,
+              h.etapa_anterior,
             h.etapa_nova,
             h.sub_etapa,
             h.relevancia_anterior,
@@ -1132,10 +1142,11 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
         LEFT JOIN FT_HISTORICO_CANAIS hc ON hc.id_historico = h.id_historico
         LEFT JOIN DM_CANAIS_COMUNICACAO dc ON dc.id_canal = hc.id_canal
         WHERE h.id_requisicao = ?
-        GROUP BY
-            h.id_historico,
-            h.id_usuario_gestor,
-            h.status_anterior,
+          GROUP BY
+              h.id_historico,
+              h.id_usuario_gestor,
+              h.mail_graph_message_id,
+              h.status_anterior,
             h.status_novo,
             h.etapa_anterior,
             h.etapa_nova,
@@ -1157,23 +1168,24 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 	defer rows.Close()
 
 	type Item struct {
-		ID               int64     `json:"id_historico"`
-		GestorID         int64     `json:"id_usuario_gestor"`
-		StatusAnt        *string   `json:"status_anterior"`
-		StatusNovo       *string   `json:"status_novo"`
-		StatusComp       string    `json:"status_composto"`
-		EtapaAnt         *string   `json:"etapa_anterior"`
-		EtapaNova        *string   `json:"etapa_nova"`
-		SubEtapa         *string   `json:"sub_etapa"`
-		RelAnt           *bool     `json:"relevancia_anterior"`
-		RelNova          *bool     `json:"relevancia_nova"`
-		Comentario       *string   `json:"comentario"`
-		JustAtraso       *string   `json:"justificativa_atraso"`
+  		ID               int64      `json:"id_historico"`
+  		GestorID         int64      `json:"id_usuario_gestor"`
+  		MailGraphMessageID string   `json:"mail_graph_message_id,omitempty"`
+  		StatusAnt        *string    `json:"status_anterior"`
+		StatusNovo       *string    `json:"status_novo"`
+		StatusComp       string     `json:"status_composto"`
+		EtapaAnt         *string    `json:"etapa_anterior"`
+		EtapaNova        *string    `json:"etapa_nova"`
+		SubEtapa         *string    `json:"sub_etapa"`
+		RelAnt           *bool      `json:"relevancia_anterior"`
+		RelNova          *bool      `json:"relevancia_nova"`
+		Comentario       *string    `json:"comentario"`
+		JustAtraso       *string    `json:"justificativa_atraso"`
 		DataMov          *time.Time `json:"data_movimentacao,omitempty"`
-		TipoMov          *string   `json:"tipo_movimentacao,omitempty"`
-		Canais           []string  `json:"canais,omitempty"`
-		CanalComunicacao string    `json:"canal_comunicacao,omitempty"`
-		UsuarioNome      *string   `json:"usuario_nome,omitempty"`
+		TipoMov          *string    `json:"tipo_movimentacao,omitempty"`
+		Canais           []string   `json:"canais,omitempty"`
+		CanalComunicacao string     `json:"canal_comunicacao,omitempty"`
+		UsuarioNome      *string    `json:"usuario_nome,omitempty"`
 		Anexos           []AnexoOut `json:"anexos,omitempty"`
 	}
 	var out []Item
@@ -1185,9 +1197,9 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 		var usuarioNome sql.NullString
 		var tipoMov sql.NullString
 		var dataMov sql.NullTime
-		if err := rows.Scan(
-			&it.ID, &it.GestorID, &it.StatusAnt, &it.StatusNovo,
-			&it.EtapaAnt, &it.EtapaNova, &it.SubEtapa,
+ 		if err := rows.Scan(
+ 			&it.ID, &it.GestorID, &it.MailGraphMessageID, &it.StatusAnt, &it.StatusNovo,
+ 			&it.EtapaAnt, &it.EtapaNova, &it.SubEtapa,
 			&relAnt, &relNov, &it.Comentario, &it.JustAtraso, &dataMov,
 			&tipoMov, &usuarioNome, &canaisCSV,
 		); err == nil {
@@ -1256,10 +1268,10 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 	}
 	// Carrega anexos do processo e tenta associar ao historico por proximidade de data
 	type anexoDB struct {
-		Nome   string
+		Nome    string
 		Caminho string
-	HistID  sql.NullInt64
-		Data   sql.NullTime
+		HistID  sql.NullInt64
+		Data    sql.NullTime
 	}
 	anexosDB := make([]anexoDB, 0)
 	if rowsA, errA := queryGorm(database.GormDB_App, `
@@ -1271,7 +1283,9 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 		for rowsA.Next() {
 			var a anexoDB
 			if err := rowsA.Scan(&a.Nome, &a.Caminho, &a.Data); err == nil {
-				if id, ok := parseHistIDFromPath(a.Caminho); ok { a.HistID = sql.NullInt64{Int64: id, Valid: true} }
+				if id, ok := parseHistIDFromPath(a.Caminho); ok {
+					a.HistID = sql.NullInt64{Int64: id, Valid: true}
+				}
 				anexosDB = append(anexosDB, a)
 			}
 		}
@@ -1283,7 +1297,9 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 		for rowsA.Next() {
 			var a anexoDB
 			if err := rowsA.Scan(&a.Nome, &a.Caminho, &a.Data); err == nil {
-				if id, ok := parseHistIDFromPath(a.Caminho); ok { a.HistID = sql.NullInt64{Int64: id, Valid: true} }
+				if id, ok := parseHistIDFromPath(a.Caminho); ok {
+					a.HistID = sql.NullInt64{Int64: id, Valid: true}
+				}
 				anexosDB = append(anexosDB, a)
 			}
 		}
@@ -1453,14 +1469,14 @@ func AddHistoricoAnexo(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar anexo"})
 			return
 		}
-		_, err := execGorm(tx, 
+		_, err := execGorm(tx,
 			"INSERT INTO FT_ANEXOS (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload) VALUES (?, ?, ?, 'gestor', ?)",
 			processoID, filename, filePath, histTime.Time,
 		)
 		if err != nil {
 			log.Printf("[HIST-ANEXO] insert error (proc=%d hist=%d file=%s): %v", processoID, histID, filename, err)
 			// Fallback: coluna data_upload pode não existir
-			if _, err2 := execGorm(tx, 
+			if _, err2 := execGorm(tx,
 				"INSERT INTO FT_ANEXOS (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por) VALUES (?, ?, ?, 'gestor')",
 				processoID, filename, filePath,
 			); err2 != nil {
@@ -1618,7 +1634,7 @@ func ComentarProcesso(c *gin.Context) {
 				if !allowed[n] {
 					continue
 				}
-				if _, e3 := execGorm(tx, 
+				if _, e3 := execGorm(tx,
 					`INSERT INTO FT_HISTORICO_CANAIS (id_historico, id_canal)
                      SELECT ?, id_canal FROM DM_CANAIS_COMUNICACAO WHERE nome = ?`,
 					lastID, n); e3 != nil {
@@ -1641,7 +1657,7 @@ func ComentarProcesso(c *gin.Context) {
 					if !allowed[n] {
 						continue
 					}
-					if _, e3 := execGorm(tx, 
+					if _, e3 := execGorm(tx,
 						`INSERT INTO FT_HISTORICO_CANAIS (id_historico, id_canal)
                          SELECT ?, id_canal FROM DM_CANAIS_COMUNICACAO WHERE nome = ?`,
 						lastID, n); e3 != nil {
@@ -1838,8 +1854,8 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 	}
 
 	var payload struct {
-		CreditoSimples   string `json:"credito_simples"`   // Recebe como string, converte abaixo
-		CreditoDobro     string `json:"credito_dobro"`     // Recebe como string, converte abaixo
+		CreditoSimples   string `json:"credito_simples"` // Recebe como string, converte abaixo
+		CreditoDobro     string `json:"credito_dobro"`   // Recebe como string, converte abaixo
 		DataProcedencia  string `json:"data_procedencia"`
 		DataCreditoDobro string `json:"data_credito_dobro"`
 	}
@@ -2041,7 +2057,7 @@ func DescartarProcesso(c *gin.Context) {
 	}
 	statusNovo := "Indeferido"
 
-	if _, err = execGorm(tx, 
+	if _, err = execGorm(tx,
 		`INSERT INTO FT_HISTORICO_MOVIMENTACOES 
            (id_requisicao, id_usuario_gestor, status_anterior, status_novo, 
             etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao) 
@@ -2473,6 +2489,12 @@ func DeleteAlerta(c *gin.Context) {
 	if _, err := execGorm(database.GormDB_App, "DELETE FROM FT_ALERTAS WHERE id_alerta=?", id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao excluir"})
 		return
+	}
+	if v, ok := c.Get("userID"); ok {
+		if uid, ok2 := v.(int64); ok2 {
+			notifyUnread(uid)
+			sse.BroadcastUser(uid, sse.Event{Type: "alerta_unread"})
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Alerta excluído"})
 }

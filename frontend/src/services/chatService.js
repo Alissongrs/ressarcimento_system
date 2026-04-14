@@ -59,3 +59,13 @@ export const addChatMessage = async ({ id, role, content }) => {
   const resp = await api.post(`/chat/sessions/${id}/messages`, { role, content });
   return resp.data;
 };
+
+// Chat global de processos (acesso ao banco de dados em tempo real)
+export const askProcessosChat = async ({ question, history, signal }) => {
+  const resp = await api.post(
+    '/chat/processos',
+    { question, history: history || [] },
+    { signal, timeout: 60000 },
+  );
+  return resp.data;
+};

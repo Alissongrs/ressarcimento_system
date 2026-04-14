@@ -967,13 +967,13 @@ func MailMessageLinkProcess(c *gin.Context) {
 
 	histID := int64(0)
 	if body.MoveProcess {
-		histID, err = registerEmailMoveHistory(tx, body.ProcessoID, createdBy, body.Note, body.Move.Etapa, body.Move.Sub, body.Move.Comentario, msgBodyHTML)
+		histID, err = registerEmailMoveHistory(tx, body.ProcessoID, createdBy, body.Note, body.Move.Etapa, body.Move.Sub, body.Move.Comentario, id, msgBodyHTML)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 	} else {
-		histID, err = registerProcessHistory(tx, body.ProcessoID, createdBy, body.Note, msgBodyHTML)
+		histID, err = registerProcessHistory(tx, body.ProcessoID, createdBy, body.Note, id, msgBodyHTML)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -1420,7 +1420,7 @@ func upsertMailMessageTx(tx *gorm.DB, msg *services.GraphMessageDetail) (int64, 
 		if pid, ok := findProcessByThreadIDTx(tx, threadID); ok {
 			if !hasProcessMailLinkTx(tx, pid, id) {
 				_ = linkProcessMailTx(tx, pid, id, 0, "auto-link thread")
-				_, _ = registerProcessHistory(tx, pid, 0, "Resposta de e-mail vinculada automaticamente")
+				_, _ = registerProcessHistory(tx, pid, 0, "Resposta de e-mail vinculada automaticamente", graphID)
 			}
 		}
 	}
@@ -1428,7 +1428,7 @@ func upsertMailMessageTx(tx *gorm.DB, msg *services.GraphMessageDetail) (int64, 
 		text := strings.TrimSpace(msg.Subject + " " + msg.BodyPreview)
 		if pid, ok := findProcessByUCTx(tx, text); ok {
 			_ = linkProcessMailTx(tx, pid, id, 0, "auto-link uc")
-			_, _ = registerProcessHistory(tx, pid, 0, "E-mail vinculado automaticamente por UC")
+			_, _ = registerProcessHistory(tx, pid, 0, "E-mail vinculado automaticamente por UC", graphID)
 		}
 	}
 	return id, nil
@@ -2039,7 +2039,7 @@ func mailAttachmentExists(tx *gorm.DB, mailID int64, sha string) (bool, error) {
 	return count > 0, nil
 }
 
-func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note string, emailBody ...string) (int64, error) {
+func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note string, mailGraphMessageID string, emailBody ...string) (int64, error) {
 	body := ""
 	if len(emailBody) > 0 {
 		body = strings.TrimSpace(emailBody[0])
@@ -2086,9 +2086,9 @@ func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note st
         (id_requisicao, id_usuario_gestor,
          status_anterior, status_novo,
          etapa_anterior, etapa_nova, sub_etapa,
-         comentario, data_movimentacao, tipo_movimentacao)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		processoID, userVal, statusNome, statusNome, etapaTxt, etapaTxt, subTxt, comentario, time.Now(), "EMAIL",
+         comentario, data_movimentacao, tipo_movimentacao, mail_graph_message_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		processoID, userVal, statusNome, statusNome, etapaTxt, etapaTxt, subTxt, comentario, time.Now(), "EMAIL", strings.TrimSpace(mailGraphMessageID),
 	)
 	if err != nil {
 		return 0, err
@@ -2097,7 +2097,7 @@ func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note st
 	return id, nil
 }
 
-func registerEmailMoveHistory(tx *gorm.DB, processoID int64, userID int64, note string, etapa string, sub string, moveComentario string, emailBody ...string) (int64, error) {
+func registerEmailMoveHistory(tx *gorm.DB, processoID int64, userID int64, note string, etapa string, sub string, moveComentario string, mailGraphMessageID string, emailBody ...string) (int64, error) {
 	novaEtapa := strings.TrimSpace(etapa)
 	novaSub := strings.TrimSpace(sub)
 	if novaEtapa == "" || novaSub == "" {
@@ -2178,9 +2178,9 @@ func registerEmailMoveHistory(tx *gorm.DB, processoID int64, userID int64, note 
         (id_requisicao, id_usuario_gestor,
          status_anterior, status_novo,
          etapa_anterior, etapa_nova, sub_etapa,
-         comentario, data_movimentacao, tipo_movimentacao)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		processoID, userVal, statusNome, statusNome, etapaAnterior.String, novaEtapa, novaSub, comentario, time.Now(), "EMAIL",
+         comentario, data_movimentacao, tipo_movimentacao, mail_graph_message_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		processoID, userVal, statusNome, statusNome, etapaAnterior.String, novaEtapa, novaSub, comentario, time.Now(), "EMAIL", strings.TrimSpace(mailGraphMessageID),
 	)
 	if err != nil {
 		return 0, err

@@ -88,7 +88,7 @@ const fmtDataCurta = (d) => {
 
 /* ===================== COMPONENTE ===================== */
 
-const DISABLE_ALERTS = true;
+const DISABLE_ALERTS = false;
 
 export default function ProcessoCard({ processo, meta, onClick }) {
   const pid = processo?.id ?? processo?.processo_id ?? processo?.requisicao_id;
@@ -181,6 +181,8 @@ export default function ProcessoCard({ processo, meta, onClick }) {
   // Alerta e contorno de prazo vencido
   const dataAlerta =
     toDate(pick(processo, ['data_alerta', 'dataAlerta', 'DataAlerta'])) || null;
+  const [customAlertDate, setCustomAlertDate] = useState(dataAlerta);
+  useEffect(() => { setCustomAlertDate(dataAlerta); }, [dataAlerta]);
 
   const alertasCount = (() => {
     const v = pick(processo, ['alertas_count', 'AlertasCount', '__alertas']);
@@ -188,7 +190,8 @@ export default function ProcessoCard({ processo, meta, onClick }) {
     return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
   })();
 
-  const alertaVencido = useMemo(() => { if (typeof DISABLE_ALERTS !== 'undefined' && DISABLE_ALERTS) return false; if (!dataAlerta) return false; const hoje = new Date(); const d = new Date(dataAlerta.getFullYear(), dataAlerta.getMonth(), dataAlerta.getDate(), 23, 59, 59); return d.getTime() < hoje.getTime(); }, [dataAlerta, nowTick]);
+  const effectiveAlertDate = customAlertDate || dataAlerta;
+  const alertaVencido = useMemo(() => { if (typeof DISABLE_ALERTS !== 'undefined' && DISABLE_ALERTS) return false; if (!effectiveAlertDate) return false; const hoje = new Date(); const d = new Date(effectiveAlertDate.getFullYear(), effectiveAlertDate.getMonth(), effectiveAlertDate.getDate(), 23, 59, 59); return d.getTime() < hoje.getTime(); }, [effectiveAlertDate, nowTick]);
 
   // Última movimentação (histórico)
   const [ultimaMovLocal, setUltimaMovLocal] = useState(null);
@@ -216,6 +219,19 @@ const ultimaDataISO = useMemo(() => {
   // Modal (Anexos / Faturas)
   const [modal, setModal] = useState({ open: false, type: null, title: '', rows: [], loading: false });
   const closeModal = () => setModal({ open: false, type: null, title: '', rows: [], loading: false });
+  const [alertModalOpen, setAlertModalOpen] = useState(false);
+  const [alertSaving, setAlertSaving] = useState(false);
+  const [alertError, setAlertError] = useState('');
+  const [alertForm, setAlertForm] = useState({
+    mensagem: '',
+    data_alerta: effectiveAlertDate ? effectiveAlertDate.toISOString().slice(0, 10) : '',
+  });
+  useEffect(() => {
+    setAlertForm((prev) => ({
+      ...prev,
+      data_alerta: effectiveAlertDate ? effectiveAlertDate.toISOString().slice(0, 10) : '',
+    }));
+  }, [effectiveAlertDate]);
 
   const openAnexos = async () => {
     if (!pid) return;
@@ -428,10 +444,49 @@ const ultimaDataISO = useMemo(() => {
     }
   };
 
+  const openAlertModal = (e) => {
+    e.stopPropagation();
+    setAlertError('');
+    setAlertForm({
+      mensagem: cliente ? `Acompanhar retorno da distribuidora para ${cliente}` : 'Acompanhar processo',
+      data_alerta: effectiveAlertDate ? effectiveAlertDate.toISOString().slice(0, 10) : '',
+    });
+    setAlertModalOpen(true);
+  };
+
+  const handleSaveAlert = async (e) => {
+    e.stopPropagation();
+    if (!pid) return;
+    const mensagem = String(alertForm.mensagem || '').trim();
+    if (!mensagem) {
+      setAlertError('Informe a mensagem do alerta.');
+      return;
+    }
+    setAlertSaving(true);
+    setAlertError('');
+    try {
+      await criarAlertaProcesso(pid, {
+        mensagem,
+        data_alerta: String(alertForm.data_alerta || '').trim() || undefined,
+      });
+      if (String(alertForm.data_alerta || '').trim()) {
+        await salvarDataAlerta(pid, { data_alerta: String(alertForm.data_alerta).trim() });
+        setCustomAlertDate(new Date(`${String(alertForm.data_alerta).trim()}T00:00:00`));
+      } else {
+        setCustomAlertDate(null);
+      }
+      setAlertModalOpen(false);
+    } catch (err) {
+      setAlertError(err?.response?.data?.error || 'Falha ao salvar alerta.');
+    } finally {
+      setAlertSaving(false);
+    }
+  };
+
 
   const tooltip = [
     erroHist || '',
-    dataAlerta ? ('Alerta: ' + fmtDataCurta(dataAlerta)) : '',
+    effectiveAlertDate ? ('Alerta: ' + fmtDataCurta(effectiveAlertDate)) : '',
     (processo?.__prazoVencido && processo?.__prazoDias) ? ('Prazo (' + processo.__prazoDias + 'd) vencido') : '',
     ultimaMovLocal?.comentario || ''
   ].filter(Boolean).join(' • ');
@@ -439,6 +494,7 @@ const ultimaDataISO = useMemo(() => {
   // Classes de borda: prioridade (favorito > suspenso > default) – alertas desativados
   const borderClasses = (() => {
     // Alertas desativados: ignora contornos de vencido
+    if (alertaVencido) return 'border-2 border-red-500 ring-1 ring-red-500/30';
     if (fav) return 'border-2 border-yellow-400 ring-1 ring-yellow-400/30';
     if (suspLocal) return 'border-2 border-amber-500 ring-1 ring-amber-300/30';
     return 'border panel-border hover:border-[var(--accent)]/60';
@@ -467,9 +523,8 @@ const ultimaDataISO = useMemo(() => {
         </div>
       )}
 
-      {/* FITA: Vencido – desativada */}
-      {/* eslint-disable-next-line no-constant-binary-expression */}
-      {false && alertaVencido && (
+      {/* FITA: Vencido */}
+      {alertaVencido && (
         <div className="absolute -left-2 -top-2 flex items-center gap-1 rounded-md bg-red-600 text-white text-[10px] px-2 py-0.5 shadow">
           <AlertTriangle size={12} /> Vencido
         </div>
@@ -507,32 +562,29 @@ const ultimaDataISO = useMemo(() => {
               title={`Alarme: ${sev}`}
             >{sev}</span>
           )}
-                      <div className="flex items-center gap-2 shrink-0 w-[72px] justify-end">
-          {/* eslint-disable-next-line no-constant-binary-expression */}
-          {false && (
-          <div
+                      <div className="flex items-center gap-2 shrink-0 w-[104px] justify-end">
+          <button
+            type="button"
             className={[
-              'relative rounded-md px-1.5 py-1 text-sm transition-colors',
-              alertaVencido ? 'text-red-500' : (alertasCount > 0 ? 'text-amber-500' : 'text-[var(--fg)]/70'),
-                          ].join(' ')}
-            title={(processo?.__prazoVencido && processo?.__prazoDias) ? ('Prazo (' + processo.__prazoDias + 'd) vencido') : ''}
-            onClick={(e) => e.stopPropagation()}
+              'relative p-1 rounded-md transition-colors',
+              alertaVencido ? 'text-red-500 hover:bg-red-500/10' : (alertasCount > 0 || effectiveAlertDate ? 'text-amber-500 hover:bg-amber-500/10' : 'text-[var(--fg)]/70 hover:bg-[var(--panel)]')
+            ].join(' ')}
+            title="Criar alerta do processo"
+            aria-label="Criar alerta do processo"
+            onClick={openAlertModal}
             onMouseDown={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
-            role="button"
-            tabIndex={-1}
           >
-            <Bell size={18} />
-            {(alertasCount > 0 || alertaVencido) && (
+            <Clock size={18} />
+            {(alertasCount > 0 || alertaVencido || effectiveAlertDate) && (
               <span className={[
                 'absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full text-[10px] leading-[18px] text-center px-[4px]',
                 alertaVencido ? 'bg-red-600 text-white' : 'bg-amber-500 text-black'
               ].join(' ')}>
-                {alertaVencido ? '!' : alertasCount}
+                {alertaVencido ? '!' : (alertasCount > 0 ? alertasCount : '•')}
               </span>
             )}
-          </div>
-          )}
+          </button>
           {/* Suspender/Retomar */}
           {!suspLocal ? (
             <button
@@ -602,6 +654,13 @@ const ultimaDataISO = useMemo(() => {
           <div className="flex items-center gap-3">
             <div className="text-xs opacity-70 w-[120px]">Última mov:</div>
             <div className="font-semibold tabular-nums">{carregandoHist ? '...' : (ultimaMovRel || '-')}</div>
+          </div>
+        </div>
+        <div className="flex items-start gap-2">
+          <Bell size={16} className={`mt-0.5 ${alertaVencido ? 'text-red-500' : 'opacity-70'}`} />
+          <div className="flex items-center gap-3">
+            <div className="text-xs opacity-70 w-[120px]">Próximo alerta:</div>
+            <div className={`font-semibold tabular-nums ${alertaVencido ? 'text-red-500' : ''}`}>{effectiveAlertDate ? fmtDataCurta(effectiveAlertDate) : '-'}</div>
           </div>
         </div>
         <div className="flex items-start gap-2">
@@ -688,6 +747,45 @@ const ultimaDataISO = useMemo(() => {
             </div>
             <div className="px-4 py-3 border-t panel-border text-right">
               <button onClick={closeModal} className="btn-outline">Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {alertModalOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-md sap-card text-[var(--fg)]">
+            <div className="flex items-center justify-between px-4 py-3 border-b panel-border">
+              <h3 className="text-lg font-bold inline-flex items-center gap-2"><Clock size={18} /> Alerta do processo</h3>
+              <button onClick={() => setAlertModalOpen(false)} className="btn-outline p-2"><X size={18} /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="block text-xs opacity-70 mb-1">Mensagem</label>
+                <textarea
+                  rows={3}
+                  value={alertForm.mensagem}
+                  onChange={(e) => setAlertForm((prev) => ({ ...prev, mensagem: e.target.value }))}
+                  className="w-full rounded-lg border px-3 py-2 text-sm bg-[var(--bg)] border-[var(--border)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                  placeholder="Ex.: cobrar resposta da distribuidora"
+                />
+              </div>
+              <div>
+                <label className="block text-xs opacity-70 mb-1">Data do alerta</label>
+                <input
+                  type="date"
+                  value={alertForm.data_alerta}
+                  onChange={(e) => setAlertForm((prev) => ({ ...prev, data_alerta: e.target.value }))}
+                  className="w-full rounded-lg border px-3 py-2 text-sm bg-[var(--bg)] border-[var(--border)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                />
+              </div>
+              {alertError && <div className="text-xs text-red-500">{alertError}</div>}
+            </div>
+            <div className="px-4 py-3 border-t panel-border flex items-center justify-between gap-2">
+              <button onClick={() => setAlertModalOpen(false)} className="btn-outline">Cancelar</button>
+              <button onClick={handleSaveAlert} disabled={alertSaving} className="btn-themed disabled:opacity-50">
+                {alertSaving ? 'Salvando...' : 'Salvar alerta'}
+              </button>
             </div>
           </div>
         </div>

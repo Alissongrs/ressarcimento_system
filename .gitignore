@@ -56,3 +56,8 @@ ressarcimento_system_old_*/
 
 # Backups gerados pelos scripts
 /backups/
+
+# Python virtual environments
+ia/venv/
+**/venv/
+ia/carga_query.sql

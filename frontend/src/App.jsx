@@ -35,6 +35,7 @@ import {
   LayoutDashboard,
   TrendingUp,
   Settings2,
+  CalendarDays,
 } from 'lucide-react';
 
 import FeedbackModal from './components/FeedbackModal.jsx';
@@ -44,8 +45,11 @@ import PageContainer from './components/PageContainer.jsx';
 
 // Components
 import AlertasVencimentoModal from './components/AlertasVencimentoModal.jsx';
+import AlertCalendarModal from './components/AlertCalendarModal.jsx';
+import AlertTicker from './components/AlertTicker.jsx';
 import GlobalNewProcessNotifier from './components/GlobalNewProcessNotifier.jsx';
 import FloatingEmailComposer from './components/FloatingEmailComposer.jsx';
+import GlobalChatWidget from './components/GlobalChatWidget.jsx';
 import { EmailComposeProvider } from './context/EmailComposeContext.jsx';
 
 // Pages
@@ -65,6 +69,7 @@ import AdminPrazos from './pages/AdminPrazos.jsx';
 import AdminEditor from './pages/AdminEditor.jsx';
 import AdminPlanilha from './pages/AdminPlanilha.jsx';
 import Backlog from './pages/Backlog.jsx';
+import RequisicaoForm from './pages/RequisicaoForm.jsx';
 
 // Alerts SSE
 import { getUnreadCount, connectAlertasSSE } from './services/alertaService.js';
@@ -115,7 +120,7 @@ function MailLinkMinimizedBar({ visible, onRestore }) {
   );
 }
 
-function TopNav({ role, unread, mailUnread, onLogout }) {
+function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const navigate = useNavigate();
   const baseItems = [
@@ -188,16 +193,28 @@ function TopNav({ role, unread, mailUnread, onLogout }) {
         </nav>
         <div className="top-nav-actions">
           {(role === 'admin' || role === 'gestor') && (
-            <button
-              type="button"
-              onClick={() => navigate('/caixa-de-email')}
-              className="top-nav-link top-nav-alert relative"
-              title="Caixa de Email"
-              aria-label="Caixa de Email"
-            >
-              <MailIcon className="top-nav-icon" />
-              {Number(mailUnread) > 0 && <span className="top-nav-badge">{mailUnread}</span>}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={onOpenAlertCalendar}
+                className="top-nav-link top-nav-alert relative"
+                title="Calendário de alertas"
+                aria-label="Calendário de alertas"
+              >
+                <CalendarDays className="top-nav-icon" />
+                {Number(unread) > 0 && <span className="top-nav-badge">{unread > 99 ? '99+' : unread}</span>}
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/caixa-de-email')}
+                className="top-nav-link top-nav-alert relative"
+                title="Caixa de Email"
+                aria-label="Caixa de Email"
+              >
+                <MailIcon className="top-nav-icon" />
+                {Number(mailUnread) > 0 && <span className="top-nav-badge">{mailUnread}</span>}
+              </button>
+            </>
           )}
           <button type="button" onClick={onLogout} className="top-nav-link top-nav-logout">
             <LogOut className="top-nav-icon" />
@@ -233,6 +250,7 @@ function App() {
   // Alerts state
   const [unread, setUnread] = useState(0);
   const [openGestorVenc, setOpenGestorVenc] = useState(false);
+  const [openAlertCalendar, setOpenAlertCalendar] = useState(false);
   const [openFeedback, setOpenFeedback] = useState(false);
   const [toast, setToast] = useState({ open: false, type: 'info', text: '', position: 'bottom-right' });
 
@@ -869,8 +887,16 @@ function App() {
         <RouteKeeper user={user} />
         <div className="flex min-h-screen themed-surface flex-col">
           {user && (
-            <TopNav role={role} mailUnread={mailUnread} onLogout={logout} />
+            <TopNav
+              role={role}
+              unread={unread}
+              mailUnread={mailUnread}
+              onOpenAlertCalendar={() => setOpenAlertCalendar(true)}
+              onLogout={logout}
+            />
           )}
+
+          {user && (role === 'gestor' || role === 'admin') && <AlertTicker />}
 
           <main className="flex-1 min-w-0 pt-16">
             <PageContainer>
@@ -897,6 +923,7 @@ function App() {
                       }
                     />
                     <Route path="/backlog" element={<Backlog />} />
+                    <Route path="/novo" element={<RequisicaoForm />} />
 
                     {role === 'gestor' || role === 'admin' ? (
                       <>
@@ -970,8 +997,13 @@ function App() {
           open={openGestorVenc}
           onClose={() => setOpenGestorVenc(false)}
         />
+        <AlertCalendarModal
+          open={openAlertCalendar}
+          onClose={() => setOpenAlertCalendar(false)}
+        />
         <CommandPaletteHost />
         <FloatingEmailComposer />
+        {user && <GlobalChatWidget />}
 
         {sessionExpired && (
           <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">

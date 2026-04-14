@@ -370,6 +370,17 @@ const RequisicaoForm = ({ initialUc = '', manualMode: manualModeProp = false, on
     }
     data.append('periodosIrregularidade', JSON.stringify(buildPeriodosList()));
     data.append('RessarcimentoEstimado', formData.ressarcimentoEstimado);
+    // Envia lista completa de faturas selecionadas (link + mes_ref) para o backend
+    const selectedFaturasDetalhes = Array.from(faturasSelected)
+      .sort((a, b) => a - b)
+      .map((idx) => ({
+        link: toStr(todasFaturas[idx]?.link || ''),
+        mes_ref: toStr(todasFaturas[idx]?.mes_ref || ''),
+      }))
+      .filter((f) => f.link);
+    if (selectedFaturasDetalhes.length > 0) {
+      data.append('linksFaturasDetalhes', JSON.stringify(selectedFaturasDetalhes));
+    }
     anexos.forEach((f) => data.append('anexos', f));
     try {
       const resp = await criarRequisicao(data);

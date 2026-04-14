@@ -275,12 +275,12 @@ func buildFichaFilters(c *gin.Context) (string, []any) {
 	}
 
 	if uc := strings.TrimSpace(c.Query("uc")); uc != "" {
-		sb.WriteString(" AND LOWER(COALESCE(UC, '')) LIKE ? ESCAPE '\\'")
+		sb.WriteString(" AND LOWER(COALESCE(UC, '')) LIKE ? ESCAPE '\\\\'")
 		args = append(args, "%"+strings.ToLower(escapeLike(uc))+"%")
 	}
 
 	if cliente := strings.TrimSpace(c.Query("cliente")); cliente != "" {
-		sb.WriteString(" AND LOWER(COALESCE(RAZAO_SOCIAL, '')) LIKE ? ESCAPE '\\'")
+		sb.WriteString(" AND LOWER(COALESCE(RAZAO_SOCIAL, '')) LIKE ? ESCAPE '\\\\'")
 		args = append(args, "%"+strings.ToLower(escapeLike(cliente))+"%")
 	}
 
@@ -324,12 +324,12 @@ func buildFichaFilters(c *gin.Context) (string, []any) {
 		pattern := "%" + strings.ToLower(escapeLike(busca)) + "%"
 		sb.WriteString(" AND (")
 		sb.WriteString(strings.Join([]string{
-			"LOWER(COALESCE(CAST(UC AS CHAR), '')) LIKE ? ESCAPE '\\'",
-			"LOWER(COALESCE(RAZAO_SOCIAL, '')) LIKE ? ESCAPE '\\'",
-			"LOWER(COALESCE(Concessionaria, '')) LIKE ? ESCAPE '\\'",
-			"LOWER(COALESCE(Mes_Ref, '')) LIKE ? ESCAPE '\\'",
-			"LOWER(COALESCE(fichas_aplicadas, '')) LIKE ? ESCAPE '\\'",
-			"LOWER(COALESCE(detalhamento, '')) LIKE ? ESCAPE '\\'",
+			"LOWER(COALESCE(CAST(UC AS CHAR), '')) LIKE ? ESCAPE '\\\\'",
+			"LOWER(COALESCE(RAZAO_SOCIAL, '')) LIKE ? ESCAPE '\\\\'",
+			"LOWER(COALESCE(Concessionaria, '')) LIKE ? ESCAPE '\\\\'",
+			"LOWER(COALESCE(Mes_Ref, '')) LIKE ? ESCAPE '\\\\'",
+			"LOWER(COALESCE(fichas_aplicadas, '')) LIKE ? ESCAPE '\\\\'",
+			"LOWER(COALESCE(detalhamento, '')) LIKE ? ESCAPE '\\\\'",
 		}, " OR "))
 		sb.WriteString(")")
 		for i := 0; i < 6; i++ {
@@ -367,7 +367,7 @@ func queryFichaSQL(c *gin.Context, ficha string) {
 
 	filtro := filtroFicha(ficha)
 	filtroExtra, filtroArgs := buildFichaFilters(c)
-	base := "FROM fichas_anomalias_cache f WHERE 1=1" + filtro + filtroExtra
+	base := "FROM fichas_anomalias_cache f WHERE COALESCE(f.deletado,0) = 0" + filtro + filtroExtra
 
 	// Contagem total
 	var total int64
@@ -441,8 +441,17 @@ func ListFicha05(c *gin.Context) { queryFichaSQL(c, "f05") }
 
 type salvarResultadoIAReq struct {
 	ID                         int64    `json:"id"`
-	ResultadoIA                string   `json:"resultado_ia"`
+	IaStatus                   string   `json:"ia_status"`             // CONFIRMADO | FALSO_POSITIVO | INCONCLUSIVO
+	IaFichasConfirmadas        string   `json:"ia_fichas_confirmadas"` // ex: "F02 | F04"
+	ResultadoIA                string   `json:"resultado_ia"`          // texto completo do parecer
 	ValorRessarcimentoEstimado *float64 `json:"valor_ressarcimento_estimado"`
+}
+
+var statusPermitidos = map[string]bool{
+	"CONFIRMADO":     true,
+	"FALSO_POSITIVO": true,
+	"INCONCLUSIVO":   true,
+	"PENDENTE":       true,
 }
 
 func SalvarResultadoIAFicha(c *gin.Context) {
@@ -457,8 +466,16 @@ func SalvarResultadoIAFicha(c *gin.Context) {
 	}
 
 	resultado := strings.TrimSpace(in.ResultadoIA)
-	if resultado == "" && in.ValorRessarcimentoEstimado == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "informe resultado_ia ou valor_ressarcimento_estimado"})
+	iaStatus := strings.ToUpper(strings.TrimSpace(in.IaStatus))
+
+	if resultado == "" && in.ValorRessarcimentoEstimado == nil && iaStatus == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "informe ao menos resultado_ia, ia_status ou valor_ressarcimento_estimado"})
+		return
+	}
+
+	// Valida ia_status se fornecido
+	if iaStatus != "" && !statusPermitidos[iaStatus] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ia_status inválido — use: CONFIRMADO, FALSO_POSITIVO, INCONCLUSIVO ou PENDENTE"})
 		return
 	}
 
@@ -474,22 +491,20 @@ func SalvarResultadoIAFicha(c *gin.Context) {
 		return
 	}
 
-	if in.ValorRessarcimentoEstimado != nil {
-		_, err = sqlDB.Exec(`
-			UPDATE fichas_anomalias_cache
-			   SET resultado_ia = ?,
-			       valor_ressarcimento_estimado = ?,
-			       resultado_salvo_em = NOW()
-			 WHERE id = ?`,
-			resultado, *in.ValorRessarcimentoEstimado, in.ID)
-	} else {
-		_, err = sqlDB.Exec(`
-			UPDATE fichas_anomalias_cache
-			   SET resultado_ia = ?,
-			       resultado_salvo_em = NOW()
-			 WHERE id = ?`,
-			resultado, in.ID)
-	}
+	_, err = sqlDB.Exec(`
+		UPDATE fichas_anomalias_cache
+		   SET resultado_ia                  = ?,
+		       ia_status                     = CASE WHEN ? != '' THEN ? ELSE ia_status END,
+		       ia_fichas_confirmadas         = CASE WHEN ? != '' THEN ? ELSE ia_fichas_confirmadas END,
+		       valor_ressarcimento_estimado  = COALESCE(?, valor_ressarcimento_estimado),
+		       resultado_salvo_em            = NOW()
+		 WHERE id = ?`,
+		resultado,
+		iaStatus, iaStatus,
+		strings.TrimSpace(in.IaFichasConfirmadas), strings.TrimSpace(in.IaFichasConfirmadas),
+		in.ValorRessarcimentoEstimado,
+		in.ID,
+	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("erro ao salvar resultado: %v", err)})
 		return
@@ -498,6 +513,8 @@ func SalvarResultadoIAFicha(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"ok":                           true,
 		"id":                           in.ID,
+		"ia_status":                    iaStatus,
+		"ia_fichas_confirmadas":        in.IaFichasConfirmadas,
 		"resultado_ia":                 resultado,
 		"valor_ressarcimento_estimado": in.ValorRessarcimentoEstimado,
 		"resultado_salvo_em":           time.Now(),
@@ -569,7 +586,7 @@ func GetUCFaturas(c *gin.Context) {
 		 FROM Faturas_Registradas_Cache
 		 WHERE UC = ?
 		 ORDER BY Mes_Ref DESC
-		 LIMIT 60`, uc)
+		 LIMIT 200`, uc)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao consultar: " + err.Error()})
 		return
@@ -604,6 +621,281 @@ func GetUCFaturas(c *gin.Context) {
 		result = []map[string]any{}
 	}
 	c.JSON(http.StatusOK, gin.H{"columns": cols, "rows": result})
+}
+
+// GetUCConsumoChart retorna dados estruturados para o gráfico de consumo F02.
+// Query: ?uc=E5041338872&mes_ref=2022-11
+// Retorna pontos com tipo: "historico", "auditado", "posterior"
+// GetUCsResumo retorna 1 linha por UC com dados agregados: qtd faturas, erros, % erros, última fatura.
+func GetUCsResumo(c *gin.Context) {
+	empresa := c.Query("empresa") // cod_empresa opcional
+	busca   := c.Query("busca")   // filtro livre por UC/cliente
+
+	db := database.GormDB_App
+	if db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "banco indisponível"})
+		return
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	where := "WHERE frc.UC IS NOT NULL AND frc.UC != '' AND TRIM(frc.UC) != ''"
+	args  := []interface{}{}
+	if empresa != "" {
+		where += " AND frc.Cod_Empresa = ?"
+		args = append(args, empresa)
+	}
+	if busca != "" {
+		where += " AND (frc.UC LIKE ? OR frc.RAZAO_SOCIAL LIKE ?)"
+		like := "%" + busca + "%"
+		args = append(args, like, like)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			frc.UC,
+			COALESCE(MAX(frc.RAZAO_SOCIAL), '')                        AS cliente,
+			COALESCE(MAX(frc.Concessionaria), '')                       AS distribuidora,
+			COALESCE(MAX(frc.Cod_Empresa), 0)                           AS cod_empresa,
+			COUNT(DISTINCT frc.id)                                      AS quantidade_faturas,
+			COUNT(DISTINCT fac.id)                                      AS quantidade_erros,
+			ROUND(COUNT(DISTINCT fac.id) * 100.0 / COUNT(DISTINCT frc.id), 1) AS percentual_erros,
+			MAX(DATE_FORMAT(frc.Mes_Ref, '%%Y-%%m'))                    AS ultima_fatura,
+			COALESCE(MAX(fac.desvio_pct_max), 0)                        AS max_desvio,
+			COALESCE(SUM(CASE WHEN fac.ia_status = 'CONFIRMADO'
+				THEN COALESCE(fac.valor_ressarcimento_estimado, 0) ELSE 0 END), 0) AS ressarcimento_confirmado,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F01%%' THEN 1 ELSE 0 END) AS tem_f01,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F02%%' THEN 1 ELSE 0 END) AS tem_f02,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F03%%' THEN 1 ELSE 0 END) AS tem_f03,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F04%%' THEN 1 ELSE 0 END) AS tem_f04,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F05%%' THEN 1 ELSE 0 END) AS tem_f05
+		FROM Faturas_Registradas_Cache frc
+		LEFT JOIN fichas_anomalias_cache fac ON fac.id = frc.id AND fac.deletado = 0
+		%s
+		GROUP BY frc.UC
+		ORDER BY quantidade_erros DESC, quantidade_faturas DESC
+		LIMIT 1000
+	`, where)
+
+	rows, err := sqlDB.Query(query, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	type UCResumo struct {
+		UC                      string   `json:"uc"`
+		Cliente                 string   `json:"cliente"`
+		Distribuidora           string   `json:"distribuidora"`
+		CodEmpresa              int      `json:"cod_empresa"`
+		QuantidadeFaturas       int      `json:"quantidade_faturas"`
+		QuantidadeErros         int      `json:"quantidade_erros"`
+		PercentualErros         float64  `json:"percentual_erros"`
+		UltimaFatura            string   `json:"ultima_fatura"`
+		MaxDesvio               float64  `json:"max_desvio"`
+		RessarcimentoConfirmado float64  `json:"ressarcimento_confirmado"`
+		Fichas                  []string `json:"fichas"` // ex: ["F01","F02"]
+	}
+
+	var ucs []UCResumo
+	for rows.Next() {
+		var u UCResumo
+		var temF01, temF02, temF03, temF04, temF05 int
+		if err := rows.Scan(
+			&u.UC, &u.Cliente, &u.Distribuidora, &u.CodEmpresa,
+			&u.QuantidadeFaturas, &u.QuantidadeErros, &u.PercentualErros,
+			&u.UltimaFatura, &u.MaxDesvio, &u.RessarcimentoConfirmado,
+			&temF01, &temF02, &temF03, &temF04, &temF05,
+		); err == nil {
+			fichas := []string{}
+			if temF01 == 1 { fichas = append(fichas, "F01") }
+			if temF02 == 1 { fichas = append(fichas, "F02") }
+			if temF03 == 1 { fichas = append(fichas, "F03") }
+			if temF04 == 1 { fichas = append(fichas, "F04") }
+			if temF05 == 1 { fichas = append(fichas, "F05") }
+			u.Fichas = fichas
+			ucs = append(ucs, u)
+		}
+	}
+	if ucs == nil {
+		ucs = []UCResumo{}
+	}
+	c.JSON(http.StatusOK, gin.H{"ucs": ucs, "total": len(ucs)})
+}
+
+func GetUCConsumoChart(c *gin.Context) {
+	uc     := c.Query("uc")
+	mesRef := c.Query("mes_ref") // "YYYY-MM"
+	if uc == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "parâmetro uc obrigatório"})
+		return
+	}
+	// fichas_anomalias_cache só existe em db_ressarcimento (GormDB_App).
+	// Faturas_Registradas_Cache também existe lá (espelhada pelo pipeline).
+	db := database.GormDB_App
+	if db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "banco não disponível"})
+		return
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Busca todos os registros com consumo real + NroMedidor para detectar troca.
+	// A classificação historico/auditado/posterior é feita em Go pelo mesRef.
+	rows, err := sqlDB.Query(`
+		SELECT DATE_FORMAT(frc.Mes_Ref, '%Y-%m') AS mes,
+		       COALESCE(frc.KWH_FPonta,    0) AS kwh_fp,
+		       COALESCE(frc.KWH_Ponta,     0) AS kwh_p,
+		       COALESCE(frc.KWH_Reservado, 0) AS kwh_r,
+		       COALESCE(frc.KWH_FPonta, 0) + COALESCE(frc.KWH_Ponta, 0) + COALESCE(frc.KWH_Reservado, 0) AS kwh_total,
+		       COALESCE(frc.RS_Total_Fatura, 0) AS rs_total,
+		       COALESCE(frc.NroMedidor, '') AS nro_medidor,
+		       COALESCE(frc.Link, '') AS link,
+		       CASE WHEN fac.id IS NOT NULL THEN 1 ELSE 0 END AS anomalia,
+		       COALESCE(fac.fichas_aplicadas, '') AS fichas,
+		       COALESCE(fac.ia_status, '') AS ia_status_fac
+		FROM Faturas_Registradas_Cache frc
+		LEFT JOIN fichas_anomalias_cache fac ON fac.id = frc.id AND fac.deletado = 0
+		WHERE frc.UC = ?
+		  AND (COALESCE(frc.KWH_FPonta, 0) + COALESCE(frc.KWH_Ponta, 0) + COALESCE(frc.KWH_Reservado, 0) > 0
+		       OR COALESCE(frc.KWH_Total, 0) > 0
+		       OR DATE_FORMAT(frc.Mes_Ref, '%Y-%m') = ?)
+		ORDER BY frc.Mes_Ref ASC
+	`, uc, mesRef)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	type rawPonto struct {
+		Mes        string
+		KwhFP      float64
+		KwhP       float64
+		KwhR       float64
+		KwhTotal   float64
+		RsTotal    float64
+		NroMedidor string
+		Link       string
+		Anomalia   int
+		Fichas     string
+		IAStatus   string
+	}
+
+	var raw []rawPonto
+	var somaHist float64
+	var cntHist  int
+
+	for rows.Next() {
+		var p rawPonto
+		if err := rows.Scan(&p.Mes, &p.KwhFP, &p.KwhP, &p.KwhR, &p.KwhTotal, &p.RsTotal, &p.NroMedidor, &p.Link, &p.Anomalia, &p.Fichas, &p.IAStatus); err != nil {
+			continue
+		}
+		if mesRef == "" || p.Mes < mesRef {
+			somaHist += p.KwhTotal
+			cntHist++
+		}
+		raw = append(raw, p)
+	}
+
+	media := 0.0
+	if cntHist > 0 {
+		media = somaHist / float64(cntHist)
+	}
+
+	// Calcular MAD (Median Absolute Deviation) sobre os pontos históricos
+	mad := 0.0
+	if cntHist > 1 {
+		// Coleta valores históricos para calcular MAD
+		histVals := make([]float64, 0, cntHist)
+		for _, p := range raw {
+			if mesRef == "" || p.Mes < mesRef {
+				histVals = append(histVals, p.KwhTotal)
+			}
+		}
+		// MAD = median(|xi - median(x)|)
+		// Usamos média como aproximação (mais simples, sem sort completo)
+		var somaAbsDev float64
+		for _, v := range histVals {
+			diff := v - media
+			if diff < 0 {
+				diff = -diff
+			}
+			somaAbsDev += diff
+		}
+		mad = somaAbsDev / float64(len(histVals))
+	}
+
+	type Ponto struct {
+		Mes          string   `json:"mes"`
+		KwhFP        float64  `json:"kwh_fp"`
+		KwhP         float64  `json:"kwh_p"`
+		KwhR         float64  `json:"kwh_r"`
+		KwhTotal     float64  `json:"kwh_total"`
+		RsTotal      float64  `json:"rs_total"`
+		Tipo         string   `json:"tipo"`          // "historico" | "auditado" | "posterior"
+		DifPct       *float64 `json:"dif_pct"`       // % desvio em relação à média histórica
+		TrocaMedidor bool     `json:"troca_medidor"` // true quando NroMedidor mudou
+		Link         string   `json:"link"`          // URL da fatura original
+		Anomalia     bool     `json:"anomalia"`      // tem entrada em fichas_anomalias_cache
+		Fichas       string   `json:"fichas"`        // ex: "F01,F02"
+		IAStatus     string   `json:"ia_status"`     // PENDENTE|CONFIRMADO|FALSO_POSITIVO|INCONCLUSIVO
+	}
+
+	var pontos []Ponto
+	prevMedidor := ""
+	for _, r := range raw {
+		var tipo string
+		if mesRef == "" || r.Mes < mesRef {
+			tipo = "historico"
+		} else if r.Mes == mesRef {
+			tipo = "auditado"
+		} else {
+			tipo = "posterior"
+		}
+
+		var difPct *float64
+		if media > 0 {
+			v := (r.KwhTotal - media) / media * 100.0
+			difPct = &v
+		}
+
+		troca := prevMedidor != "" && r.NroMedidor != "" && r.NroMedidor != prevMedidor
+		if r.NroMedidor != "" {
+			prevMedidor = r.NroMedidor
+		}
+
+		pontos = append(pontos, Ponto{
+			Mes:          r.Mes,
+			KwhFP:        r.KwhFP,
+			KwhP:         r.KwhP,
+			KwhR:         r.KwhR,
+			KwhTotal:     r.KwhTotal,
+			RsTotal:      r.RsTotal,
+			Tipo:         tipo,
+			DifPct:       difPct,
+			TrocaMedidor: troca,
+			Link:         r.Link,
+			Anomalia:     r.Anomalia == 1,
+			Fichas:       r.Fichas,
+			IAStatus:     r.IAStatus,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"uc":      uc,
+		"mes_ref": mesRef,
+		"media":   media,
+		"mad":     mad,
+		"pontos":  pontos,
+	})
 }
 
 // processoVinculadoItem representa um processo vinculado a uma UC.
@@ -702,6 +994,553 @@ func GetProcessoVinculado(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"processos": processos, "fatura_links": faturaLinks})
+}
+
+// GetFaturasAnalisadas retorna todas as faturas analisadas pela IA,
+// com JOIN em fichas_anomalias_cache para puxar valor ressarcimento e fichas confirmadas.
+func GetFaturasAnalisadas(c *gin.Context) {
+	db := database.GormDB_App
+	if db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "DB indisponível"})
+		return
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	limitStr  := c.DefaultQuery("limit",  "200")
+	offsetStr := c.DefaultQuery("offset", "0")
+	limit, _  := strconv.Atoi(limitStr)
+	offset, _ := strconv.Atoi(offsetStr)
+	if limit <= 0 || limit > 5000 { limit = 200 }
+	if offset < 0 { offset = 0 }
+
+	empresa    := strings.TrimSpace(c.Query("empresa"))
+	anomalia   := strings.TrimSpace(c.Query("anomalia"))   // "1" | "0" | ""
+	search     := strings.TrimSpace(c.Query("search"))
+	distribuidora := strings.TrimSpace(c.Query("distribuidora"))
+	periodoInicio := strings.TrimSpace(c.Query("periodo_inicio"))
+	periodoFim    := strings.TrimSpace(c.Query("periodo_fim"))
+	fichasFiltro  := strings.TrimSpace(c.Query("fichas"))  // "F02" | "F01,F03" | ""
+
+	where := "WHERE frc.analise_IA IS NOT NULL"
+	args  := []interface{}{}
+
+	if empresa != "" {
+		where += " AND frc.Cod_Empresa = ?"
+		args = append(args, empresa)
+	}
+	if anomalia == "1" {
+		where += " AND frc.anomalia_encontrada = 1"
+	} else if anomalia == "0" {
+		where += " AND (frc.anomalia_encontrada = 0 OR frc.anomalia_encontrada IS NULL)"
+	}
+	if distribuidora != "" {
+		where += " AND frc.Concessionaria = ?"
+		args = append(args, distribuidora)
+	}
+	if periodoInicio != "" {
+		where += " AND frc.Mes_Ref >= ?"
+		args = append(args, periodoInicio)
+	}
+	if periodoFim != "" {
+		where += " AND frc.Mes_Ref <= ?"
+		args = append(args, periodoFim)
+	}
+	if search != "" {
+		pattern := "%" + strings.ToLower(escapeLike(search)) + "%"
+		where += " AND (LOWER(COALESCE(CAST(frc.UC AS CHAR),'')) LIKE ? ESCAPE '\\\\'" +
+			" OR LOWER(COALESCE(frc.RAZAO_SOCIAL,'')) LIKE ? ESCAPE '\\\\'" +
+			" OR LOWER(COALESCE(frc.Concessionaria,'')) LIKE ? ESCAPE '\\\\')"
+		args = append(args, pattern, pattern, pattern)
+	}
+	if fichasFiltro != "" {
+		parts := strings.Split(fichasFiltro, ",")
+		var conds []string
+		for _, f := range parts {
+			f = strings.ToUpper(strings.TrimSpace(f))
+			if f == "F01" || f == "F02" || f == "F03" || f == "F04" || f == "F05" {
+				conds = append(conds, "UPPER(COALESCE(fa.ia_fichas_confirmadas,'')) LIKE '%"+f+"%'")
+			}
+		}
+		if len(conds) > 0 {
+			where += " AND (" + strings.Join(conds, " OR ") + ")"
+		}
+	}
+
+	countSQL := "SELECT COUNT(*) FROM Faturas_Registradas_Cache frc " +
+		"LEFT JOIN fichas_anomalias_cache fa ON fa.id = frc.id AND COALESCE(fa.deletado,0) = 0 " + where
+	var total int64
+	_ = sqlDB.QueryRow(countSQL, args...).Scan(&total)
+
+	dataSQL := `SELECT
+		frc.id,
+		COALESCE(CAST(frc.UC AS CHAR), '')           AS uc,
+		COALESCE(frc.RAZAO_SOCIAL, '')               AS razao_social,
+		COALESCE(frc.Concessionaria, '')             AS concessionaria,
+		DATE_FORMAT(frc.Mes_Ref, '%Y-%m')            AS mes_ref,
+		COALESCE(frc.Tp_Tensao, '')                  AS tp_tensao,
+		COALESCE(frc.RS_Total_Fatura, 0)             AS rs_total_fatura,
+		COALESCE(frc.Link, '')                       AS link,
+		COALESCE(frc.anomalia_encontrada, 0)         AS anomalia_encontrada,
+		frc.ia_analisado_em,
+		LEFT(COALESCE(frc.analise_IA, ''), 500)      AS analise_resumo,
+		COALESCE(fa.valor_ressarcimento_estimado, 0) AS valor_ressarcimento_estimado,
+		COALESCE(fa.ia_fichas_confirmadas, '')       AS ia_fichas_confirmadas,
+		COALESCE(fa.ia_status, '')                   AS ia_status,
+		COALESCE(fa.aprovado, 0)                     AS aprovado,
+		fa.aprovado_em,
+		COALESCE(fa.desvio_pct_max, 0)              AS desvio_pct_max,
+		COALESCE(fa.qtd_regras, 0)                  AS qtd_regras,
+		CASE WHEN fa.troca_medidor IS NOT NULL
+		          AND fa.troca_medidor != ''
+		          AND fa.troca_medidor != '0'
+		     THEN 1 ELSE 0 END                      AS troca_medidor
+	FROM Faturas_Registradas_Cache frc
+	LEFT JOIN fichas_anomalias_cache fa ON fa.id = frc.id AND COALESCE(fa.deletado,0) = 0
+	` + where + `
+	ORDER BY frc.ia_analisado_em DESC
+	LIMIT ? OFFSET ?`
+
+	queryArgs := append(append([]interface{}{}, args...), limit, offset)
+	rows, err := sqlDB.Query(dataSQL, queryArgs...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	type FaturaAnalisada struct {
+		ID                         int64    `json:"id"`
+		UC                         string   `json:"UC"`
+		RazaoSocial                string   `json:"RAZAO_SOCIAL"`
+		Concessionaria             string   `json:"Concessionaria"`
+		MesRef                     string   `json:"Mes_Ref"`
+		TpTensao                   string   `json:"Tp_Tensao"`
+		RSTotalFatura              float64  `json:"RS_Total_Fatura"`
+		Link                       string   `json:"Link"`
+		AnomaliaEncontrada         int      `json:"anomalia_encontrada"`
+		IAAnalisadoEm              *string  `json:"ia_analisado_em"`
+		AnaliseResumo              string   `json:"analise_resumo"`
+		ValorRessarcimentoEstimado float64  `json:"valor_ressarcimento_estimado"`
+		IAFichasConfirmadas        string   `json:"ia_fichas_confirmadas"`
+		IAStatus                   string   `json:"ia_status"`
+		Aprovado                   int      `json:"aprovado"`
+		AprovadoEm                 *string  `json:"aprovado_em"`
+		DesvioMax                  float64  `json:"desvio_pct_max"`
+		QtdRegras                  int      `json:"qtd_regras"`
+		TrocaMedidor               int      `json:"troca_medidor"`
+		ScoreAnomalia              int      `json:"score_anomalia"`
+	}
+
+	var result []FaturaAnalisada
+	for rows.Next() {
+		var f FaturaAnalisada
+		var analisadoEm, aprovadoEm *time.Time
+		if err := rows.Scan(
+			&f.ID, &f.UC, &f.RazaoSocial, &f.Concessionaria,
+			&f.MesRef, &f.TpTensao, &f.RSTotalFatura, &f.Link,
+			&f.AnomaliaEncontrada, &analisadoEm, &f.AnaliseResumo,
+			&f.ValorRessarcimentoEstimado, &f.IAFichasConfirmadas,
+			&f.IAStatus, &f.Aprovado, &aprovadoEm,
+			&f.DesvioMax, &f.QtdRegras, &f.TrocaMedidor,
+		); err == nil {
+			if analisadoEm != nil { s := analisadoEm.Format("2006-01-02 15:04"); f.IAAnalisadoEm = &s }
+			if aprovadoEm  != nil { s := aprovadoEm.Format("2006-01-02 15:04");  f.AprovadoEm   = &s }
+			f.ScoreAnomalia = calcScoreAnomalia(f.DesvioMax, f.IAStatus, f.QtdRegras, f.ValorRessarcimentoEstimado, f.TrocaMedidor)
+			result = append(result, f)
+		}
+	}
+	if result == nil { result = []FaturaAnalisada{} }
+
+	c.JSON(http.StatusOK, gin.H{
+		"rows":   result,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
+}
+
+// calcScoreAnomalia computa score composto de anomalia (0–100).
+// Dimensões: desvio %, confirmação IA, qtd fichas ativas, valor financeiro, troca de medidor.
+func calcScoreAnomalia(desvio float64, iaStatus string, qtdRegras int, valor float64, trocaMedidor int) int {
+	score := 0
+
+	// 1. Desvio de consumo (0–40 pts)
+	abs := desvio
+	if abs < 0 { abs = -abs }
+	switch {
+	case abs >= 200:
+		score += 40
+	case abs >= 100:
+		score += 30
+	case abs >= 50:
+		score += 20
+	case abs >= 30:
+		score += 10
+	}
+	// Bonus negativo (consumo muito abaixo também é grave)
+	if desvio <= -100 && score < 30 {
+		score += 30
+	} else if desvio <= -50 && score < 15 {
+		score += 15
+	}
+
+	// 2. Confirmação IA (−20 a +30 pts)
+	switch iaStatus {
+	case "CONFIRMADO":
+		score += 30
+	case "INCONCLUSIVO":
+		score += 10
+	case "FALSO_POSITIVO":
+		score -= 20
+	}
+
+	// 3. Quantidade de fichas/regras ativas (0–15 pts)
+	switch {
+	case qtdRegras >= 4:
+		score += 15
+	case qtdRegras == 3:
+		score += 10
+	case qtdRegras == 2:
+		score += 7
+	case qtdRegras == 1:
+		score += 3
+	}
+
+	// 4. Valor financeiro estimado (0–10 pts)
+	switch {
+	case valor > 10000:
+		score += 10
+	case valor > 5000:
+		score += 7
+	case valor > 1000:
+		score += 5
+	case valor > 0:
+		score += 3
+	}
+
+	// 5. Troca de medidor (0–5 pts)
+	if trocaMedidor > 0 {
+		score += 5
+	}
+
+	// Clamp [0, 100]
+	if score < 0  { score = 0 }
+	if score > 100 { score = 100 }
+	return score
+}
+
+// AprovarFicha marca uma anomalia como aprovada (irregularidade confirmada).
+func AprovarFicha(c *gin.Context) {
+	var body struct {
+		ID int64 `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.ID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id inválido"})
+		return
+	}
+	db := database.GormDB_App
+	if db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "DB indisponível"})
+		return
+	}
+	sqlDB, _ := db.DB()
+	_, err := sqlDB.Exec(`
+		UPDATE fichas_anomalias_cache
+		   SET aprovado    = 1,
+		       aprovado_em = NOW()
+		 WHERE id = ?`, body.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// DeletarFicha faz soft-delete de uma anomalia (não aparece mais nas listagens).
+func DeletarFicha(c *gin.Context) {
+	var body struct {
+		ID int64 `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.ID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id inválido"})
+		return
+	}
+	db := database.GormDB_App
+	if db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "DB indisponível"})
+		return
+	}
+	sqlDB, _ := db.DB()
+	_, err := sqlDB.Exec(`
+		UPDATE fichas_anomalias_cache
+		   SET deletado    = 1,
+		       deletado_em = NOW()
+		 WHERE id = ?`, body.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// ResetFaturaIA limpa o resultado de análise IA de uma ou mais faturas,
+// devolvendo-as à fila de processamento do pipeline.
+// Aceita: {"id": N}, {"ids": [N,...]}, ou {"empresa": N}.
+func ResetFaturaIA(c *gin.Context) {
+	var body struct {
+		ID      int64   `json:"id"`
+		IDs     []int64 `json:"ids"`
+		Empresa int64   `json:"empresa"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "corpo inválido"})
+		return
+	}
+
+	db := database.GormDB_App
+	if db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "DB indisponível"})
+		return
+	}
+	sqlDB, _ := db.DB()
+
+	// Monta lista de IDs alvo
+	var ids []int64
+	switch {
+	case body.Empresa > 0:
+		rows, err := sqlDB.Query(
+			"SELECT id FROM Faturas_Registradas_Cache WHERE Cod_Empresa = ? AND analise_IA IS NOT NULL",
+			body.Empresa)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			if rows.Scan(&id) == nil {
+				ids = append(ids, id)
+			}
+		}
+	case len(body.IDs) > 0:
+		ids = body.IDs
+	case body.ID > 0:
+		ids = []int64{body.ID}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "informe id, ids ou empresa"})
+		return
+	}
+
+	if len(ids) == 0 {
+		c.JSON(http.StatusOK, gin.H{"ok": true, "resetados": 0})
+		return
+	}
+
+	// Monta placeholders para IN (?)
+	ph := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		ph[i] = "?"
+		args[i] = id
+	}
+	inClause := strings.Join(ph, ",")
+
+	// 1. Limpa Faturas_Registradas_Cache
+	_, err := sqlDB.Exec(
+		"UPDATE Faturas_Registradas_Cache SET analise_IA = NULL, anomalia_encontrada = NULL, ia_analisado_em = NULL WHERE id IN ("+inClause+")",
+		args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "FRC: " + err.Error()})
+		return
+	}
+
+	// 2. Volta fichas_anomalias_cache para PENDENTE
+	_, _ = sqlDB.Exec(
+		"UPDATE fichas_anomalias_cache SET ia_status = 'PENDENTE', ia_fichas_confirmadas = NULL, valor_ressarcimento_estimado = 0, aprovado = 0, aprovado_em = NULL WHERE id IN ("+inClause+")",
+		args...)
+
+	c.JSON(http.StatusOK, gin.H{"ok": true, "resetados": len(ids)})
+}
+
+// GetResumoClientes retorna lista de clientes com contagem de faturas auditadas e anomalias.
+func GetResumoClientes(c *gin.Context) {
+	empresa := c.Query("empresa")
+
+	dbApp := database.GormDB_App
+	if dbApp == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "DB indisponível"})
+		return
+	}
+	sqlDB, err := dbApp.DB()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	where := "WHERE frc.RAZAO_SOCIAL IS NOT NULL AND frc.RAZAO_SOCIAL != ''"
+	args := []interface{}{}
+	if empresa != "" {
+		where += " AND frc.Cod_Empresa = ?"
+		args = append(args, empresa)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			frc.RAZAO_SOCIAL,
+			frc.Cod_Empresa,
+			COUNT(*)                                                                        AS total_faturas,
+			SUM(CASE WHEN frc.analise_IA IS NOT NULL THEN 1 ELSE 0 END)                    AS faturas_analisadas,
+			SUM(CASE WHEN frc.analise_IA IS NULL     THEN 1 ELSE 0 END)                    AS nao_analisadas,
+			SUM(CASE WHEN frc.anomalia_encontrada = 1 THEN 1 ELSE 0 END)                   AS anomalias_encontradas,
+			SUM(CASE WHEN fac.ia_status = 'CONFIRMADO'    THEN 1 ELSE 0 END)               AS casos_confirmados,
+			SUM(CASE WHEN fac.ia_status = 'FALSO_POSITIVO' THEN 1 ELSE 0 END)              AS casos_descartados,
+			COALESCE(SUM(
+				CASE WHEN fac.ia_status = 'CONFIRMADO'
+				THEN COALESCE(fac.valor_ressarcimento_estimado, 0) ELSE 0 END
+			), 0)                                                                           AS ressarcimento_estimado
+		FROM Faturas_Registradas_Cache frc
+		LEFT JOIN fichas_anomalias_cache fac ON fac.id = frc.id
+		%s
+		GROUP BY frc.RAZAO_SOCIAL, frc.Cod_Empresa
+		ORDER BY casos_confirmados DESC, anomalias_encontradas DESC, total_faturas DESC
+	`, where)
+
+	rows, err := sqlDB.Query(query, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	type ClienteResumo struct {
+		RazaoSocial           string  `json:"razao_social"`
+		CodEmpresa            *int    `json:"cod_empresa"`
+		TotalFaturas          int     `json:"total_faturas"`
+		FaturasAnalisadas     int     `json:"faturas_analisadas"`
+		NaoAnalisadas         int     `json:"nao_analisadas"`
+		AnomaliaEncontradas   int     `json:"anomalias_encontradas"`
+		CasosConfirmados      int     `json:"casos_confirmados"`
+		CasosDescartados      int     `json:"casos_descartados"`
+		RessarcimentoEstimado float64 `json:"ressarcimento_estimado"`
+		PctAnalisadas         float64 `json:"pct_analisadas"`
+		PctNaoAnalisadas      float64 `json:"pct_nao_analisadas"`
+	}
+
+	var clientes []ClienteResumo
+	for rows.Next() {
+		var cl ClienteResumo
+		if err := rows.Scan(
+			&cl.RazaoSocial, &cl.CodEmpresa,
+			&cl.TotalFaturas, &cl.FaturasAnalisadas, &cl.NaoAnalisadas,
+			&cl.AnomaliaEncontradas, &cl.CasosConfirmados, &cl.CasosDescartados,
+			&cl.RessarcimentoEstimado,
+		); err == nil {
+			if cl.TotalFaturas > 0 {
+				cl.PctAnalisadas    = float64(cl.FaturasAnalisadas) / float64(cl.TotalFaturas) * 100
+				cl.PctNaoAnalisadas = float64(cl.NaoAnalisadas) / float64(cl.TotalFaturas) * 100
+			}
+			clientes = append(clientes, cl)
+		}
+	}
+	if clientes == nil {
+		clientes = []ClienteResumo{}
+	}
+	c.JSON(http.StatusOK, gin.H{"clientes": clientes})
+}
+
+// GetClienteIAFaturas retorna faturas de um cliente específico com resultado da análise IA.
+func GetClienteIAFaturas(c *gin.Context) {
+	empresa    := c.Query("empresa")
+	razaoSocial := c.Query("razao_social")
+
+	if razaoSocial == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "razao_social obrigatório"})
+		return
+	}
+
+	dbApp := database.GormDB_App
+	if dbApp == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "DB indisponível"})
+		return
+	}
+	sqlDB, err := dbApp.DB()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	args := []interface{}{razaoSocial}
+	empresaWhere := ""
+	if empresa != "" {
+		empresaWhere = " AND Cod_Empresa = ?"
+		args = append(args, empresa)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			frc.id, frc.UC, frc.Cod_Empresa, frc.Concessionaria,
+			DATE_FORMAT(frc.Mes_Ref, '%%Y-%%m') AS mes_ref,
+			frc.Tp_Tensao, frc.RS_Total_Fatura, frc.Link,
+			frc.anomalia_encontrada,
+			frc.ia_analisado_em,
+			LEFT(COALESCE(frc.analise_IA, ''), 500) AS analise_resumo,
+			COALESCE(fac.ia_status, '')                         AS ia_status,
+			COALESCE(fac.valor_ressarcimento_estimado, 0)       AS valor_ressarcimento_estimado
+		FROM Faturas_Registradas_Cache frc
+		LEFT JOIN fichas_anomalias_cache fac ON fac.id = frc.id
+		WHERE frc.RAZAO_SOCIAL = ?
+		  AND frc.analise_IA IS NOT NULL
+		  %s
+		ORDER BY frc.Mes_Ref DESC
+		LIMIT 500
+	`, empresaWhere)
+
+	rows, err := sqlDB.Query(query, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	type FaturaIA struct {
+		ID                         int64    `json:"id"`
+		UC                         string   `json:"uc"`
+		CodEmpresa                 *int     `json:"cod_empresa"`
+		Concessionaria             *string  `json:"concessionaria"`
+		MesRef                     string   `json:"mes_ref"`
+		TpTensao                   *string  `json:"tp_tensao"`
+		RSTotalFatura              *float64 `json:"rs_total_fatura"`
+		Link                       *string  `json:"link"`
+		AnomaliaEncontrada         *int     `json:"anomalia_encontrada"`
+		IAAnalisadoEm              *string  `json:"ia_analisado_em"`
+		AnaliseResumo              *string  `json:"analise_resumo"`
+		IAStatus                   string   `json:"ia_status"`
+		ValorRessarcimentoEstimado float64  `json:"valor_ressarcimento_estimado"`
+	}
+
+	var faturas []FaturaIA
+	for rows.Next() {
+		var f FaturaIA
+		var analisadoEm *time.Time
+		if err := rows.Scan(&f.ID, &f.UC, &f.CodEmpresa, &f.Concessionaria,
+			&f.MesRef, &f.TpTensao, &f.RSTotalFatura, &f.Link,
+			&f.AnomaliaEncontrada, &analisadoEm, &f.AnaliseResumo,
+			&f.IAStatus, &f.ValorRessarcimentoEstimado); err == nil {
+			if analisadoEm != nil {
+				s := analisadoEm.Format("2006-01-02 15:04")
+				f.IAAnalisadoEm = &s
+			}
+			faturas = append(faturas, f)
+		}
+	}
+	if faturas == nil {
+		faturas = []FaturaIA{}
+	}
+	c.JSON(http.StatusOK, gin.H{"faturas": faturas, "razao_social": razaoSocial})
 }
 
 // ListUCsEmProcesso retorna todas as UCs que possuem requisições no banco principal.

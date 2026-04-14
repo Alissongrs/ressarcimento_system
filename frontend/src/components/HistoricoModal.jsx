@@ -26,6 +26,11 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [descricaoProblema, setDescricaoProblema] = useState('');
+  const openMailShortcut = (mailGraphMessageId) => {
+    const id = String(mailGraphMessageId || '').trim();
+    if (!id) return;
+    window.location.href = `/caixa-de-email?messageId=${encodeURIComponent(id)}`;
+  };
 
   const normalizeText = (s) => {
     try {
@@ -408,6 +413,7 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
                 const status = fixMojibake(h?.status_composto || h?.status_novo || '');
                 const tipo = h?.tipo_movimentacao || '';
                 const isEmail = String(tipo || '').toLowerCase() === 'email';
+                const mailGraphMessageId = String(h?.mail_graph_message_id || '').trim();
                 const comentario = fixMojibake(h?.comentario || '');
                 return (
                   <div key={idx} className="rounded-lg border border-[var(--border)] p-3 bg-[var(--card)]/40">
@@ -418,9 +424,20 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
                     <div className="mt-2 flex items-center gap-2">
                       <div className="text-sm font-semibold">{status || 'Sem status'}</div>
                       {isEmail && (
-                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--fg)]/70 bg-[var(--card)]/40">
-                          <Mail size={12} /> E-mail
-                        </span>
+                        <>
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--fg)]/70 bg-[var(--card)]/40">
+                            <Mail size={12} /> E-mail
+                          </span>
+                          {mailGraphMessageId && (
+                            <button
+                              type="button"
+                              onClick={() => openMailShortcut(mailGraphMessageId)}
+                              className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-[var(--border)] hover:bg-[var(--border)]/20"
+                            >
+                              <ArrowRight size={12} /> Abrir e-mail
+                            </button>
+                          )}
+                        </>
                       )}
                       {!isEmail && tipo && (
                         <span className="text-[11px] opacity-70">Tipo: {tipo}</span>
@@ -446,7 +463,6 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
     </div>
   );
 }
-
 
 
 

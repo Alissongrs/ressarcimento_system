@@ -13,6 +13,7 @@ import (
 type HistoricoItemDTO struct {
     IDHistorico    int64  `json:"id_historico"`
     ProcessoID     int64  `json:"id_processo"`
+    MailGraphMessageID string `json:"mail_graph_message_id,omitempty"`
     UsuarioID      int64  `json:"id_usuario"`
     UsuarioNome    string `json:"usuario_nome"`
     StatusAnterior string `json:"status_anterior"`
@@ -44,6 +45,7 @@ func HistoricoRecent(c *gin.Context) {
         SELECT
           h.id_historico,
           h.id_requisicao,
+          COALESCE(h.mail_graph_message_id, '') AS mail_graph_message_id,
           COALESCE(h.id_usuario_gestor,0) as id_usuario,
           COALESCE(u.nome_usuario,'') AS usuario_nome,
           COALESCE(h.status_anterior, '') AS status_anterior,
@@ -68,7 +70,7 @@ func HistoricoRecent(c *gin.Context) {
     for rows.Next() {
         var it HistoricoItemDTO
         if err := rows.Scan(
-            &it.IDHistorico, &it.ProcessoID, &it.UsuarioID, &it.UsuarioNome,
+            &it.IDHistorico, &it.ProcessoID, &it.MailGraphMessageID, &it.UsuarioID, &it.UsuarioNome,
             &it.StatusAnterior, &it.StatusNovo, &it.EtapaAnterior, &it.EtapaNova, &it.SubEtapa,
             &it.Tipo, &it.Quando, &it.Comentario,
         ); err == nil {
@@ -78,4 +80,3 @@ func HistoricoRecent(c *gin.Context) {
     if out == nil { out = []HistoricoItemDTO{} }
     c.JSON(http.StatusOK, out)
 }
-

@@ -10,7 +10,7 @@ import React, {
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { createPortal } from 'react-dom';
-import { Activity, RefreshCcw, Paperclip, X, Mail, Clock, FileText, Trash2, Sparkles } from 'lucide-react';
+import { Activity, RefreshCcw, Paperclip, X, Mail, Clock, FileText, Trash2, Sparkles, Pencil } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, Cell, Customized, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
@@ -585,6 +585,7 @@ const PROCESS_LIST_COLUMNS = [
   { key: 'ultima', label: 'Última movimentação', sortable: true },
   { key: 'dias_sem', label: 'Dias sem movimentar', sortable: true },
   { key: 'score_progressao', label: 'Score de Progressão', sortable: false },
+  { key: 'editar', label: '', sortable: false },
 ];
 
 const SUBETAPAS_DEFERIDOS = [
@@ -783,6 +784,26 @@ const formatPeriodosIrregularidade = (value) => {
   }
 
   return formatSnapshotValue(data);
+};
+
+// Formata "2025-05" → "maio/2025" ou "05/2025" → "maio/2025"
+const MESES_PT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+const formatMesRef = (mesRef) => {
+  const s = String(mesRef || '').trim();
+  if (!s) return '';
+  // formato YYYY-MM
+  const m1 = s.match(/^(\d{4})-(\d{2})$/);
+  if (m1) {
+    const nome = MESES_PT[parseInt(m1[2], 10) - 1];
+    return nome ? `${nome}/${m1[1]}` : s;
+  }
+  // formato MM/YYYY
+  const m2 = s.match(/^(\d{2})\/(\d{4})$/);
+  if (m2) {
+    const nome = MESES_PT[parseInt(m2[1], 10) - 1];
+    return nome ? `${nome}/${m2[2]}` : s;
+  }
+  return s;
 };
 
 const toDateTimeLocal = (dbValue) => {
@@ -1201,6 +1222,7 @@ const ProcessoDadosView = memo(function ProcessoDadosView({
   onChangeEstimado,
   onSaveEstimado,
   onDeleteAnexo,
+  onEditInfo,
 }) {
   const anexos = Array.isArray(anexosData) ? anexosData : [];
 
@@ -1229,7 +1251,19 @@ const ProcessoDadosView = memo(function ProcessoDadosView({
   return (
     <div className="mt-3 pt-3 border-t panel-border space-y-4">
       <div>
-        <div className="text-base font-semibold uppercase tracking-wide mb-3">Informações</div>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="text-base font-semibold uppercase tracking-wide">Informações</div>
+          {onEditInfo && (
+            <button
+              type="button"
+              onClick={onEditInfo}
+              className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-[var(--panel-border)] bg-[var(--panel)] hover:bg-[var(--hover)] transition-colors"
+            >
+              <Pencil size={10} />
+              Editar
+            </button>
+          )}
+        </div>
         <div className="grid grid-cols-1 gap-1 text-xs mb-4">
           <div><b>UC:</b> {formatSnapshotValue(pickFirst(merged, ['uc', 'Uc', 'UC'])) || '-'}</div>
           <div><b>Cliente:</b> {formatSnapshotValue(pickFirst(merged, ['cliente', 'Cliente'])) || '-'}</div>
@@ -1240,7 +1274,13 @@ const ProcessoDadosView = memo(function ProcessoDadosView({
           <div><b>Período:</b> {infoPeriodo || '-'}</div>
           <div><b>Fatura:</b> {infoLink || '-'}</div>
           <div><b>Faturas:</b> {infoFaturas.length} {infoPeriodo ? `(${infoPeriodo})` : ''}</div>
-          <div><b>Descrição:</b> {infoDescricao || '-'}</div>
+          <div>
+            <b>Descrição:</b>
+            <div style={{ whiteSpace: 'pre-wrap', maxHeight: '8.4em', lineHeight: '1.4em', overflowY: 'auto' }}
+              className="mt-0.5 text-[11px] opacity-75 border border-[var(--border)] rounded px-1.5 py-0.5 bg-[var(--bg)]">
+              {infoDescricao || '-'}
+            </div>
+          </div>
         </div>
 
         {null}
@@ -1282,6 +1322,7 @@ function ProcessoDrawer({
   detailValue: detailValueLocal,
   scoreData,
   activeTab,
+  onEditInfo,
 }) {
   const [emailExtract, setEmailExtract] = useState({});
   const [docConfirmOpen, setDocConfirmOpen] = useState(false);
@@ -2006,6 +2047,7 @@ function ProcessoDrawer({
                 }))
               }
               onSaveEstimado={() => handleSaveProcesso(pid, header, 'deferimento')}
+              onEditInfo={onEditInfo}
             />
 
             {showDocBanner && (
@@ -3095,7 +3137,7 @@ export default function AdminPlanilha() {
       const parsed = raw ? JSON.parse(raw) : null;
       if (Array.isArray(parsed) && parsed.length === PROCESS_LIST_COLUMNS.length) return parsed;
     } catch {}
-    return [90, 120, 240, 180, 220, 260, 200, 170, 120];
+    return [90, 120, 240, 180, 220, 260, 200, 170, 120, 50];
   });
   const processResizeRef = useRef({ idx: -1, startX: 0, startW: 0 });
   const [processSort, setProcessSort] = useState({ key: 'ultima', dir: 'desc' });
@@ -4800,6 +4842,34 @@ export default function AdminPlanilha() {
     });
     setReqInfoEditOpen(true);
   }, [reqDetails]);
+
+  // Abre o modal de edição diretamente a partir de uma linha da tabela ou drawer.
+  // Mescla row.header + dados assíncronos (snapshotHeaderData / requisicaoHeaderData)
+  // para garantir que os campos apareçam preenchidos mesmo quando o drawer já está aberto.
+  const openReqInfoEditFromRow = useCallback((row) => {
+    const id = row?.pid || row?.id || row?.id_requisicao;
+    if (!id) return;
+    setSelectedReqId(Number(id));
+    // Prioridade: dados do req carregado > snapshot > header da linha
+    const h = {
+      ...(row?.header || {}),
+      ...(snapshotHeaderData || {}),
+      ...(requisicaoHeaderData || {}),
+    };
+    setReqInfoDraft({
+      cliente: pickFirst(h, ['cliente', 'Cliente'], ''),
+      uc: pickFirst(h, ['uc', 'UC', 'Uc'], ''),
+      concessionaria: pickFirst(h, ['concessionaria', 'Concessionaria'], ''),
+      valor_estimado: String(pickFirst(h, ['ressarcimento_estimado', 'valor_estimado'], '') || ''),
+      link_fatura: pickFirst(h, ['link_fatura', 'linkFatura', 'link'], ''),
+      descricao_irregularidade: pickFirst(h, ['descricao_irregularidade', 'descricaoIrregularidade'], ''),
+      periodos_irregularidade: pickFirst(h, ['periodos_irregularidade', 'periodosIrregularidade'], ''),
+      endereco_completo: pickFirst(h, ['endereco_completo', 'enderecoCompleto'], ''),
+      id_tipo_irregularidade: pickFirst(h, ['id_tipo_irregularidade', 'idTipoIrregularidade', 'id_tipo', 'tipo_id'], ''),
+      id_subtipo_irregularidade: pickFirst(h, ['id_subtipo_irregularidade', 'idSubtipoIrregularidade', 'id_subtipo', 'subtipo_id'], ''),
+    });
+    setReqInfoEditOpen(true);
+  }, [snapshotHeaderData, requisicaoHeaderData]);
 
   const saveReqInfoEdit = useCallback(async () => {
     if (!selectedReqId) return;
@@ -7235,6 +7305,16 @@ export default function AdminPlanilha() {
                                 <span className="text-xs opacity-50">-</span>
                               )}
                             </div>
+                            <div className="px-1 py-2 border-t panel-border flex items-center justify-center">
+                              <button
+                                type="button"
+                                title="Editar cabeçalho"
+                                onClick={(e) => { e.stopPropagation(); openReqInfoEditFromRow(row); }}
+                                className="inline-flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--hover)] text-[var(--fg)] opacity-60 hover:opacity-100 transition-opacity"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                            </div>
                           </button>
                         );
                       });
@@ -7547,6 +7627,7 @@ export default function AdminPlanilha() {
             detailValue={detailValue}
             scoreData={scoreData}
             activeTab={activeTab}
+            onEditInfo={selectedRow ? () => openReqInfoEditFromRow(selectedRow) : undefined}
           />
 
           {reqNovaModalOpen && (
@@ -7566,7 +7647,17 @@ export default function AdminPlanilha() {
                 <div className="mt-4 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-4">
                   <div className="space-y-3">
                     <div className="sap-card border panel-border p-3">
-                      <div className="text-xs font-semibold mb-2">Informações</div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="text-xs font-semibold">Informações</div>
+                        <button
+                          type="button"
+                          onClick={openReqInfoEdit}
+                          className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-[var(--panel-border)] bg-[var(--panel)] hover:bg-[var(--hover)] transition-colors"
+                        >
+                          <Pencil size={10} />
+                          Alterar dados
+                        </button>
+                      </div>
                       <div className="grid grid-cols-1 gap-1 text-xs">
                         <div><b>UC:</b> {reqUc || '-'}</div>
                         <div><b>Cliente:</b> {reqCliente || '-'}</div>
@@ -7578,7 +7669,13 @@ export default function AdminPlanilha() {
                         <div><b>Fatura:</b> {reqLink || '-'}</div>
                         <div><b>Anexos:</b> {reqCounts.anexos ?? 0}</div>
                         <div><b>Faturas:</b> {reqCounts.faturas ?? 0} {reqCounts.periodo ? `(${reqCounts.periodo})` : ''}</div>
-                        <div><b>Descrição:</b> {reqDescricao || '-'}</div>
+                        <div>
+                          <b>Descrição:</b>
+                          <div style={{ whiteSpace: 'pre-wrap', maxHeight: '8.4em', lineHeight: '1.4em', overflowY: 'auto' }}
+                            className="mt-0.5 text-[11px] opacity-75 border border-[var(--border)] rounded px-1.5 py-0.5 bg-[var(--bg)]">
+                            {reqDescricao || '-'}
+                          </div>
+                        </div>
                       </div>
                       {Array.isArray(reqFaturas) && reqFaturas.length > 0 && (
                         <div className="mt-2">
@@ -7586,13 +7683,14 @@ export default function AdminPlanilha() {
                           <div className="space-y-1 text-[11px]">
                             {reqFaturas.map((f, idx) => {
                               const link = String(f?.link || f?.Link || '').trim();
-                              const mes = String(f?.mes_ref || f?.MesRef || '').trim();
+                              const mes = formatMesRef(f?.mes_ref || f?.MesRef || '');
                               if (!link) return null;
                               return (
-                                <div key={`req-fat-modal-${idx}`} className="truncate">
-                                  {mes ? `${mes} - ` : ''}
+                                <div key={`req-fat-modal-${idx}`} className="flex items-center gap-1">
+                                  {mes && <span className="font-medium">{mes}</span>}
+                                  {mes && <span className="opacity-40">—</span>}
                                   <a className="text-[var(--accent)] underline" href={link} target="_blank" rel="noreferrer">
-                                    {link}
+                                    Link
                                   </a>
                                 </div>
                               );
@@ -7816,7 +7914,7 @@ export default function AdminPlanilha() {
 
                 <div className={`p-4 ${reqHistoricoOpen ? 'grid grid-cols-1 lg:grid-cols-[1fr_12px_1.4fr] gap-0' : 'space-y-4'}`}>
                   <div className={reqHistoricoOpen ? 'h-full overflow-auto pr-4 space-y-4' : 'space-y-4'}>
-                  {!isNovaRequisicao && (
+                  {true && (
                   <div className="sap-card border panel-border p-3">
                     <div className="flex items-center justify-between gap-2 mb-2">
                       <div className="text-xs font-semibold">Informações</div>
@@ -7855,13 +7953,14 @@ export default function AdminPlanilha() {
                           <div className="space-y-1 text-[11px]">
                             {reqFaturas.map((f, idx) => {
                               const link = String(f?.link || f?.Link || '').trim();
-                              const mes = String(f?.mes_ref || f?.MesRef || '').trim();
+                              const mes = formatMesRef(f?.mes_ref || f?.MesRef || '');
                               if (!link) return null;
                               return (
-                                <div key={`req-fat-${idx}`} className="truncate">
-                                  {mes ? `${mes} - ` : ''}
+                                <div key={`req-fat-${idx}`} className="flex items-center gap-1">
+                                  {mes && <span className="font-medium">{mes}</span>}
+                                  {mes && <span className="opacity-40">—</span>}
                                   <a className="text-[var(--accent)] underline" href={link} target="_blank" rel="noreferrer">
-                                    {link}
+                                    Link
                                   </a>
                                 </div>
                               );
@@ -7871,7 +7970,13 @@ export default function AdminPlanilha() {
                       )}
                       <div><b>Anexos:</b> {reqCounts.anexos ?? 0}</div>
                       <div><b>Faturas:</b> {reqCounts.faturas ?? 0} {reqCounts.periodo ? `(${reqCounts.periodo})` : ''}</div>
-                      <div><b>Descrição:</b> {reqDescricao || '-'}</div>
+                      <div>
+                        <b>Descrição:</b>
+                        <div style={{ whiteSpace: 'pre-wrap', maxHeight: '8.4em', lineHeight: '1.4em', overflowY: 'auto' }}
+                          className="mt-0.5 text-[11px] opacity-75 border border-[var(--border)] rounded px-1.5 py-0.5 bg-[var(--bg)]">
+                          {reqDescricao || '-'}
+                        </div>
+                      </div>
                     </div>
 
                     {reqInfoHistoryItems.length > 0 ? (
@@ -8022,7 +8127,17 @@ export default function AdminPlanilha() {
 
                           <div className="mt-3 space-y-3 text-xs">
                             <div className="rounded-xl border panel-border bg-[var(--panel)]/30 p-2">
-                              <div className="text-[11px] uppercase font-semibold mb-2">Informações</div>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <div className="text-[11px] uppercase font-semibold">Informações</div>
+                                <button
+                                  type="button"
+                                  onClick={openReqInfoEdit}
+                                  className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border border-[var(--panel-border)] bg-[var(--panel)] hover:bg-[var(--hover)] transition-colors"
+                                >
+                                  <Pencil size={10} />
+                                  Alterar dados
+                                </button>
+                              </div>
                               <div className="grid grid-cols-1 gap-1 text-xs">
                                 <div><b>UC:</b> {reqUc || '-'}</div>
                                 <div><b>Cliente:</b> {reqCliente || '-'}</div>
@@ -8031,10 +8146,31 @@ export default function AdminPlanilha() {
                                 <div><b>Valor estimado:</b> {formatCurrencyBR(reqValor)}</div>
                                 <div><b>Criado em:</b> {formatDateTimeBR(reqCriado)}</div>
                                 <div><b>Período:</b> {reqPeriodo || reqCounts.periodo || '-'}</div>
-                                <div><b>Fatura:</b> {reqLink || '-'}</div>
+                                <div><b>Faturas:</b> {reqCounts.faturas ?? 0}
+                                  {Array.isArray(reqFaturas) && reqFaturas.length > 0 && (
+                                    <span className="ml-1">
+                                      {reqFaturas.map((f, idx) => {
+                                        const link = String(f?.link || f?.Link || '').trim();
+                                        const mes = formatMesRef(f?.mes_ref || f?.MesRef || '');
+                                        if (!link) return null;
+                                        return (
+                                          <span key={`req-fat-c-${idx}`} className="ml-2">
+                                            {mes && <span className="font-medium">{mes} — </span>}
+                                            <a className="text-[var(--accent)] underline" href={link} target="_blank" rel="noreferrer">Link</a>
+                                          </span>
+                                        );
+                                      })}
+                                    </span>
+                                  )}
+                                </div>
                                 <div><b>Anexos:</b> {reqCounts.anexos ?? 0}</div>
-                                <div><b>Faturas:</b> {reqCounts.faturas ?? 0} {reqCounts.periodo ? `(${reqCounts.periodo})` : ''}</div>
-                                <div><b>Descrição:</b> {reqDescricao || '-'}</div>
+                                <div>
+                          <b>Descrição:</b>
+                          <div style={{ whiteSpace: 'pre-wrap', maxHeight: '8.4em', lineHeight: '1.4em', overflowY: 'auto' }}
+                            className="mt-0.5 text-[11px] opacity-75 border border-[var(--border)] rounded px-1.5 py-0.5 bg-[var(--bg)]">
+                            {reqDescricao || '-'}
+                          </div>
+                        </div>
                               </div>
                             </div>
 

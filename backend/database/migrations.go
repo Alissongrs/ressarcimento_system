@@ -1193,6 +1193,37 @@ END`, strings.Join(insertCols, ", "), strings.Join(insertVals, ", "))
 		}
 	}
 
+	// 18) Colunas para_todos e email_enviado_em em FT_ALERTAS
+	{
+		var hasParaTodos int
+		_ = db.QueryRow(`
+			SELECT COUNT(1) FROM INFORMATION_SCHEMA.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME = 'FT_ALERTAS'
+			  AND COLUMN_NAME = 'para_todos'`,
+		).Scan(&hasParaTodos)
+		if hasParaTodos == 0 {
+			log.Println("[migrate] Adicionando coluna FT_ALERTAS.para_todos ...")
+			if _, err := db.Exec(`ALTER TABLE FT_ALERTAS ADD COLUMN para_todos TINYINT(1) NOT NULL DEFAULT 0`); err != nil {
+				log.Printf("[migrate] aviso: falha ao adicionar para_todos: %v", err)
+			}
+		}
+
+		var hasEmailEnviadoEm int
+		_ = db.QueryRow(`
+			SELECT COUNT(1) FROM INFORMATION_SCHEMA.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME = 'FT_ALERTAS'
+			  AND COLUMN_NAME = 'email_enviado_em'`,
+		).Scan(&hasEmailEnviadoEm)
+		if hasEmailEnviadoEm == 0 {
+			log.Println("[migrate] Adicionando coluna FT_ALERTAS.email_enviado_em ...")
+			if _, err := db.Exec(`ALTER TABLE FT_ALERTAS ADD COLUMN email_enviado_em DATETIME NULL`); err != nil {
+				log.Printf("[migrate] aviso: falha ao adicionar email_enviado_em: %v", err)
+			}
+		}
+	}
+
     log.Println("✅ Todas as migrações concluídas com sucesso")
 	return nil
 }

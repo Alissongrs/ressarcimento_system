@@ -50,6 +50,31 @@ export async function getUnreadCount() {
   return 0;
 }
 
+export async function listAlertas(params = {}) {
+  try {
+    const { data } = await api.get('/alertas', { params });
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.warn('[alertaService] listAlertas falhou:', e?.message);
+    return [];
+  }
+}
+
+export async function criarAlerta(input = {}) {
+  const { data } = await api.post('/alertas', input);
+  return data;
+}
+
+export async function atualizarAlerta(alertaId, input = {}) {
+  const { data } = await api.put(`/alertas/${alertaId}`, input);
+  return data;
+}
+
+export async function excluirAlerta(alertaId) {
+  const { data } = await api.delete(`/alertas/${alertaId}`);
+  return data;
+}
+
 // === SSE ===
 // Abre EventSource com token na query (?token=...). EventSource nativo não envia Authorization.
 export function connectAlertasSSE() {
@@ -64,9 +89,8 @@ export function connectAlertasSSE() {
 // === Consulta de alertas não lidos (com data_alerta) ===
 export async function getUnreadAlertas() {
   try {
-    const { data } = await api.get('/alertas?unread=1');
-    return Array.isArray(data) ? data : [];
-  } catch (e) {
+    return await listAlertas({ unread: 1 });
+  } catch {
     return [];
   }
 }
@@ -76,4 +100,3 @@ export async function marcarAlertasComoLidos(ids = []) {
   if (!Array.isArray(ids) || ids.length === 0) return;
   await api.post('/alertas/marcar-lido', { alerta_ids: ids });
 }
-

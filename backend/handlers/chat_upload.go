@@ -251,7 +251,12 @@ func ChatExtractPDFHandler(c *gin.Context) {
 
 	text, err := callAisureOpenAIVision(ctx, question, "", in.Images)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "falha ao extrair texto com IA: " + err.Error()})
+		// Retorna 200 com texto vazio para o frontend exibir mensagem amigável
+		// (503 causava erro não tratado no axios)
+		c.JSON(http.StatusOK, gin.H{
+			"name": in.Name,
+			"text": "",
+		})
 		return
 	}
 

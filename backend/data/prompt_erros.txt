@@ -1,0 +1,751 @@
+================================================================================
+CATÁLOGO DE ERROS DE FATURAMENTO — FICHAS F06 A F14
+================================================================================
+Documento de referência para auditoria de faturas de energia elétrica.
+Base normativa: REN ANEEL nº 1.000/2021, PRODIST Módulos 5, 8 e 11, Lei 14.300/2022.
+Emitido por: Ressarcimento — AMEE Gestão de Energia (versão 01 — 28/11/2025)
+
+As fichas F01 a F05 estão documentadas no motor de regras SQL e
+no prompt principal (prompt_confirmar.txt). Este arquivo cobre exclusivamente F06–F14.
+
+================================================================================
+FONTES DE DADOS — REGRA GERAL PARA TODAS AS FICHAS
+================================================================================
+Cada verificação tem UMA fonte primária. Respeite a hierarquia abaixo
+sem exceção:
+
+  [DB]     → Campo disponível em Faturas_Registradas_Cache (banco de dados).
+             Use como fonte PRIMÁRIA de detecção quando indicado.
+             Campos críticos disponíveis no banco:
+               NroMedidor, Dt_Leitura_Anterior, Dt_Leitura_Atual, Qtd_Dias,
+               Numero_Dias, IMPEDIMENTO_LEITURA, Media_Consumo,
+               KWH_Ponta, KWH_FPonta, KWH_Reservado, KWH_Total,
+               KWH_Ponta_Injet, KWH_FPonta_Injet, KWH_Total_Injet,
+               KW_Ponta, KW_FPonta, KW_Registrada_Ponta, KW_Registrada_FPonta,
+               UFER_Ponta, UFER_FPonta, UFER_Reservado,
+               Leitura_Anterior_KWH_P, Leitura_Atual_KWH_P,
+               Leitura_Anterior_KWH_FP, Leitura_Atual_KWH_FP,
+               Leitura_Anterior_KWH_R, Leitura_Atual_KWH_R,
+               Constante_KWH_P, Constante_KWH_FP, Constante_KWH_R,
+               Modalidade_Tarifaria, Tp_Tensao, Tipo, RS_Total_Fatura
+
+  [FATURA] → Leitura direta da imagem da fatura (visual ou OCR).
+             Use para CONFIRMAR, qualificar e complementar o que o banco detectou.
+             Nunca invente campos não visíveis na fatura.
+             Se um campo estiver ilegível, registre "ilegível" e não calcule a ficha.
+
+  ATENÇÃO: O banco pode armazenar 0 no lugar de NULL para leituras ausentes.
+  Portanto, Leitura_Anterior=0 e Leitura_Atual=0 NÃO confirma leitura real — pode
+  indicar ausência de dado. Sempre cruzar com a fatura antes de concluir.
+
+================================================================================
+FICHA F06 — AUSÊNCIA DE ITENS DE LEITURAS NA FATURA
+================================================================================
+CONCEITO:
+  A fatura não apresenta as leituras do medidor (leitura anterior e leitura atual),
+  informações obrigatórias pela regulação para que o consumidor possa verificar
+  o consumo cobrado.
+
+  O ERRO É: ausência de LA e LC na fatura + consumo cobrado acima do custo de
+  disponibilidade + SEM qualquer justificativa legal declarada.
+
+  O ERRO NÃO É: ausência de leituras quando há justificativa explícita de
+  faturamento por média, custo de disponibilidade, impedimento de acesso ou
+  leitura estimada com motivo legal. Nesses casos a ausência é procedimento regular.
+
+FONTE DE DADOS:
+  [DB]     Leitura_Anterior_KWH_P / Leitura_Atual_KWH_P → 0 indica possível ausência
+  [DB]     Leitura_Anterior_KWH_FP / Leitura_Atual_KWH_FP
+  [DB]     Leitura_Anterior_KWH_R / Leitura_Atual_KWH_R
+  [DB]     IMPEDIMENTO_LEITURA = 'S' → existe justificativa → NÃO é F06
+  [DB]     KWH_Total > 0 → consumo está sendo cobrado mesmo sem leituras
+  [FATURA] Confirmar visualmente se LA e LC estão presentes ou ausentes
+  [FATURA] Verificar campo "Informações" ou "Observações" para justificativa legal
+  [FATURA] Verificar todas as páginas, verso e anexos antes de concluir ausência
+
+ONDE VERIFICAR NA FATURA:
+  Grupo B Convencional:
+    • Leitura Anterior Consumo Ativo (kWh)
+    • Leitura Atual Consumo Ativo (kWh)
+    • Consumo Faturado (kWh)
+  Grupo B Tarifa Branca: por posto (Ponta, Fora Ponta, Intermediário)
+  Grupo B Irrigante / Aquicultor: Posto Reservado (kWh)
+  GD Gerador: Consumo Ativo Injetado (kWh)
+  Grupo A (por posto — Ponta, FP, Reservado):
+    • Leitura Anterior/Atual Consumo Ativo, Reativo e Demandas
+    • Consumo Faturado Ativo, Reativo e Demandas
+
+  Campo de Informações — justificativas que afastam o erro:
+    "Leitura Estimada" | "Faturamento por Média" | "Impedimento de Acesso"
+    "Custo de Disponibilidade" | "Leitura Plurimensal" | "Autoleitura"
+    "Defeito no Medidor" | "Ligação Direta"
+
+METODOLOGIA DE VERIFICAÇÃO:
+  Passo 1: [DB] Verificar se Leitura_Anterior e Leitura_Atual estão zeradas
+           no banco para todos os postos. Zero não confirma leitura real.
+  Passo 2: [DB] Verificar se IMPEDIMENTO_LEITURA = 'S'.
+           Se sim → há justificativa registrada → PARAR, NÃO classificar F06.
+  Passo 3: [FATURA] Confirmar visualmente se LA e LC aparecem na fatura.
+           Procurar nas seções: "Medição", "Histórico de Leitura", "Dados do Medidor",
+           "Informações de Consumo", "Resumo de Consumo".
+  Passo 4: [FATURA] Se leituras estiverem ausentes → procurar justificativa legal.
+           Se há justificativa declarada → PARAR, NÃO classificar F06.
+  Passo 5: [DB+FATURA] Se leituras ausentes + sem justificativa + consumo cobrado
+           acima do custo de disponibilidade → ERRO F06 confirmado.
+
+REGRAS ABSOLUTAS — NUNCA IGNORE:
+  ✗ NUNCA classifique F06 se a fatura declarar qualquer uma destas situações:
+      "Leitura Estimada", "Faturamento por Média", "Impedimento de Acesso",
+      "Custo de Disponibilidade", "Leitura Plurimensal", "Autoleitura",
+      "Defeito no Medidor", "Ligação Direta", ou qualquer equivalente.
+  ✗ NUNCA classifique F06 sem verificar TODAS as páginas e anexos da fatura.
+  ✗ NUNCA conclua ausência de leituras baseado apenas no banco (leitura=0 pode ser
+      zero real ou dado ausente — confirmar na fatura obrigatoriamente).
+  ✓ SEMPRE verificar se o consumo cobrado supera o custo de disponibilidade antes
+      de concluir erro. Se o consumo é exatamente 30/50/100 kWh, provavelmente é
+      custo de disponibilidade declarado — não é F06.
+
+ANTI-FALSO-POSITIVO:
+  • Custo de disponibilidade (30/50/100 kWh) pode dispensar a apresentação de leituras
+    quando declarado — verificar tipo de ligação e valor faturado.
+  • Faturamento por média sem leituras é regular quando há justificativa explícita.
+  • Para Grupo A, ausência de leitura de demanda pode ser normal em alguns layouts —
+    focar na ausência de leitura de energia ativa sem justificativa.
+  • Se apenas 1 posto (ex.: somente Ponta) está sem leitura e os demais têm, registrar
+    especificamente qual posto está sem informação.
+
+FUNDAMENTAÇÃO LEGAL:
+  • REN ANEEL nº 1.000/2021, Art. 283 (faturamento com leituras reais).
+  • REN ANEEL nº 1.000/2021, Art. 327 (itens obrigatórios da fatura).
+  • PRODIST – Módulo 11: obrigatoriedade de apresentar leituras na fatura.
+
+================================================================================
+FICHA F07 — ROLLOVER (VIRADA DO MEDIDOR) NÃO TRATADO CORRETAMENTE
+================================================================================
+CONCEITO:
+  O medidor atinge seu valor máximo de leitura e reinicia do zero. A distribuidora
+  não aplica o tratamento correto, gerando consumo incorreto: negativo (impossível),
+  muito baixo (subfaturamento) ou muito alto (superfaturamento).
+
+  Fórmula correta com rollover:
+    Consumo = [(Máximo − Leitura_Anterior) + Leitura_Atual + 1] × K
+    O "+1" representa a passagem do último dígito máximo para zero.
+
+  Capacidade por número de dígitos:
+    4 dígitos → máximo 9.999 (residenciais antigos)
+    5 dígitos → máximo 99.999 (residenciais / comerciais)
+    6 dígitos → máximo 999.999 (industriais / Grupo A)
+
+  ATENÇÃO: Leitura_Atual < Leitura_Anterior pode ser ROLLOVER ou TROCA DE MEDIDOR.
+  Diferenciar obrigatoriamente antes de classificar.
+
+FONTE DE DADOS:
+  [DB]     Leitura_Atual_KWH_P < Leitura_Anterior_KWH_P → sinal de rollover ou troca
+  [DB]     Leitura_Atual_KWH_FP < Leitura_Anterior_KWH_FP → idem
+  [DB]     NroMedidor (comparar com mês anterior via histórico) → mesmo número = rollover
+  [FATURA] Verificar mensagem "Troca de medidor" → se presente = F08, não F07
+  [FATURA] Verificar número de dígitos da leitura anterior para determinar capacidade
+  [FATURA] Confirmar se Leitura_Anterior está próxima do valor máximo do medidor
+
+ONDE VERIFICAR NA FATURA:
+  Indicador principal: Leitura Atual < Leitura Anterior (por posto)
+  Grupo B: Leitura Anterior/Atual Consumo Ativo (kWh) — por posto se aplicável
+  Grupo A: por posto (Ponta, FP, Reservado); Reativo e Demanda quando houver
+  Campo "Informações": verificar "Troca de medidor" — se presente, não é rollover
+
+  Diferenciação Rollover vs. Troca de Medidor:
+    Aspecto              Rollover                   Troca de Medidor
+    Mensagem na fatura   Geralmente nenhuma         "Troca de medidor" explícito
+    Leitura anterior     Próxima do máximo          Qualquer valor
+    Leitura atual        Baixa (ex.: 1.200)         Zero ou muito baixa (ex.: 00.000)
+    Número do medidor    MESMO número               NÚMERO DIFERENTE
+    Consumo calculado    Coerente com histórico      Pode ser parcial (dias)
+
+METODOLOGIA DE VERIFICAÇÃO:
+  Passo 1: [DB] Detectar Leitura_Atual < Leitura_Anterior em qualquer posto.
+  Passo 2: [FATURA] Verificar se a fatura indica "Troca de medidor".
+           Se sim → NÃO é F07 → investigar F08 obrigatoriamente.
+  Passo 3: [DB+FATURA] Verificar número do medidor.
+           Se NroMedidor mudou → é troca → investigar F08, não F07.
+  Passo 4: [FATURA] Verificar se Leitura_Anterior está próxima do valor máximo
+           do medidor (ex.: 94.640 de 99.999 → rollover provável).
+           Se LA for baixa e LC for ainda mais baixa → pode ser F14 (diferença
+           negativa) sem rollover.
+  Passo 5: [FATURA] Determinar a capacidade do medidor (número de dígitos).
+  Passo 6: Calcular Consumo Correto com Rollover:
+           Consumo = [(Máximo − LA) + LC + 1] × K + 2,5% (se Grupo A)
+  Passo 7: Comparar com Consumo Faturado.
+           Se Faturado ≠ Calculado → ERRO F07.
+  Passo 8: Divergência = Consumo_Faturado − Consumo_Correto
+           Valor = Divergência × Tarifa (R$/kWh)
+
+REGRAS ABSOLUTAS — NUNCA IGNORE:
+  ✗ NUNCA classifique F07 se a fatura indicar "Troca de medidor" → investigar F08.
+  ✗ NUNCA classifique F07 se o número do medidor mudou em relação ao mês anterior.
+  ✗ NUNCA assuma o número de dígitos sem ver a leitura anterior — não invente capacidade.
+  ✓ SEMPRE verificar primeiramente se é troca (F08) antes de concluir rollover (F07).
+  ✓ SEMPRE checar se a Leitura Anterior está realmente próxima do máximo. Se estiver
+     distante (ex.: LA=5.000 de 99.999), o rollover não é a causa plausível.
+
+ANTI-FALSO-POSITIVO:
+  • Se a fatura indica "Troca de medidor" explicitamente → não é F07, é F08.
+  • Se o número do medidor mudou → não é F07, é F08.
+  • Se LA está longe do máximo do medidor → não é rollover → investigar F14.
+  • Rollover correto (distribuidora tratou) deve resultar em consumo coerente com
+    o histórico — se o consumo faturado já está correto, não há erro.
+
+FUNDAMENTAÇÃO LEGAL:
+  • REN ANEEL nº 1.000/2021, Art. 283.
+  • PRODIST – Módulo 5: integridade e processamento correto das leituras.
+
+================================================================================
+FICHA F08 — TROCA DE MEDIDOR SEM ZERAMENTO / AJUSTE ADEQUADO DAS LEITURAS
+================================================================================
+CONCEITO:
+  A distribuidora troca o medidor mas não registra corretamente:
+    (a) A leitura final do medidor antigo (saída); ou
+    (b) A leitura inicial do medidor novo (entrada — geralmente zero).
+
+  Consumo correto no mês da troca:
+    Consumo_antigo = (Leitura_Final_Antigo − LA_mês_anterior) × K_antigo
+    Consumo_novo   = (LC_novo − Leitura_Inicial_Novo) × K_novo
+    Consumo_total  = Consumo_antigo + Consumo_novo
+
+  Tipos de erro mais comuns:
+    Erro 1: Leitura final incorreta do medidor antigo → consumo inflado.
+    Erro 2: Leitura inicial do novo registrada com valor do antigo → consumo
+            negativo ou absurdo.
+
+FONTE DE DADOS:
+  [DB]     NroMedidor (mês atual) ≠ NroMedidor (mês anterior via LAG) → troca confirmada
+  [DB]     Leitura_Atual_KWH_P / FP / R muito baixa → medidor novo começou próximo a zero
+  [DB]     KWH_Total muito alto ou muito baixo após mudança de NroMedidor → suspeito
+  [FATURA] Mensagem "Troca de medidor" / "Substituição de equipamento" / "Novo medidor"
+  [FATURA] Leitura Final do medidor antigo (deve ser coerente com LA do mês anterior)
+  [FATURA] Leitura Inicial do medidor novo (geralmente 00.000 ou valor muito baixo)
+  [FATURA] Verificar se houve mudança na Constante K
+
+ONDE VERIFICAR NA FATURA:
+  Mensagem indicativa: "Troca de medidor", "Substituição de equipamento",
+    "Novo medidor instalado".
+  Número do medidor: deve ser diferente da fatura anterior.
+  Leitura Atual muito baixa: LA=7.800 → LC=200 (novo começa próximo ao zero).
+  Consumo anormal: muito alto ou muito baixo após a troca.
+
+  Grupo B: NroMedidor, Leitura Final Antigo, Leitura Inicial Novo, K, Consumo Faturado.
+  Grupo A (por posto — Ponta, FP, Reservado):
+    • Leitura Final Ponta/FP do medidor antigo
+    • Leitura Inicial Ponta/FP do medidor novo
+    • Demanda Registrada: verificar se houve mudança
+    • Energia Reativa: verificar se novo medidor registra reativos
+    • Constante K: verificar se foi atualizada
+
+METODOLOGIA DE VERIFICAÇÃO:
+  Passo 1: [DB] Confirmar mudança de NroMedidor entre mês atual e mês anterior.
+  Passo 2: [FATURA] Confirmar mensagem de troca na fatura.
+  Passo 3: [FATURA] Verificar Leitura Final do Medidor Antigo.
+           Deve ser coerente com a Leitura Atual da fatura do mês anterior.
+           Se divergir muito → suspeita de Erro 1 (leitura final incorreta).
+  Passo 4: [FATURA] Verificar Leitura Inicial do Medidor Novo.
+           Geralmente 00.000 ou valor muito baixo.
+           Se for alto → possível erro de registro (Erro 2).
+  Passo 5: Calcular Consumo Correto Total:
+           Consumo_antigo = (Leitura_Final_Antigo − LA_fatura_anterior) × K_antigo
+           Consumo_novo   = (LC_novo − Leitura_Inicial_Novo) × K_novo
+           Total_correto  = Consumo_antigo + Consumo_novo
+  Passo 6: Comparar com Consumo Faturado.
+           Se Faturado ≠ Total_correto → ERRO F08.
+  Passo 7: Divergência = Consumo_Faturado − Total_correto
+           Valor = Divergência × Tarifa (R$/kWh)
+
+REGRAS ABSOLUTAS — NUNCA IGNORE:
+  ✗ NUNCA calcule F08 sem confirmar que houve troca de medidor (mensagem na fatura
+      ou número do medidor diferente).
+  ✗ NUNCA assuma que o medidor novo começa em zero sem verificar o valor registrado.
+  ✓ SEMPRE buscar a Leitura Final do medidor antigo na fatura — ela pode estar em
+      seção separada, em tabela de medição ou no verso da fatura.
+  ✓ SEMPRE verificar se a Constante K mudou junto com a troca — isso afeta o cálculo.
+  ✓ SEMPRE comparar a Leitura Final do antigo com a Leitura Atual da fatura anterior
+      para identificar inconsistências.
+
+ANTI-FALSO-POSITIVO:
+  • Se a fatura não menciona troca e o número do medidor é o mesmo → não é F08.
+    Se LC < LA nesse cenário → investigar F07 (rollover) ou F14 (diferença negativa).
+  • Pequenas diferenças no consumo total podem decorrer da proporcionalidade de dias
+    (dias com medidor antigo + dias com medidor novo). Verificar antes de concluir erro.
+  • Se a leitura inicial do novo for alta mas igual ao valor do antigo → pode ser
+    reprogramação, não troca física. Verificar campo de informações.
+  • Reprogramação de medidor é diferente de troca — a leitura inicial pode não ser zero.
+
+FUNDAMENTAÇÃO LEGAL:
+  • REN ANEEL nº 1.000/2021, Art. 283, Art. 323.
+
+================================================================================
+FICHA F09 — LEITURA ESTIMADA SEM JUSTIFICATIVA (REGRA DE NEGÓCIO)
+================================================================================
+CONCEITO:
+  A distribuidora emite fatura com leitura estimada ou faturamento por média
+  sem apresentar justificativa legal prevista na regulação.
+
+  O faturamento por estimativa/média é um PROCEDIMENTO EXCEPCIONAL, não rotineiro.
+  Quando aplicado sem motivo legal declarado, viola o direito do consumidor de pagar
+  apenas pelo consumo efetivamente medido.
+
+  ERRO: Fatura indica estimativa (texto, símbolo ou ausência de leituras)
+        + NÃO há justificativa legal declarada na fatura.
+  NÃO É ERRO: Estimativa COM justificativa legal explícita → procedimento regular.
+
+FONTE DE DADOS:
+  [DB]     IMPEDIMENTO_LEITURA = 'S' → há justificativa registrada → NÃO é F09
+  [DB]     IMPEDIMENTO_LEITURA = 'N' ou vazio → justificativa ausente no banco
+  [DB]     Tipo de faturamento: verificar se campo registra "Estimada", "Média" etc.
+  [DB]     Leitura_Anterior e Leitura_Atual = 0 → possível indicador de estimativa
+  [FATURA] Confirmar indicador de estimativa na fatura (texto, símbolo, ausência)
+  [FATURA] Confirmar presença ou ausência de justificativa legal no campo Informações
+
+SINAIS DE ESTIMATIVA NA FATURA:
+  Texto explícito: "Leitura Estimada", "Faturamento por Média", "Consumo Estimado",
+    "Medição Estimada"
+  Símbolos: (E) = Estimada; (M) = Média; asterisco (*) junto ao consumo
+  Ausência de leituras reais: LA=0 / — / "Não Exec" + consumo sendo cobrado
+
+JUSTIFICATIVAS LEGAIS QUE AFASTAM O ERRO:
+  Motivo                     Base Legal      Descrição
+  Impedimento de acesso      Art. 289, I     Portão trancado, animal, risco de segurança
+  Defeito no medidor         Art. 289, II    Medidor com defeito aguardando reparo ou troca
+  Leitura Plurimensal        Art. 288        Leitura a cada 2 ou 3 meses (autorizada)
+  Caso fortuito/força maior  Art. 289, III   Enchente, desastre natural, situação excepcional
+  Ausência temporária        Art. 320        Medidor retirado sem substituição imediata
+  Emergência/calamidade      Art. 321        Situação declarada por órgão competente
+
+METODOLOGIA DE VERIFICAÇÃO:
+  Passo 1: [DB] Verificar IMPEDIMENTO_LEITURA.
+           Se = 'S' → há justificativa → PARAR, NÃO classificar F09.
+  Passo 2: [FATURA] Identificar indicador de estimativa (texto, símbolo ou leituras ausentes).
+           Se não há nenhum indicador → não é fatura estimada → encerrar verificação F09.
+  Passo 3: [FATURA] Procurar justificativa legal no campo de informações da fatura.
+           Verificar todas as páginas, verso e anexos.
+  Passo 4: Classificar:
+           COM justificativa legal → NÃO é F09 → verificar F10 (valor da média correto?).
+           SEM justificativa + consumo acima do custo de disponibilidade → ERRO F09.
+  Passo 5: Verificar Recorrência no histórico:
+           Contar quantas faturas foram estimadas sem justificativa nos últimos 6-12 meses.
+
+REGRAS ABSOLUTAS — NUNCA IGNORE:
+  ✗ NUNCA classifique F09 se há justificativa legal declarada, mesmo que o valor
+      da estimativa esteja errado (nesse caso, investigar F10 em vez de F09).
+  ✗ NUNCA classifique F09 se o consumo faturado for exatamente o custo de
+      disponibilidade (30/50/100 kWh) — esse valor pode dispensar justificativa
+      explícita quando é o procedimento declarado do Art. 291.
+  ✓ SEMPRE verificar [DB] campo IMPEDIMENTO_LEITURA antes de concluir F09.
+  ✓ SEMPRE que houver estimativa COM justificativa, prosseguir para F10 (verificar
+      se a média usada é compatível com o histórico).
+  ✓ SEMPRE verificar todas as páginas e anexos — a justificativa pode estar no verso
+      ou em carta anexa da distribuidora.
+
+ANTI-FALSO-POSITIVO:
+  • Custo de disponibilidade (30/50/100 kWh) sem leitura pode ser regular (Art. 291).
+  • Leitura plurimensal declarada é procedimento regulamentado — não é F09.
+  • F09 e F10 são complementares: F09 = sem justificativa; F10 = com justificativa
+    mas valor incompatível com histórico. Verificar sequencialmente, nunca em paralelo.
+
+FUNDAMENTAÇÃO LEGAL:
+  • REN ANEEL nº 1.000/2021, Art. 283, Art. 288, Art. 289, Art. 291.
+
+================================================================================
+FICHA F10 — FATURAMENTO POR MÉDIA COM LEITURAS INCOMPATÍVEIS
+================================================================================
+CONCEITO:
+  A distribuidora fatura por média (com justificativa legal válida), mas o valor
+  cobrado é INCOMPATÍVEL com o histórico de consumo do cliente.
+
+  O erro NÃO está em faturar por média — esse procedimento é previsto.
+  O erro está em usar uma média INCORRETA ou INCOMPATÍVEL com o histórico.
+
+  Cálculo correto (Art. 289, §1º):
+    Média = Soma dos consumos faturados nos últimos 12 ciclos ÷ 12
+    Se histórico < 12 meses: usar os ciclos disponíveis.
+    Se não há histórico: usar custo de disponibilidade (Art. 291).
+
+FONTE DE DADOS:
+  [DB]     Media_Consumo → campo já calculado no banco; usar como referência
+  [DB]     KWH_Total (mês atual) → consumo estimado faturado
+  [DB]     IMPEDIMENTO_LEITURA = 'S' → confirma que houve faturamento por média
+  [DB]     Histórico dos últimos 12 meses via window function (KWH_Total dos 12 meses
+           anteriores por UC ordenados por Mes_Ref DESC LIMIT 12)
+  [FATURA] Confirmar valor do consumo estimado faturado
+  [FATURA] Confirmar que a justificativa de estimativa está presente (pré-requisito de F10)
+
+CENÁRIOS E REGRAS DE CÁLCULO:
+  1. Impedimento de Acesso (Art. 289):
+     → Faturar pela média dos últimos 12 meses.
+     → Nos 1º e 2º ciclos: média + notificar consumidor.
+     → No 3º ciclo consecutivo: pode suspender o fornecimento.
+     → Após regularização: acerto de contas (cobrança limitada aos 3 últimos ciclos,
+       Art. 323, §2º).
+
+  2. Defeito na Medição (Art. 255) — em ordem de prioridade:
+     (1) Média dos últimos 12 meses.
+     (2) Avaliação técnica dos equipamentos instalados.
+     (3) Consumo medido no 1º ciclo após regularização.
+     Cobrança a menor: até 3 ciclos.
+     Devolução a maior: até 60 ciclos.
+
+  3. Ausência Temporária de Medição (Art. 320):
+     ≤ 30 dias → faturar pela média (12 meses).
+     > 30 dias por responsabilidade da distribuidora → custo de disponibilidade.
+
+  4. Emergência / Calamidade (Art. 321):
+     → Média dos últimos 12 meses; sem limite de 3 ciclos para cobrança posterior.
+
+METODOLOGIA DE CÁLCULO:
+  Passo 1: [FATURA] Confirmar que há justificativa de estimativa (pré-requisito).
+           Se NÃO há justificativa → investigar F09, não F10.
+  Passo 2: [DB] Obter histórico dos últimos 12 meses (KWH_Total por Mes_Ref).
+           Calcular Média_Correta = Σ(12 meses) ÷ 12 (ou ciclos disponíveis se < 12).
+           Pode usar Media_Consumo do banco como referência inicial.
+  Passo 3: [DB+FATURA] Identificar o consumo estimado cobrado (KWH_Total / fatura).
+  Passo 4: Calcular Divergência:
+           Divergência (%) = [(Consumo_Estimado ÷ Média_Correta) − 1] × 100
+           Diferença = Consumo_Estimado − Média_Correta
+           Valor_Impacto = Diferença × Tarifa (R$/kWh)
+  Passo 5: Avaliar materialidade.
+           Divergências < 5% podem ser arredondamentos — não classificar como erro.
+
+REGRAS ABSOLUTAS — NUNCA IGNORE:
+  ✗ NUNCA classifique F10 sem antes confirmar que há justificativa legal de estimativa
+      na fatura ou no banco (IMPEDIMENTO_LEITURA = 'S'). Sem justificativa → F09.
+  ✗ NUNCA conclua erro se não houver histórico suficiente para calcular a média
+      (< 3 meses disponíveis) — registrar SEM_HISTORICO_SUFICIENTE.
+  ✗ NUNCA some postos tarifários diferentes (Ponta + FP) para calcular a média
+      — manter por posto quando Grupo A ou Tarifa Branca.
+  ✓ SEMPRE calcular a média correta pelo histórico antes de comparar.
+  ✓ SEMPRE verificar se o valor faturado é o custo de disponibilidade (30/50/100 kWh)
+      — pode ser o procedimento correto do Art. 291 quando não há histórico.
+  ✓ SEMPRE considerar sazonalidade para clientes Irrigantes (comparar meses da mesma
+      estação — seca ou úmida).
+
+ANTI-FALSO-POSITIVO:
+  • Pequenas variações (< 5%) podem ser diferenças de arredondamento — não classificar.
+  • Se não há histórico anterior, o custo de disponibilidade é o correto — não é erro.
+  • Histórico parcial (< 12 meses): calcular com os ciclos disponíveis antes de concluir.
+  • Se o campo Media_Consumo do banco diverge do cálculo manual, priorizar o cálculo
+    manual com os 12 meses históricos — o campo pode estar desatualizado.
+
+FUNDAMENTAÇÃO LEGAL:
+  • REN ANEEL nº 1.000/2021, Art. 255, Art. 283, Art. 289 (§1º e §2º),
+    Art. 291, Art. 320, Art. 321, Art. 323 (§2º).
+
+================================================================================
+FICHA F11 — FATURAMENTO POR MÉDIA ACIMA DA RECORRÊNCIA PERMITIDA / LEITURA PLURIMENSAL
+================================================================================
+CONCEITO:
+  Leitura plurimensal é o procedimento regulamentado em que a distribuidora realiza
+  a leitura real do medidor somente a cada 2 ou 3 meses, com faturamento intermediário
+  baseado em autoleitura do consumidor ou estimativa nos ciclos sem leitura real.
+
+  É procedimento PERMITIDO desde que:
+    1. Previsto no procedimento comercial da distribuidora (não é erro operacional).
+    2. Ciclo plurimensal definido previamente e de forma planejada.
+    3. Informado explicitamente na fatura: "Leitura Plurimensal" ou equivalente.
+
+  LIMITE LEGAL (Art. 276): A distribuidora DEVE realizar leitura real no ciclo
+  subsequente sempre que o consumidor não enviar autoleitura por 2 ciclos consecutivos.
+  → Portanto, NÃO pode haver 3 ou mais ciclos consecutivos sem leitura real coletada.
+
+  ERRO: distribuidora aplica estimativa/média no ciclo de SUA responsabilidade,
+  sem justificativa de impedimento, quando deveria usar custo de disponibilidade
+  (Art. 276) — OU permite 3+ ciclos sem leitura real.
+
+FONTE DE DADOS:
+  [DB]     IMPEDIMENTO_LEITURA em meses consecutivos → padrão de estimativa recorrente
+  [DB]     Histórico de Tipo de faturamento por Mes_Ref (6-12 meses) → identificar padrão
+  [DB]     Sequência de KWH_Total iguais ou estimados → sinal de plurimensal incorreto
+  [FATURA] Campo de informações: "Rota Rural – Leitura Plurimensal", "Autoleitura"
+  [FATURA] Histórico impresso: alternância entre leitura real e estimada/autoleitura
+  [FATURA] Verificar se o ciclo de responsabilidade da distribuidora usa média em vez
+           de custo de disponibilidade (quando consumidor não enviou autoleitura)
+
+METODOLOGIA DE VERIFICAÇÃO:
+  Passo 1: [FATURA] Identificar declaração de plurimensal na fatura.
+           Se não há declaração → investigar F09 em vez de F11.
+  Passo 2: [DB+FATURA] Identificar quais ciclos são de responsabilidade do consumidor
+           (autoleitura) e quais são de responsabilidade da distribuidora (leitura real).
+  Passo 3: [DB] No ciclo de responsabilidade da distribuidora:
+           a) Coletou leitura real → OK.
+           b) Usou custo de disponibilidade (30/50/100 kWh) por falta de autoleitura → OK
+              (Art. 276 — procedimento correto).
+           c) Aplicou MÉDIA sem justificativa de impedimento → ERRO F11.
+  Passo 4: [DB] Contar ciclos consecutivos sem leitura real:
+           3 ou mais ciclos sem leitura real → ERRO F11 (ultrapassa limite do Art. 276).
+
+REGRAS ABSOLUTAS — NUNCA IGNORE:
+  ✗ NUNCA classifique F11 sem confirmar que se trata de leitura plurimensal declarada.
+      Se não há declaração explícita, é F09 (estimativa sem justificativa).
+  ✗ NUNCA classifique como erro o custo de disponibilidade aplicado no ciclo da
+      distribuidora quando o consumidor não enviou autoleitura — é procedimento correto.
+  ✓ SEMPRE verificar o calendário plurimensal antes de concluir erro.
+  ✓ SEMPRE contar os ciclos consecutivos sem leitura real — o limite é 2 ciclos sem
+      autoleitura; no 3º, a distribuidora deve coletar ou usar custo de disponibilidade.
+
+ANTI-FALSO-POSITIVO:
+  • A leitura plurimensal em si é regular — o erro está no descumprimento dos limites.
+  • Custo de disponibilidade no ciclo da distribuidora (quando consumidor não enviou
+    autoleitura) é procedimento correto — NÃO é erro.
+  • Se o consumidor enviou autoleitura e a distribuidora não a aceitou, verificar
+    contexto antes de classificar.
+
+FUNDAMENTAÇÃO LEGAL:
+  • REN ANEEL nº 1.000/2021, Art. 276, Art. 288, Capítulo X (Do Faturamento).
+
+================================================================================
+FICHA F12 — FATURAMENTO INCORRETO POR AUSÊNCIA DE MEDIÇÃO
+================================================================================
+CONCEITO:
+  A distribuidora retira o medidor por defeito, mas NÃO instala substituto imediatamente.
+  Nesse período sem medidor, o faturamento segue regras específicas baseadas na duração.
+
+  Regra fundamental (Art. 320):
+    Duração ≤ 30 dias  → faturar pela MÉDIA dos últimos 12 meses.
+    Duração > 30 dias por responsabilidade da distribuidora →
+      faturar pelo CUSTO DE DISPONIBILIDADE (30/50/100 kWh).
+
+  Custo de Disponibilidade (Art. 291):
+    Monofásico ou bifásico 2 condutores → 30 kWh
+    Bifásico 3 condutores               → 50 kWh
+    Trifásico                           → 100 kWh
+
+  Proibição adicional: NÃO cobrar consumo de energia reativa excedente nem
+  demanda de potência reativa excedente durante o período sem medidor.
+
+FONTE DE DADOS:
+  [DB]     NroMedidor = NULL ou vazio → sem medidor registrado
+  [DB]     Constante_KWH_P = NULL ou 0 → ausência de constante confirma ausência de medidor
+  [DB]     Leitura_Anterior e Leitura_Atual = NULL/0 para todos os postos
+  [DB]     Dt_Leitura_Anterior e Dt_Leitura_Atual → calcular duração da ausência
+  [DB]     UFER_Ponta / UFER_FPonta > 0 durante o período → cobrança indevida de reativo
+  [DB]     KW_Ponta / KW_FPonta > 0 durante o período → cobrança indevida de demanda
+  [FATURA] "Ausência temporária de medição", "Medição não disponibilizada",
+           "Ligação Direta", ausência de número do medidor, ausência de constante
+
+METODOLOGIA DE VERIFICAÇÃO:
+  Passo 1: [FATURA+DB] Identificar indicador de ausência de medição.
+           Texto: "Ligação Direta", "Ausência de Medição", NroMedidor ausente.
+  Passo 2: [DB] Calcular Duração da Ausência.
+           Duração = Data_Fim − Data_Início (em dias ou meses).
+           Usar Dt_Leitura_Anterior / Dt_Leitura_Atual para referência de datas.
+  Passo 3: Aplicar Regra Correta:
+           Se Duração ≤ 30 dias:
+             → Verificar se faturou pela MÉDIA (12 meses). Se não → ERRO F12.
+           Se Duração > 30 dias:
+             → Verificar se faturou pelo CUSTO DE DISPONIBILIDADE.
+               Se faturou pela média → ERRO F12.
+               Se faturou valor acima do custo de disponibilidade → ERRO F12.
+  Passo 4: [DB] Verificar cobrança indevida de reativo/demanda durante o período.
+           Se UFER_Ponta > 0 OU KW_Ponta/FPonta > 0 no período → ERRO adicional.
+
+REGRAS ABSOLUTAS — NUNCA IGNORE:
+  ✗ NUNCA confunda Ausência de Medição (F12) com Impedimento de Acesso (F09/F10).
+      F12 = o medidor foi fisicamente retirado pela distribuidora.
+      F09/F10 = o leiturista não conseguiu acessar o medidor que ainda está instalado.
+  ✗ NUNCA classifique F12 se o medidor foi substituído imediatamente — sem período
+      de ausência, não há erro de F12.
+  ✗ NUNCA ignore cobranças de reativo/demanda durante o período de ausência —
+      são vedadas independentemente da duração.
+  ✓ SEMPRE verificar a duração antes de avaliar qual regra se aplica (≤30 ou >30 dias).
+  ✓ SEMPRE verificar se a responsabilidade da ausência é da distribuidora ou do consumidor
+      — regras diferentes se aplicam.
+
+ANTI-FALSO-POSITIVO:
+  • Se o medidor foi substituído imediatamente → não há ausência de medição → não é F12.
+  • Se a ausência foi causada por ação do consumidor (irregularidade), aplicam-se regras
+    do Capítulo VII — não é F12 padrão.
+  • Verificar se a fatura com "Ligação Direta" não está apenas no 1º ciclo (≤30 dias
+    com média compatível) — pode estar dentro do prazo regular.
+
+FUNDAMENTAÇÃO LEGAL:
+  • REN ANEEL nº 1.000/2021, Art. 291 (custo de disponibilidade),
+    Art. 320 §1º (≤30 dias → média), §2º (>30 dias → custo de disponibilidade).
+
+================================================================================
+FICHA F13 — CONSUMO ATIVO ZERO COM COBRANÇA DE REATIVO / DEMANDA
+================================================================================
+CONCEITO:
+  A fatura registra consumo de energia ativa (kWh) igual a zero em todos os postos,
+  mas ao mesmo tempo registra demanda (kW) ou energia reativa (kvarh) maior que zero.
+
+  Fisicamente impossível: onde há demanda registrada ou energia reativa circulando,
+  há necessariamente consumo ativo. A situação indica erro de medição ou faturamento.
+
+  REGRA DE DETECÇÃO:
+    SE (Demanda_Medida > 0 OU Energia_Reativa > 0)
+    E  (Energia_Ativa_Total = 0 em TODOS os postos)
+    → ERRO F13
+
+FONTE DE DADOS:
+  [DB]     KWH_Total = 0 E (KW_Ponta > 0 OU KW_FPonta > 0) → detectável diretamente
+  [DB]     KWH_Total = 0 E (UFER_Ponta > 0 OU UFER_FPonta > 0 OU UFER_Reservado > 0)
+  [DB]     KWH_Ponta = 0 E KWH_FPonta = 0 E KWH_Reservado = 0 → soma zero confirmada
+  [DB]     KW_Registrada_Ponta > 0 OU KW_Registrada_FPonta > 0 → demanda registrada
+  [FATURA] Confirmar que Energia Ativa é zero em todos os postos (não apenas em um)
+  [FATURA] Confirmar que Demanda Medida e/ou Reativo têm valor positivo
+
+  ⚠️ Este erro é detectável DIRETAMENTE pelo banco de dados sem necessidade de leitura
+  da imagem da fatura — o banco tem todos os campos necessários.
+
+ONDE VERIFICAR NA FATURA:
+  Grandeza              Campo esperado no erro  Análise
+  Energia Ativa (kWh)   0 em todos os postos    Nenhum consumo ativo em nenhum posto
+  Demanda Medida (kW)   > 0                     Houve consumo de potência
+  Energia Reativa Exc.  > 0                     Houve consumo de energia reativa
+
+METODOLOGIA DE VERIFICAÇÃO:
+  Passo 1: [DB] Somar KWH_Ponta + KWH_FPonta + KWH_Reservado.
+           Se soma = 0 → prosseguir.
+           Se soma > 0 → não é F13.
+  Passo 2: [DB] Verificar KW_Ponta, KW_FPonta, KW_Registrada_Ponta, KW_Registrada_FPonta.
+           Se qualquer um > 0 → ERRO F13 confirmado.
+  Passo 3: [DB] Verificar UFER_Ponta, UFER_FPonta, UFER_Reservado.
+           Se qualquer um > 0 → ERRO F13 confirmado.
+  Passo 4: [FATURA] Confirmar visualmente os valores de ativo, demanda e reativo.
+
+REGRAS ABSOLUTAS — NUNCA IGNORE:
+  ✗ NUNCA classifique F13 verificando apenas 1 posto — somar TODOS os postos.
+      O consumo ativo total zero exige que Ponta + FP + Reservado = 0.
+  ✗ NUNCA classifique F13 em unidades desativadas se não há cobrança efetiva —
+      verificar se há valor financeiro sendo cobrado.
+  ✓ SEMPRE verificar [DB] primeiro — este erro é 100% detectável pelo banco.
+  ✓ SEMPRE confirmar tanto demanda quanto reativo — o erro pode ocorrer com um ou
+      com ambos presentes.
+
+ANTI-FALSO-POSITIVO:
+  • Se a unidade estava desativada/cancelada sem cobrança no período, não há erro.
+  • Se o medidor foi recém-instalado e não houve consumo no ciclo (leitura inicial=final),
+    o zero pode ser legítimo — verificar se há demanda ou reativo nesse cenário.
+  • Para Grupo A: a demanda contratada pode ser cobrada mesmo sem consumo ativo no mês,
+    dependendo do contrato — verificar se a fatura indica demanda CONTRATADA (não medida).
+    A cobrança de DEMANDA MEDIDA > 0 com ATIVO = 0 é o cenário de erro.
+
+FUNDAMENTAÇÃO LEGAL:
+  • REN ANEEL nº 1.000/2021, Art. 283 (faturamento deve refletir grandezas medidas).
+
+================================================================================
+FICHA F14 — DIFERENÇA DE LEITURAS NEGATIVA
+================================================================================
+CONCEITO:
+  A diferença entre leitura atual e leitura anterior é negativa ou zero, o que é
+  fisicamente impossível em um medidor em funcionamento normal.
+
+  Um medidor sempre registra consumo crescente — a leitura atual deve ser SEMPRE
+  maior que a anterior, com exceção dos casos especiais listados abaixo.
+
+  Situação Normal:  LA=5.380 → LC=5.430 → Diferença = +50 kWh ✓
+  Situação de Erro: LA=5.430 → LC=5.380 → Diferença = −50 kWh ✗ (IMPOSSÍVEL)
+
+  Exceções Legítimas que AFASTAM o erro:
+    (a) Troca de medidor: novo começa em zero — investigar F08.
+    (b) Rollover: medidor atingiu limite máximo e voltou a zero — investigar F07.
+    (c) Reprogramação declarada: fatura informa ajuste de leitura.
+
+FONTE DE DADOS:
+  [DB]     Leitura_Atual_KWH_P < Leitura_Anterior_KWH_P → diferença negativa no banco
+  [DB]     Leitura_Atual_KWH_FP < Leitura_Anterior_KWH_FP → por posto FP
+  [DB]     Leitura_Atual_KWH_R < Leitura_Anterior_KWH_R → por posto Reservado
+  [DB]     NroMedidor diferente do mês anterior → troca → investigar F08, não F14
+  [DB]     Leitura_Anterior próxima do valor máximo → rollover → investigar F07, não F14
+  [FATURA] "Troca de medidor" → F08, não F14
+  [FATURA] Número de dígitos da leitura anterior para avaliar rollover
+  [FATURA] "Correção de leitura" ou "Ajuste de faturamento" → reprogramação declarada
+
+  ⚠️ A detecção inicial de LC < LA é 100% possível pelo banco. A diferenciação
+  entre F07 (rollover), F08 (troca) e F14 (erro real) requer confirmação da fatura.
+
+ONDE VERIFICAR NA FATURA:
+  Grupo B:
+    • Leitura Anterior (kWh) — campo de medição
+    • Leitura Atual (kWh) — campo de medição
+    • Consumo Faturado (kWh)
+    Exceções declaradas: "Troca de medidor" | "Virada do medidor" | "Correção de leitura"
+  Grupo A (por posto — verificar cada posto separadamente):
+    Energia Ativa Ponta:     Diferença = LC_P − LA_P
+    Energia Ativa Fora Ponta: Diferença = LC_FP − LA_FP
+    Energia Ativa Reservada (irrigantes): Diferença = LC_R − LA_R
+    ⚠️ O erro pode ocorrer em apenas um posto — verificar todos individualmente.
+
+METODOLOGIA DE VERIFICAÇÃO:
+  Passo 1: [DB] Detectar LC < LA em qualquer posto.
+  Passo 2: [DB+FATURA] Verificar Exceção (a) — Troca de medidor:
+           [DB] NroMedidor mudou entre meses → troca → investigar F08, PARAR F14.
+           [FATURA] "Troca de medidor" explícito → investigar F08, PARAR F14.
+  Passo 3: [DB+FATURA] Verificar Exceção (b) — Rollover:
+           [DB] Leitura_Anterior próxima do valor máximo do medidor.
+           [FATURA] Confirmar número de dígitos → se LA ≈ máximo → investigar F07, PARAR F14.
+  Passo 4: [FATURA] Verificar Exceção (c) — Reprogramação:
+           Campo "Informações": "Correção de leitura", "Ajuste de faturamento" → PARAR F14.
+  Passo 5: Se nenhuma exceção se aplica → ERRO F14 confirmado.
+  Passo 6: Calcular Consumo Correto:
+           Opção principal: Consumo_Correto = Média dos últimos 12 meses.
+  Passo 7: Calcular Impacto Financeiro:
+           Diferença_consumo = Consumo_Correto − Consumo_Faturado
+           Valor = Diferença_consumo × Tarifa (R$/kWh)
+
+REGRAS ABSOLUTAS — NUNCA IGNORE:
+  ✗ NUNCA classifique F14 sem primeiro verificar as três exceções (troca, rollover,
+      reprogramação). Cada uma tem uma ficha específica (F08, F07) ou é procedimento
+      regular — classificar F14 sem essa verificação gera falso positivo grave.
+  ✗ NUNCA ignore que o erro pode ocorrer em apenas 1 posto — verificar todos.
+  ✓ SEMPRE verificar o NroMedidor do mês anterior antes de concluir F14.
+  ✓ SEMPRE verificar se a Leitura Anterior está próxima do máximo antes de descartar
+      rollover. Exemplo: LA=94.640 com medidor de 5 dígitos (máx=99.999) → rollover.
+  ✓ SEMPRE usar a média dos últimos 12 meses como consumo correto de referência
+      quando F14 for confirmado.
+
+ANTI-FALSO-POSITIVO:
+  • "Troca de medidor" na fatura → não é F14, é F08.
+  • NroMedidor diferente do mês anterior → não é F14, é F08.
+  • LA próxima do máximo do medidor → não é F14, é F07.
+  • "Correção de leitura" ou "Ajuste de faturamento" declarado → não é F14.
+  • Se for o primeiro faturamento da UC e a leitura inicial herdou valor incorreto
+    do cadastro → verificar contexto antes de classificar.
+
+FUNDAMENTAÇÃO LEGAL:
+  • REN ANEEL nº 1.000/2021, Art. 283.
+  • PRODIST – Módulo 5: integridade, rastreabilidade e sequência lógica das leituras.
+
+================================================================================
+TABELA RESUMO — FICHAS F06 A F14
+================================================================================
+Ficha  Erro                                     Fonte Principal   Fórmula / Regra de Detecção
+-----  ---------------------------------------  ----------------  ----------------------------------------
+F06    Leituras ausentes sem justificativa       [DB]+[FATURA]     LA=0 E LC=0 E sem IMPEDIMENTO + consumo>mínimo
+F07    Rollover não tratado (LC < LA)            [DB]+[FATURA]     [(máx − LA) + LC + 1] × K ≠ Faturado
+F08    Troca de medidor com leituras erradas     [DB]+[FATURA]     Antigo + Novo ≠ consumo faturado
+F09    Estimativa sem motivo legal               [DB]              IMPEDIMENTO='N' + indica estimativa
+F10    Média incompatível com histórico          [DB]              |Estimado − Média_12meses| > 5%
+F11    Plurimensal > 2 ciclos sem leitura real  [DB]              Contar ciclos consecutivos sem leitura real
+F12    Ausência de medição faturada errado       [DB]+[FATURA]     ≤30d→média; >30d→custo disponibilidade
+F13    Ativo=0 com Demanda ou Reativo > 0       [DB]              KWH_Total=0 E (KW>0 OU UFER>0)
+F14    LC − LA ≤ 0 sem exceção legítima         [DB]              LC < LA + sem troca + sem rollover
+
+================================================================================
+PRECEDÊNCIA E BLOQUEIOS ENTRE FICHAS (F06–F14)
+================================================================================
+Quando LC < LA for detectado, aplicar esta sequência obrigatoriamente:
+  1º → Verificar F08 (troca de medidor): NroMedidor mudou OU "Troca" declarada.
+  2º → Verificar F07 (rollover): LA próxima do máximo do medidor.
+  3º → Verificar reprogramação declarada na fatura.
+  4º → Se nenhuma exceção → classificar F14.
+  ⚠️ NUNCA pular etapas desta sequência.
+
+F09 e F10 são mutuamente exclusivos no mesmo ciclo:
+  → Se há justificativa de estimativa → somente F10 (verificar se a média é correta).
+  → Se NÃO há justificativa → somente F09.
+  → NUNCA classificar F09 e F10 simultaneamente para o mesmo mês.
+
+F12 vs. F09/F10:
+  → F12 = medidor fisicamente retirado (sem equipamento instalado).
+  → F09/F10 = medidor instalado mas leitura não coletada (impedimento de acesso,
+    defeito do medidor ainda presente etc.).
+  → Verificar se o NroMedidor está ausente no banco para confirmar F12.
+
+================================================================================

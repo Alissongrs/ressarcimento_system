@@ -2,6 +2,7 @@
 import DOMPurify from 'dompurify';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
+import { useLocation } from 'react-router-dom';
 import {
   Archive,
   FileText,
@@ -1156,12 +1157,21 @@ const LinkProcessModal = ({
    PAGE
 ========================= */
 const CaixaDeEmail = () => {
+  const location = useLocation();
+  const targetMessageId = useMemo(() => {
+    try {
+      return new URLSearchParams(location.search).get('messageId') || '';
+    } catch {
+      return '';
+    }
+  }, [location.search]);
   const { user } = useAuth();
   const [folders, setFolders] = useState([]);
   const [activeFolder, setActiveFolder] = useState(null);
 
   const [messages, setMessages] = useState([]);
   const [selectedMessage, setSelectedMessage] = useState(null);
+  const [pendingDeepLinkMessageId, setPendingDeepLinkMessageId] = useState(targetMessageId);
   const [selectedIds, setSelectedIds] = useState([]);
   const [moveTargetFolderId, setMoveTargetFolderId] = useState('');
   const [readByMap, setReadByMap] = useState({});
@@ -1209,6 +1219,36 @@ const CaixaDeEmail = () => {
   const dragRef = useRef(null);
 
   // load/save layout widths
+  useEffect(() => {
+    setPendingDeepLinkMessageId(targetMessageId);
+  }, [targetMessageId]);
+
+  useEffect(() => {
+    if (!pendingDeepLinkMessageId) return;
+    let ignore = false;
+    (async () => {
+      try {
+        const detail = await getMailMessage(pendingDeepLinkMessageId);
+        if (ignore || !detail?.id) return;
+        setSelectedMessage((prev) => (prev?.id === detail.id ? prev : detail));
+        setMessages((prev) => {
+          const list = Array.isArray(prev) ? prev : [];
+          if (list.some((item) => item?.id === detail.id)) return list;
+          return [detail, ...list];
+        });
+      } catch {
+        if (!ignore) {
+          setToast({ open: true, type: 'error', message: 'Falha ao abrir o e-mail do histórico.' });
+        }
+      } finally {
+        if (!ignore) setPendingDeepLinkMessageId('');
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [pendingDeepLinkMessageId]);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem('mail_layout_v1');
@@ -1419,10 +1459,10 @@ const CaixaDeEmail = () => {
           offset: 0,
         });
 
-        if (!ignore) {
-          setMessages((prev) => {
-            if (messagesOffset <= 0) {
-              return list || [];
+          if (!ignore) {
+            setMessages((prev) => {
+              if (messagesOffset <= 0) {
+                return list || [];
             }
             const seen = new Set();
             const merged = [];
@@ -1442,17 +1482,17 @@ const CaixaDeEmail = () => {
             setHasMoreMessages((list || []).length === REQUEST_PAGE_SIZE);
           }
           // manter selecionado se poss?vel; senão escolhe o primeiro apenas se não houver sele??o
-          if (list?.length) {
-            if (selectedMessage?.id) {
-              const keep = list.find((x) => x.id === selectedMessage.id);
-              if (keep) setSelectedMessage(keep);
-            } else {
-              setSelectedMessage(list[0]);
+            if (list?.length) {
+              if (selectedMessage?.id) {
+                const keep = list.find((x) => x.id === selectedMessage.id);
+                if (keep) setSelectedMessage(keep);
+              } else if (!pendingDeepLinkMessageId) {
+                setSelectedMessage(list[0]);
+              }
+            } else if (!selectedMessage?.id && !pendingDeepLinkMessageId) {
+              setSelectedMessage(null);
             }
-          } else if (!selectedMessage?.id) {
-            setSelectedMessage(null);
           }
-        }
       } catch {
         if (!ignore) setToast({ open: true, type: 'error', message: 'Falha ao carregar mensagens.' });
       } finally {
@@ -1467,7 +1507,7 @@ const CaixaDeEmail = () => {
       clearInterval(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFolder?.id, search, onlyUnread, reloadSeq, messagesOffset]);
+  }, [activeFolder?.id, search, onlyUnread, reloadSeq, messagesOffset, pendingDeepLinkMessageId]);
 
   // LOAD MESSAGE DETAIL
   useEffect(() => {

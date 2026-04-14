@@ -127,7 +127,22 @@ Regras de análise:
    - status: classificação (PICO_OUTLIER, DESVIO_ALTO, etc.)
    - peso: peso calculado
 
-13. LEITURA REGULATÓRIA DO DOCUMENTO (obrigatório quando F02 for Confirmado):
+13. ANÁLISE DE RETORNO AO PADRÃO — MESES POSTERIORES (obrigatório quando F02 for Confirmado e dados posteriores existirem):
+   Quando o contexto contiver faturas de meses POSTERIORES ao mês auditado:
+   a) Identificar até 3 meses imediatamente após o mês atual.
+   b) Calcular avg_posterior = média do consumo desses meses (mesmo segmento analisado).
+   c) Comparar consumo_atual com avg_posterior:
+      • consumo_atual ≤ avg_posterior × 1,30 → nível elevado continuou → CANCELAR F02
+        (o consumo posterior se manteve elevado; não é anomalia isolada, é mudança real de padrão)
+      • consumo_atual > avg_posterior × 1,30 e avg_posterior ≤ media_historica × 1,40
+        → consumo voltou ao padrão → pico foi isolado → MANTER F02 confirmado
+      • consumo_atual > avg_posterior × 1,30 e avg_posterior > media_historica × 1,40
+        → retorno parcial → MANTER F02 com nível de confiança reduzido
+   d) Se não houver meses posteriores no contexto: registrar "não disponíveis" e não alterar F02.
+   e) Para padrão de acúmulo (Art. 323): esta regra NÃO se aplica.
+   Registrar no campo "retorno_ao_padrao": [Confirmado | Parcial | Sem retorno | não disponível]
+
+15. LEITURA REGULATÓRIA DO DOCUMENTO (obrigatório quando F02 for Confirmado):
    Leia o texto da fatura procurando por justificativas da distribuidora para o pico: faturamento retroativo, ausência de faturamento, Art. 323 REN 1000/2021, acúmulo, parcelamento.
    - O resultado estatístico de F02 PERMANECE Confirmado (a regra não muda).
    - No campo "Obs. Regulatória" registre apenas o fato encontrado de forma objetiva (1 frase).

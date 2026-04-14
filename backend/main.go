@@ -138,6 +138,9 @@ func startScheduler() {
 	// Tarefa 5: Checar prazos de processos (a cada 1 hora)
 	s.Every(1).Hour().Do(services.ChecarPrazosProcessos)
 
+	// Tarefa 5b: Enviar e-mail da equipe de ressarcimento quando alerta "para_todos" vence
+	s.Every(1).Day().At("08:00").Do(services.ChecarAlertasParaTodos)
+
     // Tarefa 6: Processar resumos pendentes (a cada 1 minuto)
     s.Every(1).Minutes().Do(func(){
         ctx := context.Background()

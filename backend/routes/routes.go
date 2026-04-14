@@ -262,8 +262,10 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.GET("/requisicoes/departamento", handlers.GetRequisicoesDepartamento)
 
 			// Alertas
-			authRequired.GET("/alertas", handlers.GetAlertasByUser)
+			authRequired.GET("/alertas", handlers.GetAlertas)
+			authRequired.POST("/alertas", handlers.CreateAlerta)
 			authRequired.POST("/alertas/marcar-lido", handlers.MarcarAlertaComoLido)
+			authRequired.POST("/alertas/ack", handlers.AckAlertas)
 			authRequired.PUT("/alertas/:id", handlers.UpdateAlerta)
 			authRequired.DELETE("/alertas/:id", handlers.DeleteAlerta)
 
@@ -281,12 +283,21 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.GET("/faturas/ficha/04", handlers.ListFicha04)
 			authRequired.GET("/faturas/ficha/05", handlers.ListFicha05)
 			authRequired.GET("/faturas/uc-historico", handlers.GetUCFaturas)
+			authRequired.GET("/faturas/uc-consumo-chart", handlers.GetUCConsumoChart)
+			authRequired.GET("/faturas/ucs-resumo", handlers.GetUCsResumo)
+			authRequired.GET("/faturas/analisadas", handlers.GetFaturasAnalisadas)
+			authRequired.POST("/faturas/ficha/aprovar", handlers.AprovarFicha)
+			authRequired.POST("/faturas/ficha/deletar", handlers.DeletarFicha)
+			authRequired.GET("/faturas/clientes-ia", handlers.GetResumoClientes)
+			authRequired.GET("/faturas/clientes-ia/detalhe", handlers.GetClienteIAFaturas)
 			authRequired.GET("/faturas/ucs-em-processo", handlers.ListUCsEmProcesso)
 			authRequired.GET("/faturas/ficha/processo-vinculado", handlers.GetProcessoVinculado)
 			authRequired.POST("/faturas/aisure/chat", handlers.AisureChatHandler)
 			authRequired.GET("/faturas/aisure/fetch", handlers.AisureFetchFaturaHandler)
+			authRequired.POST("/faturas/aisure/anexar-ao-processo", handlers.AisureAttachFaturaToProcessHandler)
 			authRequired.POST("/faturas/aisure/confirmar", handlers.AisureConfirmarHandler)
 			authRequired.POST("/faturas/analise-resultado/salvar", handlers.SalvarResultadoIAFicha)
+			authRequired.POST("/faturas/reset-ia", handlers.ResetFaturaIA)
 			authRequired.POST("/faturas/aisure/gerar-email", handlers.GerarEmailHandler)
 
 			// Busca global
@@ -305,6 +316,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.GET("/chat/sessions/:id/messages", handlers.ListChatMessages)
 			authRequired.POST("/chat/sessions/:id/messages", handlers.AddChatMessage)
 			authRequired.DELETE("/chat/sessions/:id", handlers.DeleteChatSession)
+			authRequired.POST("/chat/processos", handlers.ChatProcessosHandler)
+			authRequired.GET("/chat/processos/contexto", handlers.ChatProcessosContextoHandler)
 
 			// Irregularidades
 			authRequired.GET("/tipos-irregularidade", handlers.GetTiposIrregularidade)
@@ -424,6 +437,9 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/admin/prazos", handlers.GetPrazosConfig)
 			gestorRequired.POST("/admin/prazos", handlers.SavePrazosConfig)
 
+			// Admin - Disparar alertas manualmente
+			gestorRequired.POST("/admin/alertas/disparar-agora", handlers.DispararAlertasAgora)
+
 			// Admin - Alarmes (regras de alerta por etapa/coluna)
 			gestorRequired.GET("/admin/alarmes", handlers.GetAlarmes)
 			gestorRequired.POST("/admin/alarmes", handlers.SaveAlarme)
@@ -540,7 +556,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.GET("/requisicoes/historico", handlers.HistoricoRecent)
 			authRequired.POST("/requisicoes", handlers.CreateRequisicaoPersist)
 			authRequired.GET("/requisicoes/departamento", handlers.GetRequisicoesDepartamento)
-			authRequired.GET("/alertas", handlers.GetAlertasByUser)
+			authRequired.GET("/alertas", handlers.GetAlertas)
+			authRequired.POST("/alertas", handlers.CreateAlerta)
 			authRequired.POST("/alertas/marcar-lido", handlers.MarcarAlertaComoLido)
 			authRequired.POST("/feedback", handlers.CreateFeedback)
 			authRequired.POST("/ai/resumo/feedback", handlers.CreateResumoFeedback)

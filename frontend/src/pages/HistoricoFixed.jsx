@@ -50,10 +50,17 @@ function normalizeHistItem(it) {
       Array.isArray(it.canais) ? it.canais.join(', ')
         : typeof it.canais === 'string' ? it.canais
         : '',
+    mailGraphMessageId: extrair(it.mail_graph_message_id) || '',
     comentario: extrair(it.comentario) || extrair(it.obs) || '',
     usuario: extrair(it.usuario) || extrair(it.usuario_nome) || '',
     data,
   };
+}
+
+function openMailShortcut(mailGraphMessageId) {
+  const id = String(mailGraphMessageId || '').trim();
+  if (!id) return;
+  window.location.href = `/caixa-de-email?messageId=${encodeURIComponent(id)}`;
 }
 
 export default function HistoricoFixed() {
@@ -288,6 +295,7 @@ export default function HistoricoFixed() {
               <th className="px-2 py-2 border border-[var(--border)] text-left">Canais</th>
               <th className="px-2 py-2 border border-[var(--border)] text-left">Comentário</th>
               <th className="px-2 py-2 border border-[var(--border)] text-left">Usuário</th>
+              <th className="px-2 py-2 border border-[var(--border)] text-left">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -305,11 +313,24 @@ export default function HistoricoFixed() {
                   {r.comentario || '-'}
                 </td>
                 <td className="px-2 py-1 border border-[var(--border)]">{r.usuario || '-'}</td>
+                <td className="px-2 py-1 border border-[var(--border)]">
+                  {r.mailGraphMessageId ? (
+                    <button
+                      type="button"
+                      onClick={() => openMailShortcut(r.mailGraphMessageId)}
+                      className="px-2 py-1 rounded border panel-border panel-bg-60 hover:bg-[var(--hover)] text-[11px]"
+                    >
+                      Abrir e-mail
+                    </button>
+                  ) : (
+                    '-'
+                  )}
+                </td>
               </tr>
             ))}
             {!filtered.length && (
               <tr>
-                <td className="px-2 py-4 text-center opacity-70" colSpan={10}>
+                <td className="px-2 py-4 text-center opacity-70" colSpan={11}>
                   Nenhum registro encontrado com os filtros atuais.
                 </td>
               </tr>
@@ -320,4 +341,3 @@ export default function HistoricoFixed() {
     </div>
   );
 }
-

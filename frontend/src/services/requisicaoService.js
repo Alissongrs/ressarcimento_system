@@ -330,8 +330,12 @@ export const salvarFluxoRessarcimento = async (processoId, payload) =>
 export const salvarDataAlerta = (processoId, data) =>
   api.post(`/processos/${processoId}/alerta`, data);
 
-export const criarAlertaProcesso = async (processoId, mensagem) =>
-  (await api.post(`/processos/${processoId}/alertas`, { mensagem })).data;
+export const criarAlertaProcesso = async (processoId, input) => {
+  const payload = typeof input === 'string'
+    ? { mensagem: input }
+    : (input || {});
+  return (await api.post(`/processos/${processoId}/alertas`, payload)).data;
+};
 
 // ======================= Deferimento (autosave) =======================
 export async function salvarDeferimento(processoId, deferimento) {
@@ -949,5 +953,4 @@ export async function getMesesPorIdUc(idUcOrParams) {
     return { meses: [] };
   }
 }
-
 

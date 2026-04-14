@@ -118,6 +118,19 @@ func createRequisicaoPersistente(c *gin.Context) {
 	if linkFatura == "" {
 		linkFatura = strings.TrimSpace(get("linkFatura"))
 	}
+	// Lista completa de faturas com link + mes_ref enviada pelo frontend
+	type faturaDetalhe struct {
+		Link   string `json:"link"`
+		MesRef string `json:"mes_ref"`
+	}
+	var linksFaturasDetalhes []faturaDetalhe
+	if raw := strings.TrimSpace(get("linksFaturasDetalhes")); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &linksFaturasDetalhes)
+	}
+	// Se veio lista completa, o linkFatura é o primeiro da lista
+	if len(linksFaturasDetalhes) > 0 && linkFatura == "" {
+		linkFatura = strings.TrimSpace(linksFaturasDetalhes[0].Link)
+	}
 	cnpj := strings.TrimSpace(payload.CNPJ)
 	if cnpj == "" {
 		cnpj = strings.TrimSpace(get("cnpj"))
@@ -236,7 +249,7 @@ func createRequisicaoPersistente(c *gin.Context) {
 	lastID, _ := res.LastInsertId()
 	pid := int(lastID)
 
-	// Busca nomes de tipo/subtipo antes de criar o processo
+	// Busca nomes de tipo/subtipo para o histórico
 	tipoNome := ""
 	subtipoNome := ""
 	if strings.TrimSpace(tipoID) != "" {
@@ -246,50 +259,8 @@ func createRequisicaoPersistente(c *gin.Context) {
 		_ = queryRowGorm(tx, "SELECT nome FROM DM_SUBTIPO_IRREGULARIDADE WHERE id_subtipo = ?", subtipoID).Scan(&subtipoNome)
 	}
 
-	// cria FT_PROCESSOS com todos os campos necessários
-	etapaID := 1
-	subEtapa := "Primeira reclamação da etapa - Em elaboração"
-	subID, _ := resolveSubEtapaIDGorm(tx, subEtapa)
-	var colID sql.NullInt64
-	var colNome sql.NullString
-	_ = queryRowGorm(tx, `
-		SELECT k.id_coluna, k.nome_coluna
-		  FROM DM_ETAPAS_PROCESSO e
-		  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-		 WHERE e.id_etapa_processo = ?`,
-		etapaID,
-	).Scan(&colID, &colNome)
-
-	colNomeIface := func() interface{} {
-		if colNome.Valid {
-			return colNome.String
-		}
-		return nil
-	}()
-
-	if _, err := execGorm(tx, `
-		INSERT INTO FT_PROCESSOS (
-			id_processo, id_etapa_processo, etapa, sub_etapa, id_sub_etapa_processo,
-			id_coluna, nome_coluna, relevancia, ultima_atualizacao,
-			uc, cliente, concessionaria,
-			id_responsavel, data_movimentacao, data_criacao,
-			ressarcimento_estimado, periodos_irregularidade, descricao_irregularidade,
-			id_tipo_irregularidade, id_subtipo_irregularidade,
-			nome_tipo_irregularidade, nome_subtipo_irregularidade
-		) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NOW(), ?, ?, ?, ?, NOW(), NOW(), ?, ?, ?, ?, ?, ?, ?)`,
-		pid, etapaID, "Distribuidora", subEtapa, nullIntToIface(subID),
-		nullIntToIface(colID), colNomeIface,
-		valOrNullStr(uc), valOrNullStr(cliente), valOrNullStr(concessionaria),
-		nullIntOrNil(userIDNull),
-		nullFloatOrNil(ressarcNum),
-		valOrNullStr(periodosIrregularidade), valOrNullStr(descricaoIrregularidade),
-		valOrNullStr(tipoID), valOrNullStr(subtipoID),
-		valOrNullStr(tipoNome), valOrNullStr(subtipoNome),
-	); err != nil {
-		log.Printf("Erro ao criar processo: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar processo"})
-		return
-	}
+	// NÃO cria FT_PROCESSOS automaticamente — a requisição segue o fluxo normal de aprovação.
+	// FT_PROCESSOS só é criado quando a requisição for aprovada (status=3) com triagem=1.
 
 	// Histórico de criação com todos os detalhes da requisição
 	anexosCount := 0
@@ -326,8 +297,37 @@ func createRequisicaoPersistente(c *gin.Context) {
 		VALUES (?, ?, '', 'Nova Requisição', '', 'Nova Requisição', '', ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'criacao')`,
 		pid, nullIntOrNil(userIDNull), histComentario)
 
-	// Se houve seleÃ§ão de fatura, registra na tabela e no histórico
-	if strings.TrimSpace(linkFatura) != "" {
+	// Registra faturas em FT_REQUISICOES_FATURAS com mes_ref
+	// Preferência: lista completa (linksFaturasDetalhes); fallback: linkFatura isolado
+	if len(linksFaturasDetalhes) > 0 {
+		for _, fd := range linksFaturasDetalhes {
+			lnk := strings.TrimSpace(fd.Link)
+			mr := strings.TrimSpace(fd.MesRef)
+			if lnk == "" {
+				continue
+			}
+			var mrVal interface{} = nil
+			if mr != "" {
+				mrVal = mr
+			}
+			_, _ = execGorm(tx, `
+				INSERT INTO FT_REQUISICOES_FATURAS (id_requisicao, link, mes_ref, dt_vencimento, valor_total)
+				VALUES (?, ?, ?, NULL, NULL)`,
+				pid, lnk, mrVal,
+			)
+		}
+		statusNome := strings.TrimSpace(getStatusNomeByRequisicaoGorm(tx, int64(pid)))
+		if statusNome == "" {
+			statusNome = "Nova Requisição"
+		}
+		_, _ = execGorm(tx, `
+			INSERT INTO FT_HISTORICO_MOVIMENTACOES
+			(id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
+			VALUES (?, ?, ?, ?, '', '', '', ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'fatura')`,
+			pid, nullIntOrNil(userIDNull), statusNome, statusNome,
+			fmt.Sprintf("%d fatura(s) selecionada(s)", len(linksFaturasDetalhes)),
+		)
+	} else if strings.TrimSpace(linkFatura) != "" {
 		_, _ = execGorm(tx, `
 			INSERT INTO FT_REQUISICOES_FATURAS (id_requisicao, link, mes_ref, dt_vencimento, valor_total)
 			VALUES (?, ?, NULL, NULL, NULL)`,
@@ -340,8 +340,8 @@ func createRequisicaoPersistente(c *gin.Context) {
 		_, _ = execGorm(tx, `
 			INSERT INTO FT_HISTORICO_MOVIMENTACOES
 			(id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
-			VALUES (?, ?, ?, ?, '', 'Distribuidora', ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'fatura')`,
-			pid, nullIntOrNil(userIDNull), statusNome, statusNome, subEtapa, "Fatura selecionada: "+strings.TrimSpace(linkFatura),
+			VALUES (?, ?, ?, ?, '', '', '', ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'fatura')`,
+			pid, nullIntOrNil(userIDNull), statusNome, statusNome, "Fatura selecionada: "+strings.TrimSpace(linkFatura),
 		)
 	}
 

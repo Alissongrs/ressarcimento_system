@@ -1,4 +1,4 @@
-﻿package handlers
+package handlers
 
 import (
 	"database/sql"
@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"ressarcimento-backend/database"
+	"ressarcimento-backend/services"
+	"ressarcimento-backend/sse"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,6 +21,7 @@ type alertaDTO struct {
 	Ack         bool       `json:"acknowledged"`
 	DataCriacao time.Time  `json:"data_criacao"`
 	DataAlerta  *time.Time `json:"data_alerta,omitempty"`
+	ParaTodos   bool       `json:"para_todos"`
 }
 
 // GET /api/alertas?overdue=1&unread=1
@@ -40,7 +43,7 @@ func GetAlertas(c *gin.Context) {
 	userID, _ := userIDVal.(int64)
 
 	var (
-		where  = []string{"id_usuario = ?"}
+		where  = []string{"(id_usuario = ? OR (para_todos = 1 AND DATE(data_alerta) = CURDATE()))"}
 		args   = []interface{}{userID}
 		overdu = strings.TrimSpace(c.Query("overdue")) == "1"
 		unread = strings.TrimSpace(c.Query("unread")) == "1"
@@ -66,10 +69,11 @@ func GetAlertas(c *gin.Context) {
 	}
 
 	q := `
-		SELECT id_alerta, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta
+		SELECT id_alerta, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta,
+		       COALESCE(para_todos, 0)
 		  FROM FT_ALERTAS
 		 WHERE ` + strings.Join(where, " AND ") + `
-		 ORDER BY 
+		 ORDER BY
 		   CASE WHEN data_alerta IS NULL THEN 1 ELSE 0 END,
 		   data_alerta ASC, data_criacao DESC`
 
@@ -84,13 +88,14 @@ func GetAlertas(c *gin.Context) {
 	var out []alertaDTO
 	for rows.Next() {
 		var (
-			id, procID sql.NullInt64
-			msg        sql.NullString
-			lido, ack  sql.NullBool
-			criacao    time.Time
-			dtA        sql.NullTime
+			id, procID  sql.NullInt64
+			msg         sql.NullString
+			lido, ack   sql.NullBool
+			criacao     time.Time
+			dtA         sql.NullTime
+			paraTodos   sql.NullInt64
 		)
-		if err := rows.Scan(&id, &procID, &msg, &lido, &ack, &criacao, &dtA); err != nil {
+		if err := rows.Scan(&id, &procID, &msg, &lido, &ack, &criacao, &dtA, &paraTodos); err != nil {
 			continue
 		}
 		item := alertaDTO{
@@ -99,6 +104,7 @@ func GetAlertas(c *gin.Context) {
 			Lido:        lido.Bool,
 			Ack:         ack.Bool,
 			DataCriacao: criacao,
+			ParaTodos:   paraTodos.Int64 == 1,
 		}
 		if procID.Valid {
 			v := procID.Int64
@@ -139,6 +145,7 @@ func CreateAlerta(c *gin.Context) {
 		Mensagem   string  `json:"mensagem"`
 		DataAlerta *string `json:"data_alerta"` // YYYY-MM-DD
 		ProcID     *int64  `json:"id_processo"` // opcional
+		ParaTodos  bool    `json:"para_todos"`  // visível para toda a equipe
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Mensagem) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Corpo inválido (mensagem é obrigatória)."})
@@ -148,7 +155,6 @@ func CreateAlerta(c *gin.Context) {
 	var driverData interface{}
 	if body.DataAlerta != nil && strings.TrimSpace(*body.DataAlerta) != "" {
 		val := strings.TrimSpace(*body.DataAlerta)
-		// aceita YYYY-MM-DD
 		if _, err := time.Parse("2006-01-02", val); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "data_alerta inválida"})
 			return
@@ -156,15 +162,34 @@ func CreateAlerta(c *gin.Context) {
 		driverData = val
 	}
 
+	paraTodosVal := 0
+	if body.ParaTodos { paraTodosVal = 1 }
+
 	_, err := execGorm(database.GormDB_App, `
-		INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta)
-		VALUES (?, ?, ?, 0, 0, NOW(), ?)`,
-		userID, body.ProcID, strings.TrimSpace(body.Mensagem), driverData,
+		INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta, para_todos)
+		VALUES (?, ?, ?, 0, 0, NOW(), ?, ?)`,
+		userID, body.ProcID, strings.TrimSpace(body.Mensagem), driverData, paraTodosVal,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar alerta"})
 		return
 	}
+	sse.BroadcastUser(userID, sse.Event{
+		Type:    "alerta_novo",
+		Payload: gin.H{"processo_id": body.ProcID},
+	})
+	notifyUnread(userID)
+
+	// Envia e-mail de lembrete para o criador (alertas pessoais)
+	// ou para toda a equipe (para_todos). Feito em goroutine para não bloquear.
+	if !body.ParaTodos {
+		dataAlertaStr := ""
+		if body.DataAlerta != nil {
+			dataAlertaStr = *body.DataAlerta
+		}
+		go services.EnviarAlertaPessoal(userID, strings.TrimSpace(body.Mensagem), dataAlertaStr)
+	}
+
 	c.JSON(http.StatusCreated, gin.H{"message": "Alerta criado"})
 }
 
@@ -236,7 +261,29 @@ func UpdateAlerta(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar alerta"})
 		return
 	}
+	if v, ok := c.Get("userID"); ok {
+		if uid, ok2 := v.(int64); ok2 {
+			notifyUnread(uid)
+			sse.BroadcastUser(uid, sse.Event{Type: "alerta_unread"})
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "Alerta atualizado"})
+}
+
+// POST /api/v1/admin/alertas/disparar-agora
+// @Summary Dispara manualmente o envio de alertas para_todos vencendo hoje
+// @Tags Alertas
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Router /api/v1/admin/alertas/disparar-agora [post]
+func DispararAlertasAgora(c *gin.Context) {
+	force := c.Query("force") == "1"
+	if force {
+		go services.DispararAlertasParaTodosForce()
+	} else {
+		go services.ChecarAlertasParaTodos()
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Disparo iniciado — verifique os logs do servidor"})
 }
 
 // POST /api/alertas/ack  { alerta_ids: [ ... ] }
@@ -268,4 +315,3 @@ func AckAlertas(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Alertas confirmados"})
 }
-
