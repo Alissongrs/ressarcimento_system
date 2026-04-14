@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Bot,
   ChevronDown,
+  Download,
   Loader2,
   Maximize2,
   MessageSquare,
@@ -15,6 +16,13 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import {
+  AreaChart, Area,
+  BarChart, Bar,
+  PieChart, Pie, Cell,
+  XAxis, YAxis, Tooltip,
+  ResponsiveContainer,
+} from 'recharts';
 import api from '../services/apiClient.js';
 
 // ─── Markdown simples (sem dependência extra) ──────────────────────────────
@@ -45,6 +53,252 @@ const SUGESTOES = [
   { label: 'Totais financeiros', q: 'Qual é o valor total deferido em ressarcimentos?' },
   { label: 'Por etapa', q: 'Como estão distribuídos os processos por etapa?' },
 ];
+
+// ─── Paleta de cores dos gráficos ─────────────────────────────────────────
+const CHART_COLORS = ['#6366f1','#3b82f6','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899'];
+const fmtBRL = (v) => `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+const fmtNum = (v) => Number(v).toLocaleString('pt-BR');
+
+// ─── Exportar contexto como CSV ───────────────────────────────────────────
+function exportCSV(context) {
+  const sections = [];
+  if (context.ressarcimento_mensal?.length) {
+    sections.push('Ressarcimento Mensal\nMês,Valor (R$)');
+    context.ressarcimento_mensal.forEach(r => sections.push(`${r.mes},${r.valor}`));
+    sections.push('');
+  }
+  if (context.por_etapa?.length) {
+    sections.push('Processos por Etapa\nEtapa,Total');
+    context.por_etapa.forEach(r => sections.push(`${r.Etapa},${r.Total}`));
+    sections.push('');
+  }
+  if (context.por_cliente?.length) {
+    sections.push('Top Clientes\nCliente,Processos');
+    context.por_cliente.forEach(r => sections.push(`"${r.cliente}",${r.total}`));
+    sections.push('');
+  }
+  if (context.por_concessionaria?.length) {
+    sections.push('Por Concessionária\nConcessionária,Processos,Valor Total (R$)');
+    context.por_concessionaria.forEach(r => sections.push(`"${r.concessionaria}",${r.total},${r.valor_total}`));
+    sections.push('');
+  }
+  if (context.media_movimentacoes?.length) {
+    sections.push('Média de Movimentações por Etapa\nEtapa,Média,Máximo');
+    context.media_movimentacoes.forEach(r => sections.push(`"${r.etapa}",${r.media},${r.maximo}`));
+    sections.push('');
+  }
+  if (!sections.length) return;
+  const blob = new Blob(['\uFEFF' + sections.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `aisure_relatorio_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+// ─── Tooltip customizado ──────────────────────────────────────────────────
+const ChartTooltip = ({ active, payload, label, isCurrency }) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{ background: '#1e293b', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, padding: '6px 10px', fontSize: 11 }}>
+      {label && <div style={{ color: 'rgba(255,255,255,0.5)', marginBottom: 3 }}>{label}</div>}
+      {payload.map((p, i) => (
+        <div key={i} style={{ color: p.color || '#818cf8', fontWeight: 600 }}>
+          {isCurrency ? fmtBRL(p.value) : fmtNum(p.value)}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ─── Componente de gráficos do chat ──────────────────────────────────────
+function MessageCharts({ context, expanded }) {
+  if (!context) return null;
+
+  const charts = [];
+  const chartH = expanded ? 200 : 160;
+
+  // 1. Ressarcimento mensal — AreaChart
+  if (context.ressarcimento_mensal?.length > 1) {
+    charts.push(
+      <div key="res-mensal" style={{ marginBottom: 12 }}>
+        <p style={{ margin: '0 0 6px', fontSize: 10.5, fontWeight: 700, color: '#818cf8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          💰 Ressarcimento mensal
+        </p>
+        <ResponsiveContainer width="100%" height={chartH}>
+          <AreaChart data={context.ressarcimento_mensal} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+            <defs>
+              <linearGradient id="gradRes" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis dataKey="mes" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`} width={40} />
+            <Tooltip content={<ChartTooltip isCurrency />} />
+            <Area type="monotone" dataKey="valor" stroke="#6366f1" strokeWidth={2} fill="url(#gradRes)" />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  // 2. Abertura mensal de processos — AreaChart
+  if (context.abertura_mensal?.length > 1) {
+    charts.push(
+      <div key="abertura" style={{ marginBottom: 12 }}>
+        <p style={{ margin: '0 0 6px', fontSize: 10.5, fontWeight: 700, color: '#06b6d4', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          📋 Abertura de processos / mês
+        </p>
+        <ResponsiveContainer width="100%" height={chartH}>
+          <AreaChart data={context.abertura_mensal} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+            <defs>
+              <linearGradient id="gradAb" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis dataKey="mes" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} width={30} />
+            <Tooltip content={<ChartTooltip />} />
+            <Area type="monotone" dataKey="total" stroke="#06b6d4" strokeWidth={2} fill="url(#gradAb)" />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  // 3. Por etapa — PieChart
+  if (context.por_etapa?.length) {
+    charts.push(
+      <div key="por-etapa" style={{ marginBottom: 12 }}>
+        <p style={{ margin: '0 0 6px', fontSize: 10.5, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          📊 Distribuição por etapa
+        </p>
+        <ResponsiveContainer width="100%" height={chartH}>
+          <PieChart>
+            <Pie data={context.por_etapa} dataKey="Total" nameKey="Etapa" cx="50%" cy="50%" outerRadius={expanded ? 75 : 58} paddingAngle={2} label={({ Etapa, percent }) => `${Etapa} ${(percent*100).toFixed(0)}%`} labelLine={false} fontSize={9}>
+              {context.por_etapa.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+            </Pie>
+            <Tooltip formatter={(v, n) => [fmtNum(v), n]} contentStyle={{ background: '#1e293b', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: 11 }} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  // 4. Top clientes — BarChart horizontal
+  if (context.por_cliente?.length) {
+    charts.push(
+      <div key="por-cliente" style={{ marginBottom: 12 }}>
+        <p style={{ margin: '0 0 6px', fontSize: 10.5, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          🏢 Top clientes
+        </p>
+        <ResponsiveContainer width="100%" height={Math.max(chartH, context.por_cliente.length * 22 + 20)}>
+          <BarChart data={context.por_cliente} layout="vertical" margin={{ top: 4, right: 20, left: 4, bottom: 4 }}>
+            <XAxis type="number" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} />
+            <YAxis type="category" dataKey="cliente" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.6)' }} axisLine={false} tickLine={false} width={90} />
+            <Tooltip content={<ChartTooltip />} />
+            <Bar dataKey="total" radius={[0, 4, 4, 0]}>
+              {context.por_cliente.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  // 5. Por concessionária — BarChart
+  if (context.por_concessionaria?.length) {
+    charts.push(
+      <div key="por-conc" style={{ marginBottom: 12 }}>
+        <p style={{ margin: '0 0 6px', fontSize: 10.5, fontWeight: 700, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          ⚡ Por concessionária
+        </p>
+        <ResponsiveContainer width="100%" height={chartH}>
+          <BarChart data={context.por_concessionaria} margin={{ top: 4, right: 4, left: 4, bottom: 20 }}>
+            <XAxis dataKey="concessionaria" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)', angle: -30, textAnchor: 'end' }} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="left" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} width={30} />
+            <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: 11 }} formatter={(v, n) => [n === 'valor_total' ? fmtBRL(v) : fmtNum(v), n === 'valor_total' ? 'Valor' : 'Processos']} />
+            <Bar yAxisId="left" dataKey="total" fill="#ef4444" radius={[4, 4, 0, 0]} name="Processos" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  // 6. Média de movimentações por etapa — BarChart
+  if (context.media_movimentacoes?.length) {
+    charts.push(
+      <div key="media-mov" style={{ marginBottom: 12 }}>
+        <p style={{ margin: '0 0 6px', fontSize: 10.5, fontWeight: 700, color: '#8b5cf6', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          🔄 Média de movimentações / etapa
+        </p>
+        <ResponsiveContainer width="100%" height={chartH}>
+          <BarChart data={context.media_movimentacoes} margin={{ top: 4, right: 4, left: 4, bottom: 20 }}>
+            <XAxis dataKey="etapa" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)', angle: -30, textAnchor: 'end' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} width={25} />
+            <Tooltip content={<ChartTooltip />} />
+            <Bar dataKey="media" fill="#8b5cf6" radius={[4, 4, 0, 0]}>
+              {context.media_movimentacoes.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  // 7. Tempo médio por etapa — BarChart
+  if (context.tempo_por_etapa?.length) {
+    charts.push(
+      <div key="tempo-etapa" style={{ marginBottom: 12 }}>
+        <p style={{ margin: '0 0 6px', fontSize: 10.5, fontWeight: 700, color: '#ec4899', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          ⏱ Tempo médio por etapa (dias)
+        </p>
+        <ResponsiveContainer width="100%" height={chartH}>
+          <BarChart data={context.tempo_por_etapa} margin={{ top: 4, right: 4, left: 4, bottom: 20 }}>
+            <XAxis dataKey="etapa" tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)', angle: -30, textAnchor: 'end' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.4)' }} axisLine={false} tickLine={false} width={30} />
+            <Tooltip content={<ChartTooltip />} formatter={v => [`${v} dias`]} />
+            <Bar dataKey="media_dias" fill="#ec4899" radius={[4, 4, 0, 0]}>
+              {context.tempo_por_etapa.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  if (!charts.length) return null;
+
+  return (
+    <div style={{
+      marginTop: 10,
+      padding: '10px 12px',
+      background: 'rgba(0,0,0,0.2)',
+      borderRadius: 10,
+      border: '1px solid rgba(99,102,241,0.15)',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          Dados em tempo real
+        </span>
+        <button
+          type="button"
+          onClick={() => exportCSV(context)}
+          title="Exportar CSV"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)',
+            borderRadius: 6, padding: '3px 8px', fontSize: 10, color: '#818cf8', cursor: 'pointer',
+          }}
+        >
+          <Download size={10} /> CSV
+        </button>
+      </div>
+      {charts}
+    </div>
+  );
+}
 
 // ─── Componente principal ──────────────────────────────────────────────────
 export default function GlobalChatWidget() {
@@ -114,7 +368,7 @@ export default function GlobalChatWidget() {
       const answer = resp.data?.answer || 'Sem resposta.';
       setMessages((prev) => [
         ...prev,
-        { id: Date.now() + 1, role: 'assistant', content: answer },
+        { id: Date.now() + 1, role: 'assistant', content: answer, context: resp.data?.context || null },
       ]);
     } catch (err) {
       if (err.name === 'AbortError' || err.name === 'CanceledError') return;
@@ -442,34 +696,38 @@ export default function GlobalChatWidget() {
                   )}
                 </div>
 
-                {/* Balão */}
-                <div
-                  style={{
-                    maxWidth: '80%',
-                    padding: '8px 11px',
-                    borderRadius:
-                      msg.role === 'user' ? '12px 4px 12px 12px' : '4px 12px 12px 12px',
-                    fontSize: 12.5,
-                    lineHeight: 1.55,
-                    background:
-                      msg.role === 'user'
-                        ? 'rgba(30,58,95,0.6)'
-                        : msg.role === 'error'
-                        ? 'rgba(239,68,68,0.12)'
-                        : 'rgba(255,255,255,0.05)',
-                    border:
-                      msg.role === 'user'
-                        ? '1px solid rgba(30,58,95,0.8)'
-                        : msg.role === 'error'
-                        ? '1px solid rgba(239,68,68,0.3)'
-                        : '1px solid rgba(255,255,255,0.08)',
-                    color:
-                      msg.role === 'error' ? '#fca5a5' : 'rgba(255,255,255,0.88)',
-                    wordBreak: 'break-word',
-                  }}
-                  // eslint-disable-next-line react/no-danger
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-                />
+                {/* Balão + gráficos */}
+                <div style={{ maxWidth: msg.role === 'assistant' && msg.context ? '95%' : '80%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div
+                    style={{
+                      padding: '8px 11px',
+                      borderRadius:
+                        msg.role === 'user' ? '12px 4px 12px 12px' : '4px 12px 12px 12px',
+                      fontSize: 12.5,
+                      lineHeight: 1.55,
+                      background:
+                        msg.role === 'user'
+                          ? 'rgba(30,58,95,0.6)'
+                          : msg.role === 'error'
+                          ? 'rgba(239,68,68,0.12)'
+                          : 'rgba(255,255,255,0.05)',
+                      border:
+                        msg.role === 'user'
+                          ? '1px solid rgba(30,58,95,0.8)'
+                          : msg.role === 'error'
+                          ? '1px solid rgba(239,68,68,0.3)'
+                          : '1px solid rgba(255,255,255,0.08)',
+                      color:
+                        msg.role === 'error' ? '#fca5a5' : 'rgba(255,255,255,0.88)',
+                      wordBreak: 'break-word',
+                    }}
+                    // eslint-disable-next-line react/no-danger
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                  />
+                  {msg.role === 'assistant' && msg.context && (
+                    <MessageCharts context={msg.context} expanded={expanded} />
+                  )}
+                </div>
               </div>
             ))}
 

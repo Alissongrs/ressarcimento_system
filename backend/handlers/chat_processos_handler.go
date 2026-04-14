@@ -298,6 +298,224 @@ func buildProcessosContext(question string) (string, map[string]any) {
 		))
 	}
 
+	// ── 9. Ressarcimento mensal (últimos 12 meses) — para gráfico ─────────────
+	{
+		rows, err := db.Query(`
+			SELECT DATE_FORMAT(created_at, '%m/%Y') AS mes,
+			       DATE_FORMAT(created_at, '%Y-%m') AS mes_ord,
+			       COALESCE(SUM(valor), 0) AS valor
+			  FROM FT_DEFERIMENTOS
+			 WHERE created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+			   AND valor > 0
+			 GROUP BY mes, mes_ord
+			 ORDER BY mes_ord ASC`)
+		if err == nil {
+			defer rows.Close()
+			type mesVal struct {
+				Mes   string  `json:"mes"`
+				Valor float64 `json:"valor"`
+			}
+			var serie []mesVal
+			for rows.Next() {
+				var m mesVal
+				var ord string
+				if rows.Scan(&m.Mes, &ord, &m.Valor) == nil {
+					serie = append(serie, m)
+				}
+			}
+			rows.Close()
+			if len(serie) > 0 {
+				ctxData["ressarcimento_mensal"] = serie
+				var sb strings.Builder
+				sb.WriteString("## Ressarcimento Mensal (últimos 12 meses)\n")
+				for _, s := range serie {
+					sb.WriteString(fmt.Sprintf("- %s: R$ %.2f\n", s.Mes, s.Valor))
+				}
+				parts = append(parts, sb.String())
+			}
+		}
+	}
+
+	// ── 10. Top clientes por número de processos ──────────────────────────────
+	{
+		rows, err := db.Query(`
+			SELECT COALESCE(r.cliente, 'Sem nome') AS cliente, COUNT(*) AS total
+			  FROM FT_REQUISICOES r
+			  JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
+			 WHERE r.cliente IS NOT NULL AND r.cliente != ''
+			 GROUP BY r.cliente
+			 ORDER BY total DESC
+			 LIMIT 8`)
+		if err == nil {
+			defer rows.Close()
+			type clienteRow struct {
+				Cliente string `json:"cliente"`
+				Total   int    `json:"total"`
+			}
+			var clientes []clienteRow
+			for rows.Next() {
+				var c clienteRow
+				if rows.Scan(&c.Cliente, &c.Total) == nil {
+					clientes = append(clientes, c)
+				}
+			}
+			rows.Close()
+			if len(clientes) > 0 {
+				ctxData["por_cliente"] = clientes
+				var sb strings.Builder
+				sb.WriteString("## Top Clientes por Processos\n")
+				for _, c := range clientes {
+					sb.WriteString(fmt.Sprintf("- %s: %d processo(s)\n", c.Cliente, c.Total))
+				}
+				parts = append(parts, sb.String())
+			}
+		}
+	}
+
+	// ── 11. Média de movimentações por etapa ──────────────────────────────────
+	{
+		rows, err := db.Query(`
+			SELECT e.etapa,
+			       ROUND(AVG(cnt), 1) AS media,
+			       MAX(cnt) AS maximo
+			  FROM (
+			    SELECT p.id_processo,
+			           e2.etapa,
+			           COUNT(h.id_historico) AS cnt
+			      FROM FT_PROCESSOS p
+			      JOIN DM_ETAPAS_PROCESSO e2 ON e2.id_etapa_processo = p.id_etapa_processo
+			      LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = p.id_processo
+			     GROUP BY p.id_processo, e2.etapa
+			  ) t
+			  JOIN DM_ETAPAS_PROCESSO e ON e.etapa = t.etapa
+			 GROUP BY e.etapa
+			 ORDER BY media DESC`)
+		if err == nil {
+			defer rows.Close()
+			type movRow struct {
+				Etapa  string  `json:"etapa"`
+				Media  float64 `json:"media"`
+				Maximo int     `json:"maximo"`
+			}
+			var movs []movRow
+			for rows.Next() {
+				var m movRow
+				if rows.Scan(&m.Etapa, &m.Media, &m.Maximo) == nil {
+					movs = append(movs, m)
+				}
+			}
+			rows.Close()
+			if len(movs) > 0 {
+				ctxData["media_movimentacoes"] = movs
+			}
+		}
+	}
+
+	// ── 12. Tempo médio em dias por etapa ─────────────────────────────────────
+	{
+		rows, err := db.Query(`
+			SELECT e.etapa,
+			       ROUND(AVG(DATEDIFF(NOW(), COALESCE(ult.ultima_mov, r.data_criacao))), 0) AS media_dias
+			  FROM FT_PROCESSOS p
+			  JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+			  JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+			  LEFT JOIN (
+			    SELECT id_requisicao, MAX(created_at) AS ultima_mov
+			      FROM FT_HISTORICO_MOVIMENTACOES
+			     GROUP BY id_requisicao
+			  ) ult ON ult.id_requisicao = p.id_processo
+			 GROUP BY e.etapa
+			 ORDER BY media_dias DESC`)
+		if err == nil {
+			defer rows.Close()
+			type tempoRow struct {
+				Etapa     string  `json:"etapa"`
+				MediaDias float64 `json:"media_dias"`
+			}
+			var tempos []tempoRow
+			for rows.Next() {
+				var t tempoRow
+				if rows.Scan(&t.Etapa, &t.MediaDias) == nil {
+					tempos = append(tempos, t)
+				}
+			}
+			rows.Close()
+			if len(tempos) > 0 {
+				ctxData["tempo_por_etapa"] = tempos
+			}
+		}
+	}
+
+	// ── 13. Por concessionária ────────────────────────────────────────────────
+	{
+		rows, err := db.Query(`
+			SELECT COALESCE(r.concessionaria, 'Não informada') AS concessionaria,
+			       COUNT(*) AS total,
+			       COALESCE(SUM(d.valor), 0) AS valor_total
+			  FROM FT_REQUISICOES r
+			  JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
+			  LEFT JOIN (
+			    SELECT x.id_processo, x.valor
+			      FROM FT_DEFERIMENTOS x
+			      JOIN (SELECT id_processo, MAX(created_at) mx FROM FT_DEFERIMENTOS GROUP BY id_processo) u
+			           ON u.id_processo = x.id_processo AND u.mx = x.created_at
+			  ) d ON d.id_processo = p.id_processo
+			 WHERE r.concessionaria IS NOT NULL AND r.concessionaria != ''
+			 GROUP BY r.concessionaria
+			 ORDER BY total DESC
+			 LIMIT 8`)
+		if err == nil {
+			defer rows.Close()
+			type concRow struct {
+				Concessionaria string  `json:"concessionaria"`
+				Total          int     `json:"total"`
+				ValorTotal     float64 `json:"valor_total"`
+			}
+			var concs []concRow
+			for rows.Next() {
+				var c concRow
+				if rows.Scan(&c.Concessionaria, &c.Total, &c.ValorTotal) == nil {
+					concs = append(concs, c)
+				}
+			}
+			rows.Close()
+			if len(concs) > 0 {
+				ctxData["por_concessionaria"] = concs
+			}
+		}
+	}
+
+	// ── 14. Evolução mensal de abertura de processos ──────────────────────────
+	{
+		rows, err := db.Query(`
+			SELECT DATE_FORMAT(data_criacao, '%m/%Y') AS mes,
+			       DATE_FORMAT(data_criacao, '%Y-%m') AS mes_ord,
+			       COUNT(*) AS total
+			  FROM FT_REQUISICOES
+			 WHERE data_criacao >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+			 GROUP BY mes, mes_ord
+			 ORDER BY mes_ord ASC`)
+		if err == nil {
+			defer rows.Close()
+			type mesTotal struct {
+				Mes   string `json:"mes"`
+				Total int    `json:"total"`
+			}
+			var serie []mesTotal
+			for rows.Next() {
+				var m mesTotal
+				var ord string
+				if rows.Scan(&m.Mes, &ord, &m.Total) == nil {
+					serie = append(serie, m)
+				}
+			}
+			rows.Close()
+			if len(serie) > 0 {
+				ctxData["abertura_mensal"] = serie
+			}
+		}
+	}
+
 	return strings.Join(parts, "\n\n"), ctxData
 }
 

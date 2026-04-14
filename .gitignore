@@ -61,3 +61,8 @@ ressarcimento_system_old_*/
 ia/venv/
 **/venv/
 ia/carga_query.sql
+
+# Permitir docs
+!docs/
+!docs/*.md
+!CLAUDE.md
