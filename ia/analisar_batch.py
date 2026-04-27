@@ -1,21 +1,19 @@
 """
 analisar_batch.py
 -----------------
-Análise IA (F01-F05) em lote com visão real da fatura.
+Análise IA (F01-F14) em lote com visão real da fatura.
 Para cada fatura:
-  1. Baixa o PDF do Link
-  2. Converte páginas em imagens (visão da fatura como analista)
-  3. Monta contexto: histórico banco + OCR + markitdown (quando disponível)
-  4. Envia tudo para OpenAI (texto + imagens)
-  5. Exibe resultado na tela
+  1. Monta contexto: histórico banco + textos extraídos (plumber/markitdown/ocr)
+  2. No modo padrão: baixa PDF e envia imagens + texto para OpenAI
+  3. No modo --batch: usa OpenAI Batch API (50% mais barato, texto-only)
+  4. Salva resultado em Faturas_Registradas_Cache e fichas_anomalias_cache
 
 Uso:
-    python analisar_batch.py --empresa 14 --limite 5
-    python analisar_batch.py --empresa 14
-    python analisar_batch.py --empresa 14 --force
+    python analisar_batch.py --empresa 14 --direto --batch
+    python analisar_batch.py --empresa 4 14 32 --direto --batch
+    python analisar_batch.py --all-empresas --direto --batch
     python analisar_batch.py --empresa 14 --direto --limite 20
-        (modo direto: lê de Faturas_Registradas_Cache sem depender do motor_regras
-         — a IA detecta e confirma as anomalias F01-F05 autonomamente pelos textos)
+    python analisar_batch.py --empresa 14 --direto --force    # re-processa CONFIRMADO/FALSO_POSITIVO
 """
 
 import argparse
@@ -23,11 +21,16 @@ import base64
 import io
 import json
 import logging
+import os
 import re
 import sys
 import tempfile
 import time
 from pathlib import Path
+
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent / ".env")
+
 
 import mysql.connector
 import requests
@@ -39,10 +42,9 @@ except ImportError:
     HAS_PDFIUM = False
 
 # ─── Configuração ─────────────────────────────────────────────────────────────
-
 OPENAI_API_KEY   = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL     = "gpt-4.1-mini"       # modelo com visão (padrão)
-OPENAI_MODEL_MINI = "gpt-5.4-mini" # modelo para batch ($0.375/M input, $2.25/M output)
+OPENAI_MODEL_MINI = "gpt-4.1-mini"  # modelo para batch
 OPENAI_BASE_URL  = "https://api.openai.com"
 OPENAI_TIMEOUT   = 300
 
@@ -88,10 +90,8 @@ def _sanitize(text: str) -> str:
     """Remove surrogate characters e outros caracteres inválidos para UTF-8."""
     if not isinstance(text, str):
         text = str(text) if text is not None else ""
-    # Remove explicitamente surrogates U+D800–U+DFFF via re antes de encode
-    import re as _re
-    text = _re.sub(r'[\ud800-\udfff]', '', text)
-    return text.encode("utf-8", errors="ignore").decode("utf-8")
+    # surrogatepass codifica surrogates como CESU-8 inválido → ignore remove na decodificação
+    return text.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="ignore")
 
 def _reconectar():
     """Cria nova conexão ao banco quando a existente caiu."""
@@ -325,12 +325,13 @@ def montar_contexto(ficha: dict, fatura: dict, historico: list, posteriores: lis
                        if v not in (None, 0, "", "None")}
         if preenchidos:
             ctx.append("=== BANCO — CAMPOS DESTA FATURA ===")
-            ctx.append("⚠️ Valores registrados no sistema — podem divergir do PDF.")
+            ctx.append("⚠️ Apenas campos com valor registrado são listados abaixo.")
+            ctx.append("⚠️ Campos AUSENTES desta lista = não extraídos pelo sistema, NÃO tratá-los como divergência.")
             for k, v in preenchidos.items():
                 ctx.append(f"  {k}: {v}")
             ctx.append("=== FIM BANCO CAMPOS ===")
         else:
-            ctx.append("=== BANCO — CAMPOS DESTA FATURA: nenhum campo preenchido ===")
+            ctx.append("=== BANCO — CAMPOS DESTA FATURA: nenhum campo preenchido — use somente os textos do PDF ===")
 
         ctx.append(
             "\n=== FORMATO DA RESPOSTA — OBRIGATÓRIO ===\n"
@@ -351,7 +352,7 @@ def montar_contexto(ficha: dict, fatura: dict, historico: list, posteriores: lis
         )
 
     else:
-        # ── Modo padrão: textos após dados ─────────────────────────────────────
+        # ── Modo padrão: textos + campos numéricos do banco ────────────────────
         if not fichas_motor:
             ctx.append("MODO AUTÔNOMO: aplique F01 a F05 com base nos textos e imagens abaixo.")
 
@@ -372,6 +373,15 @@ def montar_contexto(ficha: dict, fatura: dict, historico: list, posteriores: lis
             ctx.append("\n=== TEXTO MARKITDOWN (estrutura e layout da fatura — gerado pelo markitdown) ===")
             ctx.append(md)
             ctx.append("=== FIM DO MARKITDOWN ===")
+
+        preenchidos = {k: v for k, v in _campos_banco_dict(fatura).items()
+                       if v not in (None, 0, "", "None")}
+        if preenchidos:
+            ctx.append("\n=== BANCO — CAMPOS NUMÉRICOS DESTA FATURA ===")
+            ctx.append("⚠️ Valores registrados no sistema — compare com o PDF/textos acima.")
+            for k, v in preenchidos.items():
+                ctx.append(f"  {k}: {v}")
+            ctx.append("=== FIM BANCO CAMPOS ===")
 
     # ── Histórico do banco (sempre, independente do modo) ──────────────────────
     mes_ref_str = str(ficha["Mes_Ref"])[:7]
@@ -467,204 +477,46 @@ def chamar_ia(system_prompt: str, contexto: str, imagens: list[dict]) -> str:
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]
 
-# ─── Conferência Motor de Regras ─────────────────────────────────────────────
-
-# Limiares idênticos ao motor_regras_f01_f05.sql — atualizar aqui se o SQL mudar
-_MR = dict(
-    desvio_pico    = 2.0,    # 200% → PICO_OUTLIER
-    desvio_alto    = 1.0,    # 100% → DESVIO_ALTO  (mínimo para F02 alto)
-    desvio_baixo   = -1.0,   # -100% → MUITO_BAIXO (mínimo para F02 baixo)
-    media_minima   = 50,     # kWh — excluído do histórico se abaixo disso
-    min_historico  = 9,      # mínimo de meses válidos na janela de 12m
-    tolerancia_f01 = 0.01,   # kWh — diferença mínima para acusar F01
-    prev_fixos_f03 = 4,      # meses fixos anteriores para acusar F03
-)
-
-
-def _check_motor_regras(fichas_ia: str, historico: list, ficha: dict) -> dict:
-    """
-    Replica os limiares do motor_regras_f01_f05.sql sobre os dados do banco.
-    Retorna:
-        {
-          "passou": bool,
-          "checks": [{"ficha": "F02", "status": "PASS"|"WARN"|"FAIL", "motivo": "..."}],
-          "override_status": None | "INCONCLUSIVO"
-        }
-    PASS  = motor_regras concordaria com a IA
-    WARN  = dados insuficientes no banco para validar (não bloqueia)
-    FAIL  = motor_regras NÃO detectaria esta anomalia → override para INCONCLUSIVO
-    """
-    fichas_set = {c.upper() for c in re.findall(r"F0[1-5]", fichas_ia or "", re.IGNORECASE)}
-    checks = []
-    override = None
-
-    # ── F02 ──────────────────────────────────────────────────────────────────
-    if "F02" in fichas_set:
-        validos = [r for r in historico
-                   if float(r.get("kwh_total") or 0) > _MR["media_minima"]]
-        n_val = len(validos)
-
-        # kwh_total da fatura auditada
-        kwh_atual = float(ficha.get("KWH_Total") or 0)
-        if kwh_atual == 0:
-            kwh_atual = (float(ficha.get("KWH_Ponta")     or 0) +
-                         float(ficha.get("KWH_FPonta")    or 0) +
-                         float(ficha.get("KWH_Reservado") or 0))
-
-        if n_val >= _MR["min_historico"] and kwh_atual > 0:
-            media   = sum(float(r["kwh_total"]) for r in validos) / n_val
-            dif_pct = (kwh_atual - media) / media if media > 0 else 0
-
-            if dif_pct >= _MR["desvio_pico"]:
-                status_mr, label = "PASS", "PICO_OUTLIER"
-            elif dif_pct >= _MR["desvio_alto"]:
-                status_mr, label = "PASS", "DESVIO_ALTO"
-            elif dif_pct <= _MR["desvio_baixo"]:
-                status_mr, label = "PASS", "MUITO_BAIXO"
-            elif dif_pct < _MR["desvio_baixo"] / 2.0:
-                status_mr, label = "WARN", "DESVIO_BAIXO (limítrofe)"
-                override = override or "INCONCLUSIVO"
-            else:
-                status_mr, label = "FAIL", "NORMAL"
-                override = "INCONCLUSIVO"
-
-            checks.append({
-                "ficha": "F02", "status": status_mr,
-                "motivo": (
-                    f"motor_regras→{label} | "
-                    f"dif_pct={dif_pct*100:+.1f}% | "
-                    f"media={media:.0f} kWh ({n_val}m) | "
-                    f"atual={kwh_atual:.0f} kWh | "
-                    f"limiar_alto=+{_MR['desvio_alto']*100:.0f}% "
-                    f"limiar_baixo={_MR['desvio_baixo']*100:.0f}%"
-                ),
-            })
-
-        elif n_val > 0:
-            checks.append({
-                "ficha": "F02", "status": "WARN",
-                "motivo": (f"Base pequena: {n_val} meses válidos "
-                           f"(mínimo {_MR['min_historico']}) → "
-                           "motor_regras marcaria AMOSTRA_PEQUENA"),
-            })
-        else:
-            checks.append({
-                "ficha": "F02", "status": "WARN",
-                "motivo": "Sem histórico no banco (KWH_Total ausente) — não foi possível validar F02",
-            })
-
-    # ── F01 ──────────────────────────────────────────────────────────────────
-    if "F01" in fichas_set:
-        la_p   = float(ficha.get("Leitura_Anterior_KWH_P")  or 0)
-        lc_p   = float(ficha.get("Leitura_Atual_KWH_P")     or 0)
-        la_fp  = float(ficha.get("Leitura_Anterior_KWH_FP") or 0)
-        lc_fp  = float(ficha.get("Leitura_Atual_KWH_FP")    or 0)
-        kwh_p  = float(ficha.get("KWH_Ponta")               or 0)
-        kwh_fp = float(ficha.get("KWH_FPonta")              or 0)
-        cp     = float(ficha.get("Constante_KWH_P")         or 0) or 1.0
-        cfp    = float(ficha.get("Constante_KWH_FP")        or 0) or 1.0
-
-        sem_dados = (la_p == 0 and lc_p == 0 and la_fp == 0 and lc_fp == 0)
-        if sem_dados:
-            checks.append({
-                "ficha": "F01", "status": "WARN",
-                "motivo": "Leituras não disponíveis no banco — F01 só pode ser validado via PDF",
-            })
-        else:
-            flag_p = flag_fp = False
-            if (la_p > 0 or lc_p > 0) and kwh_p > 0 and kwh_p not in (30, 50, 100):
-                calc = (lc_p - la_p) * cp
-                if (abs(kwh_p - round(calc,      6)) > _MR["tolerancia_f01"] and
-                    abs(kwh_p - round(calc*1.025, 6)) > _MR["tolerancia_f01"]):
-                    flag_p = True
-            if (la_fp > 0 or lc_fp > 0) and kwh_fp > 0 and kwh_fp not in (30, 50, 100):
-                calc = (lc_fp - la_fp) * cfp
-                if (abs(kwh_fp - round(calc,      6)) > _MR["tolerancia_f01"] and
-                    abs(kwh_fp - round(calc*1.025, 6)) > _MR["tolerancia_f01"]):
-                    flag_fp = True
-
-            if flag_p or flag_fp:
-                segs = " | ".join(filter(None, ["P" if flag_p else None, "FP" if flag_fp else None]))
-                checks.append({"ficha": "F01", "status": "PASS",
-                               "motivo": f"Divergência confirmada pelo motor_regras: posto(s) {segs}"})
-            else:
-                checks.append({
-                    "ficha": "F01", "status": "FAIL",
-                    "motivo": (f"Motor_regras NÃO detectaria F01: "
-                               f"|calc − kwh_faturado| ≤ {_MR['tolerancia_f01']} kWh"),
-                })
-                override = "INCONCLUSIVO"
-
-    # ── F03 ──────────────────────────────────────────────────────────────────
-    if "F03" in fichas_set:
-        grupo   = "B" if "BT" in (ficha.get("Tp_Tensao") or "").upper() else "A"
-        recentes = historico[:5]
-        fixos = sum(
-            1 for r in recentes
-            if (grupo == "B" and float(r.get("kwh_total") or 0) in (30, 50, 100))
-            or (grupo == "A" and float(r.get("kwh_total") or 0) == 0)
-        )
-        if fixos >= _MR["prev_fixos_f03"]:
-            checks.append({"ficha": "F03", "status": "PASS",
-                           "motivo": f"{fixos} meses fixos detectados no banco — padrão F03 confirma"})
-        elif fixos > 0:
-            checks.append({
-                "ficha": "F03", "status": "WARN",
-                "motivo": (f"Apenas {fixos} meses fixos no banco "
-                           f"(motor_regras exige {_MR['prev_fixos_f03']}) — "
-                           "F03 pode ser identificado somente pela fatura"),
-            })
-        else:
-            checks.append({
-                "ficha": "F03", "status": "WARN",
-                "motivo": ("Nenhum mês fixo detectado no banco — "
-                           "F03 baseado exclusivamente na fatura; verificar manualmente"),
-            })
-
-    # ── F04 / F05 — validação manual ─────────────────────────────────────────
-    for fx in ("F04", "F05"):
-        if fx in fichas_set:
-            checks.append({"ficha": fx, "status": "WARN",
-                           "motivo": (f"{fx}: requer comparação de medidor/leitura "
-                                      "com mês anterior — validação automática não disponível")})
-
-    passou = all(c["status"] != "FAIL" for c in checks)
-    return {
-        "passou": passou,
-        "checks": checks,
-        "override_status": override if not passou else None,
-    }
-
-
-def _logar_check(mr: dict, fid: int):
-    """Imprime o resultado da conferência do motor de regras."""
-    status_geral = "✅ OK" if mr["passou"] else "⚠️  DIVERGÊNCIA"
-    log.info(f"    [motor_regras check] {status_geral} | id={fid}")
-    for c in mr["checks"]:
-        ico = {"PASS": "✓", "WARN": "~", "FAIL": "✗"}.get(c["status"], "?")
-        log.info(f"      {ico} {c['ficha']} [{c['status']}]: {c['motivo']}")
-    if mr.get("override_status"):
-        log.warning(f"    → ia_status rebaixado para {mr['override_status']} "
-                    f"(motor_regras não confirma anomalia)")
-
-
 # ─── Parser da resposta ────────────────────────────────────────────────────────
 
 def parsear_resposta(texto: str) -> dict:
-    ia_status = "INCONCLUSIVO"
-    if re.search(r"Anomalia\s+Confirmada|✓\s*Anomalia", texto, re.IGNORECASE):
-        ia_status = "CONFIRMADO"
-    elif re.search(r"Anomalia\s+Não\s+Confirmada|Não\s+Confirmada|✗", texto, re.IGNORECASE):
-        ia_status = "FALSO_POSITIVO"
+    _FICHA_PAT = r"F(?:0[1-9]|1[0-4])"
 
-    m = re.search(r"Fichas\s+Confirmadas\s*:\s*\d+\s*\(([^)]*)\)", texto, re.IGNORECASE)
-    if m:
-        codes = re.findall(r"F0[1-5]", m.group(1), re.IGNORECASE)
-        ia_fichas = " | ".join(sorted(set(c.upper() for c in codes)))
+    # ── Status + fichas a partir de "Fichas Confirmadas: N (FXX)" ─────────────
+    # Handles: "1 (F03)", "[F09]", "nenhuma", "0 []", "0 ()", "3 (F02)", "9", etc.
+    ia_status = "PENDENTE"
+    ia_fichas = ""
+
+    line_m = re.search(r"Fichas\s+Confirmadas\s*:([^\n]{0,100})", texto, re.IGNORECASE)
+    if line_m:
+        line = line_m.group(1).strip()
+        fichas_found = re.findall(_FICHA_PAT, line, re.IGNORECASE)
+        ia_fichas = ",".join(sorted(set(c.upper() for c in fichas_found)))
+        count_m = re.match(r"(\d+)", line)
+        count = int(count_m.group(1)) if count_m else None
+        is_nenhuma = bool(re.search(r"nenhuma|none", line, re.IGNORECASE))
+
+        if ia_fichas:
+            ia_status = "CONFIRMADO"
+        elif count is not None and count > 0:
+            ia_status = "CONFIRMADO"   # confia na contagem mesmo sem listar fichas
+        elif is_nenhuma or count == 0 or not line:
+            ia_status = "FALSO_POSITIVO"
+        else:
+            ia_status = "FALSO_POSITIVO"
     else:
-        # Fallback: F0x seguido de confirmação explícita
-        codes = re.findall(r"F0[1-5](?=\s*(?:confirmad|✓|constat|detectad))", texto, re.IGNORECASE)
-        ia_fichas = " | ".join(sorted(set(c.upper() for c in codes)))
+        # Fallback: busca apenas na seção SAÍDA/DIAGNÓSTICO para não confundir
+        # com "✗" dos marcadores de divergência da FASE 2
+        saida_idx = max(texto.find("---DIAGNÓSTICO---"), texto.find("SAÍDA FINAL"), 0)
+        saida = texto[saida_idx:] if saida_idx else texto
+        if re.search(r"Anomalia\s+Confirmada|✓\s*Anomalia", saida, re.IGNORECASE):
+            ia_status = "CONFIRMADO"
+        elif re.search(r"Anomalia\s+Não\s+Confirmada|Não\s+Confirmada", saida, re.IGNORECASE):
+            ia_status = "FALSO_POSITIVO"
+        codes = re.findall(
+            _FICHA_PAT + r"(?=\s*(?:confirmad|✓|constat|detectad))", texto, re.IGNORECASE
+        )
+        ia_fichas = ",".join(sorted(set(c.upper() for c in codes)))
 
     valor = None
     for pat in [
@@ -692,16 +544,14 @@ def parsear_resposta(texto: str) -> dict:
             if valor:
                 break
 
-    # ── Anti-falso-positivo F02 ────────────────────────────────────────────
-    # F02 "consumo abaixo da média" produz valor_f02 = R$0,00.
-    # Se a IA confirmou SOMENTE F02 mas não extraiu nenhum valor monetário,
-    # o caso não representa cobrança indevida real: rebaixar para INCONCLUSIVO
-    # para revisão manual em vez de aparecer como anomalia confirmada.
+    # ── Anti-falso-positivo F02/F13 ───────────────────────────────────────────
+    # Fichas de consumo estatístico (F02, F13) sem valor monetário extraído
+    # são muito propensas a falso positivo — rebaixa para PENDENTE.
+    FICHAS_SEM_VALOR = {"F02", "F13"}
     if ia_status == "CONFIRMADO" and (valor is None or valor == 0):
-        fichas_set = set(re.findall(r"F0[1-5]", ia_fichas, re.IGNORECASE))
-        fichas_set = {c.upper() for c in fichas_set}
-        if fichas_set == {"F02"} or not fichas_set:
-            ia_status = "INCONCLUSIVO"
+        fichas_set = {c.upper() for c in re.findall(r"F(?:0[1-9]|1[0-4])", ia_fichas)}
+        if not fichas_set or fichas_set.issubset(FICHAS_SEM_VALOR):
+            ia_status = "PENDENTE"
 
     return {
         "ia_status":                    ia_status,
@@ -709,6 +559,211 @@ def parsear_resposta(texto: str) -> dict:
         "resultado_ia":                 texto,
         "valor_ressarcimento_estimado": valor,
     }
+
+# ─── Score de Confiança ───────────────────────────────────────────────────────
+
+def _extrair_campos_json(resposta_ia: str) -> dict | None:
+    """Parseia o bloco ---CAMPOS_JSON--- ... ---FIM_CAMPOS_JSON--- da resposta."""
+    match = re.search(
+        r"---CAMPOS_JSON---\s*(\{.*?\})\s*---FIM_CAMPOS_JSON---",
+        resposta_ia,
+        re.DOTALL,
+    )
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(1))
+    except json.JSONDecodeError as e:
+        log.warning(f"confianca: JSON inválido no bloco CAMPOS_JSON — {e}")
+        return None
+
+
+def _calcular_confianca(campos: dict, ficha: dict) -> list[dict]:
+    """
+    Aplica regras determinísticas sobre os campos extraídos pela IA.
+    Retorna lista de flags para campos com baixa confiança.
+    confianca: 0.0–0.3 = provável erro | 0.4–0.6 = suspeito | 0.7–0.8 = divergência leve
+    """
+    flags = []
+
+    def flag(campo, valor, confianca, motivo):
+        flags.append({
+            "campo":          campo,
+            "valor_extraido": str(valor) if valor is not None else "null",
+            "confianca":      confianca,
+            "motivo":         motivo,
+        })
+
+    # UC: formato numérico 6–12 dígitos
+    uc = campos.get("uc")
+    if not uc:
+        flag("uc", uc, 0.0, "UC não extraída")
+    elif not re.fullmatch(r"\d{6,12}", str(uc).strip()):
+        flag("uc", uc, 0.2, f"UC fora do formato numérico esperado (6–12 dígitos): '{uc}'")
+
+    # total_rs: confrontar com banco
+    total_rs = campos.get("total_rs")
+    rs_banco = ficha.get("RS_Total_Fatura")
+    if total_rs is None:
+        flag("total_rs", total_rs, 0.0, "total_rs não extraído")
+    elif rs_banco is not None:
+        try:
+            diff = abs(float(total_rs) - float(rs_banco))
+            if diff > 1.00:
+                flag("total_rs", total_rs, 0.1,
+                     f"Diverge do banco em R${diff:.2f} (extraído={total_rs}, banco={rs_banco})")
+            elif diff > 0.10:
+                flag("total_rs", total_rs, 0.6,
+                     f"Pequena divergência com banco: R${diff:.2f}")
+        except (TypeError, ValueError):
+            pass
+
+    # total_itens_rs: não pode ser 0 se total_rs > 0
+    total_itens = campos.get("total_itens_rs")
+    if total_rs is not None and total_itens is not None:
+        try:
+            if float(total_itens) == 0 and float(total_rs) > 0:
+                flag("total_itens_rs", total_itens, 0.3,
+                     "total_itens_rs = 0 mas total_rs > 0 — possível erro de extração")
+        except (TypeError, ValueError):
+            pass
+
+    # ICMS: recalcular
+    base_icms = campos.get("base_icms_rs")
+    icms_aliq = campos.get("icms_aliq")
+    icms_rs   = campos.get("icms_rs")
+    if all(v is not None for v in (base_icms, icms_aliq, icms_rs)):
+        try:
+            icms_calc = round(float(base_icms) * float(icms_aliq) / 100, 2)
+            diff = abs(icms_calc - float(icms_rs))
+            if diff > 0.10:
+                flag("icms_rs", icms_rs, 0.2,
+                     f"ICMS recalculado={icms_calc} vs extraído={icms_rs} "
+                     f"(diff=R${diff:.2f}, base={base_icms}, aliq={icms_aliq}%)")
+        except (TypeError, ValueError):
+            pass
+
+    # PIS: recalcular
+    base_pis = campos.get("base_pis_cofins_rs")
+    pis_aliq = campos.get("pis_aliq")
+    pis_rs   = campos.get("pis_rs")
+    if all(v is not None for v in (base_pis, pis_aliq, pis_rs)):
+        try:
+            pis_calc = round(float(base_pis) * float(pis_aliq) / 100, 2)
+            diff = abs(pis_calc - float(pis_rs))
+            if diff > 0.10:
+                flag("pis_rs", pis_rs, 0.2,
+                     f"PIS recalculado={pis_calc} vs extraído={pis_rs} (diff=R${diff:.2f})")
+        except (TypeError, ValueError):
+            pass
+
+    # COFINS: recalcular
+    cofins_aliq = campos.get("cofins_aliq")
+    cofins_rs   = campos.get("cofins_rs")
+    if all(v is not None for v in (base_pis, cofins_aliq, cofins_rs)):
+        try:
+            cofins_calc = round(float(base_pis) * float(cofins_aliq) / 100, 2)
+            diff = abs(cofins_calc - float(cofins_rs))
+            if diff > 0.10:
+                flag("cofins_rs", cofins_rs, 0.2,
+                     f"COFINS recalculado={cofins_calc} vs extraído={cofins_rs} (diff=R${diff:.2f})")
+        except (TypeError, ValueError):
+            pass
+
+    # Base PIS/COFINS: deve ser base_icms − icms_rs
+    if all(v is not None for v in (base_icms, icms_rs, base_pis)):
+        try:
+            esperado = round(float(base_icms) - float(icms_rs), 2)
+            diff = abs(esperado - float(base_pis))
+            if diff > 1.00:
+                flag("base_pis_cofins_rs", base_pis, 0.5,
+                     f"base_pis_cofins esperado={esperado} (base_icms − icms_rs), "
+                     f"extraído={base_pis} (diff=R${diff:.2f})")
+        except (TypeError, ValueError):
+            pass
+
+    # Leituras iguais com kWh > 0
+    kwh_t = campos.get("kwh_total")
+    la_p  = campos.get("leitura_anterior_p")
+    lc_p  = campos.get("leitura_atual_p")
+    la_fp = campos.get("leitura_anterior_fp")
+    lc_fp = campos.get("leitura_atual_fp")
+    if la_p is not None and lc_p is not None:
+        try:
+            if float(la_p) == float(lc_p) and float(kwh_t or 0) > 0:
+                flag("leitura_atual_p", lc_p, 0.3,
+                     f"Leitura ponta igual (ant={la_p} = atu={lc_p}) mas kwh_total={kwh_t}")
+        except (TypeError, ValueError):
+            pass
+    if la_fp is not None and lc_fp is not None:
+        try:
+            if float(la_fp) == float(lc_fp) and float(kwh_t or 0) > 0:
+                flag("leitura_atual_fp", lc_fp, 0.3,
+                     f"Leitura fora ponta igual (ant={la_fp} = atu={lc_fp}) mas kwh_total={kwh_t}")
+        except (TypeError, ValueError):
+            pass
+
+    # Fatura MT sem perda de transformação
+    tensao = str(ficha.get("Tp_Tensao") or "").upper()
+    perda  = campos.get("perda_transformacao_pct")
+    if tensao and not tensao.startswith("B") and perda is None:
+        flag("perda_transformacao_pct", perda, 0.6,
+             "Fatura MT/AT sem perda de transformação declarada — verificar layout")
+
+    # Fatura BT sem CIP
+    cip = campos.get("cip_rs")
+    if tensao.startswith("B") and cip is None:
+        flag("cip_rs", cip, 0.5,
+             "CIP/COSIP não extraída em fatura BT — verificar se está na fatura")
+
+    # Demanda faturada > contratada
+    demanda_fat  = campos.get("demanda_kw")
+    demanda_cont = campos.get("demanda_contratada_kw")
+    if demanda_fat is not None and demanda_cont is not None:
+        try:
+            excesso_pct = (float(demanda_fat) - float(demanda_cont)) / float(demanda_cont) * 100
+            if excesso_pct > 5:
+                flag("demanda_kw", demanda_fat,
+                     0.7,
+                     f"Demanda faturada {demanda_fat} kW excede contratada "
+                     f"{demanda_cont} kW em {excesso_pct:.1f}%")
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+
+    return flags
+
+
+def _salvar_anotacoes(cur, conn, id_fatura: int, concessionaria: str,
+                      flags: list[dict]) -> int:
+    """Insere flags de baixa confiança em Anotacoes_Campo_IA."""
+    sql = """
+        INSERT INTO Anotacoes_Campo_IA
+            (id_fatura, concessionaria, campo, valor_extraido, confianca, motivo)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """
+    inseridos = 0
+    for f in flags:
+        if f["confianca"] >= 0.9:
+            continue
+        try:
+            cur.execute(sql, (
+                id_fatura,
+                concessionaria or "",
+                f["campo"],
+                f["valor_extraido"],
+                f["confianca"],
+                f["motivo"],
+            ))
+            inseridos += 1
+        except Exception as e:
+            log.warning(f"confianca: erro ao salvar [{f['campo']}]: {e}")
+    if inseridos:
+        try:
+            conn.commit()
+        except Exception as e:
+            log.warning(f"confianca: erro ao commitar: {e}")
+    return inseridos
+
 
 # ─── Persistência ────────────────────────────────────────────────────────────
 
@@ -724,59 +779,88 @@ def _flags_fichas(fichas_str: str) -> dict:
     }
 
 
-def _gravar_ficha(cur, conn, ficha: dict, dados: dict):
-    """
-    Modo --direto: insere ou atualiza em fichas_anomalias_cache.
-    Idempotente via INSERT ... ON DUPLICATE KEY UPDATE.
-    """
+def _garantir_coluna_modelo_ia(conn):
+    """Cria coluna modelo_ia em fichas_anomalias_cache se não existir."""
+    cur = conn.cursor()
+    try:
+        cur.execute("ALTER TABLE fichas_anomalias_cache ADD COLUMN modelo_ia VARCHAR(30) NULL")
+        conn.commit()
+        log.info("Coluna modelo_ia criada em fichas_anomalias_cache.")
+    except mysql.connector.errors.ProgrammingError as e:
+        if "Duplicate column" not in str(e):
+            raise
+    finally:
+        cur.close()
+
+
+def _gravar_ficha(cur, conn, ficha: dict, dados: dict, modelo: str = ""):
+    """Insere/atualiza fichas_anomalias_cache. Retorna (cur, conn) possivelmente reconectados."""
     fid          = ficha["id"]
     fichas_ia    = dados.get("ia_fichas_confirmadas") or ""
     flags        = _flags_fichas(fichas_ia)
     qtd          = sum(flags.values())
     valor        = dados.get("valor_ressarcimento_estimado")
     resultado_ia = (dados.get("resultado_ia") or "")[:65000]
-    ia_status    = dados.get("ia_status") or "INCONCLUSIVO"
+    ia_status    = dados.get("ia_status") or "PENDENTE"
 
-    try:
-        cur.execute("""
-            INSERT INTO fichas_anomalias_cache
-                (id, UC, Cod_Empresa, Concessionaria, Mes_Ref, Tp_Tensao, NroMedidor,
-                 RAZAO_SOCIAL, Link, RS_Total_Fatura,
-                 flag_f01, flag_f02, flag_f03, flag_f04, flag_f05,
-                 qtd_regras, fichas_aplicadas, ia_fichas_confirmadas,
-                 ia_status, resultado_ia, valor_ressarcimento_estimado,
-                 resultado_salvo_em)
-            VALUES
-                (%s, %s, %s, %s, %s, %s, %s,
-                 %s, %s, %s,
-                 %s, %s, %s, %s, %s,
-                 %s, %s, %s,
-                 %s, %s, %s,
-                 NOW())
-            ON DUPLICATE KEY UPDATE
-                ia_status                    = VALUES(ia_status),
-                resultado_ia                 = VALUES(resultado_ia),
-                ia_fichas_confirmadas        = VALUES(ia_fichas_confirmadas),
-                fichas_aplicadas             = VALUES(fichas_aplicadas),
-                flag_f01 = VALUES(flag_f01), flag_f02 = VALUES(flag_f02),
-                flag_f03 = VALUES(flag_f03), flag_f04 = VALUES(flag_f04),
-                flag_f05 = VALUES(flag_f05), qtd_regras = VALUES(qtd_regras),
-                valor_ressarcimento_estimado = VALUES(valor_ressarcimento_estimado),
-                resultado_salvo_em           = NOW()
-        """, (
-            fid,
-            ficha.get("UC"), ficha.get("Cod_Empresa"), ficha.get("Concessionaria"),
-            ficha.get("Mes_Ref"), ficha.get("Tp_Tensao"), ficha.get("NroMedidor"),
-            ficha.get("RAZAO_SOCIAL"), ficha.get("Link"), ficha.get("RS_Total_Fatura"),
-            flags["flag_f01"], flags["flag_f02"], flags["flag_f03"],
-            flags["flag_f04"], flags["flag_f05"],
-            qtd, fichas_ia, fichas_ia,
-            ia_status, resultado_ia, valor,
-        ))
-        conn.commit()
-        log.info(f"    → fichas_anomalias_cache: {ia_status} | fichas={fichas_ia or '—'} | valor={valor}")
-    except Exception as e:
-        log.warning(f"    → Erro ao gravar fichas_anomalias_cache: {e}")
+    sql = """
+        INSERT INTO fichas_anomalias_cache
+            (id, UC, Cod_Empresa, Concessionaria, Mes_Ref, Tp_Tensao, NroMedidor,
+             RAZAO_SOCIAL, Link, RS_Total_Fatura,
+             flag_f01, flag_f02, flag_f03, flag_f04, flag_f05,
+             qtd_regras, fichas_aplicadas, ia_fichas_confirmadas,
+             ia_status, resultado_ia, valor_ressarcimento_estimado,
+             modelo_ia, resultado_salvo_em)
+        VALUES
+            (%s, %s, %s, %s, %s, %s, %s,
+             %s, %s, %s,
+             %s, %s, %s, %s, %s,
+             %s, %s, %s,
+             %s, %s, %s,
+             %s, NOW())
+        ON DUPLICATE KEY UPDATE
+            ia_status                    = VALUES(ia_status),
+            resultado_ia                 = VALUES(resultado_ia),
+            ia_fichas_confirmadas        = VALUES(ia_fichas_confirmadas),
+            fichas_aplicadas             = VALUES(fichas_aplicadas),
+            flag_f01 = VALUES(flag_f01), flag_f02 = VALUES(flag_f02),
+            flag_f03 = VALUES(flag_f03), flag_f04 = VALUES(flag_f04),
+            flag_f05 = VALUES(flag_f05), qtd_regras = VALUES(qtd_regras),
+            valor_ressarcimento_estimado = VALUES(valor_ressarcimento_estimado),
+            modelo_ia                    = VALUES(modelo_ia),
+            resultado_salvo_em           = NOW()
+    """
+    params = (
+        fid,
+        ficha.get("UC"), ficha.get("Cod_Empresa"), ficha.get("Concessionaria"),
+        ficha.get("Mes_Ref"), ficha.get("Tp_Tensao"), ficha.get("NroMedidor"),
+        ficha.get("RAZAO_SOCIAL"), ficha.get("Link"), ficha.get("RS_Total_Fatura"),
+        flags["flag_f01"], flags["flag_f02"], flags["flag_f03"],
+        flags["flag_f04"], flags["flag_f05"],
+        qtd, fichas_ia, fichas_ia,
+        ia_status, resultado_ia, valor,
+        modelo or "",
+    )
+    for tentativa in range(3):
+        try:
+            cur.execute(sql, params)
+            conn.commit()
+            log.info(f"    → fichas_anomalias_cache: {ia_status} | fichas={fichas_ia or '—'} | valor={valor}")
+            return cur, conn
+        except mysql.connector.errors.OperationalError as e:
+            if tentativa < 2:
+                log.warning(f"    → Reconectando fichas_anomalias_cache (tentativa {tentativa+1}): {e}")
+                try:
+                    conn.reconnect(attempts=3, delay=2)
+                    cur = conn.cursor(dictionary=True)
+                except Exception:
+                    pass
+            else:
+                log.warning(f"    → Erro ao gravar fichas_anomalias_cache: {e}")
+        except Exception as e:
+            log.warning(f"    → Erro ao gravar fichas_anomalias_cache: {e}")
+            return cur, conn
+    return cur, conn
 
 
 def _atualizar_ficha(cur, conn, fid: int, dados: dict):
@@ -802,12 +886,24 @@ def _atualizar_ficha(cur, conn, fid: int, dados: dict):
         log.warning(f"    → Erro ao atualizar fichas_anomalias_cache: {e}")
 
 
-def _salvar_cache_fatura(cur, conn, fid: int, resultado_ia: str, ia_status: str):
-    """Grava analise_IA e anomalia_encontrada em Faturas_Registradas_Cache.
+def _salvar_cache_fatura(cur, conn, fid: int, dados: dict):
+    """Grava analise_IA (JSON estruturado) e anomalia_encontrada em Faturas_Registradas_Cache.
     Retorna (cur, conn) — pode ser nova conexão se a original caiu.
     """
-    anomalia   = 1 if ia_status in ("CONFIRMADO", "INCONCLUSIVO") else 0
-    texto_safe = _sanitize(resultado_ia or "")[:65000]
+    anomalia = 1 if dados.get("ia_status") == "CONFIRMADO" else 0
+
+    analise_json = {
+        "modelo": "gpt-4.1-mini",
+        "observacao": "Analisado com OpenAI 4.1-mini",
+        "resultado": {
+            "ia_status": dados.get("ia_status", "PENDENTE"),
+            "ia_fichas_confirmadas": [f for f in dados.get("ia_fichas_confirmadas", "").split(",") if f],
+            "valor_ressarcimento_estimado": dados.get("valor_ressarcimento_estimado", 0),
+        }
+    }
+
+    json_safe = json.dumps(analise_json, ensure_ascii=False)[:65000]
+
     sql = """
         UPDATE Faturas_Registradas_Cache
            SET analise_IA          = %s,
@@ -817,7 +913,7 @@ def _salvar_cache_fatura(cur, conn, fid: int, resultado_ia: str, ia_status: str)
     """
     for tentativa in range(2):
         try:
-            cur.execute(sql, (texto_safe, anomalia, fid))
+            cur.execute(sql, (json_safe, anomalia, fid))
             conn.commit()
             return cur, conn
         except Exception as e:
@@ -831,6 +927,128 @@ def _salvar_cache_fatura(cur, conn, fid: int, resultado_ia: str, ia_status: str)
             else:
                 log.warning(f"    → Erro ao salvar analise_IA em Faturas_Registradas_Cache: {e}")
     return cur, conn
+
+
+# ─── Auto-confirmação com gpt-5.4 + imagens ──────────────────────────────────
+
+MODELO_CONFIRMACAO = "gpt-5.4"
+
+def _confirmar_confirmados(fichas: list[dict], prompt: str, cur, conn):
+    """
+    Re-analisa com gpt-4.1 + imagens PDF os casos CONFIRMADO pelo mini.
+    Substitui resultado em fichas_anomalias_cache com modelo_ia='gpt-4.1'.
+    """
+    log.info(f"\n{'═'*60}")
+    log.info(f"AUTO-CONFIRMAÇÃO: {len(fichas)} caso(s) re-analisando com {MODELO_CONFIRMACAO} + imagem")
+    log.info('═' * 60)
+
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type":  "application/json",
+    }
+    ok = erro = 0
+    cnt: dict[str, int] = {"CONFIRMADO": 0, "FALSO_POSITIVO": 0, "INCONCLUSIVO": 0}
+
+    for i, ficha in enumerate(fichas, 1):
+        fid  = ficha["id"]
+        uc   = ficha["UC"]
+        mes  = str(ficha["Mes_Ref"])[:7]
+        link = str(ficha.get("Link") or "").strip()
+
+        log.info(f"  [{i}/{len(fichas)}] id={fid} UC={uc} Mes={mes}")
+
+        if not link:
+            log.warning(f"    Sem Link — mantendo resultado do mini")
+            continue
+
+        pdf_bytes = baixar_pdf(link)
+        imagens   = pdf_bytes_para_imagens(pdf_bytes) if pdf_bytes else []
+        log.info(f"    {len(imagens)} imagem(ns)")
+
+        historico, posteriores = buscar_historico(cur, uc, mes)
+        anomalias_hist = buscar_anomalias_historicas(cur, uc, mes)
+        contexto = montar_contexto(ficha, ficha, historico, posteriores, direto=True,
+                                   anomalias_historicas=anomalias_hist)
+
+        # Monta content com texto + imagens (sempre em array format para gpt-5.4)
+        user_content = [{"type": "text", "text": _sanitize(contexto)}]
+        for img in imagens:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{img['mime']};base64,{img['base64']}", "detail": "high"},
+            })
+
+        body = {
+            "model":      MODELO_CONFIRMACAO,
+            "max_tokens": 4096,
+            "messages": [
+                {"role": "system", "content": _sanitize(prompt)},
+                {"role": "user",   "content": user_content},
+            ],
+        }
+
+        try:
+            # Debug: log request structure (without full base64)
+            content_types = [c.get("type") for c in user_content]
+            request_debug = {
+                "model": body["model"],
+                "max_tokens": body["max_tokens"],
+                "system_len": len(body["messages"][0]["content"]),
+                "user_parts": len(user_content),
+                "content_types": content_types,
+            }
+            log.info(f"    Request prep: {request_debug}")
+
+            r = requests.post(
+                f"{OPENAI_BASE_URL}/v1/chat/completions",
+                headers=headers, json=body, timeout=OPENAI_TIMEOUT,
+            )
+            r.raise_for_status()
+            resposta = r.json()["choices"][0]["message"]["content"]
+        except requests.exceptions.HTTPError as e:
+            # Detailed error logging for HTTP errors
+            log.error(f"    Erro {MODELO_CONFIRMACAO}: {e.response.status_code} {e.response.reason}")
+            try:
+                error_detail = r.json()
+                log.error(f"    API Error: {error_detail.get('error', {}).get('message', 'sem mensagem')}")
+            except:
+                log.error(f"    Response: {r.text[:500]}")
+            erro += 1
+            time.sleep(PAUSA_ENTRE)
+            continue
+        except Exception as e:
+            log.error(f"    Erro {MODELO_CONFIRMACAO}: {type(e).__name__}: {e} — mantendo resultado do mini")
+            erro += 1
+            time.sleep(PAUSA_ENTRE)
+            continue
+
+        dados = parsear_resposta(resposta)
+        log.info(f"    {MODELO_CONFIRMACAO}: {dados['ia_status']} | fichas={dados['ia_fichas_confirmadas'] or '—'} | valor={dados.get('valor_ressarcimento_estimado')}")
+
+        cur, conn = _salvar_cache_fatura(cur, conn, fid, dados)
+
+        status = dados["ia_status"]
+        cnt[status if status in cnt else "INCONCLUSIVO"] += 1
+
+        if status in ("CONFIRMADO", "INCONCLUSIVO"):
+            cur, conn = _gravar_ficha(cur, conn, ficha, dados, modelo=MODELO_CONFIRMACAO)
+        else:
+            # FALSO_POSITIVO: apaga o registro que a mini tinha gravado
+            try:
+                cur.execute(
+                    "UPDATE fichas_anomalias_cache SET deletado=1, modelo_ia=%s, resultado_ia=%s, resultado_salvo_em=NOW() WHERE id=%s AND deletado=0",
+                    (MODELO_CONFIRMACAO, _sanitize(resposta)[:65000], fid),
+                )
+                conn.commit()
+                log.info(f"    {MODELO_CONFIRMACAO}: {status} — registro da mini removido (deletado=1)")
+            except Exception as e:
+                log.warning(f"    Erro ao marcar deletado id={fid}: {e}")
+
+        ok += 1
+        time.sleep(PAUSA_ENTRE)
+
+    log.info(f"Auto-confirmação: {ok} ok | {erro} erros")
+    return cur, conn, cnt
 
 
 # ─── Modo Batch (OpenAI Batch API) ────────────────────────────────────────────
@@ -867,7 +1085,7 @@ def analisar_em_batch(fichas: list, prompt: str, cur, conn,
             "url":       "/v1/chat/completions",
             "body": {
                 "model":                  modelo,
-                "max_completion_tokens":  2048,
+                "max_completion_tokens":  4096,
                 "messages": [
                     {"role": "system", "content": _sanitize(prompt)},
                     {"role": "user",   "content": _sanitize(contexto)},
@@ -876,113 +1094,152 @@ def analisar_em_batch(fichas: list, prompt: str, cur, conn,
         }
         requests_jsonl.append(json.dumps(req, ensure_ascii=True))
 
-    jsonl_bytes = "\n".join(requests_jsonl).encode("utf-8", errors="ignore")
-    log.info(f"JSONL gerado: {len(jsonl_bytes) // 1024} KB")
+    total_bytes = sum(len(l.encode("utf-8")) + 1 for l in requests_jsonl)
+    log.info(f"JSONL total: {total_bytes // 1024} KB | {len(requests_jsonl)} requisicoes")
 
-    # ── 2. Upload do arquivo ────────────────────────────────────────────────────
-    log.info("Enviando arquivo para OpenAI Files API...")
-    upload_resp = requests.post(
-        f"{OPENAI_BASE_URL}/v1/files",
-        headers=headers,
-        files={
-            "file":    ("batch_requests.jsonl", jsonl_bytes, "application/jsonl"),
-            "purpose": (None, "batch"),
-        },
-        timeout=120,
-    )
-    upload_resp.raise_for_status()
-    file_id = upload_resp.json()["id"]
-    log.info(f"Arquivo enviado: file_id={file_id}")
+    # ── 2. Divide em chunks de <= 190 MB ────────────────────────────────────────
+    MAX_BATCH_BYTES = 190 * 1024 * 1024
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    current_size = 0
+    for line in requests_jsonl:
+        line_size = len(line.encode("utf-8")) + 1
+        if current and current_size + line_size > MAX_BATCH_BYTES:
+            chunks.append(current)
+            current = []
+            current_size = 0
+        current.append(line)
+        current_size += line_size
+    if current:
+        chunks.append(current)
+    log.info(f"Dividido em {len(chunks)} batch(es) de ate 190 MB")
 
-    # ── 3. Cria o batch ─────────────────────────────────────────────────────────
-    batch_resp = requests.post(
-        f"{OPENAI_BASE_URL}/v1/batches",
-        headers={**headers, "Content-Type": "application/json"},
-        json={
-            "input_file_id":      file_id,
-            "endpoint":           "/v1/chat/completions",
-            "completion_window":  "24h",
-        },
-        timeout=60,
-    )
-    batch_resp.raise_for_status()
-    batch_id = batch_resp.json()["id"]
-    log.info(f"Batch criado: batch_id={batch_id}")
+    # ── 3. Submete cada chunk, aguarda e coleta resultados ───────────────────────
+    all_result_lines: list[str] = []
 
-    # ── 4. Poll até concluir ────────────────────────────────────────────────────
-    log.info("Aguardando conclusão do batch (poll a cada 30s)...")
-    output_file_id = None
-    while True:
-        status_resp = requests.get(
-            f"{OPENAI_BASE_URL}/v1/batches/{batch_id}",
+    for chunk_idx, chunk_lines in enumerate(chunks, 1):
+        chunk_bytes = "\n".join(chunk_lines).encode("utf-8", errors="ignore")
+        log.info(f"[Batch {chunk_idx}/{len(chunks)}] {len(chunk_lines)} reqs | {len(chunk_bytes)//1024} KB")
+
+        # Upload
+        upload_resp = requests.post(
+            f"{OPENAI_BASE_URL}/v1/files",
             headers=headers,
-            timeout=30,
+            files={
+                "file":    (f"batch_{chunk_idx}.jsonl", chunk_bytes, "application/jsonl"),
+                "purpose": (None, "batch"),
+            },
+            timeout=180,
         )
-        status_resp.raise_for_status()
-        bdata    = status_resp.json()
-        status   = bdata["status"]
-        counts   = bdata.get("request_counts", {})
-        log.info(f"  status={status} | {counts.get('completed',0)}/{counts.get('total', len(fichas))}")
+        upload_resp.raise_for_status()
+        file_id = upload_resp.json()["id"]
+        log.info(f"  Arquivo enviado: {file_id}")
 
-        if status == "completed":
-            output_file_id = bdata.get("output_file_id")
-            error_file_id  = bdata.get("error_file_id")
-            # Se todas falharam, baixa o arquivo de erros para diagnóstico
-            if not output_file_id and error_file_id:
-                log.error("Batch completou com 0 sucessos. Baixando error_file para diagnóstico...")
-                try:
-                    err_resp = requests.get(
-                        f"{OPENAI_BASE_URL}/v1/files/{error_file_id}/content",
-                        headers=headers, timeout=60,
-                    )
-                    for i, line in enumerate(err_resp.text.strip().split("\n")[:5]):
-                        if line.strip():
-                            try:
-                                obj = json.loads(line)
-                                log.error(f"  Erro #{i+1}: {json.dumps(obj.get('error') or obj, ensure_ascii=False)[:300]}")
-                            except Exception:
-                                log.error(f"  Linha #{i+1}: {line[:300]}")
-                except Exception as de:
-                    log.error(f"  Falha ao baixar error_file: {de}")
-                raise RuntimeError("Batch concluído mas 0 requisições com sucesso — verifique os erros acima")
-            break
-        elif status in ("failed", "expired", "cancelled"):
-            error_file_id = bdata.get("error_file_id")
-            if error_file_id:
-                log.error(f"Batch encerrado ({status}). Baixando error_file...")
-                try:
-                    err_resp = requests.get(
-                        f"{OPENAI_BASE_URL}/v1/files/{error_file_id}/content",
-                        headers=headers, timeout=60,
-                    )
-                    for i, line in enumerate(err_resp.text.strip().split("\n")[:5]):
-                        if line.strip():
-                            try:
-                                obj = json.loads(line)
-                                log.error(f"  Erro #{i+1}: {json.dumps(obj.get('error') or obj, ensure_ascii=False)[:300]}")
-                            except Exception:
-                                log.error(f"  Linha #{i+1}: {line[:300]}")
-                except Exception as de:
-                    log.error(f"  Falha ao baixar error_file: {de}")
-            raise RuntimeError(f"Batch encerrado com status: {status}")
+        # Cria batch
+        batch_resp = requests.post(
+            f"{OPENAI_BASE_URL}/v1/batches",
+            headers={**headers, "Content-Type": "application/json"},
+            json={
+                "input_file_id":     file_id,
+                "endpoint":          "/v1/chat/completions",
+                "completion_window": "24h",
+            },
+            timeout=60,
+        )
+        batch_resp.raise_for_status()
+        batch_id = batch_resp.json()["id"]
+        log.info(f"  Batch criado: {batch_id}")
 
-        time.sleep(30)
+        # Persiste estado para retomada em caso de crash
+        state_file = Path(f"batch_state_{batch_id}.json")
+        state_file.write_text(json.dumps({
+            "batch_id":   batch_id,
+            "chunk":      chunk_idx,
+            "total_reqs": len(chunk_lines),
+            "modelo":     modelo,
+            "direto":     direto,
+            "ids":        [ficha_map[f"fatura-{json.loads(l)['custom_id'].split('-')[1]}"]["id"]
+                           for l in chunk_lines if "fatura-" in l],
+        }, indent=2), encoding="utf-8")
+        log.info(f"  Estado salvo: {state_file}")
 
-    if not output_file_id:
-        raise RuntimeError("Batch concluído mas sem output_file_id")
+        # Poll
+        output_file_id = None
+        while True:
+            status_resp = requests.get(
+                f"{OPENAI_BASE_URL}/v1/batches/{batch_id}",
+                headers=headers, timeout=30,
+            )
+            status_resp.raise_for_status()
+            bdata  = status_resp.json()
+            status = bdata["status"]
+            counts = bdata.get("request_counts", {})
+            log.info(f"  [{chunk_idx}/{len(chunks)}] status={status} | "
+                     f"{counts.get('completed',0)}/{counts.get('total', len(chunk_lines))}")
 
-    # ── 5. Baixa resultados ─────────────────────────────────────────────────────
-    log.info(f"Baixando resultados: {output_file_id}")
-    out_resp = requests.get(
-        f"{OPENAI_BASE_URL}/v1/files/{output_file_id}/content",
-        headers=headers,
-        timeout=120,
-    )
-    out_resp.raise_for_status()
+            if status == "completed":
+                output_file_id = bdata.get("output_file_id")
+                error_file_id  = bdata.get("error_file_id")
+                if not output_file_id and error_file_id:
+                    log.error(f"  Batch {chunk_idx} completou com 0 sucessos. Baixando error_file...")
+                    try:
+                        err_resp = requests.get(
+                            f"{OPENAI_BASE_URL}/v1/files/{error_file_id}/content",
+                            headers=headers, timeout=60,
+                        )
+                        for i, eline in enumerate(err_resp.text.strip().split("\n")[:5]):
+                            if eline.strip():
+                                try:
+                                    obj = json.loads(eline)
+                                    log.error(f"    Erro #{i+1}: {json.dumps(obj.get('error') or obj, ensure_ascii=False)[:300]}")
+                                except Exception:
+                                    log.error(f"    Linha #{i+1}: {eline[:300]}")
+                    except Exception as de:
+                        log.error(f"    Falha ao baixar error_file: {de}")
+                    raise RuntimeError(f"Batch {chunk_idx} concluido mas 0 requisicoes com sucesso")
+                break
 
-    # ── 6. Processa e salva ─────────────────────────────────────────────────────
+            elif status in ("failed", "expired", "cancelled"):
+                log.error(f"  Batch {chunk_idx} encerrado ({status}). JSON: {json.dumps(bdata, ensure_ascii=False)[:1500]}")
+                error_file_id = bdata.get("error_file_id")
+                if error_file_id:
+                    try:
+                        err_resp = requests.get(
+                            f"{OPENAI_BASE_URL}/v1/files/{error_file_id}/content",
+                            headers=headers, timeout=60,
+                        )
+                        for i, eline in enumerate(err_resp.text.strip().split("\n")[:10]):
+                            if eline.strip():
+                                try:
+                                    obj = json.loads(eline)
+                                    log.error(f"    Erro #{i+1}: {json.dumps(obj.get('error') or obj, ensure_ascii=False)[:500]}")
+                                except Exception:
+                                    log.error(f"    Linha #{i+1}: {eline[:500]}")
+                    except Exception as de:
+                        log.error(f"    Falha ao baixar error_file: {de}")
+                raise RuntimeError(f"Batch {chunk_idx} encerrado com status: {status}")
+
+            time.sleep(30)
+
+        if not output_file_id:
+            raise RuntimeError(f"Batch {chunk_idx} concluido mas sem output_file_id")
+
+        # Download resultados do chunk
+        log.info(f"  Baixando resultados: {output_file_id}")
+        out_resp = requests.get(
+            f"{OPENAI_BASE_URL}/v1/files/{output_file_id}/content",
+            headers=headers, timeout=180,
+        )
+        out_resp.raise_for_status()
+        chunk_lines_result = [l for l in out_resp.text.strip().split("\n") if l.strip()]
+        all_result_lines.extend(chunk_lines_result)
+        log.info(f"  Batch {chunk_idx} concluido: {len(chunk_lines_result)} resultados.")
+
+    # ── 4. Processa e salva todos os resultados ─────────────────────────────────
     ok = erro = 0
-    for line in out_resp.text.strip().split("\n"):
+    cnt_mini: dict[str, int] = {"CONFIRMADO": 0, "FALSO_POSITIVO": 0, "OUTROS": 0}
+    fichas_confirmadas_lista: list[dict] = []
+    for line in all_result_lines:
         if not line.strip():
             continue
         try:
@@ -1006,6 +1263,7 @@ def analisar_em_batch(fichas: list, prompt: str, cur, conn,
 
         try:
             content = result["response"]["body"]["choices"][0]["message"]["content"]
+            content = _sanitize(content)
         except (KeyError, IndexError) as e:
             log.warning(f"  {custom_id}: resposta malformada — {e}")
             erro += 1
@@ -1013,15 +1271,14 @@ def analisar_em_batch(fichas: list, prompt: str, cur, conn,
 
         dados = parsear_resposta(content)
 
-        # Conferência motor de regras (usa historico salvo na ficha_map)
-        if dados["ia_fichas_confirmadas"]:
-            hist_ficha = ficha.get("_historico") or []
-            mr = _check_motor_regras(dados["ia_fichas_confirmadas"], hist_ficha, ficha)
-            _logar_check(mr, fid)
-            if mr.get("override_status") and dados["ia_status"] == "CONFIRMADO":
-                dados["ia_status"] = mr["override_status"]
-        else:
-            mr = {"passou": True, "checks": []}
+        # Score de confiança
+        campos_json = _extrair_campos_json(content)
+        if campos_json:
+            flags = _calcular_confianca(campos_json, ficha)
+            if flags:
+                _salvar_anotacoes(cur, conn, fid, ficha.get("Concessionaria"), flags)
+
+        mr = {"passou": True, "checks": []}  # motor_regras desativado — IA é fonte de verdade
 
         log.info(f"  {custom_id} | UC={uc} | {dados['ia_status']} | fichas={dados['ia_fichas_confirmadas'] or '—'}")
 
@@ -1034,25 +1291,53 @@ def analisar_em_batch(fichas: list, prompt: str, cur, conn,
         print(content[:800] + ("..." if len(content) > 800 else ""))
         print("═" * 60)
 
-        cur, conn = _salvar_cache_fatura(cur, conn, fid, content, dados["ia_status"])
+        cur, conn = _salvar_cache_fatura(cur, conn, fid, dados)
 
-        if direto and dados["ia_status"] in ("CONFIRMADO", "INCONCLUSIVO"):
-            _gravar_ficha(cur, conn, ficha, dados)
-        elif not direto:
-            _atualizar_ficha(cur, conn, fid, dados)
+        # Mini não grava em fichas_anomalias_cache — só coleta CONFIRMADO para fase 2
+        if dados["ia_status"] == "CONFIRMADO":
+            cnt_mini["CONFIRMADO"] += 1
+            fichas_confirmadas_lista.append(ficha)
+        elif dados["ia_status"] == "FALSO_POSITIVO":
+            cnt_mini["FALSO_POSITIVO"] += 1
+        else:
+            cnt_mini["OUTROS"] += 1
 
         ok += 1
 
-    log.info(f"Batch processado: {ok} ok | {erro} erros | {len(fichas)} total")
+    log.info(f"Batch processado: {ok} ok | {erro} erros | {len(all_result_lines)} linhas | {len(fichas)} faturas")
+
+    # ── 5. Auto-confirmação com gpt-5.4 + imagens ──────────────────────────────
+    cnt_conf = {"CONFIRMADO": 0, "FALSO_POSITIVO": 0, "INCONCLUSIVO": 0}
+    if fichas_confirmadas_lista:
+        cur, conn, cnt_conf = _confirmar_confirmados(fichas_confirmadas_lista, prompt, cur, conn)
+
+    # ── 6. Resumo final ────────────────────────────────────────────────────────
+    sep = "═" * 54
+    print(f"\n{sep}")
+    print("RESUMO FINAL")
+    print(sep)
+    print(f"Faturas processadas pelo mini ({OPENAI_MODEL_MINI}): {ok}")
+    print(f"  ├─ CONFIRMADO (fase 1)              : {cnt_mini['CONFIRMADO']}")
+    print(f"  ├─ FALSO_POSITIVO                   : {cnt_mini['FALSO_POSITIVO']}")
+    print(f"  └─ PENDENTE/INCONCLUSIVO             : {cnt_mini['OUTROS']}")
+    if fichas_confirmadas_lista:
+        print(f"\nConfirmados re-analisados ({MODELO_CONFIRMACAO}): {len(fichas_confirmadas_lista)}")
+        print(f"  ├─ CONFIRMADO (final → fichas_cache): {cnt_conf['CONFIRMADO']}")
+        print(f"  ├─ FALSO_POSITIVO                   : {cnt_conf['FALSO_POSITIVO']}")
+        print(f"  └─ INCONCLUSIVO                     : {cnt_conf['INCONCLUSIVO']}")
+    if erro:
+        print(f"\nErros de API                        : {erro}")
+    print(sep)
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
-def main(cod_empresa: int, force: bool, limite: int | None,
+def main(cod_empresas: list[int], force: bool, limite: int | None,
          direto: bool = False, batch: bool = False, modelo: str | None = None):
     modelo = modelo or (OPENAI_MODEL_MINI if batch else OPENAI_MODEL)
     log.info("=" * 60)
-    log.info(f"analisar_batch.py — empresa={cod_empresa} force={force} direto={direto} batch={batch} modelo={modelo} limite={limite or 'sem limite'}")
+    empresas_str = ", ".join(str(e) for e in cod_empresas)
+    log.info(f"analisar_batch.py — empresa(s)={empresas_str} force={force} direto={direto} batch={batch} modelo={modelo} limite={limite or 'sem limite'}")
 
     if not HAS_PDFIUM:
         log.warning("pypdfium2 não instalado — análise sem imagem. Execute: pip install pypdfium2")
@@ -1060,18 +1345,29 @@ def main(cod_empresa: int, force: bool, limite: int | None,
     prompt = carregar_prompt()
     conn   = mysql.connector.connect(**DB_APP)
     cur    = conn.cursor(dictionary=True)
+    _garantir_coluna_modelo_ia(conn)
 
     limit_sql = f"LIMIT {limite}" if limite else ""
 
+    if len(cod_empresas) == 1:
+        filtro_empresa = "= %s"
+        param_empresa  = (cod_empresas[0],)
+    else:
+        placeholders   = ", ".join(["%s"] * len(cod_empresas))
+        filtro_empresa = f"IN ({placeholders})"
+        param_empresa  = tuple(cod_empresas)
+
     if direto:
-        # Modo direto: lê de Faturas_Registradas_Cache onde texto_plumber foi extraído
-        # Não depende do motor_regras — IA detecta F01-F05 autonomamente pelos textos
+        # Modo direto: elegível se ao menos 2 dos 3 extratores têm texto gravado.
+        # LEFT JOIN em fichas_anomalias_cache para incluir detalhamento do motor quando disponível.
+        filtro_ia = "" if force else "AND (fac.ia_status IS NULL OR fac.ia_status = 'PENDENTE')"
         cur.execute(f"""
             SELECT frc.id, frc.UC, frc.Cod_Empresa, frc.Concessionaria, frc.Mes_Ref,
                    frc.Tp_Tensao, frc.NroMedidor, frc.RAZAO_SOCIAL, frc.RS_Total_Fatura,
-                   NULL AS fichas_aplicadas, NULL AS detalhamento, NULL AS ia_status,
+                   COALESCE(fac.fichas_aplicadas, '') AS fichas_aplicadas,
+                   COALESCE(fac.detalhamento,    '') AS detalhamento,
+                   COALESCE(fac.ia_status, 'PENDENTE') AS ia_status,
                    frc.Link, frc.texto_plumber, frc.texto_markitdown, frc.texto_ocr,
-                   -- Campos numéricos do banco (podem divergir do PDF)
                    frc.KWH_Ponta, frc.KWH_FPonta, frc.KWH_Reservado, frc.KWH_Total,
                    frc.Leitura_Anterior_KWH_P, frc.Leitura_Atual_KWH_P,
                    frc.Leitura_Anterior_KWH_FP, frc.Leitura_Atual_KWH_FP,
@@ -1079,11 +1375,17 @@ def main(cod_empresa: int, force: bool, limite: int | None,
                    frc.Base_de_Calculo_ICMS, frc.Aliquota_ICMS, frc.ICMS_RS,
                    frc.CIP, frc.Dt_Venc_NF
             FROM Faturas_Registradas_Cache frc
-            WHERE frc.Cod_Empresa = %s
-              AND frc.texto_plumber IS NOT NULL
+            LEFT JOIN fichas_anomalias_cache fac ON fac.id = frc.id AND fac.deletado = 0
+            WHERE frc.Cod_Empresa {filtro_empresa}
+              AND (
+                (CASE WHEN frc.texto_plumber    IS NOT NULL AND frc.texto_plumber    != '' THEN 1 ELSE 0 END +
+                 CASE WHEN frc.texto_markitdown IS NOT NULL AND frc.texto_markitdown != '' THEN 1 ELSE 0 END +
+                 CASE WHEN frc.texto_ocr        IS NOT NULL AND frc.texto_ocr        != '' THEN 1 ELSE 0 END)
+              ) >= 2
+              {filtro_ia}
             ORDER BY frc.Mes_Ref DESC
             {limit_sql}
-        """, (cod_empresa,))
+        """, param_empresa)
     else:
         # Modo padrão: lê de fichas_anomalias_cache (gerada pelo motor_regras)
         filtro_ia = "" if force else "AND f.ia_status = 'PENDENTE'"
@@ -1091,14 +1393,20 @@ def main(cod_empresa: int, force: bool, limite: int | None,
             SELECT f.id, f.UC, f.Cod_Empresa, f.Concessionaria, f.Mes_Ref,
                    f.Tp_Tensao, f.NroMedidor, f.RAZAO_SOCIAL, f.RS_Total_Fatura,
                    f.fichas_aplicadas, f.detalhamento, f.ia_status,
-                   frc.Link, frc.texto_plumber, frc.texto_markitdown, frc.texto_ocr
+                   frc.Link, frc.texto_plumber, frc.texto_markitdown, frc.texto_ocr,
+                   frc.KWH_Ponta, frc.KWH_FPonta, frc.KWH_Reservado, frc.KWH_Total,
+                   frc.Leitura_Anterior_KWH_P, frc.Leitura_Atual_KWH_P,
+                   frc.Leitura_Anterior_KWH_FP, frc.Leitura_Atual_KWH_FP,
+                   frc.Constante_KWH_P, frc.Constante_KWH_FP,
+                   frc.Base_de_Calculo_ICMS, frc.Aliquota_ICMS, frc.ICMS_RS,
+                   frc.CIP, frc.Dt_Venc_NF
             FROM fichas_anomalias_cache f
             LEFT JOIN Faturas_Registradas_Cache frc ON frc.id = f.id
-            WHERE f.Cod_Empresa = %s
+            WHERE f.Cod_Empresa {filtro_empresa}
               {filtro_ia}
             ORDER BY f.Mes_Ref DESC
             {limit_sql}
-        """, (cod_empresa,))
+        """, param_empresa)
 
     fichas = cur.fetchall()
     log.info(f"Faturas para análise: {len(fichas)}")
@@ -1159,16 +1467,21 @@ def main(cod_empresa: int, force: bool, limite: int | None,
             time.sleep(PAUSA_ENTRE)
             continue
 
-        # 6. Parseia resultado + conferência motor de regras
+        # 6. Parseia resultado + conferência motor de regras + score de confiança
         dados = parsear_resposta(resposta)
 
-        if dados["ia_fichas_confirmadas"]:
-            mr = _check_motor_regras(dados["ia_fichas_confirmadas"], historico, ficha)
-            _logar_check(mr, fid)
-            if mr.get("override_status") and dados["ia_status"] == "CONFIRMADO":
-                dados["ia_status"] = mr["override_status"]
+        campos_json = _extrair_campos_json(resposta)
+        if campos_json:
+            flags = _calcular_confianca(campos_json, ficha)
+            if flags:
+                n = _salvar_anotacoes(cur, conn, fid, ficha.get("Concessionaria"), flags)
+                log.info(f"    confianca: {n} flag(s) salvo(s) em Anotacoes_Campo_IA")
+                for f in flags:
+                    log.info(f"      [{f['confianca']:.1f}] {f['campo']}: {f['motivo']}")
         else:
-            mr = {"passou": True, "checks": []}
+            log.debug(f"    confianca: bloco CAMPOS_JSON ausente na resposta id={fid}")
+
+        mr = {"passou": True, "checks": []}  # motor_regras desativado — IA é fonte de verdade
 
         print("\n" + "═" * 60)
         print(f"ID: {fid} | UC: {uc} | Mês: {mes}")
@@ -1190,15 +1503,14 @@ def main(cod_empresa: int, force: bool, limite: int | None,
         print("═" * 60)
 
         # 7. Grava analise_IA em Faturas_Registradas_Cache (sempre)
-        cur, conn = _salvar_cache_fatura(cur, conn, fid, resposta, dados["ia_status"])
+        cur, conn = _salvar_cache_fatura(cur, conn, fid, dados)
 
-        # 8. Grava em fichas_anomalias_cache se anomalia confirmada (modo direto)
-        if direto and dados["ia_status"] in ("CONFIRMADO", "INCONCLUSIVO"):
-            _gravar_ficha(cur, conn, ficha, dados)
-
-        # 9. Atualiza ia_status em fichas_anomalias_cache (modo padrão)
-        if not direto:
-            _atualizar_ficha(cur, conn, fid, dados)
+        # 8. Grava em fichas_anomalias_cache se CONFIRMADO ou INCONCLUSIVO
+        if dados["ia_status"] in ("CONFIRMADO", "INCONCLUSIVO"):
+            if direto:
+                cur, conn = _gravar_ficha(cur, conn, ficha, dados, modelo=OPENAI_MODEL)
+            else:
+                _atualizar_ficha(cur, conn, fid, dados)
 
         ok += 1
         time.sleep(PAUSA_ENTRE)
@@ -1209,14 +1521,35 @@ def main(cod_empresa: int, force: bool, limite: int | None,
     conn.close()
 
 
+def _buscar_todas_empresas() -> list[int]:
+    conn = mysql.connector.connect(**DB_APP)
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT DISTINCT Cod_Empresa FROM Faturas_Registradas_Cache
+        WHERE (
+            (CASE WHEN texto_plumber    IS NOT NULL AND texto_plumber    != '' THEN 1 ELSE 0 END +
+             CASE WHEN texto_markitdown IS NOT NULL AND texto_markitdown != '' THEN 1 ELSE 0 END +
+             CASE WHEN texto_ocr        IS NOT NULL AND texto_ocr        != '' THEN 1 ELSE 0 END)
+        ) >= 2
+        ORDER BY Cod_Empresa
+    """)
+    empresas = [r[0] for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return empresas
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Análise IA em lote com visão da fatura")
-    parser.add_argument("--empresa", type=int, required=True)
+    grp = parser.add_mutually_exclusive_group(required=True)
+    grp.add_argument("--empresa", type=int, nargs="+",
+                     help="Cod_Empresa(s) a processar (ex: 14  ou  4 14 32)")
+    grp.add_argument("--all-empresas", action="store_true",
+                     help="Processa todas as empresas com faturas aptas (≥2 extratores)")
     parser.add_argument("--force",   action="store_true")
     parser.add_argument("--limite",  type=int, default=None)
     parser.add_argument("--direto",  action="store_true",
                         help="Lê de Faturas_Registradas_Cache (texto_plumber preenchido) "
-                             "sem depender do motor_regras. IA detecta F01-F05 autonomamente.")
+                             "sem depender do motor_regras. IA detecta F01-F14 autonomamente.")
     parser.add_argument("--batch",   action="store_true",
                         help="Usa OpenAI Batch API (50%% mais barato, sem imagens). "
                              "Submete tudo de uma vez e aguarda o resultado.")
@@ -1224,5 +1557,12 @@ if __name__ == "__main__":
                         help=f"Modelo OpenAI a usar. Padrão: {OPENAI_MODEL} (normal) "
                              f"ou {OPENAI_MODEL_MINI} (batch). Ex: --modelo gpt-4.5-mini")
     args = parser.parse_args()
-    main(cod_empresa=args.empresa, force=args.force, limite=args.limite,
+
+    if args.all_empresas:
+        empresas = _buscar_todas_empresas()
+        log.info(f"--all-empresas: {len(empresas)} empresas encontradas → {empresas}")
+    else:
+        empresas = args.empresa
+
+    main(cod_empresas=empresas, force=args.force, limite=args.limite,
          direto=args.direto, batch=args.batch, modelo=args.modelo)

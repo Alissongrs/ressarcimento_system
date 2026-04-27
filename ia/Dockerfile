@@ -2,7 +2,6 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instala dependências para api_servidor.py (Score Model)
 RUN pip install --no-cache-dir \
     fastapi \
     uvicorn \
@@ -13,9 +12,8 @@ RUN pip install --no-cache-dir \
     numpy \
     scikit-learn
 
-# Copia os scripts
-COPY api_servidor.py .
-COPY train_score_async.py .
+# Copia o agente
+COPY llama_agent.py .
 
 # Cria diretórios para dados e modelos
 RUN mkdir -p models data
@@ -27,8 +25,6 @@ HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
 RUN useradd -r -u 1001 appuser && chown -R appuser /app
 USER appuser
 
-# Expõe porta
 EXPOSE 8000
 
-# Inicia o serviço
-CMD ["python", "api_servidor.py"]
+CMD ["python", "llama_agent.py"]

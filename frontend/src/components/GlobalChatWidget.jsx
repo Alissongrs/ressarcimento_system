@@ -7,6 +7,7 @@ import {
   Bot,
   ChevronDown,
   Download,
+  Info,
   Loader2,
   Maximize2,
   MessageSquare,
@@ -111,6 +112,40 @@ const ChartTooltip = ({ active, payload, label, isCurrency }) => {
 };
 
 // ─── Componente de gráficos do chat ──────────────────────────────────────
+function ChartToggle({ msgId, context, expanded }) {
+  const [show, setShow] = React.useState(false);
+  const hasData = context && (
+    context.ressarcimento_mensal?.length > 1 ||
+    context.abertura_mensal?.length > 1 ||
+    context.por_etapa?.length ||
+    context.por_cliente?.length ||
+    context.por_concessionaria?.length ||
+    context.media_movimentacoes?.length ||
+    context.tempo_por_etapa?.length
+  );
+  if (!hasData) return null;
+  return (
+    <div>
+      <button
+        onClick={() => setShow(v => !v)}
+        style={{
+          marginTop: 4,
+          fontSize: 11,
+          padding: '3px 10px',
+          borderRadius: 8,
+          border: '1px solid rgba(99,102,241,0.4)',
+          background: show ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.07)',
+          color: '#a5b4fc',
+          cursor: 'pointer',
+        }}
+      >
+        {show ? '✕ Fechar gráfico' : '📊 Visualizar como gráfico'}
+      </button>
+      {show && <MessageCharts context={context} expanded={expanded} />}
+    </div>
+  );
+}
+
 function MessageCharts({ context, expanded }) {
   if (!context) return null;
 
@@ -305,6 +340,7 @@ export default function GlobalChatWidget() {
   const [open, setOpen] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -421,25 +457,25 @@ export default function GlobalChatWidget() {
           width: 52,
           height: 52,
           borderRadius: '50%',
-          border: 'none',
-          background: 'linear-gradient(135deg, #1e3a5f 0%, #0d1b2a 100%)',
+          border: '2px solid rgba(99,102,241,0.5)',
+          background: 'linear-gradient(135deg, #1e3a8a 0%, #1e3a5f 50%, #0d1b2a 100%)',
           color: '#fff',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           boxShadow: pulse
-            ? '0 0 0 6px rgba(99,102,241,0.25), 0 4px 20px rgba(0,0,0,0.4)'
-            : '0 4px 20px rgba(0,0,0,0.35)',
+            ? '0 0 0 6px rgba(99,102,241,0.3), 0 4px 20px rgba(99,102,241,0.4)'
+            : '0 4px 20px rgba(0,0,0,0.5), 0 0 0 1px rgba(99,102,241,0.2)',
           transition: 'box-shadow 0.3s ease, transform 0.2s ease',
         }}
         onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.08)')}
         onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
       >
         {pulse ? (
-          <Sparkles size={22} style={{ color: '#818cf8' }} />
+          <Sparkles size={22} color="#818cf8" strokeWidth={2} />
         ) : (
-          <Bot size={22} />
+          <Bot size={22} color="#ffffff" strokeWidth={2} />
         )}
         {messages.length > 0 && (
           <span
@@ -518,6 +554,24 @@ export default function GlobalChatWidget() {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {!minimized && (
+            <button
+              type="button"
+              onClick={() => setShowInfo((v) => !v)}
+              title="O que o AISURE pode fazer?"
+              style={{
+                background: showInfo ? 'rgba(99,102,241,0.25)' : 'transparent',
+                border: 'none',
+                color: showInfo ? '#818cf8' : 'rgba(255,255,255,0.5)',
+                cursor: 'pointer',
+                padding: 4,
+                borderRadius: 6,
+                display: 'flex',
+              }}
+            >
+              <Info size={14} />
+            </button>
+          )}
           {messages.length > 0 && !minimized && (
             <button
               type="button"
@@ -595,6 +649,68 @@ export default function GlobalChatWidget() {
           </button>
         </div>
       </div>
+
+      {/* ── Painel de informações ──────────────────────────────────────────── */}
+      {showInfo && !minimized && (
+        <div style={{
+          padding: '14px 16px',
+          background: 'rgba(99,102,241,0.07)',
+          borderBottom: '1px solid rgba(99,102,241,0.18)',
+          overflowY: 'auto',
+          maxHeight: 320,
+        }}>
+          <p style={{ margin: '0 0 10px', fontSize: 12, fontWeight: 700, color: '#818cf8', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Bot size={13} /> O que o AISURE pode fazer?
+          </p>
+
+          {[
+            {
+              emoji: '📋', titulo: 'Visão geral dos processos',
+              itens: ['Quantos processos estão em cada etapa', 'Processos criados nos últimos 7 ou 30 dias', 'Processos parados há mais de 30 dias sem movimentação'],
+            },
+            {
+              emoji: '💰', titulo: 'Financeiro e ressarcimento',
+              itens: ['Valor total deferido (ressarcido) por período', 'Evolução mensal dos ressarcimentos', 'Valor por concessionária'],
+            },
+            {
+              emoji: '🔍', titulo: 'Consulta específica',
+              itens: ['Detalhes de um processo: "me fale sobre o proc 42"', 'Todos os processos de uma UC: "UC 94122288"', 'Histórico de movimentações de um processo'],
+            },
+            {
+              emoji: '🏢', titulo: 'Clientes e concessionárias',
+              itens: ['Top clientes com mais processos', 'Distribuição por concessionária (CEMIG, COPEL, ENEL...)', 'Processos por cliente específico'],
+            },
+            {
+              emoji: '⏱', titulo: 'Desempenho operacional',
+              itens: ['Tempo médio de permanência em cada etapa', 'Média de movimentações por processo', 'Alertas vencidos ou vencendo hoje'],
+            },
+            {
+              emoji: '📊', titulo: 'Gráficos automáticos',
+              itens: ['Toda resposta vem com gráficos de área, barras e pizza', 'Botão CSV para exportar os dados da resposta', 'Amplie a janela para ver gráficos maiores'],
+            },
+          ].map(({ emoji, titulo, itens }) => (
+            <div key={titulo} style={{ marginBottom: 10 }}>
+              <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.75)' }}>
+                {emoji} {titulo}
+              </p>
+              <ul style={{ margin: 0, paddingLeft: 14 }}>
+                {itens.map((item) => (
+                  <li key={item} style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', lineHeight: 1.6 }}>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+
+          <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(99,102,241,0.12)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.2)' }}>
+            <p style={{ margin: 0, fontSize: 10.5, color: 'rgba(255,255,255,0.45)', lineHeight: 1.6 }}>
+              💡 <strong style={{ color: 'rgba(255,255,255,0.6)' }}>Dica:</strong> pergunte de forma natural.
+              Ex: <em>"Qual cliente tem mais processos?"</em>, <em>"Mostre os alertas de hoje"</em> ou <em>"Como está a carteira?"</em>
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Corpo (hidden when minimized) ──────────────────────────────────── */}
       {!minimized && (
@@ -725,7 +841,7 @@ export default function GlobalChatWidget() {
                     dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
                   />
                   {msg.role === 'assistant' && msg.context && (
-                    <MessageCharts context={msg.context} expanded={expanded} />
+                    <ChartToggle msgId={msg.id} context={msg.context} expanded={expanded} />
                   )}
                 </div>
               </div>

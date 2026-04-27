@@ -95,7 +95,7 @@ func checarAlertasParaTodosInternal(force bool) {
 	// 3. Monta e envia e-mail HTML
 	dataStr := time.Now().Format("02/01/2006")
 	diaSemana := nomeDiaSemana(time.Now().Weekday())
-	subject := fmt.Sprintf("[AMEnergia] Lembretes da equipe · %s", dataStr)
+	subject := fmt.Sprintf("[AMEEnergia] Lembretes da equipe · %s", dataStr)
 
 	var itens strings.Builder
 	for i, a := range alertas {
@@ -128,7 +128,7 @@ func checarAlertasParaTodosInternal(force bool) {
       <table width="100%%" cellpadding="0" cellspacing="0">
         <tr>
           <td>
-            <p style="margin:0;font-size:10px;color:#93c5fd;letter-spacing:2px;text-transform:uppercase;font-weight:600;">AM Energia · Sistema de Ressarcimento</p>
+            <p style="margin:0;font-size:10px;color:#93c5fd;letter-spacing:2px;text-transform:uppercase;font-weight:600;">AMEEnergia · Sistema de Ressarcimento</p>
             <h1 style="margin:10px 0 4px;font-size:24px;color:#ffffff;font-weight:700;letter-spacing:-0.5px;">🔔 Lembretes da equipe</h1>
             <p style="margin:0;font-size:13px;color:#bfdbfe;">%s, %s</p>
           </td>
@@ -160,7 +160,7 @@ func checarAlertasParaTodosInternal(force bool) {
       <table width="100%%" cellpadding="0" cellspacing="0" style="margin-top:28px;">
         <tr>
           <td align="center">
-            <a href="http://app.amenergia.com.br" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:8px;font-size:14px;font-weight:600;letter-spacing:0.3px;">
+            <a href="http://sure.app.br" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 32px;border-radius:8px;font-size:14px;font-weight:600;letter-spacing:0.3px;">
               Acessar o Sistema →
             </a>
           </td>
@@ -176,7 +176,7 @@ func checarAlertasParaTodosInternal(force bool) {
   <tr>
     <td style="padding:20px 40px 28px;">
       <p style="margin:0;font-size:11px;color:#94a3b8;line-height:1.7;text-align:center;">
-        Este e-mail foi gerado automaticamente pelo <strong>Sistema de Ressarcimento</strong> · AM Energia.<br>
+        Este e-mail foi gerado automaticamente pelo <strong>Sistema de Ressarcimento</strong> · AMEEnergia.<br>
         Caso tenha dúvidas, entre em contato com o time de TI.
       </p>
     </td>
@@ -204,8 +204,57 @@ func checarAlertasParaTodosInternal(force bool) {
 	log.Printf("[alertas_equipe] e-mail enviado para %d destinatários — %d alerta(s)", len(emails), len(alertas))
 }
 
+// ChecarAlertasPessoaisHoje envia e-mails para alertas pessoais (para_todos=0)
+// que vencem hoje e ainda não receberam o e-mail. Chamado pelo cron diário.
+func ChecarAlertasPessoaisHoje() {
+	db := database.DB_App
+	if db == nil {
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT a.id_alerta, a.id_usuario, a.mensagem, DATE_FORMAT(a.data_alerta,'%Y-%m-%d')
+		  FROM FT_ALERTAS a
+		 WHERE a.para_todos = 0
+		   AND DATE(a.data_alerta) = CURDATE()
+		   AND a.email_enviado_em IS NULL
+	`)
+	if err != nil {
+		log.Printf("[alertas_pessoal] erro ao buscar alertas do dia: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	type pendente struct {
+		ID         int64
+		UserID     int64
+		Mensagem   string
+		DataAlerta string
+	}
+	var lista []pendente
+	for rows.Next() {
+		var p pendente
+		if err := rows.Scan(&p.ID, &p.UserID, &p.Mensagem, &p.DataAlerta); err == nil {
+			lista = append(lista, p)
+		}
+	}
+	if len(lista) == 0 {
+		log.Println("[alertas_pessoal] nenhum alerta pessoal vence hoje")
+		return
+	}
+	for _, p := range lista {
+		EnviarAlertaPessoalComID(p.ID, p.UserID, p.Mensagem, p.DataAlerta)
+	}
+}
+
 // EnviarAlertaPessoal envia um e-mail de lembrete para o criador do alerta (para_todos=false).
+// Usado ao criar o alerta — não atualiza email_enviado_em (disparo imediato, sem id conhecido).
 func EnviarAlertaPessoal(userID int64, mensagem, dataAlerta string) {
+	EnviarAlertaPessoalComID(0, userID, mensagem, dataAlerta)
+}
+
+// EnviarAlertaPessoalComID envia o e-mail e, se alertaID > 0, grava email_enviado_em.
+func EnviarAlertaPessoalComID(alertaID int64, userID int64, mensagem, dataAlerta string) {
 	db := database.DB_App
 	if db == nil {
 		return
@@ -341,4 +390,12 @@ func EnviarAlertaPessoal(userID int64, mensagem, dataAlerta string) {
 		return
 	}
 	log.Printf("[alertas_pessoal] e-mail enviado para %s (usuário %d)", email, userID)
+
+	// Marca como enviado no banco (apenas quando temos o ID do alerta)
+	if alertaID > 0 {
+		db := database.DB_App
+		if db != nil {
+			_, _ = db.Exec("UPDATE FT_ALERTAS SET email_enviado_em = NOW() WHERE id_alerta = ?", alertaID)
+		}
+	}
 }

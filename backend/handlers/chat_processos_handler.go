@@ -516,6 +516,45 @@ func buildProcessosContext(question string) (string, map[string]any) {
 		}
 	}
 
+	// ── 15. Histórico de movimentações por etapa e mês (últimos 24 meses) ───────
+	// Usado para responder "quantos processos chegaram em X etapa em Y período"
+	{
+		rows, err := db.Query(`
+			SELECT DATE_FORMAT(h.data_movimentacao, '%Y-%m') AS mes,
+			       h.etapa_nova                              AS etapa,
+			       COUNT(DISTINCT h.id_requisicao)           AS total
+			  FROM FT_HISTORICO_MOVIMENTACOES h
+			 WHERE h.data_movimentacao >= DATE_SUB(NOW(), INTERVAL 24 MONTH)
+			   AND h.etapa_nova IS NOT NULL AND h.etapa_nova != ''
+			 GROUP BY mes, etapa
+			 ORDER BY mes ASC, total DESC`)
+		if err == nil {
+			defer rows.Close()
+			type movRow struct {
+				Mes   string `json:"mes"`
+				Etapa string `json:"etapa"`
+				Total int    `json:"total"`
+			}
+			var movs []movRow
+			for rows.Next() {
+				var m movRow
+				if rows.Scan(&m.Mes, &m.Etapa, &m.Total) == nil {
+					movs = append(movs, m)
+				}
+			}
+			rows.Close()
+			if len(movs) > 0 {
+				var sb strings.Builder
+				sb.WriteString("## Movimentações por Etapa e Mês (últimos 24 meses)\n")
+				for _, m := range movs {
+					sb.WriteString(fmt.Sprintf("- %s → %s: %d processo(s)\n", m.Mes, m.Etapa, m.Total))
+				}
+				parts = append(parts, sb.String())
+				ctxData["historico_movimentacoes"] = movs
+			}
+		}
+	}
+
 	return strings.Join(parts, "\n\n"), ctxData
 }
 

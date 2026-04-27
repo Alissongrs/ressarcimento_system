@@ -180,14 +180,27 @@ func CreateAlerta(c *gin.Context) {
 	})
 	notifyUnread(userID)
 
-	// Envia e-mail de lembrete para o criador (alertas pessoais)
-	// ou para toda a equipe (para_todos). Feito em goroutine para não bloquear.
+	// Envia e-mail de lembrete imediatamente. Feito em goroutine para não bloquear.
 	if !body.ParaTodos {
+		// Alerta pessoal → envia só para o criador
 		dataAlertaStr := ""
 		if body.DataAlerta != nil {
 			dataAlertaStr = *body.DataAlerta
 		}
 		go services.EnviarAlertaPessoal(userID, strings.TrimSpace(body.Mensagem), dataAlertaStr)
+	} else {
+		// Alerta da equipe → se data_alerta = hoje, dispara o envio agora
+		// (o cron diário das 08:00 pode já ter rodado; não queremos esperar até amanhã)
+		isToday := false
+		if body.DataAlerta != nil {
+			if t, err := time.Parse("2006-01-02", strings.TrimSpace(*body.DataAlerta)); err == nil {
+				now := time.Now()
+				isToday = t.Year() == now.Year() && t.YearDay() == now.YearDay()
+			}
+		}
+		if isToday {
+			go services.ChecarAlertasParaTodos()
+		}
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Alerta criado"})
@@ -278,11 +291,14 @@ func UpdateAlerta(c *gin.Context) {
 // @Router /api/v1/admin/alertas/disparar-agora [post]
 func DispararAlertasAgora(c *gin.Context) {
 	force := c.Query("force") == "1"
+	// para_todos alerts
 	if force {
 		go services.DispararAlertasParaTodosForce()
 	} else {
 		go services.ChecarAlertasParaTodos()
 	}
+	// alertas pessoais do dia (para_todos=0) que ainda não receberam e-mail
+	go services.ChecarAlertasPessoaisHoje()
 	c.JSON(http.StatusOK, gin.H{"message": "Disparo iniciado — verifique os logs do servidor"})
 }
 

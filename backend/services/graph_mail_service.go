@@ -125,11 +125,32 @@ func ListMailFolders() ([]GraphFolder, error) {
 }
 
 func ListMailMessages(folderID, q string, unread *bool, limit, offset int) ([]GraphMessage, error) {
+	originalQ := strings.TrimSpace(q)
+	out, err := fetchMailGraph(folderID, originalQ, unread, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	// Identificadores como "30.123.456" / "2024-001" são tokenizados com a pontuação
+	// pelo indexador do Graph. Se o phrase search retornar vazio, tenta de novo
+	// com a pontuação removida — frequentemente o termo "limpo" foi indexado.
+	if len(out) == 0 && originalQ != "" {
+		cleaned := stripIDPunctuation(originalQ)
+		if cleaned != "" && cleaned != originalQ {
+			if alt, altErr := fetchMailGraph(folderID, cleaned, unread, limit, offset); altErr == nil && len(alt) > 0 {
+				out = alt
+			}
+		}
+	}
+	return out, nil
+}
+
+// fetchMailGraph chama o Graph com phrase search global e aplica fallback local
+// (filtra por subject + bodyPreview + remetentes/destinatários) quando o $search é rejeitado com 400.
+func fetchMailGraph(folderID, q string, unread *bool, limit, offset int) ([]GraphMessage, error) {
 	sender, err := graphSender()
 	if err != nil {
 		return nil, err
 	}
-	originalQ := strings.TrimSpace(q)
 	selectFields := "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,hasAttachments,isRead,internetMessageId,conversationId,parentFolderId"
 	params := url.Values{}
 	if limit <= 0 {
@@ -148,8 +169,9 @@ func ListMailMessages(folderID, q string, unread *bool, limit, offset int) ([]Gr
 	params.Set("$orderby", "receivedDateTime desc")
 	params.Set("$select", selectFields)
 	if q != "" {
-		// AQS: busca explícita em corpo e assunto
-		params.Set("$search", fmt.Sprintf("body:%q OR subject:%q", q, q))
+		// Phrase search global: deixa o Graph escolher os campos relevantes (body, subject, from, to...)
+		// e tolera melhor pontuação do que `body:"x" OR subject:"x"`.
+		params.Set("$search", strconv.Quote(q))
 	}
 	if unread != nil {
 		params.Set("$filter", fmt.Sprintf("isRead eq %v", !*unread))
@@ -164,8 +186,9 @@ func ListMailMessages(folderID, q string, unread *bool, limit, offset int) ([]Gr
 		return nil, err
 	}
 	defer resp.Body.Close()
-	// Graph $search falha com alguns padrões (ex.: números com pontos). Faz fallback.
-	if resp.StatusCode == http.StatusBadRequest && originalQ != "" {
+	// Fallback de status 400: remove $search e filtra localmente.
+	usedFallback := false
+	if resp.StatusCode == http.StatusBadRequest && q != "" {
 		_ = resp.Body.Close()
 		params.Del("$search")
 		urlStr = fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/mailFolders/%s/messages?%s", sender, url.PathEscape(folderID), params.Encode())
@@ -174,7 +197,7 @@ func ListMailMessages(folderID, q string, unread *bool, limit, offset int) ([]Gr
 			return nil, err
 		}
 		defer resp.Body.Close()
-		q = ""
+		usedFallback = true
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("erro Graph messages: status %d", resp.StatusCode)
@@ -189,8 +212,8 @@ func ListMailMessages(folderID, q string, unread *bool, limit, offset int) ([]Gr
 	for _, m := range payload.Value {
 		out = append(out, mapGraphMessage(m))
 	}
-	if originalQ != "" && q == "" {
-		needle := strings.ToLower(originalQ)
+	if usedFallback && q != "" {
+		needle := strings.ToLower(q)
 		filtered := make([]GraphMessage, 0, len(out))
 		for _, m := range out {
 			if strings.Contains(strings.ToLower(m.Subject), needle) ||
@@ -208,6 +231,28 @@ func ListMailMessages(folderID, q string, unread *bool, limit, offset int) ([]Gr
 		out = filtered
 	}
 	return out, nil
+}
+
+// stripIDPunctuation remove ., -, /, espaços de termos que parecem identificadores numéricos
+// (mantém só se o resultado contiver ao menos um dígito — para não atrapalhar busca em frases comuns).
+func stripIDPunctuation(s string) string {
+	var b strings.Builder
+	hasDigit := false
+	for _, r := range s {
+		switch r {
+		case '.', '-', '/', ' ', '\t':
+			continue
+		default:
+			if r >= '0' && r <= '9' {
+				hasDigit = true
+			}
+			b.WriteRune(r)
+		}
+	}
+	if !hasDigit {
+		return s
+	}
+	return b.String()
 }
 
 func GetMailMessage(id string) (*GraphMessageDetail, error) {

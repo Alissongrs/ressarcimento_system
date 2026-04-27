@@ -141,6 +141,9 @@ func startScheduler() {
 	// Tarefa 5b: Enviar e-mail da equipe de ressarcimento quando alerta "para_todos" vence
 	s.Every(1).Day().At("08:00").Do(services.ChecarAlertasParaTodos)
 
+	// Tarefa 5c: Enviar e-mail para alertas pessoais (para_todos=0) que vencem hoje e ainda não foram enviados
+	s.Every(1).Day().At("08:05").Do(services.ChecarAlertasPessoaisHoje)
+
     // Tarefa 6: Processar resumos pendentes (a cada 1 minuto)
     s.Every(1).Minutes().Do(func(){
         ctx := context.Background()

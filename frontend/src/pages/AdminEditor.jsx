@@ -210,11 +210,50 @@ const normalizeDateInput = (s) => {
     setToast((t) => ({ ...t, open: false, text: '' }));
   };
 
+  const [disparandoAlertas, setDisparandoAlertas] = useState(false);
+  const [alertasMsg, setAlertasMsg] = useState('');
+
+  const dispararAlertas = async () => {
+    setDisparandoAlertas(true);
+    setAlertasMsg('');
+    try {
+      const token = localStorage.getItem('userToken');
+      const r = await fetch('/api/v1/admin/alertas/disparar-agora', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json();
+      if (r.ok) {
+        setAlertasMsg('✓ Alertas disparados! Verifique os e-mails em instantes.');
+      } else {
+        setAlertasMsg(`Erro: ${data?.error || r.status}`);
+      }
+    } catch (e) {
+      setAlertasMsg(`Erro: ${e.message}`);
+    } finally {
+      setDisparandoAlertas(false);
+      setTimeout(() => setAlertasMsg(''), 6000);
+    }
+  };
+
   const Toolbar = () => (
-    <div className="mb-4 flex items-center gap-2">
+    <div className="mb-4 flex items-center gap-2 flex-wrap">
       <button className="btn-outline" onClick={() => setPlanilhaOpen((v) => !v)}>
         {planilhaOpen ? 'Voltar ao editor' : 'Em Massa'}
       </button>
+      <button
+        className="btn-outline"
+        onClick={dispararAlertas}
+        disabled={disparandoAlertas}
+        title="Envia e-mails de todos os alertas pendentes de hoje (equipe e pessoais)"
+      >
+        {disparandoAlertas ? '⟳ Disparando...' : '🔔 Disparar Alertas'}
+      </button>
+      {alertasMsg && (
+        <span style={{ fontSize: 12, color: alertasMsg.startsWith('✓') ? '#10b981' : '#ef4444' }}>
+          {alertasMsg}
+        </span>
+      )}
     </div>
   );
 

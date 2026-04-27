@@ -223,21 +223,14 @@ WHERE COALESCE(f1.flag_f01,  0) = 1
    OR COALESCE(f25.flag_f05, 0) = 1`
 
 // filtroFicha retorna a cláusula WHERE adicional para filtrar por ficha.
+// Agora usa Faturas_Registradas_Cache.fichas_apontadas (CSV unificado, F01-F14).
 func filtroFicha(ficha string) string {
-	switch ficha {
-	case "f01":
-		return " AND flag_f01 = 1"
-	case "f02":
-		return " AND flag_f02 = 1"
-	case "f03":
-		return " AND flag_f03 = 1"
-	case "f04":
-		return " AND flag_f04 = 1"
-	case "f05":
-		return " AND flag_f05 = 1"
-	default:
+	upper := strings.ToUpper(strings.TrimSpace(ficha))
+	if len(upper) != 3 || upper[0] != 'F' {
 		return ""
 	}
+	// FIND_IN_SET é mais preciso que LIKE pra evitar match parcial (F01 vs F010)
+	return " AND FIND_IN_SET('" + upper + "', f.fichas_apontadas) > 0"
 }
 
 func escapeLike(value string) string {
@@ -254,17 +247,8 @@ func buildFichaFilters(c *gin.Context) (string, []any) {
 		valid := make([]string, 0, len(parts))
 		for _, part := range parts {
 			normalized := strings.ToUpper(strings.TrimSpace(part))
-			switch normalized {
-			case "F01":
-				valid = append(valid, "flag_f01 = 1")
-			case "F02":
-				valid = append(valid, "flag_f02 = 1")
-			case "F03":
-				valid = append(valid, "flag_f03 = 1")
-			case "F04":
-				valid = append(valid, "flag_f04 = 1")
-			case "F05":
-				valid = append(valid, "flag_f05 = 1")
+			if len(normalized) == 3 && normalized[0] == 'F' {
+				valid = append(valid, "FIND_IN_SET('"+normalized+"', fichas_apontadas) > 0")
 			}
 		}
 		if len(valid) > 0 {
@@ -367,7 +351,8 @@ func queryFichaSQL(c *gin.Context, ficha string) {
 
 	filtro := filtroFicha(ficha)
 	filtroExtra, filtroArgs := buildFichaFilters(c)
-	base := "FROM fichas_anomalias_cache f WHERE COALESCE(f.deletado,0) = 0" + filtro + filtroExtra
+	// Fonte nova: Faturas_Registradas_Cache.fichas_apontadas (CSV F01-F14, populado pelo motor SQL via pipeline.py)
+	base := "FROM Faturas_Registradas_Cache f WHERE f.fichas_apontadas IS NOT NULL AND f.fichas_apontadas != ''" + filtro + filtroExtra
 
 	// Contagem total
 	var total int64
@@ -376,13 +361,17 @@ func queryFichaSQL(c *gin.Context, ficha string) {
 	_ = countRow.Scan(&total)
 
 	// Dados paginados — cliente via Tab_Empresa.Rz_Social (join por Cod_Empresa)
-	dataSQL := `SELECT f.*, (
-		SELECT e.Rz_Social
-		FROM Tab_Empresa e
-		WHERE e.Cod_Empresa = f.Cod_Empresa
-		LIMIT 1
-	) AS cliente ` + base +
-		" ORDER BY f.qtd_regras DESC, COALESCE(f.desvio_pct_max,0) DESC LIMIT ? OFFSET ?"
+	// Extrai desvio_pct_max e fichas_aplicadas do JSON resultado_regras pra manter compatibilidade
+	dataSQL := `SELECT
+		f.id, f.UC, f.RAZAO_SOCIAL, f.Cod_Empresa, f.Concessionaria, f.Mes_Ref,
+		f.RS_Total_Fatura, f.Link, f.fichas_apontadas AS fichas_aplicadas,
+		COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(f.resultado_regras, '$.f01_f05.desvio_pct_max')) AS DECIMAL(8,2)), 0) AS desvio_pct_max,
+		COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(f.resultado_regras, '$.f01_f05.qtd_regras')) AS UNSIGNED), 0) AS qtd_regras,
+		COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.resultado_regras, '$.f01_f05.detalhamento')), '') AS detalhamento,
+		f.resultado_analises,
+		(SELECT e.Rz_Social FROM Tab_Empresa e WHERE e.Cod_Empresa = f.Cod_Empresa LIMIT 1) AS cliente
+		` + base +
+		" ORDER BY f.RS_Total_Fatura DESC LIMIT ? OFFSET ?"
 	queryArgs := append(append([]any{}, filtroArgs...), limit, offset)
 	rows, err := sqlDB.Query(dataSQL, queryArgs...)
 	if err != nil {
@@ -438,6 +427,70 @@ func ListFicha02(c *gin.Context) { queryFichaSQL(c, "f02") }
 func ListFicha03(c *gin.Context) { queryFichaSQL(c, "f03") }
 func ListFicha04(c *gin.Context) { queryFichaSQL(c, "f04") }
 func ListFicha05(c *gin.Context) { queryFichaSQL(c, "f05") }
+func ListFicha13(c *gin.Context) { queryFichaSQL(c, "f13") }
+// GetAnotacoesCampo retorna os registros de Anotacoes_Campo_IA para uma fatura.
+func GetAnotacoesCampo(c *gin.Context) {
+	idStr := c.Query("id_fatura")
+	if idStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id_fatura obrigatório"})
+		return
+	}
+	idFatura, err := strconv.Atoi(idStr)
+	if err != nil || idFatura <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id_fatura inválido"})
+		return
+	}
+	db := database.GormDB_App
+	if db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "banco não disponível"})
+		return
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao obter conexão"})
+		return
+	}
+	rows, err := sqlDB.Query(
+		`SELECT campo, COALESCE(valor_extraido,'') AS valor_extraido,
+		        COALESCE(confianca, 0) AS confianca,
+		        COALESCE(motivo,'') AS motivo
+		 FROM Anotacoes_Campo_IA
+		 WHERE id_fatura = ?
+		 ORDER BY confianca ASC, campo ASC`,
+		idFatura,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	type Item struct {
+		Campo         string  `json:"campo"`
+		ValorExtraido string  `json:"valor_extraido"`
+		Confianca     float64 `json:"confianca"`
+		Motivo        string  `json:"motivo"`
+	}
+	var items []Item
+	for rows.Next() {
+		var it Item
+		if err := rows.Scan(&it.Campo, &it.ValorExtraido, &it.Confianca, &it.Motivo); err == nil {
+			items = append(items, it)
+		}
+	}
+	if items == nil {
+		items = []Item{}
+	}
+	c.JSON(http.StatusOK, gin.H{"anotacoes": items, "total": len(items)})
+}
+
+func ListFicha06(c *gin.Context) { queryFichaSQL(c, "f06") }
+func ListFicha07(c *gin.Context) { queryFichaSQL(c, "f07") }
+func ListFicha08(c *gin.Context) { queryFichaSQL(c, "f08") }
+func ListFicha09(c *gin.Context) { queryFichaSQL(c, "f09") }
+func ListFicha10(c *gin.Context) { queryFichaSQL(c, "f10") }
+func ListFicha11(c *gin.Context) { queryFichaSQL(c, "f11") }
+func ListFicha12(c *gin.Context) { queryFichaSQL(c, "f12") }
+func ListFicha14(c *gin.Context) { queryFichaSQL(c, "f14") }
 
 type salvarResultadoIAReq struct {
 	ID                         int64    `json:"id"`
@@ -450,7 +503,6 @@ type salvarResultadoIAReq struct {
 var statusPermitidos = map[string]bool{
 	"CONFIRMADO":     true,
 	"FALSO_POSITIVO": true,
-	"INCONCLUSIVO":   true,
 	"PENDENTE":       true,
 }
 
@@ -475,7 +527,7 @@ func SalvarResultadoIAFicha(c *gin.Context) {
 
 	// Valida ia_status se fornecido
 	if iaStatus != "" && !statusPermitidos[iaStatus] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ia_status inválido — use: CONFIRMADO, FALSO_POSITIVO, INCONCLUSIVO ou PENDENTE"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ia_status inválido — use: CONFIRMADO, FALSO_POSITIVO ou PENDENTE"})
 		return
 	}
 
@@ -534,16 +586,28 @@ func ListFichaResumo(c *gin.Context) {
 		return
 	}
 
-	var total, f01, f02, f03, f04, f05 int64
+	// Conta de Faturas_Registradas_Cache.fichas_apontadas (fonte unificada F01-F14)
+	var total, f01, f02, f03, f04, f05, f06, f07, f08, f09, f10, f11, f12, f13, f14 int64
 	err = sqlDB.QueryRow(`
 		SELECT
 		  COUNT(*),
-		  SUM(flag_f01),
-		  SUM(flag_f02),
-		  SUM(flag_f03),
-		  SUM(flag_f04),
-		  SUM(flag_f05)
-		FROM fichas_anomalias_cache`).Scan(&total, &f01, &f02, &f03, &f04, &f05)
+		  SUM(CASE WHEN FIND_IN_SET('F01', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F02', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F03', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F04', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F05', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F06', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F07', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F08', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F09', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F10', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F11', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F12', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F13', fichas_apontadas) > 0 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN FIND_IN_SET('F14', fichas_apontadas) > 0 THEN 1 ELSE 0 END)
+		FROM Faturas_Registradas_Cache
+		WHERE fichas_apontadas IS NOT NULL AND fichas_apontadas != ''`).
+		Scan(&total, &f01, &f02, &f03, &f04, &f05, &f06, &f07, &f08, &f09, &f10, &f11, &f12, &f13, &f14)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao consultar resumo"})
 		return
@@ -555,6 +619,15 @@ func ListFichaResumo(c *gin.Context) {
 		{"key": "f03", "nome": "F03 — Acúmulo de Consumo", "total": f03},
 		{"key": "f04", "nome": "F04 — Troca de Medidor", "total": f04},
 		{"key": "f05", "nome": "F05 — Quebra de Leitura", "total": f05},
+		{"key": "f06", "nome": "F06 — Ausência de Leituras", "total": f06},
+		{"key": "f07", "nome": "F07 — Rollover de Medidor", "total": f07},
+		{"key": "f08", "nome": "F08 — Troca sem Zeramento", "total": f08},
+		{"key": "f09", "nome": "F09 — Leitura Estimada", "total": f09},
+		{"key": "f10", "nome": "F10 — Tarifa Incorreta", "total": f10},
+		{"key": "f11", "nome": "F11 — Demanda Contratada", "total": f11},
+		{"key": "f12", "nome": "F12 — Ausência de Medição", "total": f12},
+		{"key": "f13", "nome": "F13 — Consumo Zero com Demanda/Reativo", "total": f13},
+		{"key": "f14", "nome": "F14 — Outros Erros IA", "total": f14},
 	}
 
 	c.JSON(http.StatusOK, gin.H{"fichas": resumo, "total_detectadas": total})
@@ -671,7 +744,16 @@ func GetUCsResumo(c *gin.Context) {
 			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F02%%' THEN 1 ELSE 0 END) AS tem_f02,
 			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F03%%' THEN 1 ELSE 0 END) AS tem_f03,
 			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F04%%' THEN 1 ELSE 0 END) AS tem_f04,
-			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F05%%' THEN 1 ELSE 0 END) AS tem_f05
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F05%%' THEN 1 ELSE 0 END) AS tem_f05,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F06%%' THEN 1 ELSE 0 END) AS tem_f06,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F07%%' THEN 1 ELSE 0 END) AS tem_f07,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F08%%' THEN 1 ELSE 0 END) AS tem_f08,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F09%%' THEN 1 ELSE 0 END) AS tem_f09,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F10%%' THEN 1 ELSE 0 END) AS tem_f10,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F11%%' THEN 1 ELSE 0 END) AS tem_f11,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F12%%' THEN 1 ELSE 0 END) AS tem_f12,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F13%%' THEN 1 ELSE 0 END) AS tem_f13,
+			MAX(CASE WHEN fac.fichas_aplicadas LIKE '%%F14%%' THEN 1 ELSE 0 END) AS tem_f14
 		FROM Faturas_Registradas_Cache frc
 		LEFT JOIN fichas_anomalias_cache fac ON fac.id = frc.id AND fac.deletado = 0
 		%s
@@ -704,12 +786,14 @@ func GetUCsResumo(c *gin.Context) {
 	var ucs []UCResumo
 	for rows.Next() {
 		var u UCResumo
-		var temF01, temF02, temF03, temF04, temF05 int
+		var temF01, temF02, temF03, temF04, temF05, temF06, temF07, temF08, temF09, temF10, temF11, temF12, temF13, temF14 int
 		if err := rows.Scan(
 			&u.UC, &u.Cliente, &u.Distribuidora, &u.CodEmpresa,
 			&u.QuantidadeFaturas, &u.QuantidadeErros, &u.PercentualErros,
 			&u.UltimaFatura, &u.MaxDesvio, &u.RessarcimentoConfirmado,
 			&temF01, &temF02, &temF03, &temF04, &temF05,
+			&temF06, &temF07, &temF08, &temF09, &temF10, &temF11, &temF12,
+			&temF13, &temF14,
 		); err == nil {
 			fichas := []string{}
 			if temF01 == 1 { fichas = append(fichas, "F01") }
@@ -717,6 +801,15 @@ func GetUCsResumo(c *gin.Context) {
 			if temF03 == 1 { fichas = append(fichas, "F03") }
 			if temF04 == 1 { fichas = append(fichas, "F04") }
 			if temF05 == 1 { fichas = append(fichas, "F05") }
+			if temF06 == 1 { fichas = append(fichas, "F06") }
+			if temF07 == 1 { fichas = append(fichas, "F07") }
+			if temF08 == 1 { fichas = append(fichas, "F08") }
+			if temF09 == 1 { fichas = append(fichas, "F09") }
+			if temF10 == 1 { fichas = append(fichas, "F10") }
+			if temF11 == 1 { fichas = append(fichas, "F11") }
+			if temF12 == 1 { fichas = append(fichas, "F12") }
+			if temF13 == 1 { fichas = append(fichas, "F13") }
+			if temF14 == 1 { fichas = append(fichas, "F14") }
 			u.Fichas = fichas
 			ucs = append(ucs, u)
 		}
@@ -760,7 +853,20 @@ func GetUCConsumoChart(c *gin.Context) {
 		       COALESCE(frc.Link, '') AS link,
 		       CASE WHEN fac.id IS NOT NULL THEN 1 ELSE 0 END AS anomalia,
 		       COALESCE(fac.fichas_aplicadas, '') AS fichas,
-		       COALESCE(fac.ia_status, '') AS ia_status_fac
+		       COALESCE(NULLIF(fac.ia_status,''),
+		           CASE WHEN frc.analise_IA IS NOT NULL AND frc.analise_IA != ''
+		                THEN CASE WHEN frc.anomalia_encontrada = 1 THEN 'CONFIRMADO' ELSE 'FALSO_POSITIVO' END
+		                ELSE '' END
+		       ) AS ia_status_fac,
+		       COALESCE(fac.id, 0) AS fac_id,
+		       frc.id AS fatura_id,
+		       COALESCE(fac.detalhamento, '') AS detalhamento,
+		       COALESCE(frc.RAZAO_SOCIAL, '') AS razao_social,
+		       COALESCE(frc.Concessionaria, '') AS concessionaria,
+		       COALESCE(fac.aprovado, 0) AS aprovado,
+		       COALESCE(NULLIF(fac.resultado_ia,''), frc.analise_IA, '') AS resultado_ia,
+		       COALESCE(fac.valor_ressarcimento_estimado, 0) AS valor_ressarcimento,
+		       COALESCE(fac.ia_fichas_confirmadas, '') AS ia_fichas_confirmadas
 		FROM Faturas_Registradas_Cache frc
 		LEFT JOIN fichas_anomalias_cache fac ON fac.id = frc.id AND fac.deletado = 0
 		WHERE frc.UC = ?
@@ -776,17 +882,26 @@ func GetUCConsumoChart(c *gin.Context) {
 	defer rows.Close()
 
 	type rawPonto struct {
-		Mes        string
-		KwhFP      float64
-		KwhP       float64
-		KwhR       float64
-		KwhTotal   float64
-		RsTotal    float64
-		NroMedidor string
-		Link       string
-		Anomalia   int
-		Fichas     string
-		IAStatus   string
+		Mes               string
+		KwhFP             float64
+		KwhP              float64
+		KwhR              float64
+		KwhTotal          float64
+		RsTotal           float64
+		NroMedidor        string
+		Link              string
+		Anomalia          int
+		Fichas            string
+		IAStatus          string
+		FacID             int64
+		FaturaID          int64
+		Detalhamento      string
+		RazaoSocial       string
+		Concessionaria    string
+		Aprovado          int
+		ResultadoIA       string
+		ValorRessarcimento float64
+		IAFichasConfirmadas string
 	}
 
 	var raw []rawPonto
@@ -795,7 +910,7 @@ func GetUCConsumoChart(c *gin.Context) {
 
 	for rows.Next() {
 		var p rawPonto
-		if err := rows.Scan(&p.Mes, &p.KwhFP, &p.KwhP, &p.KwhR, &p.KwhTotal, &p.RsTotal, &p.NroMedidor, &p.Link, &p.Anomalia, &p.Fichas, &p.IAStatus); err != nil {
+		if err := rows.Scan(&p.Mes, &p.KwhFP, &p.KwhP, &p.KwhR, &p.KwhTotal, &p.RsTotal, &p.NroMedidor, &p.Link, &p.Anomalia, &p.Fichas, &p.IAStatus, &p.FacID, &p.FaturaID, &p.Detalhamento, &p.RazaoSocial, &p.Concessionaria, &p.Aprovado, &p.ResultadoIA, &p.ValorRessarcimento, &p.IAFichasConfirmadas); err != nil {
 			continue
 		}
 		if mesRef == "" || p.Mes < mesRef {
@@ -834,19 +949,28 @@ func GetUCConsumoChart(c *gin.Context) {
 	}
 
 	type Ponto struct {
-		Mes          string   `json:"mes"`
-		KwhFP        float64  `json:"kwh_fp"`
-		KwhP         float64  `json:"kwh_p"`
-		KwhR         float64  `json:"kwh_r"`
-		KwhTotal     float64  `json:"kwh_total"`
-		RsTotal      float64  `json:"rs_total"`
-		Tipo         string   `json:"tipo"`          // "historico" | "auditado" | "posterior"
-		DifPct       *float64 `json:"dif_pct"`       // % desvio em relação à média histórica
-		TrocaMedidor bool     `json:"troca_medidor"` // true quando NroMedidor mudou
-		Link         string   `json:"link"`          // URL da fatura original
-		Anomalia     bool     `json:"anomalia"`      // tem entrada em fichas_anomalias_cache
-		Fichas       string   `json:"fichas"`        // ex: "F01,F02"
-		IAStatus     string   `json:"ia_status"`     // PENDENTE|CONFIRMADO|FALSO_POSITIVO|INCONCLUSIVO
+		Mes                 string   `json:"mes"`
+		KwhFP               float64  `json:"kwh_fp"`
+		KwhP                float64  `json:"kwh_p"`
+		KwhR                float64  `json:"kwh_r"`
+		KwhTotal            float64  `json:"kwh_total"`
+		RsTotal             float64  `json:"rs_total"`
+		Tipo                string   `json:"tipo"`
+		DifPct              *float64 `json:"dif_pct"`
+		TrocaMedidor        bool     `json:"troca_medidor"`
+		Link                string   `json:"link"`
+		Anomalia            bool     `json:"anomalia"`
+		Fichas              string   `json:"fichas"`
+		IAStatus            string   `json:"ia_status"`
+		FacID               int64    `json:"fac_id"`
+		FaturaID            int64    `json:"fatura_id"`
+		Detalhamento        string   `json:"detalhamento"`
+		RazaoSocial         string   `json:"razao_social"`
+		Concessionaria      string   `json:"concessionaria"`
+		Aprovado            bool     `json:"aprovado"`
+		ResultadoIA         string   `json:"resultado_ia"`
+		ValorRessarcimento  float64  `json:"valor_ressarcimento"`
+		IAFichasConfirmadas string   `json:"ia_fichas_confirmadas"`
 	}
 
 	var pontos []Ponto
@@ -873,19 +997,28 @@ func GetUCConsumoChart(c *gin.Context) {
 		}
 
 		pontos = append(pontos, Ponto{
-			Mes:          r.Mes,
-			KwhFP:        r.KwhFP,
-			KwhP:         r.KwhP,
-			KwhR:         r.KwhR,
-			KwhTotal:     r.KwhTotal,
-			RsTotal:      r.RsTotal,
-			Tipo:         tipo,
-			DifPct:       difPct,
-			TrocaMedidor: troca,
-			Link:         r.Link,
-			Anomalia:     r.Anomalia == 1,
-			Fichas:       r.Fichas,
-			IAStatus:     r.IAStatus,
+			Mes:                 r.Mes,
+			KwhFP:               r.KwhFP,
+			KwhP:                r.KwhP,
+			KwhR:                r.KwhR,
+			KwhTotal:            r.KwhTotal,
+			RsTotal:             r.RsTotal,
+			Tipo:                tipo,
+			DifPct:              difPct,
+			TrocaMedidor:        troca,
+			Link:                r.Link,
+			Anomalia:            r.Anomalia == 1,
+			Fichas:              r.Fichas,
+			IAStatus:            r.IAStatus,
+			FacID:               r.FacID,
+			FaturaID:            r.FaturaID,
+			Detalhamento:        r.Detalhamento,
+			RazaoSocial:         r.RazaoSocial,
+			Concessionaria:      r.Concessionaria,
+			Aprovado:            r.Aprovado == 1,
+			ResultadoIA:         r.ResultadoIA,
+			ValorRessarcimento:  r.ValorRessarcimento,
+			IAFichasConfirmadas: r.IAFichasConfirmadas,
 		})
 	}
 
@@ -1010,11 +1143,20 @@ func GetFaturasAnalisadas(c *gin.Context) {
 		return
 	}
 
-	limitStr  := c.DefaultQuery("limit",  "200")
-	offsetStr := c.DefaultQuery("offset", "0")
+	// suporta tanto page/per_page quanto limit/offset
+	pageStr   := c.DefaultQuery("page",     "1")
+	perPage   := c.DefaultQuery("per_page", "")
+	limitStr  := c.DefaultQuery("limit",    "50")
+	offsetStr := c.DefaultQuery("offset",   "0")
 	limit, _  := strconv.Atoi(limitStr)
 	offset, _ := strconv.Atoi(offsetStr)
-	if limit <= 0 || limit > 5000 { limit = 200 }
+	if perPage != "" {
+		pp, _ := strconv.Atoi(perPage)
+		pg, _ := strconv.Atoi(pageStr)
+		if pp > 0 && pp <= 5000 { limit = pp }
+		if pg > 0 { offset = (pg - 1) * limit }
+	}
+	if limit <= 0 || limit > 5000 { limit = 50 }
 	if offset < 0 { offset = 0 }
 
 	empresa    := strings.TrimSpace(c.Query("empresa"))
@@ -1024,6 +1166,8 @@ func GetFaturasAnalisadas(c *gin.Context) {
 	periodoInicio := strings.TrimSpace(c.Query("periodo_inicio"))
 	periodoFim    := strings.TrimSpace(c.Query("periodo_fim"))
 	fichasFiltro  := strings.TrimSpace(c.Query("fichas"))  // "F02" | "F01,F03" | ""
+	decisaoFiltro := strings.TrimSpace(c.Query("decisao")) // "PENDENTE"|"CONFIRMADO"|"FALSO_POSITIVO"|"INCONCLUSIVO"
+	sortParam     := strings.TrimSpace(c.Query("sort"))    // "valor_desc"|"score_desc"|"recente"
 
 	where := "WHERE frc.analise_IA IS NOT NULL"
 	args  := []interface{}{}
@@ -1069,6 +1213,19 @@ func GetFaturasAnalisadas(c *gin.Context) {
 			where += " AND (" + strings.Join(conds, " OR ") + ")"
 		}
 	}
+	allowed := map[string]bool{"PENDENTE": true, "CONFIRMADO": true, "FALSO_POSITIVO": true, "INCONCLUSIVO": true}
+	if allowed[decisaoFiltro] {
+		where += " AND fa.ia_status = ?"
+		args = append(args, decisaoFiltro)
+	}
+
+	orderBy := "frc.ia_analisado_em DESC"
+	switch sortParam {
+	case "valor_desc":
+		orderBy = "fa.valor_ressarcimento_estimado DESC, frc.ia_analisado_em DESC"
+	case "score_desc":
+		orderBy = "frc.ia_analisado_em DESC" // score calculado em Go; mantém recente como proxy
+	}
 
 	countSQL := "SELECT COUNT(*) FROM Faturas_Registradas_Cache frc " +
 		"LEFT JOIN fichas_anomalias_cache fa ON fa.id = frc.id AND COALESCE(fa.deletado,0) = 0 " + where
@@ -1097,11 +1254,12 @@ func GetFaturasAnalisadas(c *gin.Context) {
 		CASE WHEN fa.troca_medidor IS NOT NULL
 		          AND fa.troca_medidor != ''
 		          AND fa.troca_medidor != '0'
-		     THEN 1 ELSE 0 END                      AS troca_medidor
+		     THEN 1 ELSE 0 END                      AS troca_medidor,
+		COALESCE(fa.modelo_ia, '')                  AS modelo_ia
 	FROM Faturas_Registradas_Cache frc
 	LEFT JOIN fichas_anomalias_cache fa ON fa.id = frc.id AND COALESCE(fa.deletado,0) = 0
 	` + where + `
-	ORDER BY frc.ia_analisado_em DESC
+	ORDER BY ` + orderBy + `
 	LIMIT ? OFFSET ?`
 
 	queryArgs := append(append([]interface{}{}, args...), limit, offset)
@@ -1132,6 +1290,7 @@ func GetFaturasAnalisadas(c *gin.Context) {
 		DesvioMax                  float64  `json:"desvio_pct_max"`
 		QtdRegras                  int      `json:"qtd_regras"`
 		TrocaMedidor               int      `json:"troca_medidor"`
+		ModeloIA                   string   `json:"modelo_ia"`
 		ScoreAnomalia              int      `json:"score_anomalia"`
 	}
 
@@ -1145,7 +1304,7 @@ func GetFaturasAnalisadas(c *gin.Context) {
 			&f.AnomaliaEncontrada, &analisadoEm, &f.AnaliseResumo,
 			&f.ValorRessarcimentoEstimado, &f.IAFichasConfirmadas,
 			&f.IAStatus, &f.Aprovado, &aprovadoEm,
-			&f.DesvioMax, &f.QtdRegras, &f.TrocaMedidor,
+			&f.DesvioMax, &f.QtdRegras, &f.TrocaMedidor, &f.ModeloIA,
 		); err == nil {
 			if analisadoEm != nil { s := analisadoEm.Format("2006-01-02 15:04"); f.IAAnalisadoEm = &s }
 			if aprovadoEm  != nil { s := aprovadoEm.Format("2006-01-02 15:04");  f.AprovadoEm   = &s }
@@ -1192,8 +1351,8 @@ func calcScoreAnomalia(desvio float64, iaStatus string, qtdRegras int, valor flo
 	switch iaStatus {
 	case "CONFIRMADO":
 		score += 30
-	case "INCONCLUSIVO":
-		score += 10
+	case "PENDENTE":
+		score += 5
 	case "FALSO_POSITIVO":
 		score -= 20
 	}
@@ -1285,6 +1444,40 @@ func DeletarFicha(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// PATCHFaturaDecisao atualiza o ia_status de uma ficha para refletir a decisão do analista.
+// Aceita: {"id": N, "decisao": "CONFIRMADO"|"FALSO_POSITIVO"|"INCONCLUSIVO"|"PENDENTE"}
+func PATCHFaturaDecisao(c *gin.Context) {
+	var body struct {
+		ID      int64  `json:"id"`
+		Decisao string `json:"decisao"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.ID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id inválido"})
+		return
+	}
+	allowed := map[string]bool{"CONFIRMADO": true, "FALSO_POSITIVO": true, "INCONCLUSIVO": true, "PENDENTE": true}
+	if !allowed[body.Decisao] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "decisao inválida"})
+		return
+	}
+	db := database.GormDB_App
+	if db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "DB indisponível"})
+		return
+	}
+	sqlDB, _ := db.DB()
+	_, err := sqlDB.Exec(`
+		UPDATE fichas_anomalias_cache
+		   SET ia_status     = ?,
+		       atualizado_em = NOW()
+		 WHERE id = ?`, body.Decisao, body.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "id": body.ID, "decisao": body.Decisao})
 }
 
 // ResetFaturaIA limpa o resultado de análise IA de uma ou mais faturas,

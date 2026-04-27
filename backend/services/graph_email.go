@@ -73,7 +73,9 @@ func sendEmailGraph(to, cc, bcc, subject, body string, attachments []EmailAttach
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("erro Graph sendMail: status %d", resp.StatusCode)
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(resp.Body)
+		return fmt.Errorf("erro Graph sendMail: status %d — %s", resp.StatusCode, buf.String())
 	}
 	return nil
 }
@@ -125,16 +127,13 @@ func getGraphToken() (string, error) {
 
 func buildRecipients(raw string) []map[string]any {
 	emails := splitEmails(raw)
-	if len(emails) == 0 {
-		return nil
-	}
 	out := make([]map[string]any, 0, len(emails))
 	for _, e := range emails {
 		out = append(out, map[string]any{
 			"emailAddress": map[string]any{"address": e},
 		})
 	}
-	return out
+	return out // retorna slice vazio (nunca nil) para evitar null no JSON
 }
 
 func buildGraphAttachments(items []EmailAttachment) []map[string]any {
