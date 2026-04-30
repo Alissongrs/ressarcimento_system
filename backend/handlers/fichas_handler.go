@@ -352,7 +352,7 @@ func queryFichaSQL(c *gin.Context, ficha string) {
 	filtro := filtroFicha(ficha)
 	filtroExtra, filtroArgs := buildFichaFilters(c)
 	// Fonte nova: Faturas_Registradas_Cache.fichas_apontadas (CSV F01-F14, populado pelo motor SQL via pipeline.py)
-	base := "FROM Faturas_Registradas_Cache f WHERE f.fichas_apontadas IS NOT NULL AND f.fichas_apontadas != ''" + filtro + filtroExtra
+	base := "FROM Faturas_Registradas_Cache f WHERE f.fichas_apontadas IS NOT NULL AND f.fichas_apontadas != '' AND LOWER(COALESCE(f.UC,'')) NOT LIKE '%boleto%' AND LOWER(COALESCE(f.RAZAO_SOCIAL,'')) NOT LIKE '%boleto%' AND LOWER(COALESCE(f.Concessionaria,'')) NOT LIKE '%boleto%'" + filtro + filtroExtra
 
 	// Contagem total
 	var total int64
@@ -840,9 +840,56 @@ func GetUCConsumoChart(c *gin.Context) {
 		return
 	}
 
+	// Verifica se a tabela FATURA_DADOS_EXTRAIDOS existe para usar valores enriquecidos da IA.
+	var fdeExists int
+	_ = sqlDB.QueryRow(`SELECT COUNT(*) FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'FATURA_DADOS_EXTRAIDOS'`).Scan(&fdeExists)
+
 	// Busca todos os registros com consumo real + NroMedidor para detectar troca.
 	// A classificação historico/auditado/posterior é feita em Go pelo mesRef.
-	rows, err := sqlDB.Query(`
+	// Quando FATURA_DADOS_EXTRAIDOS existe, usa seus valores (extraídos da fatura pelo OCR/IA)
+	// via COALESCE — fonte mais confiável que os campos sumarizados de Faturas_Registradas_Cache.
+	var baseQuery string
+	if fdeExists > 0 {
+		baseQuery = `
+		SELECT DATE_FORMAT(frc.Mes_Ref, '%Y-%m') AS mes,
+		       COALESCE(fde.consumo_ativo_fponta_kwh, frc.KWH_FPonta,    0) AS kwh_fp,
+		       COALESCE(fde.consumo_ativo_ponta_kwh,  frc.KWH_Ponta,     0) AS kwh_p,
+		       COALESCE(frc.KWH_Reservado, 0) AS kwh_r,
+		       COALESCE(fde.consumo_ativo_fponta_kwh, frc.KWH_FPonta, 0)
+		         + COALESCE(fde.consumo_ativo_ponta_kwh, frc.KWH_Ponta, 0)
+		         + COALESCE(frc.KWH_Reservado, 0) AS kwh_total,
+		       COALESCE(fde.valor_total_fatura, frc.RS_Total_Fatura, 0) AS rs_total,
+		       COALESCE(frc.NroMedidor, '') AS nro_medidor,
+		       COALESCE(frc.Link, '') AS link,
+		       CASE WHEN fac.id IS NOT NULL THEN 1 ELSE 0 END AS anomalia,
+		       COALESCE(fac.fichas_aplicadas, '') AS fichas,
+		       COALESCE(NULLIF(fac.ia_status,''),
+		           CASE WHEN frc.analise_IA IS NOT NULL AND frc.analise_IA != ''
+		                THEN CASE WHEN frc.anomalia_encontrada = 1 THEN 'CONFIRMADO' ELSE 'FALSO_POSITIVO' END
+		                ELSE '' END
+		       ) AS ia_status_fac,
+		       COALESCE(fac.id, 0) AS fac_id,
+		       frc.id AS fatura_id,
+		       COALESCE(fac.detalhamento, '') AS detalhamento,
+		       COALESCE(frc.RAZAO_SOCIAL, '') AS razao_social,
+		       COALESCE(frc.Concessionaria, '') AS concessionaria,
+		       COALESCE(fac.aprovado, 0) AS aprovado,
+		       COALESCE(NULLIF(fac.resultado_ia,''), frc.analise_IA, '') AS resultado_ia,
+		       COALESCE(fac.valor_ressarcimento_estimado, 0) AS valor_ressarcimento,
+		       COALESCE(fac.ia_fichas_confirmadas, '') AS ia_fichas_confirmadas
+		FROM Faturas_Registradas_Cache frc
+		LEFT JOIN FATURA_DADOS_EXTRAIDOS fde ON fde.fatura_id = frc.id
+		LEFT JOIN fichas_anomalias_cache fac ON fac.id = frc.id AND fac.deletado = 0
+		WHERE frc.UC = ?
+		  AND (COALESCE(fde.consumo_ativo_fponta_kwh, frc.KWH_FPonta, 0)
+		         + COALESCE(fde.consumo_ativo_ponta_kwh, frc.KWH_Ponta, 0)
+		         + COALESCE(frc.KWH_Reservado, 0) > 0
+		       OR COALESCE(frc.KWH_Total, 0) > 0
+		       OR DATE_FORMAT(frc.Mes_Ref, '%Y-%m') = ?)
+		ORDER BY frc.Mes_Ref ASC`
+	} else {
+		baseQuery = `
 		SELECT DATE_FORMAT(frc.Mes_Ref, '%Y-%m') AS mes,
 		       COALESCE(frc.KWH_FPonta,    0) AS kwh_fp,
 		       COALESCE(frc.KWH_Ponta,     0) AS kwh_p,
@@ -873,8 +920,9 @@ func GetUCConsumoChart(c *gin.Context) {
 		  AND (COALESCE(frc.KWH_FPonta, 0) + COALESCE(frc.KWH_Ponta, 0) + COALESCE(frc.KWH_Reservado, 0) > 0
 		       OR COALESCE(frc.KWH_Total, 0) > 0
 		       OR DATE_FORMAT(frc.Mes_Ref, '%Y-%m') = ?)
-		ORDER BY frc.Mes_Ref ASC
-	`, uc, mesRef)
+		ORDER BY frc.Mes_Ref ASC`
+	}
+	rows, err := sqlDB.Query(baseQuery, uc, mesRef)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -2,29 +2,26 @@
 """
 pipeline.py
 ───────────────────────────────────────────────────────────────────────────────
-Pipeline completo de auditoria de faturas em 3 passos sequenciais:
+Pipeline de auditoria de faturas em 2 passos sequenciais:
 
-  Passo 1 — Motores SQL (F01-F14)
-    Executa motor_regras_f01_f05.sql e motor_regras_f06_f14.sql.
-    Grava resultado combinado em Faturas_Registradas_Cache.resultado_regras.
-
-  Passo 2 — Triagem com gpt-4.1-mini (Batch API)
-    Lê texto da fatura + análise prévia + resultado_regras.
+  Passo 1 — Triagem com gpt-4.1-mini
+    Lê as três extrações de texto (plumber, markitdown, ocr) + analise_IA prévia.
     Aplica prompt_confirmar.txt para identificar fichas confirmadas.
-    Barato e assíncrono (50% de desconto via OpenAI Batch API).
+    Modos: síncrono (padrão) ou Batch API (--batch, 50% desc, até 24h).
 
-  Passo 3 — Decisão final com gpt-5.4 + imagens
-    Só para as faturas confirmadas no Passo 2.
-    Baixa o PDF original e envia as páginas como imagem para o gpt-5.4.
+  Passo 2 — Decisão final com gpt-4.1-mini + imagens (padrão; --modelo 5.4 troca)
+    Só para as faturas confirmadas no Passo 1.
+    Baixa o PDF original e envia as páginas como imagem para o modelo configurado.
     Grava decisão final em Faturas_Registradas_Cache.resultado_analises.
 
 Uso:
   python pipeline.py --empresa 14
   python pipeline.py --empresa 4 14 32
-  python pipeline.py --empresa 14 --apenas-motores
-  python pipeline.py --empresa 14 --apenas-ia
   python pipeline.py --empresa 14 --dry-run
   python pipeline.py --empresa 14 --top 50
+  python pipeline.py --empresa 14 --force
+  python pipeline.py --empresa 14 --batch           # triagem via Batch API
+  python pipeline.py --empresa 14 --batch --retomar # aproveita batch já submetido
 """
 
 import argparse
@@ -68,20 +65,94 @@ DB = dict(
 
 API_KEY          = os.getenv("OPENAI_API_KEY", "")
 MODELO_TRIAGEM   = "gpt-4.1-mini"
-MODELO_DECISAO   = "gpt-5.4"
-BASE_URL         = "https://api.openai.com"
-MAX_BATCH_BYTES  = 190 * 1024 * 1024
+MODELO_DECISAO   = "gpt-5"
+SERVICE_TIER     = "flex"   # "flex" para menor custo (maior latência) | "default" para standard
+
+# ─── Acumulador de tokens ──────────────────────────────────────────────────────
+_USO = {"input": 0, "cached": 0, "output": 0, "chamadas": 0}
+
+def _registrar_uso(usage) -> None:
+    """Acumula tokens da resposta OpenAI e loga por chamada."""
+    if usage is None:
+        return
+    inp    = getattr(usage, "prompt_tokens", 0) or 0
+    out    = getattr(usage, "completion_tokens", 0) or 0
+    cached = getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", 0) or 0
+    _USO["input"]    += inp
+    _USO["cached"]   += cached
+    _USO["output"]   += out
+    _USO["chamadas"] += 1
+    log.debug(f"    [tokens] input={inp} cached={cached} output={out}")
+
+def _log_uso_total(label: str = "") -> None:
+    """Imprime resumo de tokens e custo estimado acumulado."""
+    inp     = _USO["input"]
+    cached  = _USO["cached"]
+    out     = _USO["output"]
+    n       = _USO["chamadas"]
+    nao_cac = inp - cached
+
+    # Tabela de preços por modelo + tier ($/1M tokens)
+    _PRECOS = {
+        # modelo              : (inp_std, cac_std, out_std, inp_flex, cac_flex, out_flex)
+        "gpt-5.5"             : (5.00,  0.50, 30.00,  2.50,  0.25, 15.00),
+        "gpt-5.4"             : (2.50,  0.25, 15.00,  1.25,  0.13,  7.50),
+        "gpt-5"               : (2.50,  0.25, 15.00,  1.25,  0.13,  7.50),
+        "gpt-4.1"             : (2.00,  0.50, 8.00,   2.00,  0.50,  8.00),
+        "gpt-4.1-mini"        : (0.40,  0.10, 1.60,   0.40,  0.10,  1.60),
+        "gpt-4o"              : (2.50,  1.25, 10.00,  2.50,  1.25, 10.00),
+    }
+    modelo_key = next((k for k in _PRECOS if MODELO_DECISAO.startswith(k)), None)
+    if modelo_key:
+        precos = _PRECOS[modelo_key]
+        if SERVICE_TIER == "flex":
+            pi, pc, po = precos[3], precos[4], precos[5]
+        else:
+            pi, pc, po = precos[0], precos[1], precos[2]
+    else:
+        pi, pc, po = 2.50, 0.25, 15.00  # fallback
+
+    custo = (nao_cac * pi + cached * pc + out * po) / 1_000_000
+    tag = f" [{label}]" if label else ""
+    log.info(
+        f"[USO TOKENS{tag}] modelo={MODELO_DECISAO} tier={SERVICE_TIER} chamadas={n} | "
+        f"input={inp:,} (cached={cached:,} / nao-cached={nao_cac:,}) | "
+        f"output={out:,} | custo_estimado=US${custo:.4f}"
+    )
 MAX_PAGINAS_PDF  = 4
-BATCH_SIZE_SQL   = 500
+BASE_URL         = "https://api.openai.com"
+MAX_BATCH_BYTES  = 50 * 1024 * 1024
+UPLOAD_TIMEOUT   = 600
 
 _DIR        = Path(__file__).parent
-_SQL_BASE   = _DIR.parent.parent   # Docker/  (onde ficam os .sql)
 _PROMPT_PATH = _DIR.parent / "backend" / "data" / "prompt_confirmar.txt"
+_STATE_DIR  = _DIR / ".pipeline_state"
+_STATE_FILE = _STATE_DIR / "triagem_state.json"
 
-SQL_JOBS = {
-    "f01_f05": _SQL_BASE / "motor_regras_f01_f05.sql",
-    "f06_f14": _SQL_BASE / "motor_regras_f06_f14.sql",
-}
+
+def _load_batch_state() -> dict:
+    if not _STATE_FILE.exists():
+        return {"batches": []}
+    try:
+        return json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"batches": []}
+
+
+def _save_batch_state(batch_id: str, custom_ids: list[str]):
+    _STATE_DIR.mkdir(exist_ok=True)
+    state = _load_batch_state()
+    state["batches"].append({
+        "batch_id"    : batch_id,
+        "custom_ids"  : custom_ids,
+        "submitted_at": datetime.now().isoformat(),
+    })
+    _STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _clear_batch_state():
+    if _STATE_FILE.exists():
+        _STATE_FILE.unlink()
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 
@@ -105,245 +176,79 @@ def _reconectar() -> tuple:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PASSO 1 — Motores SQL (F01-F14)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _split_statements(sql_text: str) -> list[str]:
-    sql_text = re.sub(r"/\*.*?\*/", "", sql_text, flags=re.DOTALL)
-    sql_text = re.sub(r"--[^\n]*", "", sql_text)
-    return [s.strip() for s in sql_text.split(";") if s.strip()]
-
-
-def _serialize(v):
-    if isinstance(v, (bytes, bytearray)):
-        return v.decode("utf-8", errors="replace")
-    if hasattr(v, "isoformat"):
-        return v.isoformat()
-    return v
-
-
-def _executar_sql(cur, sql_path: Path, empresas: list[int] | None) -> dict[int, dict]:
-    if not sql_path.exists():
-        log.error(f"  SQL nao encontrado: {sql_path}")
-        return {}
-
-    sql_text = sql_path.read_text(encoding="utf-8")
-
-    if empresas:
-        lista    = ", ".join(str(e) for e in empresas)
-        sql_text = re.sub(
-            r'f\.Cod_Empresa\s+IN\s*\([^)]+\)',
-            f'f.Cod_Empresa IN ({lista})',
-            sql_text,
-        )
-        log.info(f"  Filtro empresa(s): {lista}")
-
-    stmts      = _split_statements(sql_text)
-    set_stmts  = [s for s in stmts if re.match(r"^\s*SET\b", s, re.IGNORECASE)]
-    main_stmts = [s for s in stmts if not re.match(r"^\s*SET\b", s, re.IGNORECASE)]
-
-    for s in set_stmts:
-        cur.execute(s)
-
-    if not main_stmts:
-        log.error("  Nenhum SELECT/WITH encontrado no SQL.")
-        return {}
-
-    log.info("  Executando query principal...")
-    cur.execute(main_stmts[-1])
-    rows = cur.fetchall()
-    log.info(f"  Linhas retornadas: {len(rows)}")
-    return {int(r["id"]): r for r in rows if r.get("id") is not None}
-
-
-def _montar_resultado_regras(row_f01: dict | None, row_f06: dict | None) -> dict:
-    resultado = {}
-
-    if row_f01:
-        fichas = [
-            f.replace("flag_", "").upper()
-            for f in ["flag_f01","flag_f02","flag_f03","flag_f04","flag_f05","flag_f13"]
-            if row_f01.get(f) and int(row_f01[f]) == 1
-        ]
-        resultado["f01_f05"] = {
-            "fichas"         : fichas,
-            "fichas_aplicadas": row_f01.get("fichas_aplicadas") or ", ".join(fichas),
-            "qtd_regras"     : int(row_f01.get("qtd_regras") or len(fichas)),
-            "flag_f01"       : int(row_f01.get("flag_f01") or 0),
-            "flag_f02"       : int(row_f01.get("flag_f02") or 0),
-            "flag_f03"       : int(row_f01.get("flag_f03") or 0),
-            "flag_f04"       : int(row_f01.get("flag_f04") or 0),
-            "flag_f05"       : int(row_f01.get("flag_f05") or 0),
-            "flag_f13"       : int(row_f01.get("flag_f13") or 0),
-            "desvio_pct_max" : _serialize(row_f01.get("desvio_pct_max")),
-            "troca_medidor"  : _serialize(row_f01.get("troca_medidor")),
-            "detalhamento"   : _serialize(row_f01.get("detalhamento")),
-        }
-
-    if row_f06:
-        fichas = [
-            f.replace("flag_", "").upper()
-            for f in ["flag_f06","flag_f07","flag_f08","flag_f09","flag_f10",
-                      "flag_f11","flag_f12","flag_f13","flag_f14"]
-            if row_f06.get(f) and int(row_f06[f]) == 1
-        ]
-        resultado["f06_f14"] = {
-            "fichas"          : fichas,
-            "fichas_acionadas": row_f06.get("fichas_acionadas") or ", ".join(fichas),
-            "qtd_flags"       : int(row_f06.get("qtd_flags") or len(fichas)),
-            "flag_f06"        : int(row_f06.get("flag_f06") or 0),
-            "flag_f07"        : int(row_f06.get("flag_f07") or 0),
-            "flag_f08"        : int(row_f06.get("flag_f08") or 0),
-            "flag_f09"        : int(row_f06.get("flag_f09") or 0),
-            "flag_f10"        : int(row_f06.get("flag_f10") or 0),
-            "flag_f11"        : int(row_f06.get("flag_f11") or 0),
-            "flag_f12"        : int(row_f06.get("flag_f12") or 0),
-            "flag_f13"        : int(row_f06.get("flag_f13") or 0),
-            "flag_f14"        : int(row_f06.get("flag_f14") or 0),
-        }
-
-    todas: list[str] = []
-    if row_f01:
-        todas += resultado["f01_f05"]["fichas"]
-    if row_f06:
-        todas += [f for f in resultado["f06_f14"]["fichas"] if f not in todas]
-    resultado["fichas_todas"]   = todas
-    resultado["processado_em"]  = datetime.now().isoformat()
-    return resultado
-
-
-def rodar_motores_sql(empresas: list[int] | None, dry_run: bool) -> int:
-    """Passo 1: executa os dois motores SQL e grava resultado_regras."""
-    log.info("=" * 60)
-    log.info("PASSO 1 — Motores SQL (F01-F14)")
-    log.info(f"  Empresas: {empresas or 'todas'}")
-
-    conn, cur = _reconectar()
-    total_gravado = 0
-
-    try:
-        log.info("\nJob: F01_F05")
-        res_f01 = _executar_sql(cur, SQL_JOBS["f01_f05"], empresas)
-        log.info(f"  F01_F05: {len(res_f01)} faturas")
-
-        log.info("\nJob: F06_F14")
-        res_f06 = _executar_sql(cur, SQL_JOBS["f06_f14"], empresas)
-        log.info(f"  F06_F14: {len(res_f06)} faturas")
-
-        todos_ids = set(res_f01) | set(res_f06)
-        log.info(f"\nTotal faturas com apontamentos: {len(todos_ids)}")
-
-        if not todos_ids or dry_run:
-            if dry_run:
-                log.info("[DRY-RUN] Sem gravação.")
-            return len(todos_ids)
-
-        ids_lista = list(todos_ids)
-        agora     = datetime.now()
-
-        for i in range(0, len(ids_lista), BATCH_SIZE_SQL):
-            lote    = ids_lista[i : i + BATCH_SIZE_SQL]
-            updates = []
-            for fid in lote:
-                resultado  = _montar_resultado_regras(res_f01.get(fid), res_f06.get(fid))
-                fichas_csv = ",".join(resultado.get("fichas_todas") or [])
-                updates.append((
-                    json.dumps(resultado, ensure_ascii=False),
-                    fichas_csv or None,
-                    agora,
-                    fid,
-                ))
-
-            cur.executemany(
-                "UPDATE Faturas_Registradas_Cache "
-                "SET resultado_regras = %s, fichas_apontadas = %s, resultado_regras_em = %s "
-                "WHERE id = %s",
-                updates,
-            )
-            conn.commit()
-            total_gravado += len(lote)
-            log.info(f"  Lote {i // BATCH_SIZE_SQL + 1}: {len(lote)} faturas gravadas (total: {total_gravado})")
-
-        log.info(f"\n[OK] Passo 1 concluido: {total_gravado} faturas atualizadas.")
-
-    except Exception as e:
-        conn.rollback()
-        log.error(f"Erro no Passo 1: {e}", exc_info=True)
-        raise
-    finally:
-        cur.close()
-        conn.close()
-
-    return total_gravado
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PASSO 2 + 3 — IA (triagem + decisão final com imagens)
+# PASSO 1 + 2 — IA (triagem + decisão final com imagens)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── Busca faturas ─────────────────────────────────────────────────────────────
 
-def buscar_faturas(cur, empresas: list[int] | None, top_n: int | None, force: bool = False) -> list[dict]:
-    """
-    Busca faturas apontadas pelos motores SQL (coluna fichas_apontadas preenchida)
-    que ainda não foram processadas pelo pipeline (resultado_analises NULL),
-    a menos que --force.
-    """
-    sql_emp   = f"AND f.Cod_Empresa IN ({', '.join(str(e) for e in empresas)})" if empresas else ""
-    sql_skip  = "" if force else "AND (f.resultado_analises IS NULL OR f.resultado_analises = '')"
+def buscar_faturas(cur, empresas: list[int] | None, top_n: int | None, force: bool = False,
+                   uid_lista: list[str] | None = None,
+                   id_lista: list[int] | None = None) -> list[dict]:
+    """Busca faturas de FATURA_DADOS_EXTRAIDOS prontas para análise IA."""
+    sql_emp   = f"AND fde.cod_empresa IN ({', '.join(str(e) for e in empresas)})" if empresas else ""
+    sql_skip  = "" if force else "AND (fde.analise_ia IS NULL OR fde.analise_ia = '')"
     sql_limit = f"LIMIT {top_n}" if top_n else ""
+
+    if id_lista:
+        phs    = ", ".join(str(i) for i in id_lista)
+        sql_id = f"AND fde.id IN ({phs})"
+        sql_skip  = ""   # id_lista implica reprocessamento forçado
+        sql_limit = ""
+    else:
+        sql_id = ""
+
+    if uid_lista:
+        placeholders = ", ".join(f"'{u}'" for u in uid_lista)
+        sql_uid = f"AND fde.uid IN ({placeholders})"
+        sql_skip  = ""   # uid_lista implica reprocessamento forçado
+        sql_limit = ""
+    else:
+        sql_uid = ""
 
     cur.execute(f"""
         SELECT
-            f.id,
-            f.UC,
-            f.RS_Total_Fatura                                                  AS valor,
-            f.Concessionaria,
-            f.Mes_Ref,
-            f.Cod_Empresa,
-            f.fichas_apontadas,
-            JSON_EXTRACT(f.analise_IA, '$.resultado.analise_texto')            AS ia_analise_texto,
-            f.resultado_regras,
-            COALESCE(f.texto_plumber, f.texto_markitdown, f.texto_ocr, '')     AS texto_fatura,
-            COALESCE(f.Link, '')                                                AS link
-        FROM Faturas_Registradas_Cache f
-        WHERE f.fichas_apontadas IS NOT NULL
-          AND f.fichas_apontadas != ''
+            fde.id,
+            fde.uid,
+            fde.codigo_uc                            AS UC,
+            COALESCE(fde.valor_total_fatura, 0)      AS valor,
+            fde.distribuidora                         AS Concessionaria,
+            fde.mes_referencia                        AS Mes_Ref,
+            fde.cod_empresa,
+            COALESCE(fde.analise_ia, '')              AS ia_analise_texto,
+            COALESCE(fde.texto_plumber, '')           AS texto_plumber,
+            COALESCE(fde.texto_markdown, '')          AS texto_markitdown,
+            COALESCE(fde.texto_ocr, '')               AS texto_ocr,
+            COALESCE(fde.link_fatura, '')             AS link
+        FROM FATURA_DADOS_EXTRAIDOS fde
+        WHERE (
+            (CASE WHEN fde.texto_plumber  IS NOT NULL AND fde.texto_plumber  != '' THEN 1 ELSE 0 END) +
+            (CASE WHEN fde.texto_markdown IS NOT NULL AND fde.texto_markdown != '' THEN 1 ELSE 0 END) +
+            (CASE WHEN fde.texto_ocr      IS NOT NULL AND fde.texto_ocr      != '' THEN 1 ELSE 0 END)
+          ) >= 1
           {sql_emp}
+          {sql_id}
+          {sql_uid}
           {sql_skip}
-        ORDER BY f.RS_Total_Fatura DESC
+        ORDER BY fde.valor_total_fatura DESC
         {sql_limit}
     """)
 
     faturas = []
     for row in cur.fetchall():
         try:
-            # Fichas vêm direto da coluna unificada (CSV: "F01,F02,F10")
-            fichas_csv = (row.get("fichas_apontadas") or "").strip()
-            fichas = [f.strip().upper() for f in fichas_csv.split(",") if f.strip()]
-
-            resultado_regras = row["resultado_regras"]
-            if isinstance(resultado_regras, str):
-                try:
-                    resultado_regras = json.loads(resultado_regras)
-                except Exception:
-                    resultado_regras = {}
-
-            ia_analise = row["ia_analise_texto"] or ""
-            if isinstance(ia_analise, bytes):
-                ia_analise = ia_analise.decode("utf-8", errors="replace")
-
             faturas.append({
                 "id"              : row["id"],
-                "UC"              : row["UC"],
+                "uid"             : str(row.get("uid") or "").strip(),
+                "UC"              : str(row["UC"] or ""),
                 "valor"           : float(row["valor"] or 0),
-                "concessionaria"  : row["Concessionaria"],
+                "concessionaria"  : str(row["Concessionaria"] or ""),
                 "mes_ref"         : str(row["Mes_Ref"] or ""),
-                "ia_fichas"       : fichas,
-                "ia_analise_texto": ia_analise,
-                "resultado_regras": resultado_regras or {},
-                "texto_fatura"    : row["texto_fatura"] or "",
-                "link"            : str(row.get("link") or "").strip(),
+                "cod_empresa"     : row.get("cod_empresa"),
+                "ia_analise_texto": str(row["ia_analise_texto"] or ""),
+                "texto_plumber"   : str(row["texto_plumber"] or ""),
+                "texto_markitdown": str(row["texto_markitdown"] or ""),
+                "texto_ocr"       : str(row["texto_ocr"] or ""),
+                "link"            : str(row["link"] or "").strip(),
             })
         except Exception as e:
             log.warning(f"  Erro ao parsear fatura {row.get('id')}: {e}")
@@ -388,15 +293,7 @@ def pdf_para_imagens(pdf_bytes: bytes) -> list[dict]:
 # ─── Triagem (Rodada 1) ────────────────────────────────────────────────────────
 
 def _montar_contexto_triagem(fatura: dict, prompt_confirmar: str) -> str:
-    regras = fatura["resultado_regras"]
-    fichas_motores: list[str] = []
-    if regras:
-        fichas_motores  = regras.get("f01_f05", {}).get("fichas", [])
-        fichas_motores += regras.get("f06_f14", {}).get("fichas", [])
-
-    return f"""{prompt_confirmar}
-
-================================================================================
+    return f"""================================================================================
 CONTEXTO COMPLEMENTAR — DADOS DO SISTEMA
 ================================================================================
 
@@ -407,16 +304,85 @@ Concessionária: {fatura['concessionaria']}
 Período: {fatura['mes_ref']}
 Valor Total: R$ {fatura['valor']:,.2f}
 
-=== ANÁLISE PRÉVIA (modelo 4.1-mini) ===
-Fichas identificadas: {', '.join(fatura['ia_fichas']) if fatura['ia_fichas'] else 'nenhuma'}
-Análise: {fatura['ia_analise_texto'][:2000] if fatura['ia_analise_texto'] else '(não disponível)'}
+=== ANÁLISE PRÉVIA ===
+{fatura['ia_analise_texto'][:2000] if fatura['ia_analise_texto'] else '(não disponível)'}
 
-=== RESULTADO DOS MOTORES DE REGRAS SQL (F01-F14) ===
-Fichas apontadas pelos motores: {', '.join(fichas_motores) if fichas_motores else 'nenhuma'}
-Detalhes: {json.dumps(regras, ensure_ascii=False, indent=2)[:3000] if regras else '(motor não executado)'}
+=== EXTRAÇÕES DE TEXTO DA FATURA ===
+As três extrações abaixo são geradas por métodos diferentes (Plumber, Markitdown, OCR).
+Cada extrator pode capturar partes distintas — fragmentação é comum em layouts de duas colunas.
 
-=== TEXTO DA FATURA (OCR) ===
-{fatura['texto_fatura'][:5000]}
+--- Plumber (extração estruturada de tabelas/PDF) ---
+{fatura['texto_plumber'][:3000] or '(não disponível)'}
+
+--- Markitdown (conversão Markdown do PDF) ---
+{fatura['texto_markitdown'][:3000] or '(não disponível)'}
+
+--- OCR (reconhecimento óptico de caracteres) ---
+{fatura['texto_ocr'][:3000] or '(não disponível)'}
+
+================================================================================
+SUA TAREFA NESTA ETAPA: EXTRAÇÃO DE CAMPOS (não decisão de fichas)
+================================================================================
+
+Você NÃO deve confirmar nem refutar fichas nesta etapa.
+Sua única tarefa é extrair e cruzar os campos numéricos dos três extratores acima.
+A decisão sobre fichas será feita na próxima etapa, com as imagens da fatura.
+
+PROCEDIMENTO:
+
+1. Para cada campo abaixo, localize o valor em cada extrator (Plumber / Markitdown / OCR):
+   - leitura_anterior (ponta e fora ponta)
+   - leitura_atual (ponta e fora ponta)
+   - constante / multiplicador
+   - consumo_kwh faturado (ponta, fora ponta, total)
+   - demanda faturada e contratada (ponta e fora ponta)
+   - tarifa_te, tarifa_tusd
+   - numero_medidor
+   - historico de consumo (meses anteriores com kWh)
+   - valor_total_fatura
+   - tipo_bandeira, valor_bandeira
+   - icms_aliq, pis_aliq, cofins_aliq
+
+2. Para cada campo, registre:
+   - O valor encontrado e em qual(is) extrator(es) aparece
+   - Se há divergência entre extratores, registre ambos os valores
+   - Se ausente em todos, registre como null
+
+3. Classifique cada campo como:
+   CONFIÁVEL — mesmo valor em 2+ extratores, ou único mas inequívoco
+   DUVIDOSO  — valores diferentes entre extratores
+   AUSENTE   — não encontrado em nenhum extrator
+
+4. Monte o bloco ---CAMPOS_JSON--- com os campos CONFIÁVEIS extraídos.
+   Para campos DUVIDOSOS, use o valor do OCR como fallback.
+   Para AUSENTES, use null.
+
+Formato obrigatório de saída:
+---CAMPOS_JSON---
+{{
+  "leitura_anterior_p": <valor ou null>,
+  "leitura_atual_p": <valor ou null>,
+  "leitura_anterior_fp": <valor ou null>,
+  "leitura_atual_fp": <valor ou null>,
+  "constante_p": <valor ou null>,
+  "consumo_kwh_ponta": <valor ou null>,
+  "consumo_kwh_fponta": <valor ou null>,
+  "demanda_faturada_ponta": <valor ou null>,
+  "demanda_faturada_fponta": <valor ou null>,
+  "demanda_contratada_ponta": <valor ou null>,
+  "demanda_contratada_fponta": <valor ou null>,
+  "tarifa_te": <valor ou null>,
+  "tarifa_tusd": <valor ou null>,
+  "numero_medidor": <valor ou null>,
+  "valor_total_fatura": <valor ou null>,
+  "tipo_bandeira": <valor ou null>,
+  "icms_aliq": <valor ou null>,
+  "historico_consumo": [{{"mes": "MM/YYYY", "kwh": <valor>}}]
+}}
+---FIM_CAMPOS_JSON---
+
+Após o bloco JSON, escreva um parágrafo curto resumindo quais campos foram encontrados
+com confiança e quais estavam ausentes ou duvidosos nos textos.
 """
 
 
@@ -437,21 +403,11 @@ def _parse_triagem(texto: str) -> dict:
     return {
         "fichas_confirmadas": confirmadas or fichas[:3],
         "campos_json"       : campos_json,
-        "texto_analise"     : texto[:5000],
+        "texto_analise"     : texto[:20000],
     }
 
 
 # ─── Decisão final (Rodada 2) ─────────────────────────────────────────────────
-
-def _fichas_convergentes(triagem: dict, resultado_regras: dict) -> list[str]:
-    confirmadas = set(triagem.get("fichas_confirmadas", []))
-    fichas_sql: set[str] = set()
-    if resultado_regras:
-        fichas_sql |= set(resultado_regras.get("fichas_todas", []))
-        fichas_sql |= set(resultado_regras.get("f01_f05", {}).get("fichas", []))
-        fichas_sql |= set(resultado_regras.get("f06_f14", {}).get("fichas", []))
-    return list(confirmadas & fichas_sql)
-
 
 _ALIAS_DECISAO = {
     "NEGADO"      : "REFUTADO",
@@ -489,57 +445,53 @@ def _prompt_decisao(fatura: dict, triagem: dict, prompt_confirmar: str, com_imag
     (catalogo de fichas, regras anti-alucinacao, criterios de validacao).
     Acrescenta apenas a camada especifica de DECISAO FINAL com saida JSON.
     """
-    regras = fatura["resultado_regras"]
-    f01    = regras.get("f01_f05", {}).get("fichas", []) if regras else []
-    f06    = regras.get("f06_f14", {}).get("fichas", []) if regras else []
-
     fonte = ("As imagens da fatura estao anexadas. Extraia diretamente dos dados impressos: "
              "leituras (anterior e atual), constante/multiplicador, kWh faturado por posto "
              "(ponta/fora ponta/reservado), demanda, fator de potencia, tarifa, medidor.") \
             if com_imagem else \
-            "Analise com base no texto extraido abaixo (pode estar incompleto)."
+            "Analise com base nas extracoes de texto abaixo (podem estar incompletas)."
 
-    return f"""{prompt_confirmar}
-
-================================================================================
-PASSO 3 — DECISAO FINAL DE RESSARCIMENTO ({MODELO_DECISAO})
+    return f"""================================================================================
+PASSO 2 — DECISAO FINAL DE RESSARCIMENTO ({MODELO_DECISAO})
 ================================================================================
 
 A base de conhecimento acima (PAPEL, REGRA ANTI-ALUCINACAO, fichas F01-F14, criterios
 de validacao, regras financeiras) e VALIDA para esta etapa. Aplique-as integralmente.
 
-Sua tarefa nesta etapa: para CADA ficha apontada pela triagem ou pelos motores SQL,
-aplicar a validacao tecnica especifica da ficha e decidir se ha ANOMALIA REAL ou
-falso positivo. Diferente do PASSO 2, sua saida e JSON estruturado (nao texto livre).
+Sua tarefa: analisar esta fatura de forma independente e decidir quais fichas
+(F01-F14) se aplicam, com base nas imagens e nos campos pre-extraidos abaixo.
+A etapa anterior apenas extraiu campos do texto — NAO confirmou fichas.
+Sua saida e JSON estruturado (nao texto livre).
 
-REGRA DE OURO (reforco): se a evidencia matematica/tecnica nao suporta a ficha,
-REJEITE-A, mesmo que triagem ou motores SQL tenham apontado. NAO invente teses
-regulatorias (TUSD, ICMS, ACL, CCEE) — essas NAO sao fichas (ver REGRA ANTI-ALUCINACAO).
+REGRA DE OURO: a evidencia matematica/tecnica deve suportar cada ficha.
+NAO invente teses regulatorias (TUSD, ICMS, ACL, CCEE) — ver REGRA ANTI-ALUCINACAO.
 
 ================================================================================
 DADOS DESTA FATURA
 ================================================================================
 ID: {fatura['id']} | UC: {fatura['UC']} | {fatura['concessionaria']} | {fatura['mes_ref']} | R$ {fatura['valor']:,.2f}
 
-TRIAGEM (gpt-4.1-mini, sobre texto):
-  Fichas confirmadas pela triagem: {', '.join(triagem['fichas_confirmadas']) or 'nenhuma'}
-  Resumo: {triagem['texto_analise'][:1500]}
-
-MOTORES SQL (regras deterministicas):
-  F01-F05 detectadas: {f01}
-  F06-F14 detectadas: {f06}
-  Detalhes: {json.dumps(regras, ensure_ascii=False)[:1200] if regras else '(nao disponivel)'}
-
-CAMPOS EXTRAIDOS PELA TRIAGEM:
+CAMPOS PRE-EXTRAIDOS DO TEXTO (use como ponto de partida; valide contra as imagens):
 {json.dumps(triagem['campos_json'], ensure_ascii=False, indent=2)}
 
+RESUMO DA EXTRACAO DE TEXTO:
+{triagem['texto_analise'][:4000]}
+
 {fonte}
+
+EXTRACOES DE TEXTO (use para validacao matematica quando imagem nao disponivel ou para cruzar dados):
+--- Plumber ---
+{fatura['texto_plumber'][:5000] or '(nao disponivel)'}
+--- Markitdown ---
+{fatura['texto_markitdown'][:5000] or '(nao disponivel)'}
+--- OCR ---
+{fatura['texto_ocr'][:5000] or '(nao disponivel)'}
 
 ================================================================================
 INSTRUCOES DE SAIDA (CRITICO)
 ================================================================================
 
-1. Para CADA ficha apontada (triagem ∪ motores), aplique o criterio de validacao
+1. Para CADA ficha apontada pela triagem, aplique o criterio de validacao
    do catalogo F01-F14 acima.
 2. Liste em "fichas_confirmadas" SOMENTE as que passaram na validacao tecnica.
 3. Se nenhuma ficha passar → decisao_final="REFUTADO", fichas_confirmadas=[], ressarcimento=0.
@@ -566,13 +518,15 @@ Campos:
 
 def chamar_decisao(client: OpenAI, fatura: dict, triagem: dict, imagens: list[dict],
                     prompt_confirmar: str) -> dict:
-    """Chama gpt-5.4 com ou sem imagens conforme disponibilidade."""
+    """Chama MODELO_DECISAO com ou sem imagens conforme disponibilidade.
+    prompt_confirmar.txt vai no system para ativar cache automático da OpenAI.
+    """
     com_imagem = len(imagens) > 0
-    prompt     = _prompt_decisao(fatura, triagem, prompt_confirmar, com_imagem)
+    user_text  = _prompt_decisao(fatura, triagem, prompt_confirmar, com_imagem)
 
-    content: list = [{"type": "text", "text": prompt}]
+    user_content: list = [{"type": "text", "text": user_text}]
     for img in imagens:
-        content.append({
+        user_content.append({
             "type"     : "image_url",
             "image_url": {
                 "url"   : f"data:{img['mime']};base64,{img['base64']}",
@@ -583,16 +537,21 @@ def chamar_decisao(client: OpenAI, fatura: dict, triagem: dict, imagens: list[di
     try:
         resp  = client.chat.completions.create(
             model                = MODELO_DECISAO,
-            max_completion_tokens= 2048,
-            messages             = [{"role": "user", "content": content}],
+            max_completion_tokens= 6144,
+            service_tier         = SERVICE_TIER,
+            messages             = [
+                {"role": "system", "content": prompt_confirmar},
+                {"role": "user",   "content": user_content},
+            ],
         )
+        _registrar_uso(resp.usage)
         texto = resp.choices[0].message.content.strip()
         modo  = "imagem" if com_imagem else "texto"
         log.info(f"  [Decisao/{modo}] ID {fatura['id']}: OK")
-        return _parse_decisao(texto, triagem)
+        return _parse_decisao(texto, triagem), texto
     except Exception as e:
         log.error(f"  [Decisao] Erro ID {fatura['id']}: {e}")
-        return {
+        err = {
             "decisao_final"           : "ERRO",
             "ficha_principal"         : triagem["fichas_confirmadas"][0] if triagem["fichas_confirmadas"] else "N/A",
             "fichas_confirmadas"      : triagem["fichas_confirmadas"],
@@ -601,42 +560,190 @@ def chamar_decisao(client: OpenAI, fatura: dict, triagem: dict, imagens: list[di
             "justificativa"           : f"Erro ao chamar {MODELO_DECISAO}: {str(e)[:200]}",
             "recomendacao"            : "Analise manual necessaria",
         }
+        return err, ""
 
 
 # ─── Gravação ─────────────────────────────────────────────────────────────────
 
-def gravar_resultado(cur, conn, fatura: dict, triagem: dict, decisao: dict, dry_run: bool):
-    """Grava resultado_analises no banco. Retorna (conn, cur) atualizado."""
-    resultado = {
-        "ia_4_1_apontamentos": {
-            "fichas" : fatura["ia_fichas"],
-            "status" : "CONFIRMADO",
-            "analise": fatura["ia_analise_texto"][:1000] if fatura["ia_analise_texto"] else "",
-        },
-        "triagem_confirmar": {
-            "fichas_confirmadas": triagem["fichas_confirmadas"],
-            "campos_json"       : triagem["campos_json"],
-        },
-        "motores_sql"        : fatura["resultado_regras"],
-        "ia_opus_5_4_decisao": decisao,
-        "processado_em"      : datetime.now().isoformat(),
-        "modelo"             : MODELO_DECISAO,
+def _gravar_fde_analise(cur, conn, uid: str,
+                         analise_ia: str = None,
+                         resultado_final: str = None,
+                         fichas_apontadas: str = None):
+    """Salva analise_ia (Passo 1) e/ou resultado final (Passo 2) em FATURA_DADOS_EXTRAIDOS."""
+    if not uid:
+        return
+    sets = []
+    vals = []
+    if analise_ia:
+        sets.append("`analise_ia` = %s, `ia_analisado_em` = NOW()")
+        vals.append(analise_ia)
+    if resultado_final:
+        sets.append("`resultado_analises_final` = %s, `resultado_em` = NOW()")
+        vals.append(resultado_final)
+    if fichas_apontadas:
+        sets.append("`fichas_apontadas` = %s")
+        vals.append(fichas_apontadas)
+    if not sets:
+        return
+    cur.execute(
+        f"UPDATE FATURA_DADOS_EXTRAIDOS SET {', '.join(sets)} WHERE uid = %s",
+        vals + [uid],
+    )
+    conn.commit()
+
+
+def _gravar_ia_dados_extraidos(cur, conn, fatura_id: int, campos_json: dict,
+                                distribuidora: str | None, uc: str | None,
+                                uid: str | None = None, link: str | None = None,
+                                cod_empresa: int | None = None):
+    """Persiste campos extraídos pela IA na tabela FATURA_DADOS_EXTRAIDOS."""
+    mapa = {
+        "uc"                          : "codigo_uc",
+        "concessionaria"              : "distribuidora",
+        "mes_ref"                     : "mes_referencia",
+        "numero_fatura"               : "numero_fatura",
+        "nome_cliente"                : "nome_cliente",
+        "dias_faturados"              : "dias_faturados",
+        "modalidade_tarifaria"        : "modalidade_tarifaria",
+        "tensao_fornecimento"         : "tensao_fornecimento",
+        "numero_medidor"              : "numero_medidor",
+        "kwh_total"                   : "consumo_ativo_fponta_kwh",
+        "kwh_ponta"                   : "consumo_ativo_ponta_kwh",
+        "kwh_fponta"                  : "consumo_ativo_fponta_kwh",
+        "leitura_anterior_p"          : "leit_ant_ativa_ponta",
+        "leitura_atual_p"             : "leit_atu_ativa_ponta",
+        "leitura_anterior_fp"         : "leit_ant_ativa_fponta",
+        "leitura_atual_fp"            : "leit_atu_ativa_fponta",
+        "constante_p"                 : "constante_k",
+        "constante_fp"                : "constante_k",
+        "demanda_faturada_ponta_kw"   : "demanda_faturada_ponta_kw",
+        "demanda_faturada_fponta_kw"  : "demanda_faturada_fponta_kw",
+        "demanda_contratada_ponta_kw" : "demanda_contratada_ponta_kw",
+        "demanda_contratada_fponta_kw": "demanda_contratada_fponta_kw",
+        "tarifa_te"                   : "tarifa_te",
+        "tarifa_tusd"                 : "tarifa_tusd",
+        "subgrupo_tarifario"          : "subgrupo_tarifario",
+        "tarifa_demanda"              : "tarifa_demanda",
+        "valor_demanda"               : "valor_demanda",
+        "tipo_bandeira"               : "tipo_bandeira_tarifaria",
+        "valor_bandeira"              : "valor_bandeira",
+        "total_rs"                    : "valor_total_fatura",
+        "total_itens_rs"              : "valor_total_itens",
+        "icms_aliq"                   : "icms_aliquota",
+        "icms_rs"                     : "icms_valor",
+        "base_icms_rs"                : "icms_base_calculo",
+        "pis_aliq"                    : "pis_aliquota",
+        "pis_rs"                      : "pis_valor",
+        "cofins_aliq"                 : "cofins_aliquota",
+        "cofins_rs"                   : "cofins_valor",
+        "cip_rs"                      : "valor_cip_cosip",
+        "reativo_excedente_rs"        : "valor_energia_reativa_excedente",
+        "perda_transformacao_pct"     : "perda_transformacao_percentual",
+        "consumo_medidor_ponta"       : "consumo_ativo_ponta_kwh",
+        "consumo_medidor_fponta"      : "consumo_ativo_fponta_kwh",
     }
+
+    # uid é obrigatório — é a chave única da tabela
+    if not uid:
+        log.warning(f"  [dados_extraidos/ia] fatura sem uid, ignorando gravação")
+        return
+
+    cols = ["uid", "fonte_extracao"]
+    vals = [uid, "ia"]
+    upd  = ["fonte_extracao = VALUES(fonte_extracao)",
+            "atualizado_em = CURRENT_TIMESTAMP"]
+
+    seen_cols: set[str] = {"uid"}
+
+    for campo, col_db in mapa.items():
+        if col_db in seen_cols:
+            continue
+        v = campos_json.get(campo)
+        if v is None:
+            continue
+        # Rejeita valores inválidos conhecidos para numero_medidor
+        if col_db == "numero_medidor" and str(v).strip().lower() in _MEDIDOR_BLOCKLIST:
+            log.warning(f"  [dados_extraidos/ia] numero_medidor rejeitado: '{v}'")
+            continue
+        cols.append(col_db)
+        vals.append(v)
+        upd.append(f"`{col_db}` = VALUES(`{col_db}`)")
+        seen_cols.add(col_db)
+
+    # Distribuidora e UC como fallback
+    if distribuidora and "distribuidora" not in seen_cols:
+        cols.append("distribuidora"); vals.append(distribuidora)
+        upd.append("`distribuidora` = VALUES(`distribuidora`)")
+    if uc and "codigo_uc" not in seen_cols:
+        cols.append("codigo_uc"); vals.append(uc)
+        upd.append("`codigo_uc` = VALUES(`codigo_uc`)")
+
+    # mercado_livre
+    ml = campos_json.get("mercado_livre_acl")
+    if ml:
+        cols.append("indicador_mercado_livre"); vals.append(1)
+        upd.append("`indicador_mercado_livre` = VALUES(`indicador_mercado_livre`)")
+
+    # link_fatura e cod_empresa da fonte
+    if link:
+        cols.append("link_fatura"); vals.append(link)
+        upd.append("`link_fatura` = VALUES(`link_fatura`)")
+    if cod_empresa is not None:
+        cols.append("cod_empresa"); vals.append(cod_empresa)
+        upd.append("`cod_empresa` = VALUES(`cod_empresa`)")
+
+    if len(cols) <= 2:
+        return
+
+    placeholders = ", ".join(["%s"] * len(cols))
+    col_names    = ", ".join(f"`{c}`" for c in cols)
+    upd_clause   = ", ".join(upd)
+
+    cur.execute(
+        f"INSERT INTO FATURA_DADOS_EXTRAIDOS ({col_names}) "
+        f"VALUES ({placeholders}) "
+        f"ON DUPLICATE KEY UPDATE {upd_clause}",
+        vals,
+    )
+    conn.commit()
+
+
+def gravar_resultado(cur, conn, fatura: dict, triagem: dict, decisao: dict, dry_run: bool,
+                     texto_decisao_raw: str = ""):
+    """Grava resultado_analises, Analise_IA e fichas_apontadas no banco."""
+    fichas_triagem = triagem.get("fichas_confirmadas") or []
 
     if dry_run:
         log.info(f"  [DRY-RUN] ID {fatura['id']}: {decisao.get('decisao_final')} "
                  f"confianca={decisao.get('confianca_final')}%")
         return conn, cur
 
+    uid = fatura.get("uid")
+
     for tentativa in range(3):
         try:
-            cur.execute(
-                "UPDATE Faturas_Registradas_Cache "
-                "SET resultado_analises = %s, resultado_final_em = NOW() "
-                "WHERE id = %s",
-                (json.dumps(resultado, ensure_ascii=False), fatura["id"]),
-            )
-            conn.commit()
+            # Garante conexão viva antes de gravar (pode ter caído durante chamada OpenAI)
+            try:
+                conn.ping(reconnect=True, attempts=3, delay=2)
+            except Exception:
+                conn, cur = _reconectar()
+
+            # Grava campos extraídos pela IA em FATURA_DADOS_EXTRAIDOS
+            cj = triagem.get("campos_json") or {}
+            if cj:
+                _gravar_ia_dados_extraidos(cur, conn, fatura["id"], cj,
+                                           fatura.get("concessionaria"), fatura.get("UC"),
+                                           uid=uid, link=fatura.get("link"),
+                                           cod_empresa=fatura.get("cod_empresa"))
+
+            # Grava analise_ia (Passo 1) e resultado final (Passo 2) em FATURA_DADOS_EXTRAIDOS
+            if uid:
+                _gravar_fde_analise(cur, conn, uid,
+                    analise_ia=triagem.get("texto_analise"),
+                    resultado_final=texto_decisao_raw or None,
+                    fichas_apontadas=json.dumps(decisao, ensure_ascii=False) if decisao else None,
+                )
+
             log.info(
                 f"  [OK] ID {fatura['id']}: {decisao.get('decisao_final')} | "
                 f"confianca={decisao.get('confianca_final')}% | "
@@ -658,24 +765,35 @@ def gravar_resultado(cur, conn, fatura: dict, triagem: dict, decisao: dict, dry_
     return conn, cur
 
 
-# ─── Batch API helpers ─────────────────────────────────────────────────────────
+# ─── Batch API helpers ────────────────────────────────────────────────────────
 
-def _submit_batch(jsonl_lines: list[str], label: str) -> str:
+def _submit_batch(jsonl_lines: list[str], label: str, max_retries: int = 3) -> str:
     headers     = {"Authorization": f"Bearer {API_KEY}"}
     chunk_bytes = "\n".join(jsonl_lines).encode("utf-8", errors="ignore")
     log.info(f"  [{label}] Upload: {len(jsonl_lines)} reqs | {len(chunk_bytes)//1024} KB")
 
-    up = requests.post(
-        f"{BASE_URL}/v1/files",
-        headers = headers,
-        files   = {
-            "file"   : (f"{label}.jsonl", chunk_bytes, "application/jsonl"),
-            "purpose": (None, "batch"),
-        },
-        timeout = 180,
-    )
-    up.raise_for_status()
-    file_id = up.json()["id"]
+    file_id = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            up = requests.post(
+                f"{BASE_URL}/v1/files",
+                headers = headers,
+                files   = {
+                    "file"   : (f"{label}.jsonl", chunk_bytes, "application/jsonl"),
+                    "purpose": (None, "batch"),
+                },
+                timeout = UPLOAD_TIMEOUT,
+            )
+            up.raise_for_status()
+            file_id = up.json()["id"]
+            break
+        except (requests.ConnectionError, requests.Timeout) as e:
+            if attempt < max_retries:
+                wait = 30 * (2 ** (attempt - 1))
+                log.warning(f"  [{label}] Upload falhou ({attempt}/{max_retries}): {e}. Aguardando {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
 
     br = requests.post(
         f"{BASE_URL}/v1/batches",
@@ -731,16 +849,41 @@ def _chunks(lines: list[str]) -> list[list[str]]:
     return result
 
 
+# ─── Triagem síncrona ─────────────────────────────────────────────────────────
+
+def chamar_triagem(client: OpenAI, fatura: dict, prompt_confirmar: str) -> dict:
+    """Chamada síncrona ao MODELO_TRIAGEM para extração de campos.
+    prompt_confirmar.txt vai no system para ativar cache automático da OpenAI.
+    """
+    try:
+        resp = client.chat.completions.create(
+            model                = MODELO_TRIAGEM,
+            max_completion_tokens= 4096,
+            service_tier         = SERVICE_TIER,
+            messages             = [
+                {"role": "system", "content": prompt_confirmar},
+                {"role": "user",   "content": _montar_contexto_triagem(fatura, prompt_confirmar)},
+            ],
+        )
+        _registrar_uso(resp.usage)
+        texto = resp.choices[0].message.content.strip()
+        log.info(f"  [Triagem] ID {fatura['id']}: OK")
+        return _parse_triagem(texto)
+    except Exception as e:
+        log.error(f"  [Triagem] Erro ID {fatura['id']}: {e}")
+        return {"fichas_confirmadas": [], "campos_json": {}, "texto_analise": f"Erro: {e}"}
+
+
 # ─── Retry erros ──────────────────────────────────────────────────────────────
 
 def rodar_retry_erros(empresas: list[int] | None, dry_run: bool):
     """
     Reprocessa somente faturas com decisao_final = 'ERRO'.
     Recupera triagem já salva em resultado_analises e manda direto para
-    gpt-5.4 com imagens — sem refazer o batch da Rodada 1.
+    MODELO_DECISAO com imagens — sem refazer o batch da Rodada 1.
     """
     log.info("=" * 60)
-    log.info("RETRY ERROS/INVALIDOS — gpt-5.4 com imagens")
+    log.info(f"RETRY ERROS/INVALIDOS — {MODELO_DECISAO} com imagens")
     log.info("  Reprocessa: ERRO, NEGADO e qualquer valor invalido")
 
     if not API_KEY:
@@ -756,28 +899,28 @@ def rodar_retry_erros(empresas: list[int] | None, dry_run: bool):
     conn, cur = _reconectar()
 
     try:
-        sql_emp = f"AND f.Cod_Empresa IN ({', '.join(str(e) for e in empresas)})" if empresas else ""
+        sql_emp = f"AND fde.cod_empresa IN ({', '.join(str(e) for e in empresas)})" if empresas else ""
         cur.execute(f"""
             SELECT
-                f.id,
-                f.UC,
-                f.RS_Total_Fatura                                                AS valor,
-                f.Concessionaria,
-                f.Mes_Ref,
-                f.Cod_Empresa,
-                JSON_EXTRACT(f.analise_IA, '$.resultado.ia_fichas_confirmadas')  AS ia_fichas,
-                JSON_EXTRACT(f.analise_IA, '$.resultado.analise_texto')          AS ia_analise_texto,
-                f.resultado_regras,
-                COALESCE(f.texto_plumber, f.texto_markitdown, f.texto_ocr, '')   AS texto_fatura,
-                COALESCE(f.Link, '')                                              AS link,
-                f.resultado_analises
-            FROM Faturas_Registradas_Cache f
-            WHERE JSON_EXTRACT(f.resultado_analises, '$.ia_opus_5_4_decisao.decisao_final')
+                fde.id,
+                fde.uid,
+                fde.codigo_uc                           AS UC,
+                COALESCE(fde.valor_total_fatura, 0)     AS valor,
+                fde.distribuidora                        AS Concessionaria,
+                fde.mes_referencia                       AS Mes_Ref,
+                fde.cod_empresa,
+                COALESCE(fde.texto_plumber, '')          AS texto_plumber,
+                COALESCE(fde.texto_markdown, '')         AS texto_markitdown,
+                COALESCE(fde.texto_ocr, '')              AS texto_ocr,
+                COALESCE(fde.link_fatura, '')            AS link,
+                COALESCE(fde.analise_ia, '')             AS analise_ia
+            FROM FATURA_DADOS_EXTRAIDOS fde
+            WHERE fde.fichas_apontadas IS NOT NULL
+              AND fde.fichas_apontadas != ''
+              AND JSON_EXTRACT(fde.fichas_apontadas, '$.decisao_final')
                   NOT IN ('CONFIRMADO', 'REFUTADO', 'INCONCLUSIVO')
-              AND f.resultado_analises IS NOT NULL
-              AND f.resultado_analises != ''
               {sql_emp}
-            ORDER BY f.RS_Total_Fatura DESC
+            ORDER BY fde.valor_total_fatura DESC
         """)
         rows = cur.fetchall()
         log.info(f"  Faturas com ERRO: {len(rows)}")
@@ -790,54 +933,25 @@ def rodar_retry_erros(empresas: list[int] | None, dry_run: bool):
             fid = row["id"]
             log.info(f"  [{idx}/{len(rows)}] ID {fid} | UC {row['UC']} | R$ {float(row['valor'] or 0):,.2f}")
 
-            # Reconstrói fatura
-            ia_fichas = row["ia_fichas"]
-            if ia_fichas:
-                fichas = json.loads(ia_fichas) if isinstance(ia_fichas, str) else ia_fichas
-                fichas = fichas if isinstance(fichas, list) else [fichas]
-            else:
-                fichas = []
-
-            resultado_regras = row["resultado_regras"]
-            if isinstance(resultado_regras, str):
-                try:
-                    resultado_regras = json.loads(resultado_regras)
-                except Exception:
-                    resultado_regras = {}
-
-            ia_analise = row["ia_analise_texto"] or ""
-            if isinstance(ia_analise, bytes):
-                ia_analise = ia_analise.decode("utf-8", errors="replace")
-
             fatura = {
                 "id"              : fid,
-                "UC"              : row["UC"],
+                "uid"             : str(row.get("uid") or "").strip(),
+                "UC"              : str(row["UC"] or ""),
                 "valor"           : float(row["valor"] or 0),
-                "concessionaria"  : row["Concessionaria"],
+                "concessionaria"  : str(row["Concessionaria"] or ""),
                 "mes_ref"         : str(row["Mes_Ref"] or ""),
-                "ia_fichas"       : fichas,
-                "ia_analise_texto": ia_analise,
-                "resultado_regras": resultado_regras or {},
-                "texto_fatura"    : row["texto_fatura"] or "",
-                "link"            : str(row.get("link") or "").strip(),
+                "cod_empresa"     : row.get("cod_empresa"),
+                "ia_analise_texto": "",
+                "texto_plumber"   : str(row["texto_plumber"] or ""),
+                "texto_markitdown": str(row["texto_markitdown"] or ""),
+                "texto_ocr"       : str(row["texto_ocr"] or ""),
+                "link"            : str(row["link"] or "").strip(),
             }
 
-            # Recupera triagem já salva (evita refazer o batch)
-            resultado_anterior = row.get("resultado_analises") or {}
-            if isinstance(resultado_anterior, str):
-                try:
-                    resultado_anterior = json.loads(resultado_anterior)
-                except Exception:
-                    resultado_anterior = {}
+            # Recupera triagem do analise_ia salvo em FDE
+            triagem = _parse_triagem(str(row["analise_ia"] or ""))
 
-            triagem_salva = resultado_anterior.get("triagem_confirmar", {})
-            triagem = {
-                "fichas_confirmadas": triagem_salva.get("fichas_confirmadas") or fichas,
-                "campos_json"       : triagem_salva.get("campos_json") or {},
-                "texto_analise"     : resultado_anterior.get("ia_4_1_apontamentos", {}).get("analise") or ia_analise,
-            }
-
-            log.info(f"    triagem recuperada: fichas={triagem['fichas_confirmadas']}")
+            log.info(f"    triagem (de analise_ia): fichas={triagem['fichas_confirmadas']}")
 
             # Baixa PDF e converte em imagens
             imagens = []
@@ -848,12 +962,13 @@ def rodar_retry_erros(empresas: list[int] | None, dry_run: bool):
                     imagens = pdf_para_imagens(pdf_bytes)
 
             if not imagens:
-                log.warning(f"    Sem imagens — gpt-5.4 texto")
+                log.warning(f"    Sem imagens — {MODELO_DECISAO} texto")
 
-            decisao = chamar_decisao(client, fatura, triagem, imagens, prompt_confirmar)
+            decisao, texto_decisao_raw = chamar_decisao(client, fatura, triagem, imagens, prompt_confirmar)
             log.info(f"    Decisao: {decisao.get('decisao_final')} | confianca={decisao.get('confianca_final')}%")
 
-            conn, cur = gravar_resultado(cur, conn, fatura, triagem, decisao, dry_run)
+            conn, cur = gravar_resultado(cur, conn, fatura, triagem, decisao, dry_run,
+                                         texto_decisao_raw=texto_decisao_raw)
 
         log.info(f"\n[OK] Retry concluido: {len(rows)} faturas reprocessadas.")
 
@@ -867,13 +982,23 @@ def rodar_retry_erros(empresas: list[int] | None, dry_run: bool):
 
 # ─── Pipeline IA ──────────────────────────────────────────────────────────────
 
-def rodar_ia(empresas: list[int] | None, top_n: int | None, dry_run: bool, force: bool = False):
-    """Passo 2+3: triagem batch + decisão final com imagens."""
+def rodar_ia(empresas: list[int] | None, top_n: int | None, dry_run: bool,
+             force: bool = False, batch: bool = False, retomar: bool = False,
+             uid_lista: list[str] | None = None,
+             id_lista: list[int] | None = None,
+             sem_triagem: bool = False):
+    """Passo 1+2: triagem (sync ou batch) + decisão final com imagens.
+    Com --sem-triagem pula o Passo 1 e vai direto para Passo 2 com imagens.
+    """
     log.info("=" * 60)
-    log.info("PASSO 2+3 — IA (triagem + decisão final com imagens)")
-    log.info(f"  Modelo triagem : {MODELO_TRIAGEM}")
+    if sem_triagem:
+        log.info("PASSO 2 DIRETO — decisão final com imagens (triagem desativada)")
+    else:
+        log.info("PASSO 1+2 — extração de campos (texto) + decisão final com imagens")
+    log.info(f"  Modelo triagem : {MODELO_TRIAGEM if not sem_triagem else '(desativado)'}")
     log.info(f"  Modelo decisao : {MODELO_DECISAO}")
     log.info(f"  Force          : {force}")
+    log.info(f"  Triagem        : {'DESATIVADA (--sem-triagem)' if sem_triagem else 'BATCH (50% desc, até 24h)' if batch else 'SYNC'}")
 
     if not API_KEY:
         log.error("[ERRO] OPENAI_API_KEY nao configurada.")
@@ -890,126 +1015,137 @@ def rodar_ia(empresas: list[int] | None, top_n: int | None, dry_run: bool, force
     conn, cur = _reconectar()
 
     try:
-        modo_busca = "todas (--force)" if force else "apenas sem resultado_analises"
-        log.info(f"\nBuscando faturas CONFIRMADO ({modo_busca})...")
-        faturas = buscar_faturas(cur, empresas, top_n, force=force)
+        if id_lista:
+            modo_busca = f"{len(id_lista)} IDs especificados (--id)"
+        elif uid_lista:
+            modo_busca = f"{len(uid_lista)} UIDs especificados (--uid-arquivo)"
+        elif force:
+            modo_busca = "todas (--force)"
+        else:
+            modo_busca = "apenas sem analise_ia"
+        log.info(f"\nBuscando faturas ({modo_busca})...")
+        faturas = buscar_faturas(cur, empresas, top_n, force=force,
+                                 uid_lista=uid_lista, id_lista=id_lista)
         log.info(f"  Encontradas: {len(faturas)} faturas")
 
         if not faturas:
             log.warning("  Nenhuma fatura encontrada.")
             return
 
-        # ── Rodada 1: triagem via Batch API ───────────────────────────────────
-        log.info(f"\nRodada 1: triagem com {MODELO_TRIAGEM} (Batch API)...")
-        jsonl_r1   = []
-        fatura_map = {}
-
-        for fatura in faturas:
-            cid = f"triagem-{fatura['id']}"
-            jsonl_r1.append(json.dumps({
-                "custom_id": cid,
-                "method"   : "POST",
-                "url"      : "/v1/chat/completions",
-                "body"     : {
-                    "model"               : MODELO_TRIAGEM,
-                    "max_completion_tokens": 4096,
-                    "messages"            : [{"role": "user", "content": _montar_contexto_triagem(fatura, prompt_confirmar)}],
-                },
-            }, ensure_ascii=True))
-            fatura_map[cid] = fatura
-
         triagem_resultados: dict[int, dict] = {}
-        for i, chunk in enumerate(_chunks(jsonl_r1), 1):
-            bid    = _submit_batch(chunk, f"triagem-chunk{i}")
-            linhas = _wait_batch(bid, f"triagem-chunk{i}")
-            for linha in linhas:
-                obj    = json.loads(linha)
-                cid    = obj.get("custom_id", "")
-                fatura = fatura_map.get(cid)
-                if not fatura:
-                    continue
-                texto_resp = (
-                    obj.get("response", {})
-                       .get("body", {})
-                       .get("choices", [{}])[0]
-                       .get("message", {})
-                       .get("content", "")
-                )
-                triagem = _parse_triagem(texto_resp)
-                triagem_resultados[fatura["id"]] = {"fatura": fatura, "triagem": triagem}
 
-        confirmados = [v for v in triagem_resultados.values() if v["triagem"].get("fichas_confirmadas")]
-        refutados   = [v for v in triagem_resultados.values() if not v["triagem"].get("fichas_confirmadas")]
-        log.info(f"Rodada 1 concluída: {len(confirmados)} confirmados | {len(refutados)} refutados")
+        if sem_triagem:
+            # ── Sem triagem: popula com triagem vazia e vai direto para Passo 2 ──
+            log.info(f"\nTriagem desativada — {len(faturas)} faturas vão direto para Passo 2...")
+            for fatura in faturas:
+                triagem_resultados[fatura["id"]] = {
+                    "fatura" : fatura,
+                    "triagem": {"fichas_confirmadas": [], "campos_json": {}, "texto_analise": ""},
+                }
+        else:
+            # ── Rodada 1: extração de campos (texto) ─────────────────────────────
+            log.info(f"\nRodada 1: extração de campos com {MODELO_TRIAGEM} ({len(faturas)} faturas)...")
+            fatura_map = {f"triagem-{f['id']}": f for f in faturas}
 
-        # Reconecta — pode ter caído durante o batch (minutos a horas)
-        conn, cur = _reconectar()
+            def _consumir_linhas(linhas: list[str]) -> int:
+                n = 0
+                for linha in linhas:
+                    try:
+                        obj = json.loads(linha)
+                    except Exception:
+                        continue
+                    cid = obj.get("custom_id", "")
+                    fat = fatura_map.get(cid)
+                    if not fat:
+                        continue
+                    texto = (obj.get("response", {})
+                                .get("body", {})
+                                .get("choices", [{}])[0]
+                                .get("message", {})
+                                .get("content", ""))
+                    triagem_resultados[fat["id"]] = {"fatura": fat, "triagem": _parse_triagem(texto)}
+                    n += 1
+                return n
 
-        # Grava REFUTADO direto para os sem fichas
-        for item in refutados:
-            decisao_refutada = {
-                "decisao_final"           : "REFUTADO",
-                "ficha_principal"         : "N/A",
-                "fichas_confirmadas"      : [],
-                "confianca_final"         : 90,
-                "percentual_ressarcimento": 0,
-                "justificativa"           : "Triagem nao identificou anomalias confirmadas.",
-                "recomendacao"            : "Nenhuma acao necessaria.",
-            }
-            conn, cur = gravar_resultado(cur, conn, item["fatura"], item["triagem"], decisao_refutada, dry_run)
+            if batch:
+                # ── Batch API ────────────────────────────────────────────────
+                state = _load_batch_state()
+                if retomar and state["batches"]:
+                    log.info(f"  [RETOMAR] {len(state['batches'])} batch(es) anteriores")
+                    for entry in state["batches"]:
+                        bid = entry["batch_id"]
+                        try:
+                            linhas = _wait_batch(bid, f"retomar-{bid[:18]}")
+                            n = _consumir_linhas(linhas)
+                            log.info(f"  [retomar] {bid}: {n} resultados aproveitados")
+                        except Exception as e:
+                            log.warning(f"  [retomar] falha em {bid}: {e}")
+                elif state["batches"] and not retomar:
+                    log.warning(
+                        f"  [AVISO] {len(state['batches'])} batch(es) ignorados. "
+                        f"Use --retomar para aproveitar."
+                    )
 
-        if not confirmados:
-            log.info("Nenhuma fatura confirmada — encerrando Passo 2+3.")
-            return
+                pendentes = [f for f in faturas if f["id"] not in triagem_resultados]
+                log.info(f"  Pendentes para batch: {len(pendentes)}")
 
-        # ── Rodada 2: decisão final gpt-5.4 + imagens ─────────────────────────
-        log.info(f"\nRodada 2: decisao final com {MODELO_DECISAO} + imagens ({len(confirmados)} faturas)...")
+                if pendentes:
+                    jsonl = []
+                    for fat in pendentes:
+                        jsonl.append(json.dumps({
+                            "custom_id": f"triagem-{fat['id']}",
+                            "method"   : "POST",
+                            "url"      : "/v1/chat/completions",
+                            "body"     : {
+                                "model"               : MODELO_TRIAGEM,
+                                "max_completion_tokens": 4096,
+                                "messages"            : [{"role": "user", "content": _montar_contexto_triagem(fat, prompt_confirmar)}],
+                            },
+                        }, ensure_ascii=True))
 
-        # Reconecta antes de começar as gravações — o batch pode ter durado horas
-        log.info("Reconectando ao banco para Rodada 2...")
-        conn, cur = _reconectar()
+                    for i, chunk in enumerate(_chunks(jsonl), 1):
+                        cids = [json.loads(l)["custom_id"] for l in chunk]
+                        bid  = _submit_batch(chunk, f"triagem-chunk{i}")
+                        _save_batch_state(bid, cids)
+                        linhas = _wait_batch(bid, f"triagem-chunk{i}")
+                        n = _consumir_linhas(linhas)
+                        log.info(f"  [chunk{i}] {n} resultados | acumulado: {len(triagem_resultados)}")
 
-        n_img = n_txt = n_sem_conv = n_skip_f12 = 0
+                # Reconecta — batch pode ter durado horas
+                conn, cur = _reconectar()
+            else:
+                # ── Síncrono ─────────────────────────────────────────────────
+                for idx, fatura in enumerate(faturas, 1):
+                    log.info(f"  [{idx}/{len(faturas)}] Extração ID {fatura['id']} | UC {fatura['UC']}")
+                    triagem = chamar_triagem(client, fatura, prompt_confirmar)
+                    triagem_resultados[fatura["id"]] = {"fatura": fatura, "triagem": triagem}
 
-        # Fichas com alta taxa de falso positivo no motor SQL — pular 5.4
-        # quando aparecem SOZINHAS (sem outra ficha mais critica)
-        FICHAS_BAIXA_PRECISAO = {"F12"}
+                    uid_fat = fatura.get("uid")
+                    if uid_fat:
+                        try:
+                            conn.ping(reconnect=True, attempts=3, delay=2)
+                        except Exception:
+                            conn, cur = _reconectar()
+                        _gravar_fde_analise(cur, conn, uid_fat,
+                                            analise_ia=triagem.get("texto_analise", ""))
 
-        for idx, item in enumerate(confirmados, 1):
+            log.info(f"Rodada 1 concluída: {len(triagem_resultados)} faturas — campos extraídos")
+
+        todas = list(triagem_resultados.values())
+
+        # ── Rodada 2: decisão final com MODELO_DECISAO + imagens ─────────────
+        log.info(f"\nRodada 2: decisao final com {MODELO_DECISAO} + imagens ({len(todas)} faturas)...")
+
+        n_img = n_txt = 0
+
+        for idx, item in enumerate(todas, 1):
             fatura  = item["fatura"]
             triagem = item["triagem"]
 
-            conv = _fichas_convergentes(triagem, fatura.get("resultado_regras", {}))
             log.info(
-                f"  [{idx}/{len(confirmados)}] ID {fatura['id']} | "
-                f"triagem={triagem['fichas_confirmadas']} | "
-                f"SQL={fatura.get('resultado_regras', {}).get('fichas_todas', [])} | "
-                f"conv={conv}"
+                f"  [{idx}/{len(todas)}] ID {fatura['id']} | UC {fatura['UC']} | R$ {fatura['valor']:,.2f}"
             )
 
-            # Skip rapido: se a unica ficha convergente for de baixa precisao,
-            # marca como REFUTADO sem chamar 5.4 (alta taxa historica de FP)
-            if conv and set(conv).issubset(FICHAS_BAIXA_PRECISAO):
-                decisao = {
-                    "decisao_final"           : "REFUTADO",
-                    "ficha_principal"         : conv[0],
-                    "fichas_confirmadas"      : [],
-                    "confianca_final"         : 70,
-                    "percentual_ressarcimento": 0,
-                    "justificativa"           : (
-                        f"Apenas {','.join(conv)} apontada (baixa precisao do motor SQL) "
-                        f"sem outras fichas convergentes. Refutado automaticamente "
-                        f"sem chamar gpt-5.4. Para auditar: verificar manualmente "
-                        f"se ha cobranca real de irregularidade."
-                    ),
-                    "recomendacao"            : "Sem acao automatica. Auditar manualmente se relevante.",
-                }
-                n_skip_f12 += 1
-                log.info(f"    [SKIP] {conv} apenas — REFUTADO sem 5.4")
-                conn, cur = gravar_resultado(cur, conn, fatura, triagem, decisao, dry_run)
-                continue
-
-            # Baixa PDF e converte em imagens
             imagens = []
             link    = fatura.get("link", "")
             if link:
@@ -1017,22 +1153,20 @@ def rodar_ia(empresas: list[int] | None, top_n: int | None, dry_run: bool, force
                 if pdf_bytes:
                     imagens = pdf_para_imagens(pdf_bytes)
 
-            decisao = chamar_decisao(client, fatura, triagem, imagens, prompt_confirmar)
+            decisao, texto_decisao_raw = chamar_decisao(client, fatura, triagem, imagens, prompt_confirmar)
 
             if imagens:
                 n_img += 1
             else:
                 n_txt += 1
-            if not conv:
-                n_sem_conv += 1
 
-            conn, cur = gravar_resultado(cur, conn, fatura, triagem, decisao, dry_run)
+            conn, cur = gravar_resultado(cur, conn, fatura, triagem, decisao, dry_run,
+                                         texto_decisao_raw=texto_decisao_raw)
 
-        log.info(
-            f"\n[OK] Rodada 2 concluída: "
-            f"{n_img} com imagem | {n_txt} texto | {n_sem_conv} sem convergencia | "
-            f"{n_skip_f12} skip baixa precisao (sem 5.4)"
-        )
+        log.info(f"\n[OK] Rodada 2 concluída: {n_img} com imagem | {n_txt} texto")
+
+        if batch and not dry_run:
+            _clear_batch_state()
 
     except Exception as e:
         log.error(f"Erro no Passo 2+3: {e}", exc_info=True)
@@ -1040,6 +1174,186 @@ def rodar_ia(empresas: list[int] | None, top_n: int | None, dry_run: bool, force
     finally:
         cur.close()
         conn.close()
+        _log_uso_total("rodar_ia")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMPLETAR CAMPOS — gpt-5 lê textos extraídos e preenche/corrige campos
+# ═══════════════════════════════════════════════════════════════════════════════
+
+MODELO_CAMPOS = "gpt-5"
+
+# Palavras que NUNCA são um número de medidor válido
+_MEDIDOR_BLOCKLIST = frozenset({
+    "grandezas", "único", "unico", "postos", "tarifários", "tarifarios",
+    "enrg", "atv", "kwh", "medidor", "leitura", "anterior", "atual",
+    "consumo", "constante", "ponta", "conjunto", "grandeza", "n/a",
+})
+
+_CAMPOS_TEMPLATE_CAMPOS = """{
+  "numero_medidor":      null,
+  "leitura_anterior_p":  null,
+  "leitura_atual_p":     null,
+  "constante_p":         null,
+  "kwh_total":           null,
+  "tarifa_te":           null,
+  "tarifa_tusd":         null,
+  "tipo_bandeira":       null,
+  "valor_bandeira":      null,
+  "cip_rs":              null,
+  "base_icms_rs":        null,
+  "icms_aliq":           null,
+  "icms_rs":             null,
+  "pis_aliq":            null,
+  "pis_rs":              null,
+  "cofins_aliq":         null,
+  "cofins_rs":           null,
+  "tensao_fornecimento": null,
+  "subgrupo_tarifario":  null,
+  "total_rs":            null,
+  "total_itens_rs":      null
+}"""
+
+
+def _chamar_completar_campos(client: OpenAI, uid: str,
+                              texto_plumber: str, texto_markdown: str,
+                              texto_ocr: str, analise_ia: str) -> dict:
+    """Chama MODELO_CAMPOS para extrair/corrigir campos estruturados da fatura.
+    Usa prompt_confirmar.txt como base de conhecimento (mesma fonte de verdade do pipeline).
+    """
+    system_msg = (
+        _PROMPT_PATH.read_text(encoding="utf-8")
+        if _PROMPT_PATH.exists()
+        else "Você é um extrator preciso de campos de faturas de energia elétrica brasileiras."
+    )
+
+    partes = []
+    melhor = texto_plumber or texto_markdown or texto_ocr
+    if melhor:
+        partes.append(f"=== TEXTO DA FATURA ===\n{melhor[:9000]}")
+    if analise_ia:
+        partes.append(f"=== ANÁLISE PRÉVIA (IA) ===\n{analise_ia[:2000]}")
+
+    if not partes:
+        return {}
+
+    user_msg = (
+        "\n\n".join(partes)
+        + f"\n\nExtraia os campos abaixo. Retorne APENAS o JSON preenchido (sem texto extra):\n{_CAMPOS_TEMPLATE_CAMPOS}"
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model=MODELO_CAMPOS,
+            temperature=0,
+            max_tokens=800,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user",   "content": user_msg},
+            ],
+        )
+        raw = resp.choices[0].message.content or ""
+        m = re.search(r"\{[\s\S]+\}", raw)
+        if not m:
+            log.warning(f"  [completar-campos] uid={uid}: sem JSON na resposta")
+            return {}
+        campos = json.loads(m.group(0))
+
+        # Valida numero_medidor: rejeita palavras genéricas do cabeçalho da tabela
+        med = campos.get("numero_medidor")
+        if med and str(med).strip().lower() in _MEDIDOR_BLOCKLIST:
+            log.warning(f"  [completar-campos] uid={uid}: numero_medidor rejeitado ('{med}') — blocklist")
+            campos["numero_medidor"] = None
+
+        return campos
+    except Exception as e:
+        log.warning(f"  [completar-campos] uid={uid}: erro GPT — {e}")
+        return {}
+
+
+def rodar_completar_campos(empresas=None, top_n=None, dry_run=False, force=False):
+    """
+    Passo adicional: gpt-4.1-mini analisa textos extraídos + analise_ia e
+    preenche/corrige campos estruturados em FATURA_DADOS_EXTRAIDOS.
+
+    Uso:
+        python pipeline.py --completar-campos --empresa 189
+        python pipeline.py --completar-campos --empresa 189 --force   # reprocessa todos
+        python pipeline.py --completar-campos --empresa 189 --top 20  # limitar
+        python pipeline.py --completar-campos --empresa 189 --dry-run
+    """
+    conn, cur = _conectar()
+    client    = OpenAI(api_key=API_KEY)
+
+    filtros = ["fde.texto_plumber IS NOT NULL"]
+    params  = []
+
+    if empresas:
+        filtros.append(f"fde.cod_empresa IN ({','.join(['%s']*len(empresas))})")
+        params += list(empresas)
+
+    if not force:
+        # Sem --force: só processa quem tem ao menos um campo crítico em NULL
+        filtros.append(
+            "(fde.tarifa_te IS NULL OR fde.tarifa_tusd IS NULL "
+            "OR fde.leit_ant_ativa_ponta IS NULL OR fde.valor_bandeira IS NULL "
+            "OR fde.numero_medidor IS NULL)"
+        )
+
+    where   = " AND ".join(filtros)
+    lim_sql = f"LIMIT {top_n}" if top_n else ""
+
+    cur.execute(f"""
+        SELECT fde.id, fde.uid, fde.cod_empresa, fde.link_fatura,
+               fde.texto_plumber, fde.texto_markdown, fde.texto_ocr, fde.analise_ia
+        FROM FATURA_DADOS_EXTRAIDOS fde
+        WHERE {where}
+        ORDER BY fde.id DESC
+        {lim_sql}
+    """, params)
+    faturas = cur.fetchall()
+
+    log.info(f"[completar-campos] {len(faturas)} faturas para processar | modelo: {MODELO_CAMPOS}")
+
+    ok = erro = 0
+    for i, fat in enumerate(faturas, 1):
+        uid = fat["uid"]
+        log.info(f"  [{i}/{len(faturas)}] uid={uid} id={fat['id']}")
+
+        campos_gpt = _chamar_completar_campos(
+            client, uid,
+            fat.get("texto_plumber") or "",
+            fat.get("texto_markdown") or "",
+            fat.get("texto_ocr") or "",
+            fat.get("analise_ia") or "",
+        )
+
+        if not campos_gpt:
+            log.warning(f"    sem campos extraídos")
+            erro += 1
+            continue
+
+        preenchidos = [k for k, v in campos_gpt.items() if v is not None]
+        log.info(f"    {len(preenchidos)} campos: {preenchidos}")
+
+        if not dry_run:
+            try:
+                conn.ping(reconnect=True, attempts=3, delay=2)
+            except Exception:
+                conn, cur = _reconectar()
+
+            _gravar_ia_dados_extraidos(
+                cur, conn, fat["id"], campos_gpt,
+                distribuidora=None, uc=None,
+                uid=uid,
+                link=fat.get("link_fatura"),
+                cod_empresa=fat.get("cod_empresa"),
+            )
+        ok += 1
+
+    log.info(f"\n[completar-campos] concluído: {ok} ok | {erro} erro | {len(faturas)} total")
+    cur.close()
+    conn.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1048,44 +1362,83 @@ def rodar_ia(empresas: list[int] | None, top_n: int | None, dry_run: bool, force
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Pipeline completo: motores SQL + triagem 4.1-mini + decisao gpt-5.4 com imagens"
+        description="Pipeline de auditoria: triagem 4o-mini (texto) + decisao 4.1-mini (imagem)"
     )
-    parser.add_argument("--empresa",        type=int, nargs="+", default=None,
+    parser.add_argument("--empresa",     type=int, nargs="+", default=None,
                         help="Filtrar por Cod_Empresa (ex: 14  ou  4 14 32)")
-    parser.add_argument("--top",            type=int, default=None,
-                        help="Limitar N faturas na etapa IA (padrão: todas)")
-    parser.add_argument("--dry-run",        action="store_true",
+    parser.add_argument("--top",         type=int, default=None,
+                        help="Limitar N faturas (padrão: todas)")
+    parser.add_argument("--dry-run",     action="store_true",
                         help="Executa sem gravar no banco")
-    parser.add_argument("--apenas-motores", action="store_true",
-                        help="Executa somente o Passo 1 (SQL)")
-    parser.add_argument("--apenas-ia",      action="store_true",
-                        help="Executa somente o Passo 2+3 (IA), motores ja rodaram")
-    parser.add_argument("--force",          action="store_true",
+    parser.add_argument("--force",       action="store_true",
                         help="Reprocessa mesmo quem ja tem resultado_analises preenchido")
-    parser.add_argument("--retry-erros",    action="store_true",
-                        help="Reprocessa faturas com decisao_final invalido (ERRO, NEGADO, etc) via gpt-5.4 com imagens")
+    parser.add_argument("--batch",       action="store_true",
+                        help="Triagem via Batch API (50%% desc, até 24h)")
+    parser.add_argument("--retomar",     action="store_true",
+                        help="Aproveita batches ja submetidos (usa .pipeline_state/triagem_state.json)")
+    parser.add_argument("--retry-erros", action="store_true",
+                        help="Reprocessa faturas com decisao_final invalido (ERRO, NEGADO, etc) com imagens")
+    parser.add_argument("--modelo", type=str, default=None, metavar="MODELO",
+                        help="Modelo para análise com imagens (default: gpt-4.1-mini). Ex: --modelo 5.4")
+    parser.add_argument("--completar-campos", action="store_true",
+                        help="gpt-4.1-mini analisa textos extraídos e preenche/corrige campos da tabela")
+    parser.add_argument("--uid-arquivo", type=str, default=None, metavar="ARQUIVO",
+                        help="Arquivo .txt com uma UID por linha — reprocessa somente esses registros")
+    parser.add_argument("--id", type=int, nargs="+", default=None, metavar="ID",
+                        help="IDs específicos de FATURA_DADOS_EXTRAIDOS (ex: --id 274 ou --id 274 310)")
+    parser.add_argument("--com-triagem", action="store_true",
+                        help="Ativa Passo 1 de extração de campos via texto (desativado por padrão)")
+    parser.add_argument("--flex", action="store_true",
+                        help="Usa service_tier=flex (menor custo, maior latência)")
     args = parser.parse_args()
+
+    global MODELO_DECISAO, SERVICE_TIER
+    if args.modelo:
+        MODELO_DECISAO = args.modelo if args.modelo.startswith("gpt-") else f"gpt-{args.modelo}"
+    if args.flex:
+        SERVICE_TIER = "flex"
+
+    # Carrega lista de UIDs se --uid-arquivo foi passado
+    uid_lista: list[str] | None = None
+    if args.uid_arquivo:
+        uid_path = Path(args.uid_arquivo)
+        if not uid_path.exists():
+            log.error(f"[ERRO] Arquivo de UIDs nao encontrado: {uid_path}")
+            return
+        uid_lista = [u.strip() for u in uid_path.read_text(encoding="utf-8").splitlines() if u.strip()]
+        log.info(f"  UID-arquivo : {uid_path} ({len(uid_lista)} UIDs)")
+
+    # --id: IDs diretos de FATURA_DADOS_EXTRAIDOS
+    id_lista: list[int] | None = args.id if args.id else None
 
     log.info("=" * 70)
     log.info("PIPELINE DE AUDITORIA DE FATURAS")
-    log.info(f"  Empresas     : {args.empresa or 'todas'}")
-    log.info(f"  Top N        : {args.top or 'todas'}")
-    log.info(f"  Dry-run      : {args.dry_run}")
-    log.info(f"  Force        : {args.force}")
-    log.info(f"  Retry erros  : {args.retry_erros}")
-    log.info(f"  Modo         : {'apenas-motores' if args.apenas_motores else 'apenas-ia' if args.apenas_ia else 'completo'}")
+    log.info(f"  Empresas    : {args.empresa or 'todas'}")
+    log.info(f"  Top N       : {args.top or 'todas'}")
+    log.info(f"  Dry-run     : {args.dry_run}")
+    log.info(f"  Force       : {args.force}")
+    log.info(f"  Triagem     : {'BATCH' if args.batch else 'SYNC'}")
+    log.info(f"  Retry erros : {args.retry_erros}")
+    log.info(f"  Modelo imagem: {MODELO_DECISAO}")
+    log.info(f"  UID-lista   : {len(uid_lista) if uid_lista else 'N/A'}")
+    log.info(f"  ID-lista    : {id_lista or 'N/A'}")
+    log.info(f"  Com triagem : {args.com_triagem}")
+    log.info(f"  Service tier: {SERVICE_TIER}")
     log.info("=" * 70)
 
-    # Modo retry: só reprocessa os com ERRO, ignora os outros flags
     if args.retry_erros:
         rodar_retry_erros(empresas=args.empresa, dry_run=args.dry_run)
         return
 
-    if not args.apenas_ia:
-        rodar_motores_sql(empresas=args.empresa, dry_run=args.dry_run)
+    if args.completar_campos:
+        rodar_completar_campos(empresas=args.empresa, top_n=args.top,
+                               dry_run=args.dry_run, force=args.force)
+        return
 
-    if not args.apenas_motores:
-        rodar_ia(empresas=args.empresa, top_n=args.top, dry_run=args.dry_run, force=args.force)
+    rodar_ia(empresas=args.empresa, top_n=args.top, dry_run=args.dry_run,
+             force=args.force, batch=args.batch, retomar=args.retomar,
+             uid_lista=uid_lista, id_lista=id_lista,
+             sem_triagem=not args.com_triagem)
 
     log.info("\nPipeline concluido.")
 

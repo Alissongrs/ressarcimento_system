@@ -336,32 +336,56 @@ function RiscoMatrizChart({ rows }) {
    Histórico Drawer (gráfico de barras com onClick)
    ──────────────────────────────────────────────────────────────────────────── */
 
-function MiniChart({ titulo, dados, dataKey, cor, onBarClick, formatTip }) {
+function MiniChart({ titulo, dados, dataKey, cor, onBarClick, formatTip, media }) {
   const Tip = ({ active, payload }) => {
     if (!active || !payload?.length) return null;
     const d = payload[0]?.payload;
+    const val = d[dataKey] ?? 0;
+    const devPct = media > 0 ? ((val - media) / media * 100) : null;
     return (
       <div className="rounded border bg-[#0d1a2e] border-blue-500/40 px-3 py-2 text-xs">
         <div className="font-mono font-bold text-blue-300">{d.mes}</div>
-        <div className="font-semibold">{formatTip ? formatTip(d[dataKey]) : d[dataKey]}</div>
+        <div className="font-semibold">{formatTip ? formatTip(val) : val}</div>
+        {devPct !== null && (
+          <div className={`text-[10px] mt-1 ${Math.abs(devPct) > 50 ? 'text-orange-400 font-semibold' : 'opacity-60'}`}>
+            {devPct >= 0 ? '+' : ''}{devPct.toFixed(0)}% vs média ({formatTip ? formatTip(media) : media.toFixed(0)})
+          </div>
+        )}
         {d.link && <div className="text-[10px] opacity-60 mt-1">clique para abrir fatura</div>}
       </div>
     );
   };
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] p-3">
-      <div className="text-[11px] opacity-60 mb-2">{titulo}</div>
+      <div className="text-[11px] opacity-60 mb-2 flex items-center gap-2">
+        {titulo}
+        {media > 0 && (
+          <span className="ml-auto text-[10px] text-amber-400 opacity-80">
+            — média: {formatTip ? formatTip(media) : media.toFixed(0)}
+          </span>
+        )}
+      </div>
       <ResponsiveContainer width="100%" height={180}>
-        <ComposedChart data={dados} margin={{ top: 6, right: 12, bottom: 24, left: 4 }}>
+        <ComposedChart data={dados} margin={{ top: 6, right: 40, bottom: 24, left: 4 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
           <XAxis dataKey="mes" tick={{ fontSize: 9, fill: '#94a3b8' }} angle={-30} textAnchor="end" height={42}/>
           <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }}
             tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v.toString()}/>
           <Tooltip content={<Tip />} />
+          {media > 0 && (
+            <ReferenceLine y={media} stroke="#f59e0b" strokeDasharray="4 2" strokeWidth={1.5}
+              label={{ value: 'média', fill: '#f59e0b', fontSize: 9, position: 'insideRight' }} />
+          )}
           <Bar dataKey={dataKey} fill={cor} radius={[3, 3, 0, 0]} onClick={onBarClick} cursor="pointer">
-            {dados.map((d, i) => (
-              <Cell key={i} fill={d.link ? cor : '#475569'} />
-            ))}
+            {dados.map((d, i) => {
+              let fill = d.link ? cor : '#475569';
+              if (media > 0) {
+                const dev = (d[dataKey] - media) / media;
+                if (dev > 1.0 || dev < -0.9) fill = '#ef4444';
+                else if (dev > 0.5 || dev < -0.5) fill = '#f97316';
+              }
+              return <Cell key={i} fill={fill} />;
+            })}
           </Bar>
         </ComposedChart>
       </ResponsiveContainer>
@@ -374,10 +398,11 @@ function HistoricoDrawer({ uc, onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Fonte: FATURA_DADOS_EXTRAIDOS (db_ressarcimento)
   useEffect(() => {
     if (!uc) return;
     setLoading(true); setError('');
-    apiClient.get('/api/v1/faturas/uc-historico', { params: { uc } })
+    apiClient.get('/api/v1/faturas/fde-uc-historico', { params: { uc } })
       .then(r => setRows(r.data?.rows ?? []))
       .catch(() => setError('Erro ao carregar histórico'))
       .finally(() => setLoading(false));
@@ -386,31 +411,22 @@ function HistoricoDrawer({ uc, onClose }) {
   const data = useMemo(() => {
     return [...rows]
       .map(r => ({
-        mes: String(r.Mes_Ref ?? '').slice(0, 7),
-        valor: parseFloat(r.RS_Total_Fatura ?? 0) || 0,
-        kwhP: parseFloat(r.KWH_Ponta ?? 0) || 0,
-        kwhFP: parseFloat(r.KWH_FPonta ?? 0) || 0,
-        kwhR: parseFloat(r.KWH_Reservado ?? 0) || 0,
+        mes:      String(r.Mes_Ref ?? '').slice(0, 7),
+        valor:    parseFloat(r.RS_Total_Fatura ?? 0) || 0,
         kwhTotal: parseFloat(r.KWH_Total ?? 0) || 0,
-        link: getRowLink(r),
-        id: r.id,
+        link:     String(r.Link ?? '').trim(),
+        id:       r.id,
       }))
       .filter(d => d.mes)
       .sort((a, b) => a.mes.localeCompare(b.mes));
   }, [rows]);
 
-  // Detecta se a UC tem multi-tarifa (Verde/Azul) com ponta+fora ponta+(reservado opcional)
-  const temPonta     = useMemo(() => data.some(d => d.kwhP > 0),  [data]);
-  const temForaPonta = useMemo(() => data.some(d => d.kwhFP > 0), [data]);
-  const temReservado = useMemo(() => data.some(d => d.kwhR > 0), [data]);
-  const isMultiTarifa = temPonta || temReservado; // se só tem fora ponta, é convencional
+  const mediaValor    = useMemo(() => { const vs = data.filter(d => d.valor > 0).map(d => d.valor);       return vs.length ? vs.reduce((a,b)=>a+b,0)/vs.length : 0; }, [data]);
+  const mediaKwhTotal = useMemo(() => { const vs = data.filter(d => d.kwhTotal > 0).map(d => d.kwhTotal); return vs.length ? vs.reduce((a,b)=>a+b,0)/vs.length : 0; }, [data]);
 
   const handleBarClick = useCallback((p) => {
     const link = p?.payload?.link;
-    if (!link) {
-      alert('Esta fatura não tem PDF vinculado.');
-      return;
-    }
+    if (!link) { alert('Esta fatura não tem PDF vinculado.'); return; }
     window.open(link, '_blank', 'noopener,noreferrer');
   }, []);
 
@@ -419,62 +435,37 @@ function HistoricoDrawer({ uc, onClose }) {
   return (
     <div className="fixed inset-0 z-[9999] flex justify-end bg-black/60" onClick={onClose}>
       <div
-        className="w-full max-w-4xl bg-[var(--bg)] flex flex-col border-l border-[var(--border)] h-full"
+        className="w-full max-w-3xl bg-[var(--bg)] flex flex-col border-l border-[var(--border)] h-full"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]"
           style={{ background: 'linear-gradient(135deg, #1e3a5f, #0f2340)' }}>
           <div>
-            <div className="text-white font-bold text-sm">Histórico da UC</div>
-            <div className="text-white/50 text-xs font-mono mt-0.5">
-              {uc} {isMultiTarifa && <span className="ml-2 px-1.5 py-0.5 rounded bg-blue-500/30 text-blue-200">multi-tarifa</span>}
-            </div>
+            <div className="text-white font-bold text-sm">Histórico da UC — FATURA_DADOS_EXTRAIDOS</div>
+            <div className="text-white/50 text-xs font-mono mt-0.5">{uc}</div>
           </div>
           <button onClick={onClose} className="text-white/60 hover:text-white text-xl leading-none px-2">×</button>
         </div>
 
         <div className="flex-1 overflow-auto p-5 space-y-3">
           {loading && <div className="text-sm opacity-60 py-8 text-center">Carregando histórico...</div>}
-          {error && <div className="text-sm text-red-400 py-8 text-center">{error}</div>}
+          {error   && <div className="text-sm text-red-400 py-8 text-center">{error}</div>}
           {!loading && !error && data.length === 0 && (
             <div className="text-sm opacity-60 py-8 text-center">Sem histórico disponível para esta UC.</div>
           )}
           {!loading && !error && data.length > 0 && (
             <>
-              {/* Valor R$ — sempre */}
               <MiniChart
                 titulo="VALOR DA FATURA · clique numa barra para abrir o PDF"
                 dados={data} dataKey="valor" cor="#3b82f6"
-                onBarClick={handleBarClick}
-                formatTip={fmtCurrency}
+                onBarClick={handleBarClick} formatTip={fmtCurrency} media={mediaValor}
+              />
+              <MiniChart
+                titulo="kWh TOTAL"
+                dados={data} dataKey="kwhTotal" cor="#f59e0b"
+                onBarClick={handleBarClick} formatTip={fmtKwh} media={mediaKwhTotal}
               />
 
-              {/* Multi-tarifa: separados */}
-              {isMultiTarifa ? (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                  {temForaPonta && (
-                    <MiniChart titulo="kWh FORA PONTA"
-                      dados={data} dataKey="kwhFP" cor="#0e9f6e"
-                      onBarClick={handleBarClick} formatTip={fmtKwh}/>
-                  )}
-                  {temPonta && (
-                    <MiniChart titulo="kWh PONTA"
-                      dados={data} dataKey="kwhP" cor="#dc2626"
-                      onBarClick={handleBarClick} formatTip={fmtKwh}/>
-                  )}
-                  {temReservado && (
-                    <MiniChart titulo="kWh RESERVADO"
-                      dados={data} dataKey="kwhR" cor="#7c3aed"
-                      onBarClick={handleBarClick} formatTip={fmtKwh}/>
-                  )}
-                </div>
-              ) : (
-                <MiniChart titulo="kWh TOTAL"
-                  dados={data} dataKey={temForaPonta ? 'kwhFP' : 'kwhTotal'} cor="#f59e0b"
-                  onBarClick={handleBarClick} formatTip={fmtKwh}/>
-              )}
-
-              {/* Tabela completa */}
               <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)]">
                 <div className="text-[11px] opacity-60 px-3 py-2 border-b border-[var(--border)]">
                   TODAS AS FATURAS · {data.length}
@@ -484,11 +475,8 @@ function HistoricoDrawer({ uc, onClose }) {
                     <thead className="bg-[var(--bg)] sticky top-0">
                       <tr>
                         <th className="px-3 py-2 text-left">Mês</th>
-                        <th className="px-3 py-2 text-right">Valor</th>
-                        {temForaPonta && <th className="px-3 py-2 text-right">FP</th>}
-                        {temPonta     && <th className="px-3 py-2 text-right">P</th>}
-                        {temReservado && <th className="px-3 py-2 text-right">R</th>}
-                        {!isMultiTarifa && !temForaPonta && <th className="px-3 py-2 text-right">kWh</th>}
+                        <th className="px-3 py-2 text-right">Valor R$</th>
+                        <th className="px-3 py-2 text-right">kWh Total</th>
                         <th className="px-3 py-2 text-center">PDF</th>
                       </tr>
                     </thead>
@@ -497,12 +485,9 @@ function HistoricoDrawer({ uc, onClose }) {
                         <tr key={d.id} className="border-t border-[var(--border)]">
                           <td className="px-3 py-2 font-mono">{d.mes}</td>
                           <td className="px-3 py-2 text-right">{fmtCurrency(d.valor)}</td>
-                          {temForaPonta && <td className="px-3 py-2 text-right font-mono">{d.kwhFP.toLocaleString('pt-BR')}</td>}
-                          {temPonta     && <td className="px-3 py-2 text-right font-mono">{d.kwhP.toLocaleString('pt-BR')}</td>}
-                          {temReservado && <td className="px-3 py-2 text-right font-mono">{d.kwhR.toLocaleString('pt-BR')}</td>}
-                          {!isMultiTarifa && !temForaPonta && (
-                            <td className="px-3 py-2 text-right font-mono">{d.kwhTotal.toLocaleString('pt-BR')}</td>
-                          )}
+                          <td className="px-3 py-2 text-right font-mono">
+                            {d.kwhTotal > 0 ? d.kwhTotal.toLocaleString('pt-BR') : '—'}
+                          </td>
                           <td className="px-3 py-2 text-center">
                             {d.link
                               ? <a href={d.link} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">abrir</a>
@@ -534,7 +519,6 @@ function AnaliseIAModal({ row, onClose, onReprocessed }) {
   const analise = parseAnalises(row?.resultado_analises);
   const triagem = analise?.triagem_confirmar;
   const apontamentos = analise?.ia_4_1_apontamentos;
-  const motoresSql = analise?.motores_sql;
 
   const handleReprocessar = useCallback(async () => {
     setReprocessing(true); setError(''); setSuccess('');
@@ -548,10 +532,6 @@ function AnaliseIAModal({ row, onClose, onReprocessed }) {
       setReprocessing(false);
     }
   }, [row?.id, onReprocessed]);
-
-  const fichasMotores = motoresSql
-    ? [...new Set([...(motoresSql.f01_f05?.fichas ?? []), ...(motoresSql.f06_f14?.fichas ?? [])])]
-    : [];
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60" onClick={onClose}>
@@ -635,14 +615,7 @@ function AnaliseIAModal({ row, onClose, onReprocessed }) {
             </div>
           )}
 
-          {fichasMotores.length > 0 && (
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
-              <div className="text-[11px] opacity-60 mb-1">MOTORES SQL · regras determinísticas</div>
-              <FichasBadge fichas={fichasMotores} />
-            </div>
-          )}
-
-          {error && <div className="text-sm text-red-400">{error}</div>}
+          {error &&<div className="text-sm text-red-400">{error}</div>}
           {success && <div className="text-sm text-green-400">{success}</div>}
         </div>
 
@@ -904,8 +877,6 @@ export default function AnaliseDesvio() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showMatriz, setShowMatriz] = useState(true);
-  // Apontados: 'pendentes' (sem IA), 'processados' (com IA), 'todos'
-  const [filtroApontados, setFiltroApontados] = useState('pendentes');
   // Ordenação da tabela: { col, dir } onde dir = 'asc' | 'desc'
   const [sort, setSort] = useState({ col: 'id', dir: 'desc' });
 
@@ -943,9 +914,9 @@ export default function AnaliseDesvio() {
   const [modalReq, setModalReq] = useState(null);
   const [drawerHist, setDrawerHist] = useState(null);
 
-  // Carrega contagem por ficha
+  // Carrega contagem de fichas por tipo a partir de FATURA_DADOS_EXTRAIDOS
   useEffect(() => {
-    apiClient.get('/api/v1/faturas/ficha/resumo')
+    apiClient.get('/api/v1/faturas/fde-ficha-resumo')
       .then(r => {
         const c = {};
         (r.data?.fichas ?? []).forEach(f => { c[f.key] = f.total; });
@@ -954,69 +925,44 @@ export default function AnaliseDesvio() {
       .catch(() => {});
   }, []);
 
-  // Carrega rows ao mudar tab/ficha/filtros
+  // Carrega rows ao mudar tab/ficha/filtros — fonte: FATURA_DADOS_EXTRAIDOS via /fde-analise
   const reload = useCallback(async () => {
     setLoading(true); setError('');
+    const abaApontados = tab === 'apontados';
     try {
-      if (tab === 'apontados') {
-        const f = FICHAS.find(x => x.id === ficha);
-        const params = {
-          limit: 2000,
-          empresa: filtros.empresa || undefined,
-          busca: filtros.busca || undefined,
-          valor_min: filtros.valorMin || undefined,
-          valor_max: filtros.valorMax || undefined,
-          desvio_min: filtros.desvioMin || undefined,
-          periodo_inicio: filtros.periodoIni || undefined,
-          periodo_fim: filtros.periodoFim || undefined,
-        };
+      const params = {
+        limit: 2000,
+        empresa: filtros.empresa || undefined,
+        // Aba Apontados: filtra pela ficha selecionada; outras abas: filtra pelo status da decisão
+        ficha:  abaApontados ? ficha.toUpperCase() : undefined,
+        status: !abaApontados ? STATUS_POR_TAB[tab] : undefined,
+      };
 
-        // O endpoint já retorna resultado_analises direto da Faturas_Registradas_Cache.
-        const apontadosRes = await apiClient.get(f.endpoint, { params });
-        let data = apontadosRes.data?.rows ?? apontadosRes.data?.data ?? apontadosRes.data ?? [];
-        if (!Array.isArray(data)) data = [];
+      const res = await apiClient.get('/api/v1/faturas/fde-analise', { params });
+      let data = Array.isArray(res.data) ? res.data : (res.data?.rows ?? []);
 
-        // Aplica filtro de status IA
-        if (filtroApontados === 'pendentes') {
-          data = data.filter(r => !r.resultado_analises);
-        } else if (filtroApontados === 'processados') {
-          data = data.filter(r => !!r.resultado_analises);
-        }
-
-        setRows(data);
-      } else {
-        const status = STATUS_POR_TAB[tab];
-        const params = {
-          status,
-          limit: 2000,
-          empresa: filtros.empresa || undefined,
-        };
-        const res = await apiClient.get('/api/v1/faturas/com-analise', { params });
-        let data = Array.isArray(res.data) ? res.data : (res.data?.rows ?? []);
-
-        // Filtros client-side adicionais
-        if (filtros.busca) {
-          const q = filtros.busca.toLowerCase();
-          data = data.filter(r =>
-            String(r.UC ?? '').toLowerCase().includes(q) ||
-            String(r.concessionaria ?? r.Concessionaria ?? '').toLowerCase().includes(q) ||
-            String(r.cliente ?? r.RAZAO_SOCIAL ?? '').toLowerCase().includes(q)
-          );
-        }
-        if (filtros.valorMin) data = data.filter(r => Number(r.valor ?? 0) >= Number(filtros.valorMin));
-        if (filtros.valorMax) data = data.filter(r => Number(r.valor ?? 0) <= Number(filtros.valorMax));
-        if (filtros.periodoIni) data = data.filter(r => String(r.mes_ref ?? r.Mes_Ref ?? '') >= filtros.periodoIni);
-        if (filtros.periodoFim) data = data.filter(r => String(r.mes_ref ?? r.Mes_Ref ?? '') <= filtros.periodoFim);
-
-        setRows(data);
+      // Filtros client-side: busca por texto, valor e período
+      if (filtros.busca) {
+        const q = filtros.busca.toLowerCase();
+        data = data.filter(r =>
+          String(r.UC ?? '').toLowerCase().includes(q) ||
+          String(r.Concessionaria ?? '').toLowerCase().includes(q) ||
+          String(r.RAZAO_SOCIAL ?? '').toLowerCase().includes(q)
+        );
       }
+      if (filtros.valorMin) data = data.filter(r => Number(r.RS_Total_Fatura ?? 0) >= Number(filtros.valorMin));
+      if (filtros.valorMax) data = data.filter(r => Number(r.RS_Total_Fatura ?? 0) <= Number(filtros.valorMax));
+      if (filtros.periodoIni) data = data.filter(r => String(r.Mes_Ref ?? '') >= filtros.periodoIni);
+      if (filtros.periodoFim) data = data.filter(r => String(r.Mes_Ref ?? '') <= filtros.periodoFim);
+
+      setRows(data);
     } catch (e) {
       setError(e?.response?.data?.error || 'Falha ao carregar faturas.');
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [tab, ficha, filtros, filtroApontados]);
+  }, [tab, ficha, filtros]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -1113,36 +1059,6 @@ export default function AnaliseDesvio() {
         mostrarFicha={isApontados}
       />
 
-      {/* Sub-filtro: status IA na aba Apontados */}
-      {isApontados && (
-        <div className="flex items-center gap-2 text-xs">
-          <span className="opacity-50">STATUS IA:</span>
-          {[
-            { id: 'pendentes',   label: 'Pendentes',   cor: '#f59e0b' },
-            { id: 'processados', label: 'Já analisados', cor: '#22c55e' },
-            { id: 'todos',       label: 'Todos',       cor: '#64748b' },
-          ].map(opt => {
-            const ativo = filtroApontados === opt.id;
-            return (
-              <button key={opt.id} onClick={() => setFiltroApontados(opt.id)}
-                className="px-3 py-1 rounded-full font-semibold transition"
-                style={{
-                  background: ativo ? opt.cor + '33' : 'transparent',
-                  color: ativo ? opt.cor : 'inherit',
-                  border: `1px solid ${ativo ? opt.cor + '88' : 'var(--border)'}`,
-                  opacity: ativo ? 1 : 0.55,
-                }}>
-                {opt.label}
-              </button>
-            );
-          })}
-          <span className="opacity-40 ml-2">
-            {filtroApontados === 'pendentes' && '(faturas com anomalia detectada que ainda não passaram pelo pipeline IA)'}
-            {filtroApontados === 'processados' && '(apontados que já receberam decisão da IA)'}
-            {filtroApontados === 'todos' && '(todas as faturas com anomalia detectada)'}
-          </span>
-        </div>
-      )}
 
       {/* Cards resumo */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1157,7 +1073,7 @@ export default function AnaliseDesvio() {
         {isApontados && (
           <>
             <Card label="Ficha selecionada" value={ficha.toUpperCase()} cor={FICHAS.find(f => f.id === ficha)?.cor}/>
-            <Card label="Aguardando análise IA" value={resumo.total} cor="#f59e0b"/>
+            <Card label="Total apontado pela IA" value={resumo.total} cor="#f59e0b"/>
           </>
         )}
       </div>

@@ -3,6 +3,7 @@ import DOMPurify from 'dompurify';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { useLocation } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   Archive,
   FileText,
@@ -142,6 +143,92 @@ const initials = (nameOrEmail = '') => {
   const parts = s.split(/\s+/).filter(Boolean);
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();
+};
+
+// Paleta determinística para avatares — tons coordenados com tema escuro
+const AVATAR_PALETTE = [
+  { bg: 'bg-blue-500/30', ring: 'ring-blue-400/40', text: 'text-blue-100' },
+  { bg: 'bg-emerald-500/30', ring: 'ring-emerald-400/40', text: 'text-emerald-100' },
+  { bg: 'bg-amber-500/30', ring: 'ring-amber-400/40', text: 'text-amber-100' },
+  { bg: 'bg-rose-500/30', ring: 'ring-rose-400/40', text: 'text-rose-100' },
+  { bg: 'bg-violet-500/30', ring: 'ring-violet-400/40', text: 'text-violet-100' },
+  { bg: 'bg-cyan-500/30', ring: 'ring-cyan-400/40', text: 'text-cyan-100' },
+  { bg: 'bg-fuchsia-500/30', ring: 'ring-fuchsia-400/40', text: 'text-fuchsia-100' },
+  { bg: 'bg-lime-500/30', ring: 'ring-lime-400/40', text: 'text-lime-100' },
+];
+
+const avatarColorFor = (str = '') => {
+  const s = String(str || '');
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = (hash * 31 + s.charCodeAt(i)) | 0;
+  }
+  return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+};
+
+// Bucket de datas para sticky headers ("Hoje", "Ontem", etc.)
+const dateBucketOf = (iso) => {
+  if (!iso) return 'mais-antigos';
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return 'mais-antigos';
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfWeek.getDate() - 6);
+  if (dt >= startOfToday) return 'hoje';
+  if (dt >= startOfYesterday) return 'ontem';
+  if (dt >= startOfWeek) return 'esta-semana';
+  return 'mais-antigos';
+};
+
+const DATE_BUCKET_LABEL = {
+  hoje: 'Hoje',
+  ontem: 'Ontem',
+  'esta-semana': 'Esta semana',
+  'mais-antigos': 'Mais antigos',
+};
+
+const DATE_BUCKET_ORDER = ['hoje', 'ontem', 'esta-semana', 'mais-antigos'];
+
+// Formata tamanho de arquivo em humano-legível
+const formatFileSize = (bytes) => {
+  if (bytes == null || Number.isNaN(Number(bytes))) return '';
+  const n = Number(bytes);
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+};
+
+// Mapeia extensão/MIME → tom + label para card de anexo
+const attachmentMetaFor = (att) => {
+  const name = String(att?.name || '').toLowerCase();
+  const ct = String(att?.content_type || '').toLowerCase();
+  const ext = name.includes('.') ? name.split('.').pop() : '';
+  if (ct.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) {
+    return { tone: 'bg-blue-500/20 text-blue-200 border-blue-500/30', label: 'Imagem', short: ext.toUpperCase() || 'IMG' };
+  }
+  if (ct === 'application/pdf' || ext === 'pdf') {
+    return { tone: 'bg-rose-500/20 text-rose-200 border-rose-500/30', label: 'PDF', short: 'PDF' };
+  }
+  if (['xls', 'xlsx', 'csv'].includes(ext) || ct.includes('spreadsheet') || ct.includes('excel')) {
+    return { tone: 'bg-emerald-500/20 text-emerald-200 border-emerald-500/30', label: 'Planilha', short: ext.toUpperCase() };
+  }
+  if (['doc', 'docx', 'rtf', 'odt'].includes(ext) || ct.includes('word')) {
+    return { tone: 'bg-sky-500/20 text-sky-200 border-sky-500/30', label: 'Documento', short: ext.toUpperCase() };
+  }
+  if (['ppt', 'pptx'].includes(ext) || ct.includes('presentation')) {
+    return { tone: 'bg-amber-500/20 text-amber-200 border-amber-500/30', label: 'Apresentação', short: ext.toUpperCase() };
+  }
+  if (['zip', '7z', 'rar', 'tar', 'gz'].includes(ext)) {
+    return { tone: 'bg-violet-500/20 text-violet-200 border-violet-500/30', label: 'Arquivo', short: ext.toUpperCase() };
+  }
+  if (['txt', 'md', 'log'].includes(ext) || ct.startsWith('text/')) {
+    return { tone: 'bg-slate-500/20 text-slate-200 border-slate-500/30', label: 'Texto', short: ext.toUpperCase() || 'TXT' };
+  }
+  return { tone: 'bg-[var(--muted)]/30 text-[var(--fg)] border-[var(--border)]/40', label: 'Arquivo', short: (ext || 'FILE').toUpperCase().slice(0, 4) };
 };
 
 const QUILL_MODULES = {
@@ -1166,6 +1253,7 @@ const CaixaDeEmail = () => {
     }
   }, [location.search]);
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [folders, setFolders] = useState([]);
   const [activeFolder, setActiveFolder] = useState(null);
 
@@ -1183,11 +1271,9 @@ const CaixaDeEmail = () => {
   const [attachments, setAttachments] = useState([]);
   const [bodyHtml, setBodyHtml] = useState('');
   const [inlineBusy, setInlineBusy] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [inlineImagesEnabled, setInlineImagesEnabled] = useState(false);
 
-  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [onlyUnread, setOnlyUnread] = useState(false);
 
@@ -1210,8 +1296,13 @@ const CaixaDeEmail = () => {
   // thread grouping
   const [groupByThread, setGroupByThread] = useState(true);
 
-  // manual refresh trigger
-  const [reloadSeq, setReloadSeq] = useState(0);
+  // densidade da lista — 'comfortable' | 'compact'
+  const [density, setDensity] = useState('comfortable');
+
+  // filtros adicionais
+  const [hasAttachmentFilter, setHasAttachmentFilter] = useState(false);
+  const [linkedFilter, setLinkedFilter] = useState(false);
+  const [last7Filter, setLast7Filter] = useState(false);
 
   // resizable columns
   const [sidebarW, setSidebarW] = useState(280);
@@ -1257,6 +1348,9 @@ const CaixaDeEmail = () => {
       if (parsed?.sidebarW) setSidebarW(parsed.sidebarW);
       if (parsed?.listW) setListW(parsed.listW);
       if (typeof parsed?.groupByThread === 'boolean') setGroupByThread(parsed.groupByThread);
+      if (parsed?.density === 'compact' || parsed?.density === 'comfortable') {
+        setDensity(parsed.density);
+      }
     } catch {
       // ignore
     }
@@ -1264,11 +1358,14 @@ const CaixaDeEmail = () => {
 
   useEffect(() => {
     try {
-      localStorage.setItem('mail_layout_v1', JSON.stringify({ sidebarW, listW, groupByThread }));
+      localStorage.setItem(
+        'mail_layout_v1',
+        JSON.stringify({ sidebarW, listW, groupByThread, density })
+      );
     } catch {
       // ignore
     }
-  }, [sidebarW, listW, groupByThread]);
+  }, [sidebarW, listW, groupByThread, density]);
 
   useEffect(() => {
     let mounted = true;
@@ -1401,35 +1498,43 @@ const CaixaDeEmail = () => {
     return target?.id || '';
   }, [folders]);
 
+  // LOAD FOLDERS — useQuery; pastas raramente mudam
+  const foldersQuery = useQuery({
+    queryKey: ['mail-folders'],
+    queryFn: async () => {
+      const rawList = await getMailFolders();
+      return sortFoldersForUi(dedupeFoldersByLabel(rawList));
+    },
+    staleTime: 5 * 60_000,
+  });
+
   useEffect(() => {
-    let ignore = false;
-    (async () => {
-      try {
-        const rawList = await getMailFolders();
-        const list = sortFoldersForUi(dedupeFoldersByLabel(rawList));
-        if (ignore) return;
-        setFolders(list);
-        const inbox = list.find((f) => String(f.display_name || '').toLowerCase().includes('inbox'));
-        const stored = localStorage.getItem('mail_active_folder_id');
-        const chosen =
-          (stored && list.find((f) => f.id === stored)) ||
-          inbox ||
-          list[0] ||
-          null;
-        setActiveFolder(chosen);
-        try {
-          if (inbox?.id) localStorage.setItem('mail_inbox_folder_id', inbox.id);
-        } catch {
-          // ignore
-        }
-      } catch {
-        setToast({ open: true, type: 'error', message: 'Falha ao carregar pastas.' });
-      }
-    })();
-    return () => {
-      ignore = true;
-    };
-  }, []);
+    if (foldersQuery.isError) {
+      setToast({ open: true, type: 'error', message: 'Falha ao carregar pastas.' });
+    }
+  }, [foldersQuery.isError]);
+
+  useEffect(() => {
+    const list = foldersQuery.data;
+    if (!list) return;
+    setFolders(list);
+    const inbox = list.find((f) => String(f.display_name || '').toLowerCase().includes('inbox'));
+    setActiveFolder((current) => {
+      if (current?.id && list.some((f) => f.id === current.id)) return current;
+      const stored = localStorage.getItem('mail_active_folder_id');
+      return (
+        (stored && list.find((f) => f.id === stored)) ||
+        inbox ||
+        list[0] ||
+        null
+      );
+    });
+    try {
+      if (inbox?.id) localStorage.setItem('mail_inbox_folder_id', inbox.id);
+    } catch {
+      // ignore
+    }
+  }, [foldersQuery.data]);
 
   useEffect(() => {
     const stored = localStorage.getItem('mail_active_folder_id');
@@ -1443,117 +1548,121 @@ const CaixaDeEmail = () => {
     setHasMoreMessages(true);
   }, [activeFolder?.id, search, onlyUnread]);
 
-  // LOAD MESSAGES
+  // LOAD MESSAGES — useQuery substitui useEffect manual, mantém lista visível em refetch
+  const messagesQueryKey = useMemo(
+    () => ['mail-messages', activeFolder?.id || null, search || '', !!onlyUnread],
+    [activeFolder?.id, search, onlyUnread]
+  );
+
+  const messagesQuery = useQuery({
+    queryKey: messagesQueryKey,
+    queryFn: () => getMailMessages({
+      folderId: activeFolder.id,
+      q: search || undefined,
+      unread: undefined,
+      limit: REQUEST_PAGE_SIZE,
+      offset: 0,
+    }),
+    enabled: !!activeFolder?.id,
+    refetchInterval: POLL_MS,
+    placeholderData: keepPreviousData,
+  });
+
+  const isFetchingMessages = messagesQuery.isFetching;
+  const loading = messagesQuery.isLoading;
+
   useEffect(() => {
-    if (!activeFolder?.id) return;
-    let ignore = false;
+    if (messagesQuery.isError) {
+      setToast({ open: true, type: 'error', message: 'Falha ao carregar mensagens.' });
+    }
+  }, [messagesQuery.isError]);
 
-    const load = async () => {
-      setLoading(true);
-      try {
-        const list = await getMailMessages({
-          folderId: activeFolder.id,
-          q: search || undefined,
-          unread: undefined,
-          limit: REQUEST_PAGE_SIZE,
-          offset: 0,
-        });
-
-          if (!ignore) {
-            setMessages((prev) => {
-              if (messagesOffset <= 0) {
-                return list || [];
-            }
-            const seen = new Set();
-            const merged = [];
-            (list || []).forEach((m) => {
-              if (!m?.id || seen.has(m.id)) return;
-              seen.add(m.id);
-              merged.push(m);
-            });
-            (prev || []).forEach((m) => {
-              if (!m?.id || seen.has(m.id)) return;
-              seen.add(m.id);
-              merged.push(m);
-            });
-            return merged;
-          });
-          if (messagesOffset <= 0) {
-            setHasMoreMessages((list || []).length === REQUEST_PAGE_SIZE);
-          }
-          // manter selecionado se poss?vel; senão escolhe o primeiro apenas se não houver sele??o
-            if (list?.length) {
-              if (selectedMessage?.id) {
-                const keep = list.find((x) => x.id === selectedMessage.id);
-                if (keep) setSelectedMessage(keep);
-              } else if (!pendingDeepLinkMessageId) {
-                setSelectedMessage(list[0]);
-              }
-            } else if (!selectedMessage?.id && !pendingDeepLinkMessageId) {
-              setSelectedMessage(null);
-            }
-          }
-      } catch {
-        if (!ignore) setToast({ open: true, type: 'error', message: 'Falha ao carregar mensagens.' });
-      } finally {
-        if (!ignore) setLoading(false);
+  // Sincroniza data → messages local (apenas quando reset de pagina)
+  useEffect(() => {
+    const data = messagesQuery.data;
+    if (!data) return;
+    if (messagesOffset > 0) return;
+    setMessages(data);
+    setHasMoreMessages(data.length === REQUEST_PAGE_SIZE);
+    if (data.length) {
+      if (selectedMessage?.id) {
+        const keep = data.find((x) => x.id === selectedMessage.id);
+        if (keep) setSelectedMessage(keep);
+      } else if (!pendingDeepLinkMessageId) {
+        setSelectedMessage(data[0]);
       }
-    };
-
-    load();
-    const t = setInterval(load, POLL_MS);
-    return () => {
-      ignore = true;
-      clearInterval(t);
-    };
+    } else if (!selectedMessage?.id && !pendingDeepLinkMessageId) {
+      setSelectedMessage(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFolder?.id, search, onlyUnread, reloadSeq, messagesOffset, pendingDeepLinkMessageId]);
+  }, [messagesQuery.data, messagesOffset]);
 
-  // LOAD MESSAGE DETAIL
+  // LOAD MESSAGE DETAIL — useQuery
+  const messageDetailQuery = useQuery({
+    queryKey: ['mail-message', selectedMessage?.id || null],
+    queryFn: () => getMailMessage(selectedMessage.id),
+    enabled: !!selectedMessage?.id,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });
+
+  // Side-effects ao trocar de mensagem (reset de UI / placeholder otimista)
   useEffect(() => {
-    let ignore = false;
     if (!selectedMessage?.id) {
       setMessageDetail(null);
       setAttachments([]);
       setBodyHtml('');
-      setDetailLoading(false);
       setAttachmentsOpen(false);
       setInlineImagesEnabled(false);
       return;
     }
+    setMessageDetail({
+      ...selectedMessage,
+      body_type: '',
+      body_content: '',
+      snippet: selectedMessage?.snippet || selectedMessage?.body_preview || '',
+    });
+    setInlineImagesEnabled(true);
+    setAttachmentsOpen(true);
+    setBodyHtml('');
+  }, [selectedMessage?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    (async () => {
-      try {
-        setDetailLoading(true);
-        setMessageDetail({
-          ...selectedMessage,
-          body_type: '',
-          body_content: '',
-          snippet: selectedMessage?.snippet || selectedMessage?.body_preview || '',
-        });
-        setInlineImagesEnabled(true);
-        setAttachmentsOpen(true);
-        setBodyHtml('');
-        const detail = await getMailMessage(selectedMessage.id);
-        if (!ignore) {
-          setMessageDetail({
-            ...selectedMessage,
-            ...detail,
-            has_attachments:
-              detail?.has_attachments ?? detail?.hasAttachments ?? selectedMessage?.has_attachments ?? false,
-          });
-        }
-      } catch {
-        if (!ignore) setToast({ open: true, type: 'error', message: 'Falha ao carregar mensagem.' });
-      } finally {
-        if (!ignore) setDetailLoading(false);
-      }
-    })();
+  // Sincroniza data do useQuery → messageDetail
+  useEffect(() => {
+    const detail = messageDetailQuery.data;
+    if (!detail || !selectedMessage?.id) return;
+    if (detail.id && detail.id !== selectedMessage.id) return;
+    setMessageDetail({
+      ...selectedMessage,
+      ...detail,
+      has_attachments:
+        detail?.has_attachments ?? detail?.hasAttachments ?? selectedMessage?.has_attachments ?? false,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messageDetailQuery.data, selectedMessage?.id]);
 
-    return () => {
-      ignore = true;
-    };
-  }, [selectedMessage?.id]);
+  useEffect(() => {
+    if (messageDetailQuery.isError) {
+      setToast({ open: true, type: 'error', message: 'Falha ao carregar mensagem.' });
+    }
+  }, [messageDetailQuery.isError]);
+
+  const detailLoading = messageDetailQuery.isLoading;
+
+  // Sanitização final do corpo do e-mail (memoizada).
+  // Config explícita: permite http/https/cid/data nos URIs (cid: para inline images
+  // já substituídos por data URLs, http/https para imagens externas), preserva tag
+  // <style> e atributos target/rel; bloqueia script/iframe e handlers inline.
+  const sanitizedBodyHtml = useMemo(() => {
+    if (!bodyHtml) return '';
+    return DOMPurify.sanitize(bodyHtml, {
+      ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+      ADD_TAGS: ['style'],
+      ADD_ATTR: ['target', 'rel'],
+      FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form'],
+      FORBID_ATTR: ['onload', 'onerror', 'onclick', 'onmouseover', 'onfocus', 'onblur', 'onchange', 'onsubmit'],
+    });
+  }, [bodyHtml]);
 
   // AUTO-MARK AS READ when email is opened
   useEffect(() => {
@@ -1562,29 +1671,13 @@ const CaixaDeEmail = () => {
     return () => clearTimeout(t);
   }, [selectedMessage?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // LOAD ATTACHMENTS
-  useEffect(() => {
-    let ignore = false;
+  // LOAD ATTACHMENTS — useQuery
+  const attachmentsShouldFetch = useMemo(() => {
+    if (!messageDetail?.id) return false;
     const hasCid = /cid:/i.test(messageDetail?.body_content || '');
     const hasAttachments =
       messageDetail?.has_attachments ?? messageDetail?.hasAttachments ?? selectedMessage?.has_attachments ?? false;
-    if (!messageDetail?.id || (!hasAttachments && !hasCid)) {
-      setAttachments([]);
-      return;
-    }
-
-    (async () => {
-      try {
-        const data = await getMailAttachments(messageDetail.id);
-        if (!ignore) setAttachments(data?.attachments || []);
-      } catch {
-        if (!ignore) setAttachments([]);
-      }
-    })();
-
-    return () => {
-      ignore = true;
-    };
+    return !!hasAttachments || hasCid;
   }, [
     messageDetail?.id,
     messageDetail?.has_attachments,
@@ -1592,6 +1685,27 @@ const CaixaDeEmail = () => {
     messageDetail?.body_content,
     selectedMessage?.has_attachments,
   ]);
+
+  const attachmentsQuery = useQuery({
+    queryKey: ['mail-attachments', messageDetail?.id || null],
+    queryFn: () => getMailAttachments(messageDetail.id),
+    enabled: !!messageDetail?.id && attachmentsShouldFetch,
+    staleTime: 5 * 60_000,
+  });
+
+  useEffect(() => {
+    if (!messageDetail?.id || !attachmentsShouldFetch) {
+      setAttachments([]);
+      return;
+    }
+    if (attachmentsQuery.isError) {
+      setAttachments([]);
+      return;
+    }
+    const data = attachmentsQuery.data;
+    if (!data) return;
+    setAttachments(data?.attachments || []);
+  }, [messageDetail?.id, attachmentsShouldFetch, attachmentsQuery.data, attachmentsQuery.isError]);
 
   const blobToDataUrl = (blob) =>
     new Promise((resolve, reject) => {
@@ -1674,98 +1788,159 @@ const CaixaDeEmail = () => {
   }, [messageDetail?.id, messageDetail?.body_content, messageDetail?.snippet, attachments, inlineImagesEnabled]);
 
   const listRows = useMemo(() => {
-    const rows = messages || [];
-    if (!onlyUnread) return rows;
-    return rows.filter((m) => !m.is_read_local);
-  }, [messages, onlyUnread]);
+    let rows = messages || [];
+    if (onlyUnread) rows = rows.filter((m) => !m.is_read_local);
+    if (hasAttachmentFilter) rows = rows.filter((m) => !!m.has_attachments);
+    if (linkedFilter) rows = rows.filter((m) => !!m.linked_processo_id);
+    if (last7Filter) {
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      rows = rows.filter((m) => {
+        const t = m.received_at ? new Date(m.received_at).getTime() : 0;
+        return t >= cutoff;
+      });
+    }
+    return rows;
+  }, [messages, onlyUnread, hasAttachmentFilter, linkedFilter, last7Filter]);
+
+  const hasActiveFilters = onlyUnread || hasAttachmentFilter || linkedFilter || last7Filter || !!search;
+
+  const markAsReadMutation = useMutation({
+    mutationFn: (msg) => setMailReadLocal(msg.id),
+    onMutate: async (msg) => {
+      const name = user?.nome ? String(user.nome).trim() : 'Usu?rio';
+      await queryClient.cancelQueries({ queryKey: ['mail-messages'] });
+      const previousData = queryClient.getQueriesData({ queryKey: ['mail-messages'] });
+      queryClient.setQueriesData({ queryKey: ['mail-messages'] }, (old) =>
+        (old || []).map((m) =>
+          m.id === msg.id
+            ? {
+                ...m,
+                is_read_local: true,
+                read_by: Array.from(new Set([...(m.read_by || []), name])),
+              }
+            : m
+        )
+      );
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msg.id
+            ? {
+                ...m,
+                is_read_local: true,
+                read_by: Array.from(new Set([...(m.read_by || []), name])),
+              }
+            : m
+        )
+      );
+      setSelectedMessage((prev) =>
+        prev?.id === msg.id
+          ? {
+              ...prev,
+              is_read_local: true,
+              read_by: Array.from(new Set([...(prev.read_by || []), name])),
+            }
+          : prev
+      );
+      setMessageDetail((prev) =>
+        prev?.id === msg.id
+          ? {
+              ...prev,
+              is_read_local: true,
+              read_by: Array.from(new Set([...(prev.read_by || []), name])),
+            }
+          : prev
+      );
+      setReadByMap((prev) => ({ ...prev, [msg.id]: name }));
+      return { previousData };
+    },
+    onError: (_err, _msg, context) => {
+      if (context?.previousData) {
+        context.previousData.forEach(([key, data]) => queryClient.setQueryData(key, data));
+      }
+      setToast({ open: true, type: 'error', message: 'Falha ao marcar como lido.' });
+    },
+    onSuccess: () => {
+      window.dispatchEvent(new CustomEvent('mail-unread-refresh'));
+    },
+    // Sem invalidateQueries no onSettled: a atualização otimista é suficiente.
+    // Invalidar aqui dispararia um refetch de ~4s do Graph API que fazia a lista
+    // sumir/piscar mesmo com keepPreviousData. O poll de POLL_MS (2 min) sincroniza.
+  });
 
   const markAsRead = useCallback(
-    async (msg) => {
+    (msg) => {
       if (!msg?.id) return;
-      try {
-        await setMailReadLocal(msg.id);
-        const name = user?.nome ? String(user.nome).trim() : 'Usu?rio';
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === msg.id
-              ? {
-                  ...m,
-                  is_read_local: true,
-                  read_by: Array.from(new Set([...(m.read_by || []), name])),
-                }
-              : m
-          )
-        );
-        setSelectedMessage((prev) =>
-          prev?.id === msg.id
-            ? {
-                ...prev,
-                is_read_local: true,
-                read_by: Array.from(new Set([...(prev.read_by || []), name])),
-              }
-            : prev
-        );
-        setMessageDetail((prev) =>
-          prev?.id === msg.id
-            ? {
-                ...prev,
-                is_read_local: true,
-                read_by: Array.from(new Set([...(prev.read_by || []), name])),
-              }
-            : prev
-        );
-        setReadByMap((prev) => ({ ...prev, [msg.id]: name }));
-        // evita sobrescrever o estado local imediatamente
-        setReloadSeq((s) => s + 1);
-        window.dispatchEvent(new CustomEvent('mail-unread-refresh'));
-      } catch {
-        setToast({ open: true, type: 'error', message: 'Falha ao marcar como lido.' });
-      }
+      markAsReadMutation.mutate(msg);
     },
-    [user?.nome, activeFolder?.id, search, selectedMessage?.id]
+    [markAsReadMutation]
   );
 
-  const markAsUnread = useCallback(
-    async (msg) => {
-      if (!msg?.id) return;
-      try {
-        await setMailUnreadLocal(msg.id);
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === msg.id
-              ? {
-                  ...m,
-                  is_read_local: false,
-                  read_by: (m.read_by || []).filter((n) => n !== (user?.nome || '')),
-                }
-              : m
-          )
-        );
-        setSelectedMessage((prev) =>
-          prev?.id === msg.id
+  const markAsUnreadMutation = useMutation({
+    mutationFn: (msg) => setMailUnreadLocal(msg.id),
+    onMutate: async (msg) => {
+      const userName = user?.nome || '';
+      await queryClient.cancelQueries({ queryKey: ['mail-messages'] });
+      const previousData = queryClient.getQueriesData({ queryKey: ['mail-messages'] });
+      queryClient.setQueriesData({ queryKey: ['mail-messages'] }, (old) =>
+        (old || []).map((m) =>
+          m.id === msg.id
             ? {
-                ...prev,
+                ...m,
                 is_read_local: false,
-                read_by: (prev.read_by || []).filter((n) => n !== (user?.nome || '')),
+                read_by: (m.read_by || []).filter((n) => n !== userName),
               }
-            : prev
-        );
-        setMessageDetail((prev) =>
-          prev?.id === msg.id
+            : m
+        )
+      );
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msg.id
             ? {
-                ...prev,
+                ...m,
                 is_read_local: false,
-                read_by: (prev.read_by || []).filter((n) => n !== (user?.nome || '')),
+                read_by: (m.read_by || []).filter((n) => n !== userName),
               }
-            : prev
-        );
-        setReloadSeq((s) => s + 1);
-        window.dispatchEvent(new CustomEvent('mail-unread-refresh'));
-      } catch {
-        setToast({ open: true, type: 'error', message: 'Falha ao marcar como não lido.' });
-      }
+            : m
+        )
+      );
+      setSelectedMessage((prev) =>
+        prev?.id === msg.id
+          ? {
+              ...prev,
+              is_read_local: false,
+              read_by: (prev.read_by || []).filter((n) => n !== userName),
+            }
+          : prev
+      );
+      setMessageDetail((prev) =>
+        prev?.id === msg.id
+          ? {
+              ...prev,
+              is_read_local: false,
+              read_by: (prev.read_by || []).filter((n) => n !== userName),
+            }
+          : prev
+      );
+      return { previousData };
     },
-    [user?.nome]
+    onError: (_err, _msg, context) => {
+      if (context?.previousData) {
+        context.previousData.forEach(([key, data]) => queryClient.setQueryData(key, data));
+      }
+      setToast({ open: true, type: 'error', message: 'Falha ao marcar como não lido.' });
+    },
+    onSuccess: () => {
+      window.dispatchEvent(new CustomEvent('mail-unread-refresh'));
+    },
+    // Sem invalidateQueries — vide markAsReadMutation acima.
+  });
+
+  const markAsUnread = useCallback(
+    (msg) => {
+      if (!msg?.id) return;
+      markAsUnreadMutation.mutate(msg);
+    },
+    [markAsUnreadMutation]
   );
 
   const handleLoadMore = useCallback(async () => {
@@ -1856,6 +2031,18 @@ const CaixaDeEmail = () => {
     return groups;
   }, [listRows, groupByThread, getThreadKey]);
 
+  // Agrupa os groups por bucket de data para sticky headers
+  const groupedByDate = useMemo(() => {
+    const buckets = { hoje: [], ontem: [], 'esta-semana': [], 'mais-antigos': [] };
+    for (const g of grouped) {
+      const bucket = dateBucketOf(g.latest?.received_at);
+      buckets[bucket].push(g);
+    }
+    return DATE_BUCKET_ORDER
+      .map((key) => ({ key, label: DATE_BUCKET_LABEL[key], items: buckets[key] }))
+      .filter((b) => b.items.length > 0);
+  }, [grouped]);
+
   // selected thread items (for right panel)
   const selectedThread = useMemo(() => {
     if (!groupByThread || !selectedMessage) return null;
@@ -1895,19 +2082,20 @@ const CaixaDeEmail = () => {
     try {
       await Promise.all(ids.map((id) => setMailReadLocal(id)));
       const name = user?.nome ? String(user.nome).trim() : 'Usu?rio';
-      setMessages((prev) =>
-        prev.map((m) =>
-          ids.includes(m.id)
-            ? {
-                ...m,
-                is_read_local: true,
-                read_by: Array.isArray(m.read_by)
-                  ? Array.from(new Set([...m.read_by, name]))
-                  : [name],
-              }
-            : m
-        )
+      const applyRead = (m) =>
+        ids.includes(m.id)
+          ? {
+              ...m,
+              is_read_local: true,
+              read_by: Array.isArray(m.read_by)
+                ? Array.from(new Set([...m.read_by, name]))
+                : [name],
+            }
+          : m;
+      queryClient.setQueriesData({ queryKey: ['mail-messages'] }, (old) =>
+        (old || []).map(applyRead)
       );
+      setMessages((prev) => prev.map(applyRead));
       setSelectedMessage((prev) =>
         prev?.id && ids.includes(prev.id)
           ? {
@@ -1937,31 +2125,32 @@ const CaixaDeEmail = () => {
         const detail = await getMailMessage(selectedMessage.id);
         setMessageDetail(detail);
       }
-      setReloadSeq((s) => s + 1);
+      queryClient.invalidateQueries({ queryKey: ['mail-messages'] });
       window.dispatchEvent(new CustomEvent('mail-unread-refresh'));
     } catch {
       setToast({ open: true, type: 'error', message: 'Falha ao marcar selecionados como lidos.' });
     }
-  }, [selectedIds, user?.nome, selectedMessage?.id]);
+  }, [selectedIds, user?.nome, selectedMessage?.id, queryClient]);
 
   const bulkMarkUnread = useCallback(async () => {
     if (!selectedIds.length) return;
     const ids = [...selectedIds];
     try {
       await Promise.all(ids.map((id) => setMailUnreadLocal(id)));
-      setMessages((prev) =>
-        prev.map((m) =>
-          ids.includes(m.id)
-            ? {
-                ...m,
-                is_read_local: false,
-                read_by: Array.isArray(m.read_by)
-                  ? m.read_by.filter((n) => n && n !== user?.nome)
-                  : m.read_by,
-              }
-            : m
-        )
+      const applyUnread = (m) =>
+        ids.includes(m.id)
+          ? {
+              ...m,
+              is_read_local: false,
+              read_by: Array.isArray(m.read_by)
+                ? m.read_by.filter((n) => n && n !== user?.nome)
+                : m.read_by,
+            }
+          : m;
+      queryClient.setQueriesData({ queryKey: ['mail-messages'] }, (old) =>
+        (old || []).map(applyUnread)
       );
+      setMessages((prev) => prev.map(applyUnread));
       setSelectedMessage((prev) =>
         prev?.id && ids.includes(prev.id)
           ? {
@@ -1995,12 +2184,12 @@ const CaixaDeEmail = () => {
         const detail = await getMailMessage(selectedMessage.id);
         setMessageDetail(detail);
       }
-      setReloadSeq((s) => s + 1);
+      queryClient.invalidateQueries({ queryKey: ['mail-messages'] });
       window.dispatchEvent(new CustomEvent('mail-unread-refresh'));
     } catch {
       setToast({ open: true, type: 'error', message: 'Falha ao marcar selecionados como não lidos.' });
     }
-  }, [selectedIds, user?.nome, selectedMessage?.id]);
+  }, [selectedIds, user?.nome, selectedMessage?.id, queryClient]);
 
   useEffect(() => {
     if (!grouped.length) {
@@ -2029,7 +2218,7 @@ const CaixaDeEmail = () => {
     try {
       await moveMailMessage(selectedMessage.id, folderId);
       setToast({ open: true, type: 'success', message: 'Movido com sucesso.' });
-      setReloadSeq((s) => s + 1);
+      queryClient.invalidateQueries({ queryKey: ['mail-messages'] });
     } catch {
       setToast({ open: true, type: 'error', message: 'Falha ao mover.' });
     }
@@ -2045,12 +2234,14 @@ const CaixaDeEmail = () => {
     try {
       await Promise.all(ids.map((id) => moveMailMessage(id, moveTargetFolderId)));
       setToast({ open: true, type: 'success', message: 'E-mails movidos com sucesso.' });
-      setMessages((prev) => (prev || []).filter((m) => !ids.includes(m.id)));
+      const removeMoved = (list) => (list || []).filter((m) => !ids.includes(m.id));
+      queryClient.setQueriesData({ queryKey: ['mail-messages'] }, removeMoved);
+      setMessages(removeMoved);
       setSelectedIds([]);
       if (selectedMessage?.id && ids.includes(selectedMessage.id)) {
         setSelectedMessage(null);
       }
-      setReloadSeq((s) => s + 1);
+      queryClient.invalidateQueries({ queryKey: ['mail-messages'] });
       setMoveTargetFolderId('');
     } catch {
       setToast({ open: true, type: 'error', message: 'Falha ao mover e-mails.' });
@@ -2076,7 +2267,7 @@ const CaixaDeEmail = () => {
       await sendMailMessage(fd);
       setToast({ open: true, type: 'success', message: 'E-mail enviado.' });
       setComposeOpen(false);
-      setReloadSeq((s) => s + 1);
+      queryClient.invalidateQueries({ queryKey: ['mail-messages'] });
     } catch {
       setToast({ open: true, type: 'error', message: 'Falha ao enviar e-mail.' });
     }
@@ -2115,7 +2306,7 @@ const CaixaDeEmail = () => {
         }
       }
       setLinkOpen(false);
-      setReloadSeq((s) => s + 1);
+      queryClient.invalidateQueries({ queryKey: ['mail-messages'] });
     } catch (err) {
       const msg = err?.response?.data?.error || 'Falha ao vincular e-mail.';
       setToast({ open: true, type: 'error', message: msg });
@@ -2165,76 +2356,124 @@ const CaixaDeEmail = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] mail-shell">
+    <div
+      className="bg-[var(--bg)] text-[var(--fg)] mail-shell flex flex-col"
+      style={{ height: 'calc(125vh - 80px)' }}
+    >
       {/* TOP BAR */}
-      <div className="sticky top-0 z-30 border-b panel-border bg-[var(--bg)]/75 backdrop-blur mail-header">
-        <div className="px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="h-10 w-10 rounded-2xl bg-[var(--muted)]/25 border panel-border flex items-center justify-center shrink-0">
-              <ActiveIcon size={18} />
-            </div>
-            <div className="min-w-0">
-              <div className="font-bold text-base leading-tight truncate">Caixa de Correio</div>
-              <div className="text-xs opacity-70 truncate">
-                {activeFolderMeta.label} . {onlyUnread ? 'Não lidos' : 'Todos'} . {search ? `Filtro: "${search}"` : 'Sem filtro'}
-              </div>
+      <div className="shrink-0 border-b panel-border bg-[var(--bg)]/75 backdrop-blur mail-header">
+        <div className="px-3 py-1.5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <ActiveIcon size={14} className="opacity-70 shrink-0" />
+            <div className="text-sm font-semibold truncate">{activeFolderMeta.label}</div>
+            <div className="text-[11px] opacity-60 truncate hidden md:block">
+              · {onlyUnread ? 'Não lidos' : 'Todos'}{search ? ` · "${search}"` : ''}
             </div>
           </div>
 
-          <div className="flex items-center gap-2" />
+          <div className="flex items-center gap-1">
+            <IconBtn title="Atualizar" onClick={() => messagesQuery.refetch()}>
+              <RefreshCw size={14} />
+            </IconBtn>
+          </div>
         </div>
       </div>
 
       {/* LAYOUT */}
-      <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
+      <div className="flex flex-1 min-h-0">
         {/* SIDEBAR */}
         <aside
-          className="shrink-0 border-r panel-border bg-[var(--panel)]/45 backdrop-blur mail-sidebar"
+          className="shrink-0 border-r panel-border bg-[var(--panel)]/45 backdrop-blur mail-sidebar h-full flex flex-col"
           style={{ width: sidebarW }}
         >
-          <div className="p-4">
-            <div className="mb-3 flex flex-col gap-2">
-              <button
-                type="button"
-                className="btn-outline text-[11px] px-2 py-1 inline-flex items-center gap-2"
-                onClick={() => selectedMessage && markAsRead(selectedMessage)}
-                disabled={!selectedMessage}
-                title="Marcar como lido"
-              >
-                <MailOpen size={14} />
-                <span>Marcar como lido</span>
-              </button>
-              <button
-                type="button"
-                className="btn-outline text-[11px] px-2 py-1 inline-flex items-center gap-2"
-                onClick={() => selectedMessage && markAsUnread(selectedMessage)}
-                disabled={!selectedMessage || !selectedMessage.is_read_local}
-                title="Marcar como não lido"
-              >
-                <Mail size={14} />
-                <span>Marcar como não lido</span>
-              </button>
-              <button
-                className="btn-themed w-full text-xs"
-                onClick={() => {
-                  setComposeOpen(true);
-                  setComposeMinimized(false);
-                }}
-                type="button"
-              >
-                + Novo e-mail
-              </button>
-            </div>
+          {/* "+ Novo email" — prominente no topo */}
+          <div className="shrink-0 p-2 border-b panel-border">
+            <button
+              className="btn-themed w-full text-sm py-2 inline-flex items-center justify-center gap-2 font-semibold"
+              onClick={() => {
+                setComposeOpen(true);
+                setComposeMinimized(false);
+              }}
+              type="button"
+            >
+              <Send size={14} />
+              Novo email
+            </button>
+          </div>
 
-            <div className="text-xs font-semibold opacity-70 uppercase tracking-wider mb-2">Pastas</div>
+          {/* Ações rápidas */}
+          <div className="shrink-0 px-2 pt-2 space-y-1">
+            <button
+              type="button"
+              className="btn-outline text-[11px] px-2 py-1 w-full inline-flex items-center gap-2"
+              onClick={() => selectedMessage && markAsRead(selectedMessage)}
+              disabled={!selectedMessage}
+              title="Marcar como lido"
+            >
+              <MailOpen size={13} />
+              <span>Marcar como lido</span>
+            </button>
+            <button
+              type="button"
+              className="btn-outline text-[11px] px-2 py-1 w-full inline-flex items-center gap-2"
+              onClick={() => selectedMessage && markAsUnread(selectedMessage)}
+              disabled={!selectedMessage || !selectedMessage.is_read_local}
+              title="Marcar como não lido"
+            >
+              <Mail size={13} />
+              <span>Marcar como não lido</span>
+            </button>
+          </div>
 
-            <div className="mb-3 flex flex-col gap-2">
+          {/* Cabeçalho "Pastas" */}
+          <div className="shrink-0 px-3 pt-3 pb-1">
+            <div className="text-[10px] font-semibold opacity-50 uppercase tracking-wider">Pastas</div>
+          </div>
+
+          {/* Lista de pastas (scroll interno) */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 space-y-0.5">
+            {folders.map((f) => {
+              const meta = folderLabel(f.display_name);
+              const Icon = meta.icon;
+              const isActive = activeFolder?.id === f.id;
+
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => {
+                    setActiveFolder(f);
+                    try {
+                      localStorage.setItem('mail_active_folder_id', f.id);
+                    } catch {}
+                  }}
+                  className={cx(
+                    'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition',
+                    isActive
+                      ? 'bg-[var(--panel)]/70 text-[var(--fg)]'
+                      : 'bg-transparent hover:bg-[var(--panel)]/40'
+                  )}
+                  type="button"
+                >
+                  <Icon size={14} className="shrink-0 opacity-70" />
+                  <div className="min-w-0 flex-1 text-[13px] truncate">{meta.label}</div>
+                  {isActive && <div className="h-1.5 w-1.5 rounded-full bg-emerald-400/80 shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Mover selecionados (só aparece quando há seleção) */}
+          {selectedIds.length > 0 && (
+            <div className="shrink-0 p-2 border-t panel-border space-y-1.5 bg-[var(--panel)]/30">
+              <div className="text-[10px] opacity-60 px-1">
+                {selectedIds.length} selecionado(s)
+              </div>
               <select
-                className="input-themed text-xs"
+                className="input-themed text-xs w-full"
                 value={moveTargetFolderId}
                 onChange={(e) => setMoveTargetFolderId(e.target.value)}
               >
-                <option value="">Inserir na pasta...</option>
+                <option value="">Mover para...</option>
                 {folders.map((f) => (
                   <option key={`mv-${f.id}`} value={f.id}>
                     {folderLabel(f.display_name).label}
@@ -2243,61 +2482,14 @@ const CaixaDeEmail = () => {
               </select>
               <button
                 type="button"
-                className="btn-outline text-[11px] px-2 py-1"
+                className="btn-outline text-[11px] px-2 py-1 w-full"
                 onClick={handleMoveSelectedToFolder}
-                disabled={!moveTargetFolderId || selectedIds.length === 0}
+                disabled={!moveTargetFolderId}
               >
-                Mover selecionados
+                Mover {selectedIds.length}
               </button>
             </div>
-
-            <div className="space-y-1">
-              {folders.map((f) => {
-                const meta = folderLabel(f.display_name);
-                const Icon = meta.icon;
-                const isActive = activeFolder?.id === f.id;
-
-                return (
-                  <button
-                    key={f.id}
-                    onClick={() => {
-                      setActiveFolder(f);
-                      try {
-                        localStorage.setItem('mail_active_folder_id', f.id);
-                      } catch {}
-                    }}
-                    className={cx(
-                      'w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition border',
-                      isActive
-                        ? 'bg-[var(--panel)]/70 border-[var(--border)]/70'
-                        : 'bg-transparent border-transparent hover:bg-[var(--panel)]/40 hover:border-[var(--border)]/40'
-                    )}
-                    type="button"
-                  >
-                    <div
-                      className={cx(
-                        'h-9 w-9 rounded-xl flex items-center justify-center border panel-border',
-                        isActive ? 'bg-[var(--muted)]/20' : 'bg-[var(--panel)]/20'
-                      )}
-                    >
-                      <Icon size={16} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium truncate">{meta.label}</div>
-                    </div>
-                    {isActive && <div className="h-2 w-2 rounded-full bg-emerald-400/80" />}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-4 p-3 rounded-xl border panel-border bg-[var(--panel)]/25">
-              <div className="text-xs font-semibold mb-1">Dicas</div>
-              <div className="text-[11px] opacity-70 leading-relaxed">
-                Use <b>Anexar ao processo</b> para salvar o corpo em PDF e anexos como evidência.
-              </div>
-            </div>
-          </div>
+          )}
         </aside>
 
         {/* RESIZER 1 */}
@@ -2305,7 +2497,7 @@ const CaixaDeEmail = () => {
 
         {/* MESSAGE LIST */}
         <section
-          className="shrink-0 border-r panel-border bg-[var(--bg)] mail-list flex flex-col"
+          className="relative shrink-0 border-r panel-border bg-[var(--bg)] mail-list flex flex-col"
           style={{ width: listW, height: '100%' }}
         >
           <div className="border-b panel-border bg-[var(--bg)]/75 backdrop-blur">
@@ -2314,65 +2506,136 @@ const CaixaDeEmail = () => {
                 <div className="relative w-full">
                   <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 opacity-70" />
                   <input
-                    className="input-themed w-full pl-9"
+                    className="input-themed w-full pl-9 pr-9"
                     placeholder="Buscar por assunto, remetente..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
+                  {search && (
+                    <button
+                      type="button"
+                      onClick={() => setSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 transition"
+                      title="Limpar busca"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
                 </div>
 
-                <IconBtn title="Atualizar" onClick={() => setReloadSeq((s) => s + 1)}>
+                <IconBtn title="Atualizar" onClick={() => messagesQuery.refetch()}>
                   <RefreshCw size={16} />
                 </IconBtn>
               </div>
 
-              <div className="flex items-center justify-between text-xs gap-2">
-                <div className="flex flex-col gap-1">
-                  <button
-                    type="button"
-                    className={cx(
-                      'inline-flex items-center gap-2 px-3 py-1.5 rounded-full border panel-border transition',
-                      onlyUnread ? 'bg-blue-500/15 text-blue-200' : 'bg-[var(--panel)]/25 hover:bg-[var(--panel)]/40'
-                    )}
-                    onClick={() => setOnlyUnread((v) => !v)}
-                  >
-                    <Filter size={14} />
-                    Apenas não lidos
-                  </button>
-                  <label className="inline-flex items-center gap-2 px-3 py-1 rounded-full border panel-border bg-[var(--panel)]/15">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={toggleSelectAll}
-                    />
-                    Selecionar todos
-                  </label>
-                </div>
+              {/* Chips de filtro (V8) */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  className={cx(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] transition',
+                    onlyUnread
+                      ? 'bg-blue-500/20 text-blue-200 border-blue-500/40'
+                      : 'bg-[var(--panel)]/25 border-[var(--border)]/40 hover:bg-[var(--panel)]/45'
+                  )}
+                  onClick={() => setOnlyUnread((v) => !v)}
+                >
+                  <Mail size={12} />
+                  Não lidos
+                </button>
+                <button
+                  type="button"
+                  className={cx(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] transition',
+                    hasAttachmentFilter
+                      ? 'bg-amber-500/20 text-amber-200 border-amber-500/40'
+                      : 'bg-[var(--panel)]/25 border-[var(--border)]/40 hover:bg-[var(--panel)]/45'
+                  )}
+                  onClick={() => setHasAttachmentFilter((v) => !v)}
+                >
+                  <Paperclip size={12} />
+                  Com anexo
+                </button>
+                <button
+                  type="button"
+                  className={cx(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] transition',
+                    linkedFilter
+                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40'
+                      : 'bg-[var(--panel)]/25 border-[var(--border)]/40 hover:bg-[var(--panel)]/45'
+                  )}
+                  onClick={() => setLinkedFilter((v) => !v)}
+                >
+                  <Link2 size={12} />
+                  Vinculados
+                </button>
+                <button
+                  type="button"
+                  className={cx(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] transition',
+                    last7Filter
+                      ? 'bg-violet-500/20 text-violet-200 border-violet-500/40'
+                      : 'bg-[var(--panel)]/25 border-[var(--border)]/40 hover:bg-[var(--panel)]/45'
+                  )}
+                  onClick={() => setLast7Filter((v) => !v)}
+                >
+                  <Clock size={12} />
+                  7 dias
+                </button>
+              </div>
 
-                <div className="flex items-center gap-2">
+              {/* Toolbar inferior: seleção, conversas, densidade */}
+              <div className="flex items-center justify-between text-[11px] gap-2">
+                <label className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border panel-border bg-[var(--panel)]/15 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleSelectAll}
+                  />
+                  Todos
+                </label>
+
+                <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     className={cx(
-                      'inline-flex items-center gap-2 px-3 py-1.5 rounded-full border panel-border transition',
-                      groupByThread ? 'bg-emerald-500/15 text-emerald-200' : 'bg-[var(--panel)]/25 hover:bg-[var(--panel)]/40'
+                      'inline-flex items-center gap-1.5 px-2 py-1 rounded-full border transition',
+                      groupByThread
+                        ? 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30'
+                        : 'bg-[var(--panel)]/25 border-[var(--border)]/40 hover:bg-[var(--panel)]/40'
                     )}
                     onClick={() => setGroupByThread((v) => !v)}
                     title="Agrupar mensagens por conversa"
                   >
-                    <MessagesSquare size={14} />
+                    <MessagesSquare size={12} />
                     Conversas
                   </button>
+                  <button
+                    type="button"
+                    className={cx(
+                      'inline-flex items-center gap-1.5 px-2 py-1 rounded-full border transition',
+                      density === 'compact'
+                        ? 'bg-[var(--accent)]/20 text-[var(--accent)] border-[var(--accent)]/40'
+                        : 'bg-[var(--panel)]/25 border-[var(--border)]/40 hover:bg-[var(--panel)]/40'
+                    )}
+                    onClick={() => setDensity((d) => (d === 'compact' ? 'comfortable' : 'compact'))}
+                    title={density === 'compact' ? 'Mudar para confortável' : 'Mudar para compacto'}
+                  >
+                    <Minus size={12} />
+                    {density === 'compact' ? 'Compacto' : 'Confortável'}
+                  </button>
                 </div>
-
-                <button className="btn-outline text-xs" onClick={() => setSearch('')} type="button">
-                  Limpar
-                </button>
               </div>
             </div>
+
+            {/* Progress bar V9 — substitui o "Atualizando..." textual */}
+            {isFetchingMessages && grouped.length > 0 && (
+              <div className="mail-progress-track" aria-label="Atualizando mensagens" />
+            )}
           </div>
 
-          <div className="flex-1 overflow-y-auto pb-16">
-            {loading && (
+          <div className="flex-1 overflow-y-auto pb-16 relative">
+            {loading && grouped.length === 0 && (
               <>
                 <SkeletonRow />
                 <SkeletonRow />
@@ -2381,111 +2644,233 @@ const CaixaDeEmail = () => {
               </>
             )}
 
+            {/* Empty state ilustrado V7 */}
             {!loading && grouped.length === 0 && (
-              <div className="p-8 text-center opacity-70">
-                <div className="mx-auto h-12 w-12 rounded-2xl border panel-border bg-[var(--panel)]/25 flex items-center justify-center">
-                  <Mail size={20} />
+              <div className="p-10 text-center">
+                <div className="mx-auto h-20 w-20 rounded-3xl border panel-border bg-gradient-to-br from-[var(--panel)]/40 to-[var(--panel)]/10 flex items-center justify-center shadow-soft">
+                  <Inbox size={40} className="opacity-60" />
                 </div>
-                <div className="mt-3 text-sm font-semibold">Sem mensagens</div>
-                <div className="mt-1 text-xs opacity-70">Tente remover filtros ou trocar de pasta.</div>
+                <div className="mt-5 text-base font-semibold">
+                  {hasActiveFilters ? 'Nenhuma mensagem encontrada' : 'Caixa vazia'}
+                </div>
+                <div className="mt-1 text-xs opacity-70 max-w-xs mx-auto">
+                  {hasActiveFilters
+                    ? 'Tente ajustar os filtros aplicados ou trocar de pasta.'
+                    : 'Quando chegar uma mensagem nova, ela aparece aqui.'}
+                </div>
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    className="mt-5 inline-flex items-center gap-2 btn-outline text-xs"
+                    onClick={() => {
+                      setSearch('');
+                      setOnlyUnread(false);
+                      setHasAttachmentFilter(false);
+                      setLinkedFilter(false);
+                      setLast7Filter(false);
+                    }}
+                  >
+                    <X size={12} />
+                    Limpar filtros
+                  </button>
+                )}
               </div>
             )}
 
-            {!loading &&
-              grouped.map((g) => {
-                const m = g.latest;
-                const active = selectedMessage?.id === m.id;
-                const who = m.from_name || m.from_email || '(Sem remetente)';
-                const subject = m.subject || '(Sem assunto)';
-                const readByNames =
-                  g.kind === 'thread'
-                    ? Array.isArray(g.readBy)
-                      ? g.readBy
-                      : []
-                    : Array.isArray(m.read_by)
-                      ? m.read_by
-                      : [];
-                const localReadName = readByMap[m.id] || (m.is_read_local ? user?.nome || 'voc?' : '');
-                const mergedReadBy = localReadName
-                  ? Array.from(new Set([...readByNames, localReadName]))
-                  : readByNames;
-
-                return (
-                  <div
-                    key={g.key}
-                    className={cx(
-                      'w-full text-left p-3 border-b panel-border transition group mail-list-item',
-                      active
-                        ? 'bg-[var(--panel)]/55 mail-list-item--active'
-                        : 'hover:bg-[var(--panel)]/45 hover:border-[var(--accent)]/35 hover:ring-1 hover:ring-[var(--accent)]/25'
-                    )}
-                    onClick={() => setSelectedMessage(m)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setSelectedMessage(m);
-                      }
-                    }}
-                    role="button"
-                    tabIndex={0}
-                    title={g.linkedProcessId ? `Vinculado ao processo #${g.linkedProcessId}` : ''}
-                  >
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(m.id)}
-                      onChange={() => toggleSelectOne(m.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="mt-2"
-                      aria-label="Selecionar mensagem"
-                    />
-                      <div className="relative">
-                        <div className="h-10 w-10 rounded-2xl border panel-border bg-[var(--muted)]/20 flex items-center justify-center text-xs font-bold">
-                          {initials(who)}
-                        </div>
-                        {!m.is_read_local && (
-                          <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-[var(--accent)] border border-black/30" />
-                        )}
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                        <div className={cx('text-sm truncate', !m.is_read_local ? 'font-semibold' : 'font-medium')}>
-                          {who}
-                        </div>
-                          <div className="text-[11px] opacity-70 shrink-0">{formatDate(m.received_at)}</div>
-                        </div>
-
-                        <div className={cx('text-sm truncate', !m.is_read_local ? 'opacity-100' : 'opacity-90')}>
-                          {subject}
-                        </div>
-
-                        <div className="text-xs opacity-70 truncate mt-0.5">{m.snippet}</div>
-                        {mergedReadBy.length > 0 && (
-                          <div className="text-[11px] opacity-70 mt-0.5">
-                            Lido por {mergedReadBy.join(', ')}
-                          </div>
-                        )}
-
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                        {!m.is_read_local && <Chip tone="info">Não lido</Chip>}
-                          {g.kind === 'thread' && g.count > 1 && <Chip>{g.count} na conversa</Chip>}
-                          {g.hasAttachments && (
-                            <Chip>
-                              <Paperclip size={12} /> Anexo
-                            </Chip>
-                          )}
-                          {g.linkedProcessId && (
-                            <Chip tone="success" className="text-black">
-                              Vinculado #{g.linkedProcessId}
-                            </Chip>
-                          )}
-                      </div>
-                    </div>
+            {/* Lista com sticky headers por data V3 */}
+            {grouped.length > 0 &&
+              groupedByDate.map((bucket) => (
+                <div key={bucket.key}>
+                  <div className="sticky top-0 z-10 px-3 py-1.5 text-[10px] uppercase tracking-wider font-semibold opacity-70 bg-[var(--bg)]/90 backdrop-blur border-b panel-border">
+                    {bucket.label}
+                    <span className="ml-2 opacity-60 normal-case font-normal">{bucket.items.length}</span>
                   </div>
+                  {bucket.items.map((g) => {
+                    const m = g.latest;
+                    const active = selectedMessage?.id === m.id;
+                    const who = m.from_name || m.from_email || '(Sem remetente)';
+                    const subject = m.subject || '(Sem assunto)';
+                    const isUnread = !m.is_read_local;
+                    const palette = avatarColorFor(m.from_email || who);
+                    const readByNames =
+                      g.kind === 'thread'
+                        ? Array.isArray(g.readBy)
+                          ? g.readBy
+                          : []
+                        : Array.isArray(m.read_by)
+                          ? m.read_by
+                          : [];
+                    const localReadName = readByMap[m.id] || (m.is_read_local ? user?.nome || 'você' : '');
+                    const mergedReadBy = localReadName
+                      ? Array.from(new Set([...readByNames, localReadName]))
+                      : readByNames;
+
+                    // Densidade V11 — afeta paddings/tamanhos
+                    const isCompact = density === 'compact';
+                    const avatarSize = isCompact ? 'h-8 w-8' : 'h-10 w-10';
+                    const avatarText = isCompact ? 'text-[10px]' : 'text-xs';
+                    const itemPadding = isCompact ? 'px-3 py-2' : 'px-3 py-3';
+
+                    return (
+                      <div
+                        key={g.key}
+                        className={cx(
+                          'relative w-full text-left border-b panel-border transition group mail-list-item',
+                          itemPadding,
+                          active
+                            ? 'bg-[var(--panel)]/55 mail-list-item--active'
+                            : 'hover:bg-[var(--panel)]/45',
+                          // V2: borda lateral 3px em não lidos
+                          isUnread
+                            ? 'border-l-[3px] border-l-[var(--accent)] pl-[9px]'
+                            : 'border-l-[3px] border-l-transparent'
+                        )}
+                        onClick={() => setSelectedMessage(m)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSelectedMessage(m);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        title={g.linkedProcessId ? `Vinculado ao processo #${g.linkedProcessId}` : ''}
+                      >
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(m.id)}
+                            onChange={() => toggleSelectOne(m.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-2"
+                            aria-label="Selecionar mensagem"
+                          />
+
+                          {/* V1: avatar com cor determinística + V2 reforço dot não-lido */}
+                          <div className="relative shrink-0">
+                            <div
+                              className={cx(
+                                'rounded-full flex items-center justify-center font-bold ring-1',
+                                avatarSize,
+                                avatarText,
+                                palette.bg,
+                                palette.ring,
+                                palette.text
+                              )}
+                              aria-hidden="true"
+                            >
+                              {initials(who)}
+                            </div>
+                            {isUnread && (
+                              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--bg)]" />
+                            )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className={cx('text-sm truncate', isUnread ? 'font-semibold' : 'font-medium')}>
+                                {who}
+                              </div>
+                              <div className="text-[11px] opacity-70 shrink-0">{formatDate(m.received_at)}</div>
+                            </div>
+
+                            <div className={cx('text-sm truncate', isUnread ? 'opacity-100' : 'opacity-85')}>
+                              {subject}
+                            </div>
+
+                            {!isCompact && (
+                              <div className="text-xs opacity-70 truncate mt-0.5">{m.snippet}</div>
+                            )}
+
+                            {!isCompact && mergedReadBy.length > 0 && (
+                              <div className="text-[11px] opacity-60 mt-0.5">
+                                Lido por {mergedReadBy.join(', ')}
+                              </div>
+                            )}
+
+                            <div className={cx('flex flex-wrap items-center gap-1.5', isCompact ? 'mt-1' : 'mt-2')}>
+                              {/* V5: badge prominente para vinculados */}
+                              {g.linkedProcessId && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-200 border border-emerald-500/30 text-[10px] font-semibold">
+                                  <Link2 size={10} />
+                                  #{g.linkedProcessId}
+                                </span>
+                              )}
+                              {g.kind === 'thread' && g.count > 1 && (
+                                <Chip>
+                                  <MessagesSquare size={10} /> {g.count}
+                                </Chip>
+                              )}
+                              {g.hasAttachments && (
+                                <Chip>
+                                  <Paperclip size={10} />
+                                </Chip>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* V4: ações rápidas no hover */}
+                        <div className="absolute right-2 top-2 hidden group-hover:flex items-center gap-1 bg-[var(--bg)]/85 backdrop-blur rounded-lg border panel-border px-1 py-0.5 shadow-soft">
+                          {isUnread ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                markAsRead(m);
+                              }}
+                              title="Marcar como lido"
+                              className="h-7 w-7 rounded-md hover:bg-[var(--panel)]/60 flex items-center justify-center"
+                            >
+                              <MailOpen size={13} />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                markAsUnread(m);
+                              }}
+                              title="Marcar como não lido"
+                              className="h-7 w-7 rounded-md hover:bg-[var(--panel)]/60 flex items-center justify-center"
+                            >
+                              <Mail size={13} />
+                            </button>
+                          )}
+                          {archiveFolderId && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedMessage(m);
+                                handleMove(archiveFolderId);
+                              }}
+                              title="Arquivar"
+                              className="h-7 w-7 rounded-md hover:bg-[var(--panel)]/60 flex items-center justify-center"
+                            >
+                              <Archive size={13} />
+                            </button>
+                          )}
+                          {deletedFolderId && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedMessage(m);
+                                handleMove(deletedFolderId);
+                              }}
+                              title="Excluir"
+                              className="h-7 w-7 rounded-md hover:bg-rose-500/20 hover:text-rose-200 flex items-center justify-center"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-              })}
+              ))}
 
             {!loading && grouped.length > 0 && (
               <div className="p-3 border-t panel-border">
@@ -2503,28 +2888,41 @@ const CaixaDeEmail = () => {
               </div>
             )}
           </div>
+
+          {/* V6: FAB Novo e-mail */}
+          <button
+            type="button"
+            onClick={() => {
+              setComposeOpen(true);
+              setComposeMinimized(false);
+            }}
+            title="Novo e-mail"
+            className="absolute bottom-5 right-5 z-20 h-14 w-14 rounded-full bg-[var(--accent)] hover:brightness-110 active:scale-95 shadow-elevated flex items-center justify-center transition transform"
+          >
+            <Send size={20} className="text-white" />
+          </button>
         </section>
 
         {/* RESIZER 2 */}
         <Resizer onPointerDown={(e) => startDrag('list', e)} />
 
         {/* READER */}
-        <main className="flex-1 min-w-0 overflow-hidden" style={{ height: '100%' }}>
-          <div className="p-4">
-            {!messageDetail && (
-              <div className="h-[calc(100vh-140px)] flex flex-col items-center justify-center opacity-70">
-                <div className="h-16 w-16 rounded-3xl border panel-border bg-[var(--panel)]/25 flex items-center justify-center">
-                  <Mail size={28} />
-                </div>
-                <p className="mt-4 text-lg font-semibold">Selecione um e-mail para ler</p>
-                <p className="mt-1 text-xs opacity-70">Use "Anexar ao processo" para registrar evidências.</p>
+        <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
+          {!messageDetail && (
+            <div className="flex-1 flex flex-col items-center justify-center opacity-70 p-4">
+              <div className="h-16 w-16 rounded-3xl border panel-border bg-[var(--panel)]/25 flex items-center justify-center">
+                <Mail size={28} />
               </div>
-            )}
+              <p className="mt-4 text-lg font-semibold">Selecione um e-mail para ler</p>
+              <p className="mt-1 text-xs opacity-70">Use "Anexar ao processo" para registrar evidências.</p>
+            </div>
+          )}
 
-            {messageDetail && (
-              <div className="sap-card overflow-hidden">
+          {messageDetail && (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-4">
+              <div className="sap-card overflow-hidden flex-1 min-h-0 flex flex-col">
                 {/* header */}
-                <div className="border-b panel-border bg-[var(--panel)]/35 backdrop-blur">
+                <div className="shrink-0 border-b panel-border bg-[var(--panel)]/35 backdrop-blur">
                   <div className="p-4 flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-lg md:text-xl font-bold truncate">
@@ -2538,21 +2936,21 @@ const CaixaDeEmail = () => {
                         <Chip>Data: {formatDate(messageDetail.received_at)}</Chip>
                         {!!messageDetail.to?.length && <Chip>Para: {messageDetail.to.join('; ')}</Chip>}
                         {!!messageDetail.cc?.length && <Chip>Cc: {messageDetail.cc.join('; ')}</Chip>}
-                        {(Array.isArray(messageDetail.read_by) || readByMap[messageDetail.id] || messageDetail.is_read_local) && (
-                          <Chip className="text-black">
-                            Lido por{' '}
-                            {Array.from(
-                              new Set([
-                                ...(Array.isArray(messageDetail.read_by) ? messageDetail.read_by : []),
-                                ...(readByMap[messageDetail.id]
-                                  ? [readByMap[messageDetail.id]]
-                                  : messageDetail.is_read_local
-                                    ? [user?.nome || 'voc?']
-                                    : []),
-                              ])
-                            ).join(', ')}
-                          </Chip>
-                        )}
+                        {(() => {
+                          const readByNames = Array.from(new Set([
+                            ...(Array.isArray(messageDetail.read_by) ? messageDetail.read_by : []),
+                            ...(readByMap[messageDetail.id]
+                              ? [readByMap[messageDetail.id]]
+                              : messageDetail.is_read_local
+                                ? [user?.nome || 'você']
+                                : []),
+                          ])).filter(Boolean);
+                          return readByNames.length > 0 ? (
+                            <Chip tone="success">
+                              Lido por {readByNames.join(', ')}
+                            </Chip>
+                          ) : null;
+                        })()}
                       </div>
                     </div>
 
@@ -2607,17 +3005,15 @@ const CaixaDeEmail = () => {
                 </div>
 
                 {/* body */}
-                <div className="p-4 space-y-4">
+                <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
                   <div className="rounded-2xl border panel-border bg-[var(--bg)]/35 p-4">
                     {detailLoading && (
-                      <div className="text-xs opacity-70 mb-2">Carregando conte?do...</div>
+                      <div className="text-xs opacity-70 mb-2">Carregando conteúdo...</div>
                     )}
                     <div
-                      className="email-body text-sm leading-relaxed max-h-[calc(100vh-260px)] overflow-y-auto"
+                      className="email-body text-sm leading-relaxed"
                       style={{ wordBreak: 'break-word' }}
-                      dangerouslySetInnerHTML={{
-                        __html: DOMPurify.sanitize(bodyHtml),
-                      }}
+                      dangerouslySetInnerHTML={{ __html: sanitizedBodyHtml }}
                     />
                     {inlineBusy && (
                       <div className="mt-2 text-[11px] opacity-60">Carregando imagens...</div>
@@ -2666,42 +3062,68 @@ const CaixaDeEmail = () => {
                     </div>
                   )}
 
-                  {/* attachments */}
-                  {(effectiveHasAttachments || /cid:/i.test(bodyHtml)) && (
+                  {/* attachments — V10 cards visuais */}
+                  {attachments.length > 0 && (
                     <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="text-sm font-semibold">Anexos</div>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-sm font-semibold flex items-center gap-2">
+                          <Paperclip size={14} className="opacity-70" />
+                          Anexos
+                        </div>
                         <Chip>{attachments.length} arquivo(s)</Chip>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {attachments.map((a) => (
-                          <div
-                            key={a.id}
-                            className="flex items-center justify-between gap-2 border panel-border rounded-2xl p-3 bg-[var(--panel)]/25"
-                          >
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium truncate">{a.name}</div>
-                              <div className="text-[11px] opacity-70 truncate">{a.content_type || 'Arquivo'}</div>
-                            </div>
-                            <button
-                              className="btn-outline text-xs shrink-0"
-                              onClick={() =>
-                                downloadMailAttachment(messageDetail.id, a.id).then((resp) => downloadBlob(resp, a.name))
-                              }
-                              type="button"
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {attachments.map((a) => {
+                          const meta = attachmentMetaFor(a);
+                          const sizeLabel = formatFileSize(a.size);
+                          return (
+                            <div
+                              key={a.id}
+                              className="group flex items-center gap-3 border panel-border rounded-xl p-2.5 bg-[var(--panel)]/30 hover:bg-[var(--panel)]/50 transition"
                             >
-                              Baixar
-                            </button>
-                          </div>
-                        ))}
+                              <div
+                                className={cx(
+                                  'shrink-0 h-11 w-11 rounded-lg border flex items-center justify-center text-[10px] font-bold tracking-wide',
+                                  meta.tone
+                                )}
+                              >
+                                {meta.short}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm font-medium truncate" title={a.name}>
+                                  {a.name}
+                                </div>
+                                <div className="text-[11px] opacity-70 truncate flex items-center gap-1.5">
+                                  <span>{meta.label}</span>
+                                  {sizeLabel && (
+                                    <>
+                                      <span className="opacity-50">·</span>
+                                      <span>{sizeLabel}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                className="shrink-0 h-8 w-8 rounded-lg border panel-border bg-[var(--panel)]/40 hover:bg-[var(--panel)] transition flex items-center justify-center opacity-70 group-hover:opacity-100"
+                                onClick={() =>
+                                  downloadMailAttachment(messageDetail.id, a.id).then((resp) => downloadBlob(resp, a.name))
+                                }
+                                type="button"
+                                title="Baixar anexo"
+                              >
+                                <Download size={14} />
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </main>
       </div>
 

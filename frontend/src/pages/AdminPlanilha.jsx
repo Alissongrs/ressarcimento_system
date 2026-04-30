@@ -3128,6 +3128,17 @@ export default function AdminPlanilha() {
   const [q, setQ] = useState('');
   const qDebounced = useDebouncedValue(q, 350);
 
+  // Pre-populate q from URL ?q= param (e.g., navigated from CommandPalette search result)
+  useEffect(() => {
+    if (openedFromQueryRef.current) return;
+    const sp = new URLSearchParams(location.search);
+    const qParam = (sp.get('q') || '').trim();
+    if (qParam) {
+      openedFromQueryRef.current = true;
+      setQ(qParam);
+    }
+  }, [location.search]);
+
   const [kanbanFilter, setKanbanFilter] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [showAllRows, setShowAllRows] = useState(true);

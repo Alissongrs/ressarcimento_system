@@ -225,9 +225,163 @@ func EnviarEmailMovimentacoesDiarias() {
 	}
 }
 
-// EnviarInformativoSemanal envia o relatório geral da semana (placeholder).
+// EnviarInformativoSemanal envia o resumo semanal de processos para todos os gestores ativos.
 func EnviarInformativoSemanal() {
 	log.Println("Executando tarefa: Enviar informativo semanal...")
+	db := getAppDB()
+	if db == nil {
+		return
+	}
+
+	type semanalRow struct {
+		Label string
+		Valor string
+	}
+	var metricas []semanalRow
+
+	// Movimentações na semana
+	var movSemana int
+	_ = db.QueryRow(`SELECT COUNT(1) FROM FT_HISTORICO_MOVIMENTACOES WHERE data_movimentacao >= DATE_SUB(NOW(), INTERVAL 7 DAY)`).Scan(&movSemana)
+	metricas = append(metricas, semanalRow{"Movimentações (7 dias)", fmt.Sprintf("%d", movSemana)})
+
+	// Processos deferidos na semana
+	var deferidos int
+	_ = db.QueryRow(`
+		SELECT COUNT(DISTINCT h.id_requisicao)
+		  FROM FT_HISTORICO_MOVIMENTACOES h
+		 WHERE h.data_movimentacao >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+		   AND (LOWER(h.etapa_nova) LIKE '%deferido%' OR LOWER(h.status_novo) LIKE '%deferido%')`).Scan(&deferidos)
+	metricas = append(metricas, semanalRow{"Deferidos (7 dias)", fmt.Sprintf("%d", deferidos)})
+
+	// Processos em backlog (sem movimentação há mais de 30 dias)
+	var backlog30 int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		  FROM FT_PROCESSOS p
+		  JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+		  LEFT JOIN VW_ULTIMO_HISTORICO vh ON vh.id_requisicao = p.id_processo
+		 WHERE p.suspenso = 0
+		   AND LOWER(e.etapa) NOT IN ('concluídos','concluidos','indeferidos','rejeitados','suspensos')
+		   AND COALESCE(vh.data_movimentacao, p.ultima_atualizacao) < DATE_SUB(NOW(), INTERVAL 30 DAY)`).Scan(&backlog30)
+	metricas = append(metricas, semanalRow{"Sem movimentação > 30 dias", fmt.Sprintf("%d", backlog30)})
+
+	// Total de processos ativos
+	var ativos int
+	_ = db.QueryRow(`
+		SELECT COUNT(1)
+		  FROM FT_PROCESSOS p
+		  JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+		 WHERE p.suspenso = 0
+		   AND LOWER(e.etapa) NOT IN ('concluídos','concluidos','indeferidos','rejeitados','suspensos')`).Scan(&ativos)
+	metricas = append(metricas, semanalRow{"Processos ativos", fmt.Sprintf("%d", ativos)})
+
+	// Top-3 distribuidoras por volume de movimentação na semana
+	type distribRow struct {
+		Nome  string
+		Total int
+	}
+	var distrib []distribRow
+	rows, err := db.Query(`
+		SELECT COALESCE(r.distribuidora, r.empresa, 'N/A') AS distribuidora, COUNT(*) AS total
+		  FROM FT_HISTORICO_MOVIMENTACOES h
+		  JOIN FT_REQUISICOES r ON r.id_requisicao = h.id_requisicao
+		 WHERE h.data_movimentacao >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+		 GROUP BY distribuidora
+		 ORDER BY total DESC
+		 LIMIT 3`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var d distribRow
+			if rows.Scan(&d.Nome, &d.Total) == nil {
+				distrib = append(distrib, d)
+			}
+		}
+	}
+
+	// Monta HTML
+	dataHoje := time.Now().In(time.FixedZone("BRT", -3*3600)).Format("02/01/2006")
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f1f5f9;font-family:sans-serif;">
+<div style="max-width:600px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.1);">
+  <div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);padding:28px 32px;">
+    <h1 style="margin:0;color:#fff;font-size:22px;">📊 Informativo Semanal SURE</h1>
+    <p style="margin:6px 0 0;color:#bfdbfe;font-size:13px;">Semana encerrada em %s</p>
+  </div>
+  <div style="padding:28px 32px;">
+    <h2 style="margin:0 0 16px;color:#1e3a5f;font-size:16px;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">Métricas da Semana</h2>
+    <table style="width:100%%;border-collapse:collapse;">`, dataHoje))
+
+	for i, m := range metricas {
+		bg := "#fff"
+		if i%2 == 0 {
+			bg = "#f8fafc"
+		}
+		b.WriteString(fmt.Sprintf(`
+      <tr style="background:%s;">
+        <td style="padding:10px 12px;color:#475569;font-size:14px;">%s</td>
+        <td style="padding:10px 12px;color:#1e3a5f;font-size:18px;font-weight:700;text-align:right;">%s</td>
+      </tr>`, bg, m.Label, m.Valor))
+	}
+
+	b.WriteString(`</table>`)
+
+	if len(distrib) > 0 {
+		b.WriteString(`<h2 style="margin:24px 0 12px;color:#1e3a5f;font-size:16px;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">Top Distribuidoras (movimentações)</h2>
+    <table style="width:100%%;border-collapse:collapse;">`)
+		medals := []string{"🥇", "🥈", "🥉"}
+		for i, d := range distrib {
+			medal := ""
+			if i < len(medals) {
+				medal = medals[i]
+			}
+			bg := "#fff"
+			if i%2 == 0 {
+				bg = "#f8fafc"
+			}
+			b.WriteString(fmt.Sprintf(`
+      <tr style="background:%s;">
+        <td style="padding:10px 12px;color:#475569;font-size:14px;">%s %s</td>
+        <td style="padding:10px 12px;color:#1e3a5f;font-size:18px;font-weight:700;text-align:right;">%d</td>
+      </tr>`, bg, medal, d.Nome, d.Total))
+		}
+		b.WriteString(`</table>`)
+	}
+
+	appURL := strings.TrimSpace(os.Getenv("APP_URL"))
+	if appURL == "" {
+		appURL = "http://sure.app.br"
+	}
+	b.WriteString(fmt.Sprintf(`
+    <div style="margin-top:28px;text-align:center;">
+      <a href="%s" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 32px;border-radius:8px;font-weight:700;font-size:14px;">Abrir Sistema SURE</a>
+    </div>
+  </div>
+  <div style="padding:16px 32px;background:#f8fafc;text-align:center;color:#94a3b8;font-size:11px;">
+    Este e-mail foi gerado automaticamente pelo sistema SURE.
+  </div>
+</div></body></html>`, appURL))
+
+	// Envia para todos os gestores ativos
+	rowsG, err := db.Query(`SELECT email FROM DM_USUARIO WHERE perfil = 'gestor' AND ativo = 1 AND email IS NOT NULL AND email != ''`)
+	if err != nil {
+		log.Printf("[InformativoSemanal] erro ao buscar gestores: %v", err)
+		return
+	}
+	defer rowsG.Close()
+	assunto := fmt.Sprintf("📊 Informativo Semanal SURE — %s", dataHoje)
+	body := b.String()
+	for rowsG.Next() {
+		var emailGestor string
+		if rowsG.Scan(&emailGestor) != nil || emailGestor == "" {
+			continue
+		}
+		if err := SendEmail(emailGestor, assunto, body); err != nil {
+			log.Printf("[InformativoSemanal] erro ao enviar para %s: %v", emailGestor, err)
+		} else {
+			log.Printf("[InformativoSemanal] enviado para %s", emailGestor)
+		}
+	}
 }
 
 // VerificarPendenciasDeFluxo verifica processos na etapa \"Enviado ao Financeiro\" com dados faltando e cria alertas.
@@ -282,10 +436,10 @@ func VerificarPendenciasDeFluxo() {
 			continue
 		}
 
-		// Evita duplicar alerta no dia
+		// Não duplica enquanto houver alerta não lido para o mesmo processo
 		var exists int
 		_ = getAppDB().QueryRow(
-			"SELECT COUNT(1) FROM FT_ALERTAS WHERE id_processo=? AND DATE(data_criacao)=CURRENT_DATE AND mensagem LIKE ?",
+			"SELECT COUNT(1) FROM FT_ALERTAS WHERE id_processo=? AND lido=0 AND mensagem LIKE ?",
 			procID, "%Prazo do processo%",
 		).Scan(&exists)
 		if exists > 0 {
@@ -409,7 +563,7 @@ func ChecarPrazosProcessos() {
 		}
 		var exists int
 		_ = getAppDB().QueryRow(
-			"SELECT COUNT(1) FROM FT_ALERTAS WHERE id_processo=? AND DATE(data_criacao)=CURRENT_DATE AND mensagem LIKE ?",
+			"SELECT COUNT(1) FROM FT_ALERTAS WHERE id_processo=? AND lido=0 AND mensagem LIKE ?",
 			procID, "%Prazo do processo%",
 		).Scan(&exists)
 		if exists > 0 {

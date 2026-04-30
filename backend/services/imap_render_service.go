@@ -140,13 +140,18 @@ func LerEmailsRecebidos() {
 
 		// Salva o e-mail recebido no banco
 		_, dbErr := getAppDB().Exec(`
-            INSERT INTO FT_EMAILS_PROCESSO 
+            INSERT INTO FT_EMAILS_PROCESSO
             (id_processo, de_email, para_email, assunto, corpo, tipo)
             VALUES (?, ?, ?, ?, ?, 'recebido')`,
 			processoID, from[0].Address, to[0].Address, subject, body,
 		)
 		if dbErr != nil {
 			log.Printf("Erro ao salvar e-mail recebido no banco: %v", dbErr)
+		}
+
+		// Notifica gestor responsável se for resposta a um processo
+		if processoID.Valid {
+			criarAlertaEmailRecebido(processoID.Int64, from[0].Address)
 		}
 	}
 

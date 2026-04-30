@@ -110,3 +110,24 @@ select option {
   animation: toastFloat 3s ease-in-out both;
 }
 
+/* Indeterminate progress bar (estilo Linear/YouTube) — usada na lista de e-mails */
+@keyframes mailIndeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+.mail-progress-track {
+  position: relative;
+  height: 2px;
+  width: 100%;
+  overflow: hidden;
+  background: rgba(125, 125, 125, 0.12);
+}
+.mail-progress-track::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--accent, #3b82f6), transparent);
+  animation: mailIndeterminate 1.4s ease-in-out infinite;
+}
+

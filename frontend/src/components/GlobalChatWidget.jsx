@@ -3,6 +3,7 @@
  * Responde perguntas sobre processos de ressarcimento em tempo real.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Bot,
   ChevronDown,
@@ -337,6 +338,7 @@ function MessageCharts({ context, expanded }) {
 
 // ─── Componente principal ──────────────────────────────────────────────────
 export default function GlobalChatWidget() {
+  const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -443,6 +445,9 @@ export default function GlobalChatWidget() {
   };
 
   // ── FAB (botão flutuante) ─────────────────────────────────────────────────
+  const hiddenRoutes = ['/caixa-de-email'];
+  if (hiddenRoutes.some((r) => pathname.startsWith(r))) return null;
+
   if (!open) {
     return (
       <button

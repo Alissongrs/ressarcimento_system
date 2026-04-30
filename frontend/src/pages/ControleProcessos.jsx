@@ -547,6 +547,7 @@ const KanbanColumn = ({
 const ControleProcessos = () => {
   const navigate = useNavigate();
   const [colunas, setColunas] = useState(null);
+  const [alarmesBySubEtapa, setAlarmesBySubEtapa] = useState({});
   const [allTags, setAllTags] = useState([]);
   const [processoParaEditarTags, setProcessoParaEditarTags] = useState(null);
   const [isLoading, setIsLoading] = useState(true);

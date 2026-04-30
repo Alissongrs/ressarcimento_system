@@ -175,9 +175,14 @@ func AdminPlanilhaList(c *gin.Context) {
     where := make([]string, 0, 4)
     args := make([]any, 0, 4)
     if q != "" {
-        like := "%" + strings.ToLower(q) + "%"
-        where = append(where, "(LOWER(COALESCE(r.cliente,'')) LIKE ? OR LOWER(COALESCE(r.uc,'')) LIKE ? OR LOWER(COALESCE(h.comentario,'')) LIKE ?)")
-        args = append(args, like, like, like)
+        if pid, err2 := strconv.ParseInt(q, 10, 64); err2 == nil && pid > 0 {
+            where = append(where, "r.id_requisicao = ?")
+            args = append(args, pid)
+        } else {
+            like := "%" + strings.ToLower(q) + "%"
+            where = append(where, "(LOWER(COALESCE(r.cliente,'')) LIKE ? OR LOWER(COALESCE(r.uc,'')) LIKE ? OR LOWER(COALESCE(h.comentario,'')) LIKE ?)")
+            args = append(args, like, like, like)
+        }
     }
     if etapa != "" {
         where = append(where, "LOWER(COALESCE(h.etapa_nova,'')) = ?")

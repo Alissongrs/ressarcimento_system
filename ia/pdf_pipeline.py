@@ -22,6 +22,7 @@ Uso:
     python pdf_pipeline.py --id 167770               # fatura específica
     python pdf_pipeline.py --id 167770 328211        # múltiplos ids
     python pdf_pipeline.py --id 167770 --force       # reprocessa
+    python pdf_pipeline.py --empresa 14 --ASC        # processa mais antigos primeiro
 """
 
 import argparse
@@ -201,27 +202,100 @@ def _vazio(v) -> bool:
 
 def _campos_vazios() -> dict:
     return dict(
-        kwh_total    = None,
-        kwh_fponta   = None,   # KWH Fora Ponta (separado do ponta)
-        kwh_ponta    = None,   # KWH Ponta
-        leit_ant_p   = None,
-        leit_atu_p   = None,
-        leit_ant_fp  = None,
-        leit_atu_fp  = None,
-        constante_p  = None,
-        constante_fp = None,   # constante do medidor Fora Ponta (pode diferir)
+        # ── Identificação ─────────────────────────────────────────────────────
+        numero_fatura        = None,
+        numero_instalacao    = None,
+        nome_cliente         = None,
+        cpf_cnpj             = None,
+        classe_consumidor    = None,
+        subgrupo_tarifario   = None,
+        modalidade_tarifaria = None,
+        distribuidora        = None,
+        grupo_tarifario      = None,
+        tensao_fornecimento  = None,
+        numero_medidor       = None,
+        tipo_medicao         = None,
+
+        # ── Período ───────────────────────────────────────────────────────────
         dt_leit_ant  = None,
         dt_leit_atu  = None,
         dt_proxima   = None,
         dt_emissao   = None,
         vencimento   = None,
-        total_rs     = None,
-        rs_consumo   = None,
-        rs_ponta     = None,   # RS consumo Ponta (TE + TUSD)
-        cip          = None,
-        tarifa_kwh   = None,
-        tarifa_ponta = None,   # tarifa sem ICMS Ponta TE
+        dias         = None,
+        mes_ref      = None,
+
+        # ── Leituras ativas ───────────────────────────────────────────────────
+        leit_ant_p   = None,
+        leit_atu_p   = None,
+        leit_ant_fp  = None,
+        leit_atu_fp  = None,
+
+        # ── Leituras reativas ─────────────────────────────────────────────────
+        leit_ant_reativa = None,
+        leit_atu_reativa = None,
+
+        # ── Leituras demanda ──────────────────────────────────────────────────
+        leit_demanda_p  = None,
+        leit_demanda_fp = None,
+
+        # ── Constantes e relações ─────────────────────────────────────────────
+        constante_p  = None,
+        constante_fp = None,
+        constante_k  = None,   # constante geral (quando não há distinção P/FP)
+        fator_mult   = None,   # fator de multiplicação
+        ke           = None,   # constante eletrônica
+        rtc          = None,   # relação de transformação de corrente
+        rtp          = None,   # relação de transformação de potencial
+
+        # ── Consumo ───────────────────────────────────────────────────────────
+        kwh_total    = None,
+        kwh_fponta   = None,
+        kwh_ponta    = None,
+        kwh_reativo  = None,   # kVArh reativo total
+        kwh_reativo_exc = None,  # kVArh reativo excedente
+        kvar_reativo_exc = None, # kVAr demanda reativa excedente
+
+        # ── Demanda ───────────────────────────────────────────────────────────
+        demanda_fat_p  = None,  # demanda faturada ponta (kW)
+        demanda_fat_fp = None,  # demanda faturada fora ponta (kW)
+        demanda_cont_p  = None, # demanda contratada ponta (kW)
+        demanda_cont_fp = None, # demanda contratada fora ponta (kW)
+
+        # ── Fatores ───────────────────────────────────────────────────────────
+        fator_carga   = None,
+        fator_potencia = None,
+
+        # ── Tarifas unitárias ─────────────────────────────────────────────────
+        tarifa_te    = None,   # tarifa TE (R$/kWh sem ICMS)
+        tarifa_tusd  = None,   # tarifa TUSD (R$/kWh sem ICMS)
+        tarifa_kwh   = None,   # tarifa geral (fallback)
+        tarifa_ponta = None,
+        tarifa_demanda = None,
         preco_unit_c_trib = None,
+
+        # ── Bandeira tarifária ────────────────────────────────────────────────
+        tipo_bandeira  = None,   # VERDE / AMARELA / VERMELHA_P1 / VERMELHA_P2
+        valor_bandeira = None,
+
+        # ── Valores financeiros ───────────────────────────────────────────────
+        total_rs       = None,
+        rs_consumo     = None,
+        rs_ponta       = None,
+        valor_demanda  = None,
+        valor_reativo  = None,
+        valor_reativo_exc = None,
+        valor_demanda_reativa_exc = None,
+        cip            = None,
+        valor_encargos = None,
+        valor_outros   = None,
+
+        # ── Encargos setoriais ────────────────────────────────────────────────
+        valor_cde     = None,
+        valor_proinfa = None,
+        valor_ess     = None,
+
+        # ── Tributos ──────────────────────────────────────────────────────────
         icms_base    = None,
         icms_aliq    = None,
         icms_valor   = None,
@@ -230,8 +304,30 @@ def _campos_vazios() -> dict:
         pis_valor    = None,
         cofins_aliq  = None,
         cofins_valor = None,
-        kwh_injet    = None,
-        historico    = [],
+
+        # ── Indicadores ──────────────────────────────────────────────────────
+        ind_tarifa_social  = None,
+        ind_cliente_rural  = None,
+        ind_beneficio_fiscal = None,
+        ind_mercado_livre  = None,
+        ind_gd             = None,
+        ind_leitura_real   = None,
+        ind_leitura_estim  = None,
+        ind_troca_medidor  = None,
+        ind_revisao_fat    = None,
+        ind_impede_leitura = None,
+
+        # ── Geração distribuída ───────────────────────────────────────────────
+        kwh_injet      = None,
+        kwh_compensado = None,
+        saldo_credito  = None,
+
+        # ── Perda de transformação ────────────────────────────────────────────
+        perda_transf_pct = None,
+
+        # ── Histórico ─────────────────────────────────────────────────────────
+        historico         = [],
+        historico_demanda = [],
     )
 
 # ─── Parser por regex (funciona em texto limpo do plumber ou texto OCR) ──────
@@ -245,10 +341,34 @@ def parse_regex(linhas: list[str]) -> dict:
     texto = "\n".join(linhas)
     SEP   = r"[\s_]+"
 
-    # ── Total a pagar ─────────────────────────────────────────────────────────
-    totais = [_num(v) for v in re.findall(r"R\$\s*([\d\.]+,\d{2})", texto) if _num(v)]
-    if totais:
-        dados["total_rs"] = max(totais)
+    # ── Total a pagar — tentativas específicas primeiro; max() é último recurso ─
+    # Prioridade 1: linha "TOTAL A PAGAR" ou "VALOR A PAGAR" na mesma linha
+    for _pat_total in [
+        r"TOTAL\s+A\s+PAGAR[^\n\d]*([\d\.]+,\d{2})",
+        r"VALOR\s+A\s+PAGAR[^\n\d]*([\d\.]+,\d{2})",
+        r"VALOR\s+DO\s+DOCUMENTO[^\n\d]*([\d\.]+,\d{2})",
+        r"Subtotal\s+Faturamento\s+([\d\.]+,\d{2})",
+    ]:
+        _m = re.search(_pat_total, texto, re.IGNORECASE)
+        if _m:
+            dados["total_rs"] = _num(_m.group(1))
+            break
+    # Prioridade 2: formato boleto (ENEL SP e similares) — "<COD_BARRAS> DD MMM YYYY VALOR"
+    # O valor total aparece após a data de vencimento no header/rodapé do boleto, sem R$
+    # Ex: "63022460 23 JAN 2020 4.973,08" ou "63022460 10070713 23 JAN 2020 4.973,08 ..."
+    if not dados["total_rs"]:
+        _meses_pt = r"(?:JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)"
+        _m = re.search(
+            r"\d{5,}[\s\d]*\b(\d{2})\s+" + _meses_pt + r"\s+(\d{4})\s+([\d\.]+,\d{2})\b",
+            texto, re.IGNORECASE)
+        if _m:
+            dados["total_rs"] = _num(_m.group(3))
+
+    # max() como último recurso — só se nenhum padrão específico achou
+    if not dados["total_rs"]:
+        _totais = [_num(v) for v in re.findall(r"R\$\s*([\d\.]+,\d{2})", texto) if _num(v)]
+        if _totais:
+            dados["total_rs"] = max(_totais)
 
     # ── Vencimento ────────────────────────────────────────────────────────────
     for pat in [
@@ -265,6 +385,18 @@ def parse_regex(linhas: list[str]) -> dict:
     m = re.search(r"DATA DE EMISS[AÃ]O\s*[:\-]?\s*(\d{2}/\d{2}/\d{4})", texto, re.IGNORECASE)
     if m:
         dados["dt_emissao"] = m.group(1)
+
+    # ── Mês de referência ─────────────────────────────────────────────────────
+    # Enel SP: "04/2026" standalone; genérico: "MÊS/ANO DE REFERÊNCIA: 04/2026"
+    for _pat_mes in [
+        r"(?:M[EÊ]S|REFER[EÊ]NCIA)[^\n:]{0,30}?:\s*(\d{2}/\d{4})",
+        r"REFER[EÊ]NCIA[^\n:]{0,30}?(\d{2}/\d{4})",
+        r"(?<!\d)(\d{2}/\d{4})(?!\d)",  # standalone MM/AAAA (último recurso)
+    ]:
+        _m = re.search(_pat_mes, texto, re.IGNORECASE)
+        if _m:
+            dados["mes_ref"] = _m.group(1)
+            break
 
     # ── Datas de leitura + dias ───────────────────────────────────────────────
     m = re.search(
@@ -342,7 +474,7 @@ def parse_regex(linhas: list[str]) -> dict:
         dados["icms_valor"] = _num(m.group(3))
 
     m = re.search(
-        r"\bPIS\b" + SEP + r"([\d\.]+,\d+)" + SEP + r"([\d,\.]+)" + SEP + r"([\d\.]+,\d{2})",
+        r"\bPIS(?:/PASEP)?\b" + SEP + r"([\d\.]+,\d+)" + SEP + r"([\d,\.]+)" + SEP + r"([\d\.]+,\d{2})",
         texto, re.IGNORECASE)
     if m:
         dados["pis_base"]  = _num(m.group(1))
@@ -455,7 +587,7 @@ def parse_regex(linhas: list[str]) -> dict:
 
     # Alíquotas PIS e COFINS no cabeçalho da tabela: "PIS 0,86%"  "COFINS 3,97%"
     if not dados["pis_aliq"]:
-        m = re.search(r"\bPIS\b\s+([\d,]+)%", texto, re.IGNORECASE)
+        m = re.search(r"\bPIS(?:/PASEP)?\b\s+([\d,]+)%", texto, re.IGNORECASE)
         if m:
             dados["pis_aliq"] = _num(m.group(1))
     if not dados["cofins_aliq"]:
@@ -743,18 +875,18 @@ def parse_regex(linhas: list[str]) -> dict:
             dados["cofins_valor"] = dados["cofins_valor"] or _num(m.group(2))
 
     # Tarifas sem impostos: "0,39603 (TUSD)  0,26046 (TE)"
-    # Usa TUSD como tarifa_kwh (FP) e TE como tarifa_ponta (referência)
-    if not dados["tarifa_kwh"]:
+    if not dados["tarifa_tusd"]:
         m = re.search(r"(0,\d{4,6})\s*\(TUSD\)", texto, re.IGNORECASE)
         if m:
-            dados["tarifa_kwh"] = _num(m.group(1))
-    if not dados["tarifa_ponta"]:
+            dados["tarifa_tusd"] = _num(m.group(1))
+            dados["tarifa_kwh"]  = dados["tarifa_kwh"] or dados["tarifa_tusd"]
+    if not dados["tarifa_te"]:
         m = re.search(r"(0,\d{4,6})\s*\(TE\)", texto, re.IGNORECASE)
         if m:
-            dados["tarifa_ponta"] = _num(m.group(1))
+            dados["tarifa_te"]    = _num(m.group(1))
+            dados["tarifa_ponta"] = dados["tarifa_ponta"] or dados["tarifa_te"]
 
     # rs_consumo: TUSD + TE (últimas colunas VALOR)
-    # Pega o valor da coluna VALOR das linhas TUSD e TE (última coluna = VALOR)
     if not dados["rs_consumo"]:
         tusd_rs = te_rs = None
         m = re.search(
@@ -772,6 +904,416 @@ def parse_regex(linhas: list[str]) -> dict:
             dados["rs_consumo"] = round(tusd_rs + te_rs, 2)
         elif tusd_rs or te_rs:
             dados["rs_consumo"] = tusd_rs or te_rs
+
+    # ── Número da fatura / NF ──────────────────────────────────────────────────
+    if not dados["numero_fatura"]:
+        for pat in [
+            r"(?:N[º°\.]\s*(?:da\s+)?(?:Fatura|NF|Nota\s*Fiscal))[:\s]+(\S+)",
+            r"(?:Fatura|Nota\s*Fiscal)\s*[nN][º°]?\s*[:\-]?\s*(\S+)",
+            r"NÚMERO\s+DA\s+FATURA[:\s]+(\S+)",
+        ]:
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                dados["numero_fatura"] = m.group(1).strip(".:,")
+                break
+
+    # ── Número de instalação ───────────────────────────────────────────────────
+    if not dados["numero_instalacao"]:
+        for pat in [
+            r"(?:N[º°\.]\s*(?:da\s+)?Instala[çc][ãa]o|Instala[çc][ãa]o\s*[nN][º°]?)[:\s]+(\S+)",
+            r"CÓDIGO\s+DA\s+INSTALA[ÇC][ÃA]O[:\s]+(\S+)",
+            r"Instala[çc][ãa]o[:\s]+(\d{5,})",
+        ]:
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                dados["numero_instalacao"] = m.group(1).strip(".:,")
+                break
+
+    # ── Nome do cliente ────────────────────────────────────────────────────────
+    if not dados["nome_cliente"]:
+        for pat in [
+            # Enel SP/Eletropaulo — bloco PAGADOR do boleto
+            r"PAGADOR[:\s]+([A-ZÀ-Ú][A-ZÀ-Ú\s\.]{4,80})(?:\s*[-–]|CNPJ|CPF|\n)",
+            r"(?:Cliente|Nome)[:\s]+([A-ZÀ-Ú][A-ZÀ-Ú\s]{4,60}?)(?:\n|CPF|CNPJ|UC|$)",
+            r"CONSUMIDOR[:\s]+([A-ZÀ-Ú][A-ZÀ-Ú\s]{4,60})(?:\n|$)",
+        ]:
+            m = re.search(pat, texto, re.IGNORECASE | re.MULTILINE)
+            if m:
+                dados["nome_cliente"] = m.group(1).strip()
+                break
+
+    # ── CPF / CNPJ ────────────────────────────────────────────────────────────
+    # Busca somente após label "CPF/CNPJ:" para evitar capturar o CNPJ da distribuidora
+    if not dados["cpf_cnpj"]:
+        m = re.search(r"CPF[/\s]CNPJ[:\s]+(\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})\b", texto, re.IGNORECASE)
+        if not m:
+            m = re.search(r"CPF[/\s]CNPJ[:\s]+(\d{3}\.\d{3}\.\d{3}-\d{2})\b", texto, re.IGNORECASE)
+        if m:
+            dados["cpf_cnpj"] = m.group(1)
+
+    # ── Classe e subgrupo tarifário ────────────────────────────────────────────
+    # Enel SP / Eletropaulo: "B - B3 - CONVENCIONAL - Comercial - Comercial"
+    #   ou "A - A4 - VERDE - Comercial"
+    _cls_m = re.search(
+        r"\b([AB])\s*[-–]\s*(A\d[a-z]?|B\d)\s*[-–]\s*"
+        r"(CONVENCIONAL|VERDE|AZUL|HOR[ÁA]RIOSAZONAL[\s\w]*|HOR[ÁA]RIO[\s\w]*|TRIFÁSICO\s+\w+|MONOFÁSICO\s+\w+)"
+        r"\s*[-–]\s*([A-ZÀ-Úa-zà-ú][A-ZÀ-Úa-zà-ú\s/]+?)(?:\s*[-–]|\n|$)",
+        texto, re.IGNORECASE)
+    if _cls_m:
+        dados["grupo_tarifario"]     = dados["grupo_tarifario"]     or _cls_m.group(1).upper()
+        dados["subgrupo_tarifario"]  = dados["subgrupo_tarifario"]  or _cls_m.group(2).upper()
+        dados["modalidade_tarifaria"]= dados["modalidade_tarifaria"]or _cls_m.group(3).strip().upper()
+        dados["classe_consumidor"]   = dados["classe_consumidor"]   or _cls_m.group(4).strip()
+
+    if not dados["classe_consumidor"]:
+        m = re.search(
+            r"(?:Classe|Categoria)[:\s]+([A-ZÀ-Ú][A-ZÀ-Ú\s/]{2,40})(?:\n|Subgrupo|Modal)",
+            texto, re.IGNORECASE | re.MULTILINE)
+        if m:
+            dados["classe_consumidor"] = m.group(1).strip()
+
+    if not dados["subgrupo_tarifario"]:
+        m = re.search(r"(?:Subgrupo|Sub-grupo)[:\s]+([AB][1-4](?:\.\d)?)\b",
+                      texto, re.IGNORECASE)
+        if m:
+            dados["subgrupo_tarifario"] = m.group(1).upper()
+
+    if not dados["grupo_tarifario"]:
+        m = re.search(r"(?:Grupo\s+Tarifário|Grupo)[:\s]+([AB]\d)\b",
+                      texto, re.IGNORECASE)
+        if m:
+            dados["grupo_tarifario"] = m.group(1).upper()
+
+    # ── Modalidade tarifária ───────────────────────────────────────────────────
+    if not dados["modalidade_tarifaria"]:
+        m = re.search(
+            r"(?:Modalidade|Tarifa\s+Modalidade)[:\s]+((?:VERDE|AZUL|HOR[ÁA]RIA|CONV\w*|BINÔMIA)[^\n]*)",
+            texto, re.IGNORECASE)
+        if m:
+            dados["modalidade_tarifaria"] = m.group(1).strip()[:50]
+    # Enel ACL: "Trifásico Verde" / "Trifásico Azul" standalone
+    if not dados["modalidade_tarifaria"]:
+        m = re.search(r"\b(Trifásico|Monofásico|Bifásico)\s+(Verde|Azul|Convencional)\b",
+                      texto, re.IGNORECASE)
+        if m:
+            dados["modalidade_tarifaria"] = m.group(2).strip().upper()
+
+    # ── Tensão de fornecimento ─────────────────────────────────────────────────
+    if not dados["tensao_fornecimento"]:
+        # Tensão numérica: "13,8kV", "127/220V"
+        m = re.search(r"(?:Tens[ãa]o|Nível\s+de\s+Tens[ãa]o)[:\s]+([\d,/]+\s*k?[Vv])\b",
+                      texto, re.IGNORECASE)
+        if m:
+            dados["tensao_fornecimento"] = m.group(1).strip()
+    if not dados["tensao_fornecimento"]:
+        # Enel SP: "TIPO DE FORNECIMENTO\nMonofásico" ou "Monofásico" na linha de classificação
+        m = re.search(r"TIPO\s+DE\s+FORNECIMENTO[:\s]*(Monofásico|Bifásico|Trifásico)\b",
+                      texto, re.IGNORECASE)
+        if not m:
+            m = re.search(r"^(Monofásico|Bifásico|Trifásico)\s*$",
+                          texto, re.IGNORECASE | re.MULTILINE)
+        if m:
+            dados["tensao_fornecimento"] = m.group(1).strip()
+
+    # ── Número do medidor ─────────────────────────────────────────────────────
+    # Enel SP BT: pdfplumber extrai o layout de 2 colunas como texto fragmentado.
+    # O medidor aparece como número isolado ANTES do histórico mensal:
+    #   "12437633 nov/19 2558 30"  → captura o número antes de "mmm/aa"
+    # O label "Nº do medidor" fica na coluna oposta e NÃO aparece adjacente no texto.
+    if not dados["numero_medidor"]:
+        for pat in [
+            # Enel SP BT: número seguido direto de mês/ano do histórico (sem label)
+            r"^(\d{7,9})\s+(?:jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)/\d{2}\b",
+            r"N[º°\.]\s*do\s+[Mm]edidor[\s\n]+([\d]{5,})",
+            r"N[º°]\s*medidor[:\s]+([\d]{5,})",
+            r"MEDIDOR\s+N[º°]\s*([\d]{5,})",
+            r"(?:N[º°\.]\s*do\s+(?:Medidor|Med\.?)|Medidor\s*N[º°]?)[:\s]+([\d\w]{5,})",
+            r"MEDIDOR[:\s]+([\d]{5,})",
+            r"^([A-Z0-9]{6,})\s+ENRG\s+ATV",
+        ]:
+            m = re.search(pat, texto, re.IGNORECASE | re.MULTILINE)
+            if m:
+                val = m.group(1).strip(".:,")
+                if re.match(r"^\d{5,}$", val) or re.match(r"^[A-Z0-9]{6,}$", val):
+                    dados["numero_medidor"] = val
+                    break
+
+    # ── Leituras Enel SP BT: seção "Dados de Medição" ────────────────────────
+    # pdfplumber extrai as duas colunas intercaladas — os labels "Leitura anterior"
+    # e "Leitura atual" NÃO aparecem junto dos valores no texto extraído.
+    # O que aparece é: "DD MMM VALOR_GRANDE" onde VALOR_GRANDE usa ponto como milhar.
+    # Exemplo real: "06 FEV 49.318.053" e "05 MAR 8.225.804"
+    # A primeira ocorrência é leit_ant; a segunda é leit_atu.
+    _meses_pt = r"(?:JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)"
+    _leit_grande = r"([\d]{1,2}(?:\.[\d]{3})+)"   # ex: 49.318.053 ou 8.225.804
+    if not dados["leit_ant_p"]:
+        _leituras = re.findall(
+            r"\b\d{2}\s+" + _meses_pt + r"\s+" + _leit_grande,
+            texto, re.IGNORECASE)
+        if len(_leituras) >= 1:
+            dados["leit_ant_p"]  = _num(_leituras[0])
+            dados["leit_ant_fp"] = dados["leit_ant_p"]
+        if len(_leituras) >= 2:
+            dados["leit_atu_p"]  = _num(_leituras[1])
+            dados["leit_atu_fp"] = dados["leit_atu_p"]
+
+    # ── Constante K e relações RTC/RTP ────────────────────────────────────────
+    if not dados["constante_k"]:
+        for pat in [
+            r"\bK\s*=\s*([\d,\.]+)",
+            r"Constante[:\s]+([\d,\.]+)",
+            r"K\s*:\s*([\d,\.]+)",
+        ]:
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                dados["constante_k"] = _num(m.group(1))
+                break
+
+    if not dados["rtc"]:
+        m = re.search(r"\bRTC\b[:\s]+([\d,\.]+)", texto, re.IGNORECASE)
+        if m:
+            dados["rtc"] = _num(m.group(1))
+
+    if not dados["rtp"]:
+        m = re.search(r"\bRTP\b[:\s]+([\d,\.]+)", texto, re.IGNORECASE)
+        if m:
+            dados["rtp"] = _num(m.group(1))
+
+    if not dados["fator_mult"]:
+        m = re.search(r"(?:Fator\s+de\s+Multiplica[çc][ãa]o|FM)[:\s]+([\d,\.]+)",
+                      texto, re.IGNORECASE)
+        if m:
+            dados["fator_mult"] = _num(m.group(1))
+
+    # ── Consumo reativo (kVArh) ────────────────────────────────────────────────
+    if not dados["kwh_reativo"]:
+        m = re.search(
+            r"(?:Energia\s+Reativa|Reativa\s+Total|Indutiva)[:\s]+(?:KVArh|kVArh)?\s*([\d\.]+,\d+)",
+            texto, re.IGNORECASE)
+        if m:
+            dados["kwh_reativo"] = _num(m.group(1))
+
+    if not dados["kwh_reativo_exc"]:
+        m = re.search(
+            r"(?:Reativa\s+Excedente|Excedente\s+Reativa)[:\s]+(?:KVArh|kVArh)?\s*([\d\.]+,\d+)",
+            texto, re.IGNORECASE)
+        if m:
+            dados["kwh_reativo_exc"] = _num(m.group(1))
+
+    # ── Demanda faturada ponta e fora ponta ───────────────────────────────────
+    if not dados["demanda_fat_p"]:
+        for pat in [
+            r"Demanda\s+(?:Faturada\s+)?(?:na\s+)?Ponta\s+KW\s+([\d\.]+,\d+)",
+            r"Demanda\s+(?:Medida\s+)?(?:na\s+)?Ponta[:\s]+([\d\.]+,\d+)\s*kW",
+        ]:
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                dados["demanda_fat_p"] = _num(m.group(1))
+                break
+
+    if not dados["demanda_fat_fp"]:
+        for pat in [
+            r"Demanda\s+(?:Faturada\s+)?Fora\s+(?:de\s+)?Ponta\s+KW\s+([\d\.]+,\d+)",
+            r"Demanda\s+(?:Medida\s+)?Fora\s+(?:de\s+)?Ponta[:\s]+([\d\.]+,\d+)\s*kW",
+        ]:
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                dados["demanda_fat_fp"] = _num(m.group(1))
+                break
+
+    # ── Demanda contratada ────────────────────────────────────────────────────
+    if not dados["demanda_cont_p"]:
+        m = re.search(
+            r"Demanda\s+Contratada\s+(?:na\s+)?Ponta[:\s]+([\d\.]+,\d+)\s*k?W",
+            texto, re.IGNORECASE)
+        if m:
+            dados["demanda_cont_p"] = _num(m.group(1))
+
+    if not dados["demanda_cont_fp"]:
+        m = re.search(
+            r"Demanda\s+Contratada\s+Fora\s+(?:de\s+)?Ponta[:\s]+([\d\.]+,\d+)\s*k?W",
+            texto, re.IGNORECASE)
+        if m:
+            dados["demanda_cont_fp"] = _num(m.group(1))
+
+    # ── Enel ACL (alta tensão): demanda única e leituras do medidor ───────────
+    # "DEMANDA ÚNICA C/ DESCONTO 5.199,6 7,91811 41.171,00 18% 7.410,78 41.171,00 6,40942"
+    # "DMCR PONTA 4.545 4.528 4.754,4"  (demanda medida)
+    if not dados["demanda_fat_p"]:
+        m = re.search(
+            r"(?:DEMANDA\s+[ÚU]NICA|0602\s+DEMANDA)[^\n]*([\d\.]+,\d+)\s+[\d,\.]+\s+([\d\.]+,\d{2})",
+            texto, re.IGNORECASE)
+        if m:
+            dados["demanda_fat_p"]  = _num(m.group(1))
+            dados["valor_demanda"]  = dados["valor_demanda"] or _num(m.group(2))
+
+    # "CONSUMO PONTA AM 2.158.293 2.432.736 288.165,2"  → leit_ant  leit_atu  kwh
+    if dados["leit_ant_p"] is None:
+        m = re.search(
+            r"CONSUMO\s+PONTA\s+AM\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+,\d+)",
+            texto, re.IGNORECASE)
+        if m:
+            dados["leit_ant_p"] = _num(m.group(1))
+            dados["leit_atu_p"] = _num(m.group(2))
+            if not dados["kwh_ponta"]:
+                dados["kwh_ponta"] = _num(m.group(3))
+
+    # "CONSUMO FORA PONTA INDUTIVO AM 16.660.691 18.616.985 2.054.108,7"
+    if dados["leit_ant_fp"] is None:
+        m = re.search(
+            r"CONSUMO\s+FORA\s+PONTA\s+INDUTIVO\s+AM\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+,\d+)",
+            texto, re.IGNORECASE)
+        if m:
+            dados["leit_ant_fp"] = _num(m.group(1))
+            dados["leit_atu_fp"] = _num(m.group(2))
+            if not dados["kwh_fponta"]:
+                dados["kwh_fponta"] = _num(m.group(3))
+
+    # "CONST. ATIVO 1,05000" ou "CONST. POTENCIA 4,20000"
+    if not dados["constante_k"]:
+        m = re.search(r"CONST\.\s+ATIVO\s+([\d,\.]+)", texto, re.IGNORECASE)
+        if m:
+            dados["constante_k"] = _num(m.group(1))
+
+    # ── Fator de potência ──────────────────────────────────────────────────────
+    if not dados["fator_potencia"]:
+        for pat in [
+            r"(?:Fator\s+de\s+Pot[êe]ncia|FP\b)[:\s]+(0,\d+)",
+            r"\bFP[:\s=]+(0,\d+)",
+        ]:
+            m = re.search(pat, texto, re.IGNORECASE)
+            if m:
+                dados["fator_potencia"] = _num(m.group(1))
+                break
+
+    # ── Tarifa TE e TUSD — Enel SP / Eletropaulo (número no final da linha) ──────
+    # "USO SIST. DISTR. (TUSD) KWH 378,000 0,48238 182,34 8,47 182,34 18% 32,82 0,37317"
+    # "ENERGIA (TE)              KWH 378,000 0,34005 128,54 5,97 128,54 18% 23,13 0,26307"
+    # A tarifa sem ICMS é o último valor da linha (0,\d{4,6}). Usamos [^\n]* greedy para pegar o último.
+    if not dados["tarifa_tusd"]:
+        m = re.search(
+            r"USO\s+SIST\.?\s*DISTR\.?\s*\(TUSD\)[^\n]*(0,\d{4,6})\s*(?:\n|$)",
+            texto, re.IGNORECASE | re.MULTILINE)
+        if m:
+            dados["tarifa_tusd"] = _num(m.group(1))
+            dados["tarifa_kwh"]  = dados["tarifa_kwh"] or dados["tarifa_tusd"]
+    if not dados["tarifa_te"]:
+        m = re.search(
+            r"ENERGIA\s*\(TE\)[^\n]*(0,\d{4,6})\s*(?:\n|$)",
+            texto, re.IGNORECASE | re.MULTILINE)
+        if m:
+            dados["tarifa_te"] = _num(m.group(1))
+
+    # ── Valor energia ativa — Subtotal Faturamento (Enel SP) ──────────────────
+    # "Subtotal Faturamento 310,88 0,00 0,00 0,00" → primeiro valor = TUSD+TE
+    if not dados["rs_consumo"]:
+        m = re.search(r"Subtotal\s+Faturamento\s+([\d\.]+,\d{2})", texto, re.IGNORECASE)
+        if m:
+            dados["rs_consumo"] = _num(m.group(1))
+
+    # ── Bandeira tarifária ────────────────────────────────────────────────────
+    if not dados["tipo_bandeira"]:
+        # Enel SP: "Bandeira(s) tarifária(s) aplicada(s) no mês: VERDE"
+        m = re.search(
+            r"Bandeira(?:s)?\s+tarif[^\n:]*:\s*(VERDE|AMARELA|VERMELHA\s*(?:P[12]|PATAM[AÃ]R\s*[12])?|ESCASSEZ[^\n]*)",
+            texto, re.IGNORECASE)
+        if not m:
+            m = re.search(
+                r"Bandeira\s+(VERDE|AMARELA|VERMELHA\s*(?:P[12]|PATAM[AÃ]R\s*[12])?)",
+                texto, re.IGNORECASE)
+        if m:
+            dados["tipo_bandeira"] = m.group(1).strip().upper()
+
+    if not dados["valor_bandeira"]:
+        # Verde = sem cobrança
+        if dados["tipo_bandeira"] and dados["tipo_bandeira"].upper() == "VERDE":
+            dados["valor_bandeira"] = 0.0
+        else:
+            m = re.search(
+                r"(?:Bandeira|Encargo\s+de\s+Bandeira)[^\n]*([\d\.]+,\d{2})",
+                texto, re.IGNORECASE)
+            if m:
+                dados["valor_bandeira"] = _num(m.group(1))
+
+    # ── Energia injetada / compensada (GD) ────────────────────────────────────
+    if not dados["kwh_compensado"]:
+        m = re.search(
+            r"(?:Energia\s+Compensada|Compensa[çc][ãa]o\s+GD)[:\s]+(?:KWH|kWh)?\s*([\d\.]+,\d+)",
+            texto, re.IGNORECASE)
+        if m:
+            dados["kwh_compensado"] = _num(m.group(1))
+
+    if not dados["saldo_credito"]:
+        m = re.search(
+            r"(?:Saldo|Cr[eé]dito)[:\s]+(?:KWH|kWh)?\s*([\d\.]+,\d+)\s*(?:kWh|$)",
+            texto, re.IGNORECASE)
+        if m:
+            dados["saldo_credito"] = _num(m.group(1))
+
+    # ── Perda de transformação ────────────────────────────────────────────────
+    if not dados["perda_transf_pct"]:
+        m = re.search(
+            r"(?:Perda\s+de\s+Transforma[çc][ãa]o|Fator\s+de\s+Perda)[:\s]+([\d,\.]+)\s*%",
+            texto, re.IGNORECASE)
+        if m:
+            dados["perda_transf_pct"] = _num(m.group(1))
+
+    # ── Encargos setoriais ────────────────────────────────────────────────────
+    if not dados["valor_proinfa"]:
+        m = re.search(r"\bPROINFA\b[^\n]*([\d\.]+,\d{2})", texto, re.IGNORECASE)
+        if m:
+            dados["valor_proinfa"] = _num(m.group(1))
+
+    if not dados["valor_cde"]:
+        m = re.search(r"\bCDE\b[^\n]*([\d\.]+,\d{2})", texto, re.IGNORECASE)
+        if m:
+            dados["valor_cde"] = _num(m.group(1))
+
+    if not dados["valor_ess"]:
+        m = re.search(r"\bESS\b[^\n]*([\d\.]+,\d{2})", texto, re.IGNORECASE)
+        if m:
+            dados["valor_ess"] = _num(m.group(1))
+
+    # ── Indicadores (flags) ───────────────────────────────────────────────────
+    dados["ind_tarifa_social"]  = 1 if re.search(
+        r"Baixa\s+Renda|Tarifa\s+Social|TSEE", texto, re.IGNORECASE) else None
+    dados["ind_cliente_rural"]  = 1 if re.search(
+        r"\bRural\b|\bIrrigante\b", texto, re.IGNORECASE) else None
+    dados["ind_mercado_livre"]  = 1 if re.search(
+        r"\bACL\b|Mercado\s+Livre|Livre\b", texto, re.IGNORECASE) else None
+    dados["ind_gd"]             = 1 if re.search(
+        r"Gera[çc][ãa]o\s+Distribu[íi]da|GD\b|Microgeradora|Minigeradora",
+        texto, re.IGNORECASE) else None
+    dados["ind_troca_medidor"]  = 1 if re.search(
+        r"Troca\s+(?:de\s+)?Medidor|Substitui[çc][ãa]o\s+de\s+Medidor",
+        texto, re.IGNORECASE) else None
+    dados["ind_impede_leitura"] = 1 if re.search(
+        r"Impedimento\s+(?:de\s+)?Leitura|N[ãa]o\s+Lido|Leitura\s+Impedida",
+        texto, re.IGNORECASE) else None
+    dados["ind_leitura_estim"]  = 1 if re.search(
+        r"Estimativa|Estimado|Consumo\s+Estimado", texto, re.IGNORECASE) else None
+    dados["ind_leitura_real"]   = 1 if not dados["ind_leitura_estim"] else None
+
+    # ── Histórico demanda (12 meses) ──────────────────────────────────────────
+    if not dados["historico_demanda"]:
+        hist_d = []
+        for m in re.finditer(
+            r"\b([A-Z]{3})/(\d{2})\s+([\d\.]+,\d+|[\d]{2,})\s*kW\b",
+            texto, re.IGNORECASE
+        ):
+            mes_str = m.group(1).upper()
+            if mes_str not in MESES_PT:
+                continue
+            kw = _num(m.group(3))
+            if kw and kw > 0:
+                hist_d.append({"mes": MESES_PT[mes_str], "ano": 2000 + int(m.group(2)), "kw": kw})
+        if hist_d:
+            seen_d = {}
+            for h in hist_d:
+                k = (h["mes"], h["ano"])
+                if k not in seen_d:
+                    seen_d[k] = h
+            dados["historico_demanda"] = sorted(seen_d.values(), key=lambda x: (x["ano"], x["mes"]))
 
     return dados
 
@@ -969,7 +1511,7 @@ def parse_plumber_tables(pdf_bytes: bytes) -> dict:
 
     if dados["pis_base"] is None:
         m = re.search(
-            r"\bPIS\b" + SEP + r"([\d\.]+,\d+)" + SEP + r"([\d,\.]+)" + SEP + r"([\d\.]+,\d{2})",
+            r"\bPIS(?:/PASEP)?\b" + SEP + r"([\d\.]+,\d+)" + SEP + r"([\d,\.]+)" + SEP + r"([\d\.]+,\d{2})",
             texto_completo, re.IGNORECASE)
         if m:
             dados["pis_base"]  = _num(m.group(1))
@@ -1141,6 +1683,225 @@ def baixar_pdf(url: str) -> bytes | None:
         return None
 
 
+# ─── Gravar em FATURA_DADOS_EXTRAIDOS ────────────────────────────────────────
+
+def gravar_dados_extraidos(cur, conn, fatura_id: int, campos: dict,
+                           fonte: str = "regex",
+                           uid: str | None = None,
+                           link: str | None = None,
+                           cod_empresa: int | None = None,
+                           uc: str | None = None) -> bool:
+    """
+    INSERT ... ON DUPLICATE KEY UPDATE em FATURA_DADOS_EXTRAIDOS.
+    Grava apenas campos não-None de `campos`. Retorna True se gravou.
+    """
+    import json as _json
+
+    mapa = {
+        # identificação
+        "numero_fatura"         : "numero_fatura",
+        "numero_instalacao"     : "numero_instalacao",
+        "nome_cliente"          : "nome_cliente",
+        "cpf_cnpj"              : "cpf_cnpj",
+        "classe_consumidor"     : "classe_consumidor",
+        "subgrupo_tarifario"    : "subgrupo_tarifario",
+        "modalidade_tarifaria"  : "modalidade_tarifaria",
+        "distribuidora"         : "distribuidora",
+        "grupo_tarifario"       : "grupo_tarifario",
+        "tensao_fornecimento"   : "tensao_fornecimento",
+        "numero_medidor"        : "numero_medidor",
+        "tipo_medicao"          : "tipo_medicao",
+        # período
+        "mes_ref"               : "mes_referencia",
+        "dias"                  : "dias_faturados",
+        # leituras ativas
+        "leit_ant_p"            : "leit_ant_ativa_ponta",
+        "leit_atu_p"            : "leit_atu_ativa_ponta",
+        "leit_ant_fp"           : "leit_ant_ativa_fponta",
+        "leit_atu_fp"           : "leit_atu_ativa_fponta",
+        # leituras reativas
+        "leit_ant_reativa"      : "leit_ant_reativa",
+        "leit_atu_reativa"      : "leit_atu_reativa",
+        # leituras demanda
+        "leit_demanda_p"        : "leit_demanda_ponta",
+        "leit_demanda_fp"       : "leit_demanda_fponta",
+        # constantes
+        "constante_p"           : "constante_k",
+        "constante_k"           : "constante_k",
+        "fator_mult"            : "fator_multiplicacao",
+        "ke"                    : "constante_eletronica_ke",
+        "rtc"                   : "rtc_relacao_transformacao_corrente",
+        "rtp"                   : "rtp_relacao_transformacao_potencial",
+        # consumo
+        "kwh_ponta"             : "consumo_ativo_ponta_kwh",
+        "kwh_fponta"            : "consumo_ativo_fponta_kwh",
+        "kwh_reativo"           : "consumo_reativo_kvarh",
+        "kwh_reativo_exc"       : "consumo_reativo_excedente_kvarh",
+        "kvar_reativo_exc"      : "demanda_reativa_excedente_kvar",
+        # demanda
+        "demanda_fat_p"         : "demanda_faturada_ponta_kw",
+        "demanda_fat_fp"        : "demanda_faturada_fponta_kw",
+        "demanda_cont_p"        : "demanda_contratada_ponta_kw",
+        "demanda_cont_fp"       : "demanda_contratada_fponta_kw",
+        # fatores
+        "fator_carga"           : "fator_carga",
+        "fator_potencia"        : "fator_potencia",
+        # tarifas
+        "tarifa_te"             : "tarifa_te",
+        "tarifa_tusd"           : "tarifa_tusd",
+        "tarifa_demanda"        : "tarifa_demanda",
+        # bandeira
+        "tipo_bandeira"         : "tipo_bandeira_tarifaria",
+        "valor_bandeira"        : "valor_bandeira",
+        # financeiro
+        "total_rs"              : "valor_total_fatura",
+        "rs_consumo"            : "valor_energia_ativa",
+        "rs_ponta"              : "valor_energia_ativa",
+        "valor_demanda"         : "valor_demanda",
+        "valor_reativo_exc"     : "valor_energia_reativa_excedente",
+        "valor_demanda_reativa_exc": "valor_demanda_reativa_excedente",
+        "cip"                   : "valor_cip_cosip",
+        "valor_encargos"        : "valor_encargos",
+        "valor_outros"          : "valor_outros_itens",
+        "valor_cde"             : "valor_cde",
+        "valor_proinfa"         : "valor_proinfa",
+        "valor_ess"             : "valor_ess",
+        # tributos
+        "icms_base"             : "icms_base_calculo",
+        "icms_aliq"             : "icms_aliquota",
+        "icms_valor"            : "icms_valor",
+        "pis_aliq"              : "pis_aliquota",
+        "pis_valor"             : "pis_valor",
+        "cofins_aliq"           : "cofins_aliquota",
+        "cofins_valor"          : "cofins_valor",
+        # indicadores
+        "ind_tarifa_social"     : "indicador_tarifa_social",
+        "ind_cliente_rural"     : "indicador_cliente_rural",
+        "ind_mercado_livre"     : "indicador_mercado_livre",
+        "ind_gd"                : "indicador_geracao_distribuida",
+        "ind_leitura_real"      : "indicador_leitura_real",
+        "ind_leitura_estim"     : "indicador_leitura_estimativa",
+        "ind_troca_medidor"     : "indicacao_troca_medidor",
+        "ind_impede_leitura"    : "indicacao_impedimento_leitura",
+        # GD
+        "kwh_injet"             : "energia_injetada_kwh",
+        "kwh_compensado"        : "energia_compensada_kwh",
+        "saldo_credito"         : "saldo_credito_energia",
+        # perda
+        "perda_transf_pct"      : "perda_transformacao_percentual",
+    }
+
+    # uid é obrigatório — é a chave única da tabela
+    if not uid:
+        log.warning(f"  [dados_extraidos] fatura {fatura_id} sem uid, ignorando gravação")
+        return False
+
+    cols  = ["uid", "fonte_extracao"]
+    vals  = [uid, fonte]
+    upd   = ["fonte_extracao = VALUES(fonte_extracao)",
+             "atualizado_em = CURRENT_TIMESTAMP"]
+    seen  = {"uid"}
+
+    for campo_py, col_db in mapa.items():
+        v = campos.get(campo_py)
+        if v is None:
+            continue
+        if col_db in seen:
+            continue
+        cols.append(col_db)
+        vals.append(v)
+        upd.append(f"`{col_db}` = VALUES(`{col_db}`)")
+        seen.add(col_db)
+
+    # Datas como string DD/MM/YYYY → YYYY-MM-DD
+    for campo_py, col_db in [
+        ("dt_leit_ant", "data_leitura_anterior"),
+        ("dt_leit_atu", "data_leitura_atual"),
+    ]:
+        v = campos.get(campo_py)
+        if v:
+            d = _dt(v)
+            if d:
+                cols.append(col_db)
+                vals.append(d)
+                upd.append(f"`{col_db}` = VALUES(`{col_db}`)")
+
+    # Histórico como JSON
+    for campo_py, col_db in [
+        ("historico",         "historico_consumo_12_meses"),
+        ("historico_demanda", "historico_demanda_12_meses"),
+    ]:
+        v = campos.get(campo_py)
+        if v:
+            cols.append(col_db)
+            vals.append(_json.dumps(v, ensure_ascii=False))
+            upd.append(f"`{col_db}` = VALUES(`{col_db}`)")
+
+    # link_fatura, cod_empresa e codigo_uc — da fonte
+    if link:
+        cols.append("link_fatura"); vals.append(link)
+        upd.append("`link_fatura` = VALUES(`link_fatura`)")
+    if cod_empresa is not None:
+        cols.append("cod_empresa"); vals.append(cod_empresa)
+        upd.append("`cod_empresa` = VALUES(`cod_empresa`)")
+    # UC da fonte sempre prevalece sobre o que o OCR extraiu
+    if uc and "codigo_uc" not in seen:
+        cols.append("codigo_uc"); vals.append(uc)
+        upd.append("`codigo_uc` = VALUES(`codigo_uc`)")
+
+    if len(cols) <= 2:
+        return False
+
+    placeholders = ", ".join(["%s"] * len(cols))
+    col_names    = ", ".join(f"`{c}`" for c in cols)
+    upd_clause   = ", ".join(upd)
+
+    try:
+        cur.execute(
+            f"INSERT INTO FATURA_DADOS_EXTRAIDOS ({col_names}) "
+            f"VALUES ({placeholders}) "
+            f"ON DUPLICATE KEY UPDATE {upd_clause}",
+            vals,
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        log.warning(f"    [dados_extraidos] fatura {fatura_id}: {e}")
+        return False
+
+
+# ─── Gravar textos brutos em FATURA_DADOS_EXTRAIDOS ──────────────────────────
+
+def _gravar_textos_fde(cur, conn, uid: str,
+                        texto_plumber: str = None,
+                        texto_markdown: str = None,
+                        texto_ocr: str = None):
+    """Salva os textos brutos dos extratores em FATURA_DADOS_EXTRAIDOS (UPDATE por uid)."""
+    if not uid:
+        return
+    sets = []
+    vals = []
+    if texto_plumber:
+        sets.append("`texto_plumber` = %s, `plumber_gerado_em` = NOW()")
+        vals.append(texto_plumber)
+    if texto_markdown:
+        sets.append("`texto_markdown` = %s, `markdown_gerado_em` = NOW()")
+        vals.append(texto_markdown)
+    if texto_ocr:
+        sets.append("`texto_ocr` = %s, `ocr_gerado_em` = NOW()")
+        vals.append(texto_ocr)
+    if not sets:
+        return
+    try:
+        cur.execute(
+            f"UPDATE FATURA_DADOS_EXTRAIDOS SET {', '.join(sets)} WHERE uid = %s",
+            vals + [uid],
+        )
+        conn.commit()
+    except Exception as e:
+        log.warning(f"    [textos_fde] uid={uid}: {e}")
+
+
 # ─── Gravar campos no banco ───────────────────────────────────────────────────
 
 def gravar_campos(cur, conn, fid: int, campos: dict, row: dict):
@@ -1228,6 +1989,17 @@ def gravar_campos(cur, conn, fid: int, campos: dict, row: dict):
     else:
         log.info("    Sem campos novos para preencher.")
 
+    # Usa mes_ref da fonte se não foi extraído do PDF
+    if not campos.get("mes_ref") and row.get("Mes_Ref"):
+        campos["mes_ref"] = str(row["Mes_Ref"]).strip()
+
+    # Grava também na tabela padronizada FATURA_DADOS_EXTRAIDOS
+    gravar_dados_extraidos(cur, conn, fid, campos, fonte="regex",
+                           uid=str(row.get("UID") or "").strip() or None,
+                           link=str(row.get("Link") or "").strip() or None,
+                           cod_empresa=row.get("Cod_Empresa"),
+                           uc=str(row.get("UC") or "").strip() or None)
+
 
 # ─── Fallback GPT: extrai campos quando os parsers falham ────────────────────
 
@@ -1236,24 +2008,87 @@ _OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 _GPT_SYSTEM = """Você é um extrator de dados de faturas de energia elétrica brasileiras.
 Receberá o texto de uma fatura e deverá retornar SOMENTE um JSON válido com os campos abaixo.
-Use null para campos não encontrados. Números devem ser float (ponto decimal). Datas: "DD/MM/YYYY".
+Use null para campos não encontrados. Números: float com ponto decimal. Datas: "DD/MM/YYYY".
+Indicadores booleanos: 1 (verdadeiro) ou null (não detectado).
 
 {
-  "kwh_total": null,
-  "kwh_fponta": null,
-  "leit_ant_p": null,
-  "leit_atu_p": null,
-  "constante_p": null,
+  "numero_fatura": null,
+  "numero_instalacao": null,
+  "nome_cliente": null,
+  "cpf_cnpj": null,
+  "classe_consumidor": null,
+  "subgrupo_tarifario": null,
+  "modalidade_tarifaria": null,
+  "distribuidora": null,
+  "grupo_tarifario": null,
+  "tensao_fornecimento": null,
+  "numero_medidor": null,
+  "tipo_medicao": null,
+
   "dt_leit_ant": null,
   "dt_leit_atu": null,
   "dt_proxima": null,
   "dt_emissao": null,
   "vencimento": null,
+  "dias": null,
+  "mes_ref": null,
+
+  "leit_ant_p": null,
+  "leit_atu_p": null,
+  "leit_ant_fp": null,
+  "leit_atu_fp": null,
+  "leit_ant_reativa": null,
+  "leit_atu_reativa": null,
+  "leit_demanda_p": null,
+  "leit_demanda_fp": null,
+
+  "constante_p": null,
+  "constante_fp": null,
+  "constante_k": null,
+  "fator_mult": null,
+  "ke": null,
+  "rtc": null,
+  "rtp": null,
+
+  "kwh_total": null,
+  "kwh_fponta": null,
+  "kwh_ponta": null,
+  "kwh_reativo": null,
+  "kwh_reativo_exc": null,
+  "kvar_reativo_exc": null,
+
+  "demanda_fat_p": null,
+  "demanda_fat_fp": null,
+  "demanda_cont_p": null,
+  "demanda_cont_fp": null,
+
+  "fator_carga": null,
+  "fator_potencia": null,
+
+  "tarifa_te": null,
+  "tarifa_tusd": null,
+  "tarifa_kwh": null,
+  "tarifa_ponta": null,
+  "tarifa_demanda": null,
+  "preco_unit_c_trib": null,
+
+  "tipo_bandeira": null,
+  "valor_bandeira": null,
+
   "total_rs": null,
   "rs_consumo": null,
+  "rs_ponta": null,
+  "valor_demanda": null,
+  "valor_reativo": null,
+  "valor_reativo_exc": null,
+  "valor_demanda_reativa_exc": null,
   "cip": null,
-  "tarifa_kwh": null,
-  "preco_unit_c_trib": null,
+  "valor_encargos": null,
+  "valor_outros": null,
+  "valor_cde": null,
+  "valor_proinfa": null,
+  "valor_ess": null,
+
   "icms_base": null,
   "icms_aliq": null,
   "icms_valor": null,
@@ -1262,11 +2097,27 @@ Use null para campos não encontrados. Números devem ser float (ponto decimal).
   "pis_valor": null,
   "cofins_aliq": null,
   "cofins_valor": null,
+
+  "ind_tarifa_social": null,
+  "ind_cliente_rural": null,
+  "ind_mercado_livre": null,
+  "ind_gd": null,
+  "ind_leitura_real": null,
+  "ind_leitura_estim": null,
+  "ind_troca_medidor": null,
+  "ind_impede_leitura": null,
+
   "kwh_injet": null,
-  "historico": []
+  "kwh_compensado": null,
+  "saldo_credito": null,
+  "perda_transf_pct": null,
+
+  "historico": [],
+  "historico_demanda": []
 }
 
 Para "historico": lista de {"mes": <int 1-12>, "ano": <int>, "kwh": <float>}.
+Para "historico_demanda": lista de {"mes": <int>, "ano": <int>, "kw": <float>}.
 Retorne APENAS o JSON, sem explicações.
 """
 
@@ -1305,7 +2156,7 @@ def extrair_via_gpt(texto: str) -> dict:
                     {"role": "user",   "content": texto_input},
                 ],
                 "temperature": 0,
-                "max_tokens": 800,
+                "max_tokens": 5000,
             }).encode()
             req = urllib.request.Request(
                 "https://api.openai.com/v1/chat/completions",
@@ -1643,6 +2494,14 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
 
         gravar_campos(cur, conn, fid, campos_final, row)
 
+        # Salva textos brutos em FATURA_DADOS_EXTRAIDOS (para o pipeline IA ler de lá)
+        if not dryrun:
+            _gravar_textos_fde(cur, conn,
+                               uid=str(row.get("UID") or "").strip() or None,
+                               texto_plumber=texto_plumber or None,
+                               texto_markdown=texto_markitdown or None,
+                               texto_ocr=texto_ocr or None)
+
         ok += 1
         time.sleep(0.2)
 
@@ -1672,9 +2531,13 @@ if __name__ == "__main__":
     p.add_argument("--ordem",    default="DESC",
                    choices=["ASC", "DESC"],
                    help="Ordem de processamento por id: DESC=mais novo primeiro (padrão), ASC=mais antigo primeiro")
+    p.add_argument("--ASC",     action="store_true",
+                   help="Atalho para --ordem ASC (processa mais antigos primeiro)")
     p.add_argument("--no-gpu",   action="store_true",
                    help="Forçar OCR em CPU (útil para rodar uma 2ª instância em paralelo com a GPU)")
     args = p.parse_args()
+    if args.ASC:
+        args.ordem = "ASC"
     if args.no_gpu:
         _USE_GPU = False
 

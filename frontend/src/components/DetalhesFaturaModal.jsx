@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, ReferenceLine, Cell,
 } from 'recharts';
 import apiClient from '../services/apiClient';
 
@@ -8,6 +9,7 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
   const [loading, setLoading] = useState(false);
   const [analiseData, setAnaliseData] = useState(null);
   const [consumoData, setConsumoData] = useState([]);
+  const [mediaConsumo, setMediaConsumo] = useState(0);
   const [reprocessing, setReprocessing] = useState(false);
 
   useEffect(() => {
@@ -18,30 +20,35 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
   const carregarDados = async () => {
     setLoading(true);
     try {
-      // Busca resultado_analises do banco
-      const res = await apiClient.get(`/api/v1/faturas/${fatura.id}/detalhes`);
-      const dados = res.data;
+      const [detRes, chartRes] = await Promise.allSettled([
+        apiClient.get(`/api/v1/faturas/${fatura.id}/detalhes`),
+        fatura.UC
+          ? apiClient.get('/api/v1/faturas/uc-consumo-chart', {
+              params: { uc: fatura.UC, mes_ref: fatura.mes_ref ?? '' },
+            })
+          : Promise.resolve(null),
+      ]);
 
-      setAnaliseData(dados);
+      if (detRes.status === 'fulfilled') setAnaliseData(detRes.value.data);
 
-      // Simula dados de consumo (seria buscado do banco em produção)
-      gerarDadosConsumo();
+      if (chartRes.status === 'fulfilled' && chartRes.value?.data?.pontos) {
+        const { pontos, media } = chartRes.value.data;
+        setMediaConsumo(media ?? 0);
+        setConsumoData(
+          pontos.map(p => ({
+            mes: p.mes,
+            consumo: p.kwh_total ?? 0,
+            tipo: p.tipo,
+            anomalia: p.anomalia,
+            link: p.link,
+          }))
+        );
+      }
     } catch (error) {
       console.error('Erro ao carregar detalhes:', error);
     } finally {
       setLoading(false);
     }
-  };
-
-  const gerarDadosConsumo = () => {
-    // Gera dados simulados de consumo dos últimos 12 meses
-    const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-    const dados = meses.map((mes, idx) => ({
-      mes,
-      consumo: Math.floor(Math.random() * 500 + 200),
-      media: 350,
-    }));
-    setConsumoData(dados);
   };
 
   const handleReprocessar = async () => {
@@ -106,32 +113,58 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
 
             {/* Gráfico de Consumo */}
             <div className="bg-[var(--bg-secondary)] p-4 rounded-lg border border-[var(--border)] overflow-visible">
-              <h3 className="font-semibold mb-4">Série Histórica de Consumo (12 meses)</h3>
-              {consumoData.length > 0 && (
-                <div style={{ overflow: 'visible' }}>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={consumoData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="mes" />
-                      <YAxis />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                          border: '1px solid rgba(255, 255, 255, 0.2)',
-                          borderRadius: '4px',
-                          padding: '8px',
-                          zIndex: 1000
-                        }}
-                        wrapperStyle={{ zIndex: 1000 }}
-                        cursor={{ stroke: '#888', strokeWidth: 2 }}
-                      />
-                      <Legend />
-                      <Line type="monotone" dataKey="consumo" stroke="#3b82f6" name="Consumo (kWh)" strokeWidth={2} />
-                      <Line type="monotone" dataKey="media" stroke="#ef4444" strokeDasharray="5 5" name="Média" />
-                    </LineChart>
-                  </ResponsiveContainer>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold">Série Histórica de Consumo</h3>
+                {mediaConsumo > 0 && (
+                  <span className="text-xs text-amber-400">
+                    média: {mediaConsumo.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kWh
+                  </span>
+                )}
+              </div>
+              {consumoData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={280}>
+                  <ComposedChart data={consumoData} margin={{ top: 5, right: 40, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                    <XAxis dataKey="mes" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }}
+                      tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} />
+                    <Tooltip
+                      formatter={(v, name) => [
+                        `${Number(v).toLocaleString('pt-BR')} kWh`,
+                        name,
+                      ]}
+                      contentStyle={{ backgroundColor: '#0d1a2e', border: '1px solid #1e3a5f', borderRadius: 4 }}
+                    />
+                    {mediaConsumo > 0 && (
+                      <ReferenceLine y={mediaConsumo} stroke="#f59e0b" strokeDasharray="4 2" strokeWidth={1.5}
+                        label={{ value: 'média', fill: '#f59e0b', fontSize: 10, position: 'insideRight' }} />
+                    )}
+                    <Bar dataKey="consumo" name="Consumo (kWh)" radius={[3,3,0,0]}>
+                      {consumoData.map((d, i) => {
+                        let fill = d.tipo === 'auditado' ? '#6366f1' : '#3b82f6';
+                        if (d.anomalia) fill = '#ef4444';
+                        else if (mediaConsumo > 0) {
+                          const dev = (d.consumo - mediaConsumo) / mediaConsumo;
+                          if (dev > 1.0 || dev < -0.9) fill = '#ef4444';
+                          else if (dev > 0.5 || dev < -0.5) fill = '#f97316';
+                          else if (d.tipo === 'auditado') fill = '#6366f1';
+                        }
+                        return <Cell key={i} fill={fill} />;
+                      })}
+                    </Bar>
+                  </ComposedChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="text-sm opacity-50 text-center py-8">
+                  Sem dados de consumo disponíveis para esta UC.
                 </div>
               )}
+              <div className="flex gap-4 mt-2 text-[10px] opacity-60">
+                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-blue-500 mr-1"/>histórico</span>
+                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-indigo-500 mr-1"/>mês auditado</span>
+                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-orange-500 mr-1"/>desvio &gt;50%</span>
+                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500 mr-1"/>anomalia/desvio &gt;100%</span>
+              </div>
             </div>
 
             {/* Fichas Detectadas */}

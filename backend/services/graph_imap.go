@@ -41,6 +41,50 @@ type graphMessage struct {
 	} `json:"ccRecipients"`
 }
 
+// criarAlertaEmailRecebido cria um alerta para o gestor responsável quando o processo recebe
+// uma resposta de e-mail (só dispara se já existir pelo menos um e-mail enviado pelo sistema).
+func criarAlertaEmailRecebido(processoID int64, fromEmail string) {
+	if processoID <= 0 {
+		return
+	}
+	db := getAppDB()
+	if db == nil {
+		return
+	}
+	// Só alerta se há pelo menos um e-mail do tipo 'enviado' para este processo
+	var sentCount int
+	if err := db.QueryRow(
+		`SELECT COUNT(1) FROM FT_EMAILS_PROCESSO WHERE id_processo = ? AND tipo = 'enviado'`,
+		processoID,
+	).Scan(&sentCount); err != nil || sentCount == 0 {
+		return
+	}
+	// Busca o gestor responsável pelo processo
+	var responsavelID int64
+	if err := db.QueryRow(
+		`SELECT COALESCE(id_responsavel, 0) FROM FT_PROCESSOS WHERE id_processo = ?`,
+		processoID,
+	).Scan(&responsavelID); err != nil || responsavelID <= 0 {
+		return
+	}
+	// Não duplica enquanto houver alerta não lido do mesmo tipo
+	var exists int
+	_ = db.QueryRow(
+		`SELECT COUNT(1) FROM FT_ALERTAS WHERE id_processo = ? AND lido = 0 AND mensagem LIKE '%resposta de e-mail%'`,
+		processoID,
+	).Scan(&exists)
+	if exists > 0 {
+		return
+	}
+	msg := fmt.Sprintf("Nova resposta de e-mail recebida para o processo #%d (de: %s)", processoID, fromEmail)
+	if _, err := db.Exec(
+		`INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao) VALUES (?, ?, ?, 0, 0, NOW())`,
+		responsavelID, processoID, msg,
+	); err != nil {
+		log.Printf("[criarAlertaEmailRecebido] erro ao inserir alerta proc %d: %v", processoID, err)
+	}
+}
+
 func lerEmailsRecebidosGraph() error {
 	sender := strings.TrimSpace(os.Getenv("MAIL_SENDER"))
 	if sender == "" {
@@ -86,13 +130,18 @@ func lerEmailsRecebidosGraph() error {
 		body := strings.TrimSpace(msg.Body.Content)
 
 		_, dbErr := getAppDB().Exec(`
-            INSERT INTO FT_EMAILS_PROCESSO 
+            INSERT INTO FT_EMAILS_PROCESSO
             (id_processo, de_email, para_email, cc_email, assunto, corpo, tipo)
             VALUES (?, ?, ?, ?, ?, ?, 'recebido')`,
 			processoID, from, to, cc, subject, body,
 		)
 		if dbErr != nil {
 			log.Printf("Erro ao salvar e-mail recebido no banco: %v", dbErr)
+		}
+
+		// Notifica gestor responsável se for resposta a um processo
+		if processoID.Valid {
+			criarAlertaEmailRecebido(processoID.Int64, from)
 		}
 
 		// marca como lido

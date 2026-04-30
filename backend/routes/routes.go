@@ -275,6 +275,12 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Faturas Kanban (AnÃ¡lise de Desvio)
 			authRequired.GET("/faturas/cache", handlers.ListFaturasCache)
 
+			// FATURA_DADOS_EXTRAIDOS — pipeline OCR + IA
+			authRequired.GET("/faturas-extraidas", handlers.ListFaturasDadosExtraidos)
+			authRequired.GET("/faturas-extraidas/:uid", handlers.GetFaturaDadosExtraida)
+			authRequired.GET("/faturas/fde-ficha-resumo", handlers.GetFDEFichaResumo)
+			authRequired.GET("/faturas/fde-uc-historico", handlers.GetFDEUCHistorico)
+
 			// Fichas de AnÃ¡lise (F01â€“F05 + Resumo)
 			authRequired.GET("/faturas/ficha/resumo", handlers.ListFichaResumo)
 			authRequired.GET("/faturas/ficha/01", handlers.ListFicha01)
@@ -316,6 +322,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 
 			// Análise de Desvio - Resultado IA (novo)
 			authRequired.GET("/faturas/com-analise", handlers.ListFaturasComAnalise)
+			authRequired.GET("/faturas/fde-analise", handlers.ListFaturasFDEAnalise)
 			authRequired.GET("/faturas/:id/detalhes", handlers.GetFaturaDetalhes)
 			authRequired.POST("/faturas/:id/reprocessar-ia", handlers.ReprocessarFaturaIA)
 

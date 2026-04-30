@@ -90,7 +90,7 @@ const fmtDataCurta = (d) => {
 
 const DISABLE_ALERTS = false;
 
-export default function ProcessoCard({ processo, meta, onClick }) {
+export default function ProcessoCard({ processo, meta, onClick, prazoConfig = null }) {
   const pid = processo?.id ?? processo?.processo_id ?? processo?.requisicao_id;
 
   // Favorito (relevância)
@@ -192,6 +192,19 @@ export default function ProcessoCard({ processo, meta, onClick }) {
 
   const effectiveAlertDate = customAlertDate || dataAlerta;
   const alertaVencido = useMemo(() => { if (typeof DISABLE_ALERTS !== 'undefined' && DISABLE_ALERTS) return false; if (!effectiveAlertDate) return false; const hoje = new Date(); const d = new Date(effectiveAlertDate.getFullYear(), effectiveAlertDate.getMonth(), effectiveAlertDate.getDate(), 23, 59, 59); return d.getTime() < hoje.getTime(); }, [effectiveAlertDate, nowTick]);
+
+  // Badge SLA — baseado em prazoConfig passado pelo pai (DM_ALARMES)
+  const slaBadge = useMemo(() => {
+    if (!prazoConfig?.prazoDias) return null;
+    const ultimaMov = toDate(pick(processo, ['ultima_movimentacao', 'ultima_atualizacao', 'data_movimentacao', 'criado_em']));
+    if (!ultimaMov) return null;
+    const diasPassados = Math.floor((Date.now() - ultimaMov.getTime()) / 86400000);
+    const diasRestantes = prazoConfig.prazoDias - diasPassados;
+    if (diasRestantes <= 0) return { label: 'SLA vencido', cor: 'bg-red-600 text-white', dias: diasRestantes };
+    const pct = diasRestantes / prazoConfig.prazoDias;
+    if (pct <= 0.3) return { label: `${diasRestantes}d restantes`, cor: 'bg-amber-500 text-black', dias: diasRestantes };
+    return { label: `${diasRestantes}d restantes`, cor: 'bg-emerald-600 text-white', dias: diasRestantes };
+  }, [prazoConfig, processo, nowTick]);
 
   // Última movimentação (histórico)
   const [ultimaMovLocal, setUltimaMovLocal] = useState(null);
@@ -527,6 +540,13 @@ const ultimaDataISO = useMemo(() => {
       {alertaVencido && (
         <div className="absolute -left-2 -top-2 flex items-center gap-1 rounded-md bg-red-600 text-white text-[10px] px-2 py-0.5 shadow">
           <AlertTriangle size={12} /> Vencido
+        </div>
+      )}
+
+      {/* BADGE: SLA — aparece apenas quando não há ribbon "Vencido" sobreposto */}
+      {slaBadge && !alertaVencido && (
+        <div className={`absolute right-2 top-2 flex items-center gap-1 rounded-full text-[10px] font-semibold px-2 py-0.5 shadow ${slaBadge.cor}`}>
+          <Clock size={10} /> {slaBadge.label}
         </div>
       )}
 

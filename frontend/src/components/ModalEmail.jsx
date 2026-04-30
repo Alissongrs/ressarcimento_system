@@ -36,10 +36,11 @@ const ModalEmail = ({ processo, onClose }) => {
   const fetchEmails = async () => {
     try {
       setIsLoading(true);
+      // 1. Busca para obter os IDs
       const data = await getEmailsByProcessoID(processo.id);
       const list = data || [];
-      setHistoricoEmails(list);
       const ids = list.map((e) => e?.id_email ?? e?.ID ?? e?.id).filter(Boolean);
+      // 2. Marca como lido antes de setar o estado
       if (ids.length) {
         await Promise.all(
           ids.map((id) =>
@@ -47,6 +48,9 @@ const ModalEmail = ({ processo, onClose }) => {
           ),
         );
       }
+      // 3. Re-busca para que read_by já inclua o usuário atual
+      const fresh = await getEmailsByProcessoID(processo.id);
+      setHistoricoEmails(fresh || []);
     } catch (error) {
       console.error('Erro ao buscar histórico de e-mails:', error);
     } finally {

@@ -35,6 +35,29 @@ NUNCA confirmar uma ficha citando apenas "valores grandes", "TUSD destacada",
 "ACL", "ICMS no ACL", "homologação CCEE" — isso é TESE TRIBUTÁRIA, não FICHA.
 
 ================================================================================
+🏷️ FLAG DE TRIAGEM — MERCADO LIVRE / ACL (NÃO É FICHA)
+================================================================================
+Independente das fichas, sempre que aparecer no texto da fatura (em qualquer campo:
+modalidade tarifária, classe, descrição de itens, observações, anexos, carimbos)
+um dos termos abaixo, marcar o flag de triagem na saída:
+
+Termos disparadores (case-insensitive, com ou sem acento):
+  • "Livre"  (ex.: "Energia Livre", "Mercado Livre", "Cliente Livre", "Modalidade Livre")
+  • "ACL"    (ex.: "ACL", "ACL ML", "ACL BT", "ACL AT", "Tarifa ACL")
+
+Como reportar:
+  1. Em ---DADOS DA FATURA---, preencher a linha "Mercado Livre / ACL" indicando
+     ⚠️ DETECTADO + termo(s) literal(is) encontrado(s) na fatura.
+  2. Em ---CAMPOS_JSON---, preencher "mercado_livre_acl": true e
+     "mercado_livre_termos": ["...termos exatos encontrados..."].
+  3. Se nenhum termo aparecer: linha "não detectado" e JSON com false / [].
+
+IMPORTANTE: este flag é APENAS um marcador para filtragem posterior
+(tela AnaliseDeDesvio). NÃO confirma nenhuma ficha, NÃO altera ressarcimento,
+NÃO entra na causa raiz nem na tese regulatória. Continua valendo a regra
+anti-alucinação acima — ACL/Livre por si só nunca confirma F01-F14.
+
+================================================================================
 ⚠️ REGRA FUNDAMENTAL — FONTE DE DADOS
 ================================================================================
 A FATURA É A FONTE PRINCIPAL DE DADOS PARA TODOS OS CÁLCULOS.
@@ -1238,6 +1261,23 @@ EXCEÇÃO B — COMPENSAÇÃO DE ENERGIA (GD / SCEE / Microgeração):
       → NÃO confirmar F01 quando a diferença entre calc_base e kWh_faturado for
         explicada pela compensação GD/SCEE declarada na fatura.
 
+EXCEÇÃO C — RETORNO DO MEDIDOR ANALÓGICO (WRAP-AROUND / ZERAMENTO):
+  • Medidores analógicos possuem capacidade máxima de leitura (ex.: 99.999.999).
+    Quando atingem o máximo, o mostrador zera e recomeça do 0.
+  • Sinal identificador: leitura_atual << leitura_anterior por uma margem muito grande
+    (ex.: leitura_anterior = 49.318.053 e leitura_atual = 8.225.804).
+    Diferença negativa enorme (dezenas de milhões) é o indicador principal.
+  • Cálculo correto com wrap-around:
+      consumo_real = (capacidade_maxima − leitura_anterior) + leitura_atual
+    Se não for possível determinar a capacidade exata, estimar pela ordem de grandeza
+    (ex.: 9.999.999 para 7 dígitos, 99.999.999 para 8 dígitos).
+  • Critério de aprovação: se consumo_real calculado com wrap-around for compatível
+    com o kWh faturado (tolerância ±2%) → NÃO há anomalia F01.
+  • NÃO confirmar F01 quando leitura_atual < leitura_anterior E o wrap-around
+    explicar o kWh faturado.
+  • CONFIRMAR F01 somente se: a diferença negativa for pequena (possível leitura invertida)
+    E o wrap-around NÃO explicar o kWh faturado.
+
 ================================================================================
 
 REGRA F02 — DESVIO DE CONSUMO EM RELAÇÃO À MÉDIA HISTÓRICA (MONETIZAÇÃO)
@@ -1409,7 +1449,10 @@ PROCEDIMENTO:
      → Não confirmar F02. Registrar: "F02: dados insuficientes — meses posteriores não disponíveis."
 
 REGRAS ADICIONAIS:
-  ⚠️ Para acúmulo de consumo (F03 por Art. 323): este critério NÃO se aplica.
+  ⚠️ F03 (acúmulo de consumo / Art. 323) tem critério de desempate próprio
+     com os 3 meses posteriores — ver bloco "VALIDAÇÃO F03 COM MESES
+     POSTERIORES" logo após a regra F03. F02 e F03 usam a mesma fonte
+     (meses_posteriores_json) com lógicas distintas.
   ⚠️ A comparação usa kwh_total. Se apenas postos separados disponíveis:
      somar kwh_ponta + kwh_fp + kwh_reservado de cada mês posterior.
   ⚠️ Este critério substitui qualquer outra lógica de "retorno ao padrão"
@@ -1579,8 +1622,80 @@ Sinal:
     (30, 50 ou 100 kWh Grupo B / zero Grupo A / barras visualmente equivalentes)
     seguidos de pico relevante no mês atual
 
+⚠️ LIMIAR MÍNIMO DO PICO — OBRIGATÓRIO:
+  O consumo do mês atual deve ser SUPERIOR a 50% acima da média histórica válida.
+  Fórmula: consumo_atual > media_historica × 1,50
+  Se consumo_atual ≤ media_historica × 1,50 → ❌ NÃO confirmar F03.
+  Registrar: "F03 não confirmado — pico de [X]% acima da média ([Y] kWh); limiar mínimo é 50%."
+  Nota: um desvio de 10–30% acima da média é variação normal de consumo, não acúmulo.
+
 Base regulatória:
   • limite legal de 3 ciclos (Art. 323 REN 1000/2021)
+
+================================================================================
+⚠️ REGRA CRÍTICA — VALIDAÇÃO F03 COM MESES POSTERIORES (CRITÉRIO DE DESEMPATE)
+================================================================================
+
+Esta regra tem PRIORIDADE MÁXIMA e se aplica sempre que F03 estiver sinalizado
+pelos 12 meses anteriores (≥4 meses fixos/zerados seguidos de pico).
+
+Os 12 meses anteriores DETECTAM o padrão de acúmulo (achatado + pico).
+Os 3 meses IMEDIATAMENTE posteriores ao mês analisado são o CRITÉRIO DE DESEMPATE
+para decidir se o pico é acúmulo legítimo (Art. 323) ou mudança real de carga.
+
+Lógica do desempate em F03:
+  Se o pico é mesmo acúmulo cobrado de uma só vez, os meses seguintes voltam
+  ao patamar NORMAL de consumo (medidor volta a ler ciclos regulares).
+  Se os meses seguintes continuam altos, não houve acúmulo — houve aumento
+  real e permanente da carga.
+
+FONTE OBRIGATÓRIA DOS MESES POSTERIORES:
+  → Exclusivamente o banco de dados (meses_posteriores_json no contexto).
+  → É PROIBIDO extrair, estimar ou inferir meses posteriores da fatura, do OCR
+    ou do Markitdown.
+  → É PROIBIDO usar meses distantes (4º mês em diante).
+
+PROCEDIMENTO:
+
+1. Identificar consumo_atual do mês analisado (total ou por posto).
+
+2. Localizar no meses_posteriores_json os 3 meses imediatamente seguintes
+   em sequência calendária ininterrupta (mês+1, mês+2, mês+3).
+   — Parar no primeiro gap. Usar somente meses consecutivos sem interrupção.
+
+3. Calcular avg_3_post = média do kwh_total dos meses posteriores válidos.
+
+4. Aplicar o critério de desempate:
+
+   SE avg_3_post < consumo_atual (queda significativa, ex.: < 60% do atual):
+     → Consumo voltou ao patamar regular após o pico.
+     → Acúmulo confirmado — o pico foi cobrança retroativa.
+     → ✅ MANTER F03 CONFIRMADO.
+     → Registrar: "Meses posteriores (avg=[X] kWh) abaixo do consumo atual
+        ([Y] kWh) — acúmulo confirmado, retorno ao padrão regular."
+
+   SE avg_3_post >= consumo_atual:
+     → Consumo continuou no mesmo nível ou acima — não houve retorno ao
+       patamar pré-pico.
+     → Não é acúmulo, é mudança real de carga.
+     → ❌ CANCELAR F03. Zerar valor_f03.
+     → Registrar: "F03 cancelado — meses posteriores (avg=[X] kWh) iguais ou
+        acima do consumo atual ([Y] kWh); pico não corresponde a acúmulo."
+
+5. SE meses_posteriores_json estiver vazio ou não disponível:
+     → NÃO concluir F03 apenas pelo padrão dos 12 meses anteriores.
+     → Registrar: "F03: dados insuficientes — meses posteriores não disponíveis
+        no banco para aplicar critério de desempate."
+     → Não confirmar F03.
+
+REGRAS ADICIONAIS:
+  ⚠️ A comparação usa kwh_total. Se apenas postos separados disponíveis:
+     somar kwh_ponta + kwh_fp + kwh_reservado de cada mês posterior.
+  ⚠️ Este critério complementa (não substitui) o sinal dos ≥4 meses fixos
+     anteriores — ambos precisam estar presentes para confirmar F03.
+  ⚠️ Se a fatura/anexo já cita explicitamente Art. 323, refaturamento,
+     retroação ou consumo acumulado, o critério dos posteriores serve de
+     reforço; ainda assim aplicar para evitar falso positivo.
 
 ================================================================================
 REGRA F04 — TROCA DE MEDIDOR COM INCONSISTÊNCIA
@@ -1895,6 +2010,7 @@ Concessionária: [nome | "não identificado"]
 Classe: [nome | "não identificado"] [⚠️ RURAL | ⚠️ IRRIGANTE — se aplicável]
 Modalidade Tarifária: [nome | "N/A"]
 Grupo de Tensão: [nome | "não identificado"]
+Mercado Livre / ACL: [⚠️ DETECTADO — termo(s): "..." | "não detectado"]
 Observação: [⚠️ POSSÍVEL PERÍODO DE SAFRA — consumo elevado recorrente no mesmo mês do ano anterior | —]
 
 ================================================================================
@@ -2004,35 +2120,49 @@ Números sem aspas. Strings com aspas duplas.
 
 ---CAMPOS_JSON---
 {
-  "uc":                      "...",
-  "mes_ref":                 "MM/AAAA",
-  "concessionaria":          "...",
-  "total_rs":                0.00,
-  "total_itens_rs":          0.00,
-  "kwh_total":               0,
-  "kwh_ponta":               null,
-  "kwh_fponta":              null,
-  "consumo_medidor_ponta":   null,
-  "consumo_medidor_fponta":  null,
-  "perda_transformacao_pct": null,
-  "leitura_anterior_p":      null,
-  "leitura_atual_p":         null,
-  "constante_p":             null,
-  "leitura_anterior_fp":     null,
-  "leitura_atual_fp":        null,
-  "constante_fp":            null,
-  "base_icms_rs":            null,
-  "icms_aliq":               null,
-  "icms_rs":                 null,
-  "base_pis_cofins_rs":      null,
-  "pis_aliq":                null,
-  "pis_rs":                  null,
-  "cofins_aliq":             null,
-  "cofins_rs":               null,
-  "cip_rs":                  null,
-  "demanda_kw":              null,
-  "demanda_contratada_kw":   null,
-  "reativo_excedente_rs":    null
+  "uc":                         "...",
+  "mes_ref":                    "MM/AAAA",
+  "concessionaria":             "...",
+  "numero_fatura":              null,
+  "nome_cliente":               null,
+  "dias_faturados":             null,
+  "modalidade_tarifaria":       null,
+  "tensao_fornecimento":        null,
+  "numero_medidor":             null,
+  "total_rs":                   0.00,
+  "total_itens_rs":             0.00,
+  "kwh_total":                  0,
+  "kwh_ponta":                  null,
+  "kwh_fponta":                 null,
+  "consumo_medidor_ponta":      null,
+  "consumo_medidor_fponta":     null,
+  "perda_transformacao_pct":    null,
+  "leitura_anterior_p":         null,
+  "leitura_atual_p":            null,
+  "constante_p":                null,
+  "leitura_anterior_fp":        null,
+  "leitura_atual_fp":           null,
+  "constante_fp":               null,
+  "demanda_faturada_ponta_kw":  null,
+  "demanda_faturada_fponta_kw": null,
+  "demanda_contratada_ponta_kw": null,
+  "demanda_contratada_fponta_kw": null,
+  "tarifa_demanda":             null,
+  "valor_demanda":              null,
+  "tipo_bandeira":              null,
+  "valor_bandeira":             null,
+  "base_icms_rs":               null,
+  "icms_aliq":                  null,
+  "icms_rs":                    null,
+  "base_pis_cofins_rs":         null,
+  "pis_aliq":                   null,
+  "pis_rs":                     null,
+  "cofins_aliq":                null,
+  "cofins_rs":                  null,
+  "cip_rs":                     null,
+  "reativo_excedente_rs":       null,
+  "mercado_livre_acl":          false,
+  "mercado_livre_termos":       []
 }
 ---FIM_CAMPOS_JSON---
 

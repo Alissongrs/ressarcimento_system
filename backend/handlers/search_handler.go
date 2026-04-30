@@ -20,6 +20,8 @@ type SearchHit struct {
 	Comentario       string `json:"comentario"`
 	StatusComposto   string `json:"status_composto"`
 	CanaisCSV        string `json:"canais"`
+	NomeCliente      string `json:"nome_cliente"`
+	UC               string `json:"uc"`
 }
 
 // GET /api/v1/search/global?q=texto&limit=100&offset=0
@@ -59,7 +61,7 @@ func SearchGlobal(c *gin.Context) {
 		processID = n
 	}
 	whereParts := []string{
-		"LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa,''))) LIKE ?",
+		"LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa,''), COALESCE(r.cliente,''))) LIKE ?",
 		`EXISTS (
                 SELECT 1 
                 FROM FT_HISTORICO_CANAIS hc2
@@ -84,7 +86,9 @@ func SearchGlobal(c *gin.Context) {
             COALESCE(u.nome_usuario, '') AS usuario_nome,
             COALESCE(h.comentario, '') AS comentario,
             CONCAT_WS(' - ', COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa, '')) AS status_composto,
-            COALESCE(GROUP_CONCAT(LOWER(TRIM(dc.nome)) ORDER BY dc.nome SEPARATOR ','), '') AS canais_csv
+            COALESCE(GROUP_CONCAT(LOWER(TRIM(dc.nome)) ORDER BY dc.nome SEPARATOR ','), '') AS canais_csv,
+            COALESCE(r.cliente, '') AS nome_cliente,
+            COALESCE(r.uc, '') AS uc
         FROM FT_REQUISICOES r
         LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = r.id_requisicao
         LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
@@ -102,7 +106,9 @@ func SearchGlobal(c *gin.Context) {
             h.status_novo,
             h.etapa_anterior,
             h.etapa_nova,
-            h.sub_etapa
+            h.sub_etapa,
+            r.cliente,
+            r.uc
         ORDER BY h.data_movimentacao DESC, h.id_historico DESC
         LIMIT ? OFFSET ?
     `, append(args, limit, offset)...)
@@ -110,7 +116,7 @@ func SearchGlobal(c *gin.Context) {
 		log.Printf("[SearchGlobal] primary query error: %v\n", err)
 		// Fallback: sem canais (sem joins/exists), evita 500 em ambientes sem tabelas auxiliares
 		fallbackWhereParts := []string{
-			"LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa,''))) LIKE ?",
+			"LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa,''), COALESCE(r.cliente,''))) LIKE ?",
 			"LOWER(COALESCE(r.uc,'')) LIKE ?",
 		}
 		fallbackArgs := []any{like, like}
@@ -127,7 +133,9 @@ func SearchGlobal(c *gin.Context) {
                 COALESCE(u.nome_usuario, '') AS usuario_nome,
                 COALESCE(h.comentario, '') AS comentario,
                 CONCAT_WS(' - ', COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa, '')) AS status_composto,
-                '' AS canais_csv
+                '' AS canais_csv,
+                COALESCE(r.cliente, '') AS nome_cliente,
+                COALESCE(r.uc, '') AS uc
             FROM FT_REQUISICOES r
             LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = r.id_requisicao
             LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
@@ -147,7 +155,7 @@ func SearchGlobal(c *gin.Context) {
 	for rows.Next() {
 		var it SearchHit
 		var canais sql.NullString
-		if err := rows.Scan(&it.IDHistorico, &it.ProcessoID, &it.DataMovimentacao, &it.UsuarioNome, &it.Comentario, &it.StatusComposto, &canais); err == nil {
+		if err := rows.Scan(&it.IDHistorico, &it.ProcessoID, &it.DataMovimentacao, &it.UsuarioNome, &it.Comentario, &it.StatusComposto, &canais, &it.NomeCliente, &it.UC); err == nil {
 			if canais.Valid {
 				it.CanaisCSV = canais.String
 			}
