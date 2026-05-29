@@ -230,6 +230,10 @@ func EnviarEmailProcesso(c *gin.Context) {
 		}
 	}
 
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	// Cobre tanto o registro do e-mail quanto a promocao automatica de sub-etapa (mesma tx).
+	_ = SincronizarStatusProcesso(tx, processoID)
+
 	// 3. Finaliza a transação
 	if err := tx.Commit().Error; err != nil {
 		log.Printf("Erro ao fazer commit da transação de e-mail e histórico: %v", err)

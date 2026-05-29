@@ -74,8 +74,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 		println("[routes] aviso: falha ao definir trusted proxies:", err.Error())
 	}
 
-	// MemÃ³ria p/ multipart (uploads)
-	r.MaxMultipartMemory = 512 << 20 // 512MB
+	// Multipart: 32MB em RAM; excedente vai para disco (evita DoS por upload massivo)
+	r.MaxMultipartMemory = 32 << 20 // 32MB
 
 	// MigraÃ§Ãµes bÃ¡sicas
 	if err := database.RunMigrations(); err != nil {
@@ -95,40 +95,49 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 	}
 
 	// ===== CORS =====
-	cfg := cors.Config{
-		AllowOrigins: []string{
+	// Origens permitidas: configurar via CORS_ALLOW_ORIGINS (CSV) no .env
+	// Em dev: CORS_ALLOW_ORIGINS=http://localhost:5173,http://localhost:3000
+	// Em prod (same-origin nginx): CORS_ALLOW_ORIGINS pode ficar vazio
+	var allowedOrigins []string
+	if env := strings.TrimSpace(os.Getenv("CORS_ALLOW_ORIGINS")); env != "" {
+		for _, p := range strings.Split(env, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				allowedOrigins = append(allowedOrigins, p)
+			}
+		}
+	}
+	if len(allowedOrigins) == 0 {
+		// Fallback dev-only: aceita localhost; em prod definir CORS_ALLOW_ORIGINS
+		allowedOrigins = []string{
 			"http://localhost:3000",
 			"http://localhost:5173",
 			"http://127.0.0.1:5173",
 			"http://127.0.0.1:3000",
-		},
+		}
+		println("[routes] ATENÇÃO: CORS_ALLOW_ORIGINS não definido — usando fallback localhost (inseguro em prod)")
+	}
+
+	cfg := cors.Config{
+		AllowOrigins: allowedOrigins,
 		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"},
 		AllowHeaders: []string{
 			"Origin", "Content-Type", "Authorization",
 			"X-Auth-Token", "X-Session-Token", "Accept", "Cache-Control",
+			"X-CSRF-Token",
 		},
 		AllowCredentials: true,
-		// Expor cabeÃ§alhos Ãºteis ao front (rate limit / auth)
 		ExposeHeaders: []string{
 			"Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "WWW-Authenticate",
 		},
 	}
-
-	// Permite override de origens via env CORS_ALLOW_ORIGINS (lista separada por vÃ­rgulas)
-	if env := strings.TrimSpace(os.Getenv("CORS_ALLOW_ORIGINS")); env != "" {
-		parts := strings.Split(env, ",")
-		cfg.AllowOrigins = make([]string, 0, len(parts))
-		for _, p := range parts {
-			p = strings.TrimSpace(p)
-			if p != "" {
-				cfg.AllowOrigins = append(cfg.AllowOrigins, p)
-			}
-		}
-	}
 	r.Use(cors.New(cfg))
 
-	// Swagger (OpenAPI) UI
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// Swagger (OpenAPI) UI — restrito a IPs internos OU bearer admin
+	swaggerEnabled := os.Getenv("SWAGGER_ENABLED") != "false"
+	if swaggerEnabled {
+		r.GET("/swagger/*any", middleware.SwaggerGuard(), ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
 
 	// Liberar OPTIONS (preflight) antes de autenticaÃ§Ã£o para evitar 403 em CORS
 	r.Use(func(c *gin.Context) {
@@ -207,6 +216,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 		// PÃºblico com rate limiting restrito para autenticaÃ§Ã£o
 		apiV1.POST("/register", middleware.AuthRateLimit(), handlers.Register)
 		apiV1.POST("/login", middleware.AuthRateLimit(), handlers.Login)
+		apiV1.POST("/logout", handlers.Logout)
 		apiV1.GET("/uc/:numero", handlers.GetUCByNumero)
 		apiV1.GET("/uc/:numero/faturas", handlers.GetFaturasByUC)
 
@@ -225,13 +235,14 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 		authRequired := apiV1.Group("/")
 		authRequired.Use(middleware.AuthMiddleware())
 		{
-			authRequired.GET("/historico", handlers.HistoricoRecent)
-			authRequired.GET("/requisicoes/historico", handlers.HistoricoRecent)
+			// /historico (geral) e /requisicoes/historico (alias) movidos para adminOnly abaixo —
+			// só admin tem acesso à página Histórico global
 
 			// Filtros
 			authRequired.GET("/filtros/etapas", handlers.GetEtapasParaFiltro)
 			authRequired.GET("/filtros/subetapas", handlers.GetSubEtapasParaFiltro)
 			authRequired.GET("/filtros/etapas-subetapas", handlers.GetEtapaSubCombinacoes)
+			authRequired.GET("/instancias-deferimento", handlers.ListInstanciasDeferimento)
 
 			// Regras (somente leitura)
 			authRequired.GET("/rules", handlers.GetRules)
@@ -323,8 +334,20 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Análise de Desvio - Resultado IA (novo)
 			authRequired.GET("/faturas/com-analise", handlers.ListFaturasComAnalise)
 			authRequired.GET("/faturas/fde-analise", handlers.ListFaturasFDEAnalise)
+			authRequired.GET("/faturas/fde-analise/empresas", handlers.ListEmpresasFDEAnalise)
 			authRequired.GET("/faturas/:id/detalhes", handlers.GetFaturaDetalhes)
 			authRequired.POST("/faturas/:id/reprocessar-ia", handlers.ReprocessarFaturaIA)
+			authRequired.POST("/faturas/:id/reanalise-fde", handlers.ReanaliseFDEHandler)
+			// ⭐ v19 — popula colunas v19 via pdf_pipeline_v2 (subprocess Python)
+			authRequired.POST("/faturas/:id/processar-v2", handlers.ProcessarV2Handler)
+			// ⭐ v19 — audit trail: histórico de reanálises da fatura
+			authRequired.GET("/faturas/:id/reanalises", handlers.ListarReanalisesHandler)
+			authRequired.POST("/faturas/:id/analisar-medidor", handlers.AnalisarMedidorHandler)
+				authRequired.GET("/faturas/uc/:uc/comparar-medidores", handlers.CompararMedidoresUCHandler)
+			authRequired.GET("/faturas/uc/:uc/comparar-leituras", handlers.CompararLeiturasUCHandler)
+			authRequired.POST("/faturas/:id/f04/aprovar", handlers.AprovarF04Handler)
+			authRequired.POST("/faturas/:id/f04/desaprovar", handlers.DesaprovarF04Handler)
+			authRequired.POST("/faturas/:id/rejeitar-fde",  handlers.RejeitarFaturaFDEHandler)
 
 			// Busca global
 			authRequired.GET("/search/global", handlers.SearchGlobal)
@@ -450,13 +473,13 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/filtros/concessionarias", handlers.GetConcessionariasParaFiltro)
 			gestorRequired.GET("/filtros/tensao", handlers.GetTensaoParaFiltro)
 
-			// Admin - Planilha (lista e operaÃ§Ãµes em massa)
-			gestorRequired.GET("/admin/planilha", handlers.AdminPlanilhaList)
-			gestorRequired.GET("/admin/planilha/export", handlers.AdminPlanilhaExport)
-			gestorRequired.POST("/admin/planilha/import", handlers.AdminPlanilhaImport)
-			gestorRequired.POST("/admin/planilha/bulk-mover", handlers.AdminPlanilhaBulkMover)
-			gestorRequired.POST("/admin/planilha/bulk-comentario-replace", handlers.AdminPlanilhaBulkComentarioReplace)
-			gestorRequired.POST("/admin/planilha/recalcular-coluna", handlers.AdminPlanilhaRecalcularColuna)
+			// Admin - Processos (lista e operações em massa)
+			gestorRequired.GET("/admin/processos", handlers.AdminPlanilhaList)
+			gestorRequired.GET("/admin/processos/export", handlers.AdminPlanilhaExport)
+			gestorRequired.POST("/admin/processos/import", handlers.AdminPlanilhaImport)
+			gestorRequired.POST("/admin/processos/bulk-mover", handlers.AdminPlanilhaBulkMover)
+			gestorRequired.POST("/admin/processos/bulk-comentario-replace", handlers.AdminPlanilhaBulkComentarioReplace)
+			gestorRequired.POST("/admin/processos/recalcular-coluna", handlers.AdminPlanilhaRecalcularColuna)
 			gestorRequired.DELETE("/admin/historico/:id", handlers.AdminDeleteHistorico)
 
 			// Admin - Prazos (configuraÃ§Ãµes de prazos por kanban/etapa)
@@ -479,9 +502,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/dashboard/stats", dashHandler.Stats)
 			gestorRequired.GET("/dashboard/movimentacoes", dashHandler.MovimentacoesPeriodo)
 			gestorRequired.GET("/dashboard/changes-24h", dashHandler.MovimentacoesUltimas24h)
-			gestorRequired.GET("/relatorios/metricas", handlers.GetRelatoriosMetricas)
+			// metricas-batch é usado pela view ATIVOS do Controle de Processos (gestor pode)
 			gestorRequired.POST("/relatorios/metricas-batch", handlers.GetRelatoriosMetricasBatch)
-			gestorRequired.GET("/relatorios/kanban-composicao", handlers.GetKanbanComposicao)
 
 			// IA
 			gestorRequired.POST("/perguntar-ia", handlers.PerguntaIAHandler)
@@ -513,11 +535,36 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.DELETE("/rules/:id", handlers.DeleteRule)
 			gestorRequired.POST("/rules/interpret", handlers.InterpretRule)
 		}
+
+		// ------------------------- Admin only -------------------------
+		// Recursos restritos a administradores (Histórico global, Métricas
+		// executivas, Editor administrativo). Gestor recebe 403.
+		adminOnly := apiV1.Group("/")
+		adminOnly.Use(middleware.AuthMiddleware(), middleware.StrictAdminMiddleware())
+		{
+			// Histórico global (página /historico)
+			adminOnly.GET("/historico", handlers.HistoricoRecent)
+			adminOnly.GET("/requisicoes/historico", handlers.HistoricoRecent)
+
+			// Métricas executivas (página /dashboard)
+			adminOnly.GET("/relatorios/metricas", handlers.GetRelatoriosMetricas)
+			adminOnly.GET("/relatorios/kanban-composicao", handlers.GetKanbanComposicao)
+		}
 	}
 
 	// ============================================================
-	// Compatibilidade: espelho em /api (legado)
+	// Compatibilidade: espelho em /api (LEGADO — deprecado)
+	// Migre para /api/v1. Este grupo será removido em versão futura.
 	// ============================================================
+	r.Use(func(c *gin.Context) {
+		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" &&
+			(len(c.Request.URL.Path) < 8 || c.Request.URL.Path[:8] != "/api/v1/") {
+			c.Header("Deprecation", "true")
+			c.Header("Sunset", "2026-12-31")
+			c.Header("Link", `</api/v1/>; rel="successor-version"`)
+		}
+		c.Next()
+	})
 	api := r.Group("/api")
 	{
 		api.GET("/healthz", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
@@ -567,6 +614,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 
 		api.POST("/register", handlers.Register)
 		api.POST("/login", handlers.Login)
+		api.POST("/logout", handlers.Logout)
 
 		api.GET("/uc/:numero", handlers.GetUCByNumero)
 		api.GET("/uc/:numero/faturas", handlers.GetFaturasByUC)
@@ -578,8 +626,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 		authRequired := api.Group("/")
 		authRequired.Use(middleware.AuthMiddleware())
 		{
-			authRequired.GET("/historico", handlers.HistoricoRecent)
-			authRequired.GET("/requisicoes/historico", handlers.HistoricoRecent)
+			// /historico e /requisicoes/historico movidos para adminOnly (legado também)
 			authRequired.POST("/requisicoes", handlers.CreateRequisicaoPersist)
 			authRequired.GET("/requisicoes/departamento", handlers.GetRequisicoesDepartamento)
 			authRequired.GET("/alertas", handlers.GetAlertas)
@@ -670,6 +717,14 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/tags", handlers.GetAllTags)
 			gestorRequired.POST("/tags", handlers.CreateTag)
 			gestorRequired.PUT("/processos/:id/tags", handlers.UpdateProcessoTags)
+		}
+
+		// ------------------------- Admin only (legado) -------------------------
+		adminOnly := api.Group("/")
+		adminOnly.Use(middleware.AuthMiddleware(), middleware.StrictAdminMiddleware())
+		{
+			adminOnly.GET("/historico", handlers.HistoricoRecent)
+			adminOnly.GET("/requisicoes/historico", handlers.HistoricoRecent)
 		}
 	}
 

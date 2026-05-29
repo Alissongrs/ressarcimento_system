@@ -1,0 +1,32 @@
+# CODEOWNERS — SURE
+#
+# Cada PR aciona automaticamente review dos donos das áreas modificadas.
+# Sintaxe: <pattern> <github-handle | @org/team>
+# Documentação: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-security/customizing-your-repository/about-code-owners
+
+# Default — qualquer arquivo sem owner específico
+*                                @alissongr3
+
+# Backend
+/backend/                        @alissongr3
+/backend/handlers/auth_handler.go @alissongr3
+/backend/middleware/             @alissongr3
+/backend/database/               @alissongr3
+
+# Frontend
+/frontend/                       @alissongr3
+/frontend/src/services/          @alissongr3
+/frontend/src/context/           @alissongr3
+
+# Infraestrutura e CI
+/docker-compose.yml              @alissongr3
+/backend/Dockerfile              @alissongr3
+/frontend/Dockerfile             @alissongr3
+/docker/                         @alissongr3
+/.github/                        @alissongr3
+
+# Segurança e docs
+/SECURITY_ROTATION.md            @alissongr3
+/ARCHITECTURE.md                 @alissongr3
+/CONTRIBUTING.md                 @alissongr3
+/.github/CODEOWNERS              @alissongr3

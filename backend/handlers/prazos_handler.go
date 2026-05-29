@@ -309,7 +309,7 @@ LIMIT ?`
 	// Cria alerta para gestores quando houver atrasados (1 por dia/proc/gestor)
 	if len(atrasados) > 0 {
 		idsGestores := make([]int64, 0)
-		if rows, err := queryGorm(db, `SELECT id_usuario FROM DM_USUARIO WHERE perfil='gestor' AND ativo=1`); err == nil {
+		if rows, err := queryGorm(db, `SELECT id_usuario FROM DM_USUARIO WHERE perfil='gestor' AND usuario_ativo=1`); err == nil {
 			defer rows.Close()
 			for rows.Next() {
 				var uid int64

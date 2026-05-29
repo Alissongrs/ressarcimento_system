@@ -3,10 +3,9 @@ import axios from 'axios';
 // Cliente Axios padronizado
 // - Preserva URLs absolutas (http/https)
 // - Prefixa URLs relativas com /api/v1/
-// - Anexa Authorization: Bearer <token> quando existir em localStorage
-// Use caminhos relativos; o interceptor já normaliza para "/api/v1/..."
-// Manter baseURL vazio evita URLs quebradas como "http:localhost:5173apiv1..."
-const api = axios.create({ baseURL: '' });
+// - Envia cookie auth_token via withCredentials (auth principal)
+// - Mantém Authorization: Bearer como fallback (clientes API / dev cross-origin)
+const api = axios.create({ baseURL: '', withCredentials: true });
 
 const cleanToken = (t) => {
   if (!t) return '';

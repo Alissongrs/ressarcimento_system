@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { login as loginService } from '../services/authService';
 import { Button } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card.jsx';
+import { Card, CardContent, CardDescription, CardHeader } from '../components/ui/card.jsx';
 import { Label } from '../components/ui/label.jsx';
 import { Eye, EyeOff } from 'lucide-react';
 
@@ -44,9 +44,13 @@ const Login = () => {
     >
       <Card className="w-full max-w-md gradient-card shadow-medium backdrop-blur-sm border border-[var(--border)] text-[var(--fg)]">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold text-[var(--fg)]">
-            Sistema Unificado de Ressarcimento
-          </CardTitle>
+          <div className="flex justify-center mb-2">
+            <img
+              src="/logo_sure.png"
+              alt="SURE — Sistema Unificado de Ressarcimento"
+              style={{ width: '180px', height: 'auto' }}
+            />
+          </div>
           <CardDescription className="text-[var(--fg)] opacity-70">
             Faça login para acessar o sistema
           </CardDescription>

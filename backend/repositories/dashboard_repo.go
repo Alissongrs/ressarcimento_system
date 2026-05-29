@@ -434,6 +434,9 @@ func (r *DashboardRepo) Aging(ctx context.Context) (AgingBuckets, error) {
 }
 
 func (r *DashboardRepo) AgingFiltered(ctx context.Context, f DashFilters) (AgingBuckets, error) {
+	// Aging só conta processos ATIVOS na operação:
+	// exclui Concluídos (id_coluna=5), Indeferidos (id_coluna=6 legacy ou id_etapa_processo=11)
+	// e Suspensos (id_coluna=99 ou suspenso=1).
 	q := `
 	WITH ult AS (
 	  SELECT id_requisicao,
@@ -443,9 +446,13 @@ func (r *DashboardRepo) AgingFiltered(ctx context.Context, f DashFilters) (Aging
 	),
 	age AS (
 	  SELECT
-	    DATEDIFF(CURDATE(), DATE(ult)) AS dias,
-	    ult
+	    DATEDIFF(CURDATE(), DATE(ult.ult)) AS dias,
+	    ult.ult
 	  FROM ult
+	  INNER JOIN FT_PROCESSOS p ON p.id_processo = ult.id_requisicao
+	  WHERE COALESCE(p.suspenso, 0) = 0
+	    AND COALESCE(p.id_etapa_processo, 0) <> 11
+	    AND COALESCE(p.id_coluna, 1) NOT IN (5, 6, 99)
 	)
 	SELECT
 	  SUM(dias BETWEEN 0 AND 7)        AS b0_7,
@@ -461,7 +468,7 @@ func (r *DashboardRepo) AgingFiltered(ctx context.Context, f DashFilters) (Aging
 		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
 	}
 	var out AgingBuckets
-	err := r.db.Raw( q, args...).Row().Scan(
+	err := r.db.Raw(q, args...).Row().Scan(
 		&out.B0_7, &out.B8_15, &out.B16_30, &out.B31Mais,
 	)
 	return out, err
@@ -1170,6 +1177,7 @@ func (r *DashboardRepo) TaxaAneel(ctx context.Context, f DashFilters) (int64, in
 }
 
 // ============== Backlog (>60 dias sem movimentação, sub_etapa <> Aguardando retorno) =================
+// Considera apenas processos ATIVOS na operação — exclui Concluídos, Indeferidos e Suspensos.
 func (r *DashboardRepo) BacklogCount(ctx context.Context) (int64, error) {
 	q := `
 	SELECT COUNT(DISTINCT p.id_processo)
@@ -1179,7 +1187,9 @@ func (r *DashboardRepo) BacklogCount(ctx context.Context) (int64, error) {
 	  FROM FT_HISTORICO_MOVIMENTACOES
 	  GROUP BY id_requisicao
 	) ult ON ult.id_requisicao = p.id_processo
-	WHERE p.id_coluna NOT IN (6, 99)
+	WHERE COALESCE(p.suspenso, 0) = 0
+	  AND COALESCE(p.id_etapa_processo, 0) <> 11
+	  AND COALESCE(p.id_coluna, 1) NOT IN (5, 6, 99)
 	  AND COALESCE(p.sub_etapa, '') <> 'Aguardando retorno'
 	  AND (ult.ult_mov IS NULL OR DATEDIFF(CURDATE(), DATE(ult.ult_mov)) > 60)
 	`

@@ -9,8 +9,9 @@ RUN apk add --no-cache git ca-certificates tzdata
 WORKDIR /app
 
 # Cache de dependências (só redownload se go.mod/go.sum mudarem)
+# Usa `go mod tidy` para resolver automaticamente novos deps + atualizar go.sum.
 COPY go.mod go.sum ./
-RUN go mod download && go mod verify
+RUN go mod tidy && go mod download
 
 # Copia código fonte
 COPY . .
@@ -41,6 +42,9 @@ WORKDIR /app
 
 # Copia binary do stage de build
 COPY --from=builder --chown=app:app /app/backend /app/backend
+
+# Copia bundle de CA do RDS (se presente em certs/global-bundle.pem)
+COPY --from=builder --chown=app:app /app/certs /app/certs
 
 # Cria diretórios necessários
 RUN mkdir -p /app/uploads && chown -R app:app /app

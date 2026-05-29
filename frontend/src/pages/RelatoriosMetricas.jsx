@@ -3,10 +3,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   RefreshCcw, TrendingUp, Wallet, Award, Clock, Users,
   BarChart2, CheckCircle2, ArrowUpRight, X,
+  Activity, AlertTriangle, Target, Zap, DollarSign, Filter,
+  Sparkles,
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
-  CartesianGrid, BarChart, Bar, PieChart, Pie, Cell, Legend,
+  CartesianGrid, BarChart, Bar, PieChart, Pie, Cell, Legend, AreaChart, Area,
 } from 'recharts';
 import { getRelatoriosMetricas, getKanbanComposicao } from '../services/relatoriosService.js';
 import { getConcessionariasParaFiltro } from '../services/requisicaoService.js';
@@ -81,17 +83,200 @@ function EmptyChart({ title, hint }) {
   );
 }
 
-function SectionCard({ title, subtitle, children, style }) {
+function SectionCard({ title, subtitle, children, style, icon: Icon, accent = 'var(--accent)' }) {
   return (
     <div style={{
       background: 'var(--card)', border: '1px solid var(--border)',
       borderRadius: 12, overflow: 'hidden', ...style,
     }}>
-      <div style={{ padding: '14px 16px 0' }}>
-        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--fg)' }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 11, opacity: 0.55, marginTop: 2 }}>{subtitle}</div>}
+      <div style={{ padding: '14px 16px 0', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        {Icon && (
+          <div style={{
+            width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+            background: `color-mix(in srgb, ${accent} 14%, transparent)`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon size={15} style={{ color: accent }} />
+          </div>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--fg)' }}>{title}</div>
+          {subtitle && <div style={{ fontSize: 11, opacity: 0.55, marginTop: 2 }}>{subtitle}</div>}
+        </div>
       </div>
       <div style={{ padding: '10px 16px 14px' }}>{children}</div>
+    </div>
+  );
+}
+
+/* mini sparkline para inserir dentro de KpiCard */
+function Sparkline({ data, color = 'var(--accent)', height = 36 }) {
+  const series = Array.isArray(data) && data.length > 0 ? data : [];
+  if (series.length < 2) {
+    return <div style={{ height, opacity: 0.3, fontSize: 10, display: 'flex', alignItems: 'center' }}>—</div>;
+  }
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart data={series} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+        <defs>
+          <linearGradient id={`sparkfill-${color.replace(/[^a-z0-9]/gi, '')}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <Area type="monotone" dataKey="v" stroke={color} fill={`url(#sparkfill-${color.replace(/[^a-z0-9]/gi, '')})`} strokeWidth={1.6} dot={false} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+/* KPI hero — versão grande para os indicadores principais */
+function KpiHeroCard({ icon: Icon, label, value, sub, accentColor = 'var(--accent)', sparkData, delta }) {
+  const deltaColor = delta == null ? null : delta >= 0 ? '#10b981' : '#ef4444';
+  return (
+    <div style={{
+      background: 'var(--card)', border: '2px solid var(--border)', borderRadius: 14,
+      padding: '20px', display: 'flex', flexDirection: 'column', gap: 12,
+      position: 'relative', overflow: 'hidden', minHeight: 180,
+    }}>
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0, height: 4,
+        background: `linear-gradient(90deg, ${accentColor}, color-mix(in srgb, ${accentColor} 30%, transparent))`,
+      }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{
+          width: 42, height: 42, borderRadius: 11, flexShrink: 0,
+          background: `color-mix(in srgb, ${accentColor} 18%, transparent)`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Icon size={20} style={{ color: accentColor }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            {label}
+          </div>
+          {sub && <div style={{ fontSize: 11, opacity: 0.5, marginTop: 2 }}>{sub}</div>}
+        </div>
+        {delta != null && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: deltaColor, whiteSpace: 'nowrap', flexShrink: 0 }}>
+            <ArrowUpRight size={13} style={{ display: 'inline', transform: delta < 0 ? 'rotate(90deg)' : undefined, marginRight: 2 }} />
+            {Math.abs(delta).toFixed(1)}%
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--fg)', lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      {Array.isArray(sparkData) && sparkData.length > 1 && (
+        <div style={{ marginTop: 'auto' }}>
+          <Sparkline data={sparkData} color={accentColor} height={40} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Resumo Executivo — narrativa em texto sobre o estado da operação */
+function ExecutiveSummary({ items }) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return (
+    <div style={{
+      background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--card)), var(--card))',
+      border: '1px solid var(--border)', borderRadius: 14, padding: '18px 20px',
+      display: 'flex', alignItems: 'flex-start', gap: 14,
+    }}>
+      <div style={{
+        width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+        background: 'color-mix(in srgb, var(--accent) 18%, transparent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <Sparkles size={18} style={{ color: 'var(--accent)' }} />
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+          Resumo executivo
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px 18px' }}>
+          {items.map((it, i) => (
+            <div key={i} style={{ fontSize: 13, color: 'var(--fg)', lineHeight: 1.45 }}>
+              {it.icon && <span style={{ marginRight: 6 }}>{it.icon}</span>}
+              {it.text}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Funil de conversão Ativos → ... → Caixa */
+function ConversionFunnel({ stages }) {
+  const valid = (stages || []).filter((s) => s);
+  if (valid.length === 0) return null;
+  const max = Math.max(1, ...valid.map((s) => safeNum(s.count)));
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {valid.map((s, i) => {
+        const w = (safeNum(s.count) / max) * 100;
+        const prev = i > 0 ? valid[i - 1] : null;
+        const conv = prev && safeNum(prev.count) > 0 ? (safeNum(s.count) / safeNum(prev.count)) * 100 : null;
+        return (
+          <div key={s.label}>
+            {prev && (
+              <div style={{ fontSize: 10, opacity: 0.5, padding: '0 6px', textAlign: 'center', marginBottom: 2 }}>
+                ↓ {conv != null ? `${conv.toFixed(1)}%` : '—'} convertem
+              </div>
+            )}
+            <div style={{
+              padding: '10px 14px', borderRadius: 10, background: 'var(--panel)',
+              border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10,
+              position: 'relative', overflow: 'hidden',
+            }}>
+              <div style={{
+                position: 'absolute', top: 0, bottom: 0, left: 0, width: `${w}%`,
+                background: `color-mix(in srgb, ${s.color} 18%, transparent)`,
+                transition: 'width 500ms ease',
+              }} />
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                <div style={{
+                  width: 8, height: 28, borderRadius: 3, background: s.color, flexShrink: 0,
+                }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg)' }}>{s.label}</div>
+                  {s.hint && <div style={{ fontSize: 10, opacity: 0.5 }}>{s.hint}</div>}
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--fg)', fontVariantNumeric: 'tabular-nums' }}>{fmt(s.count)}</div>
+                  {s.value != null && <div style={{ fontSize: 11, opacity: 0.6, fontVariantNumeric: 'tabular-nums' }}>{fmtMM(s.value)}</div>}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Painel de Saúde com KPIs operacionais */
+function HealthIndicator({ icon: Icon, label, value, severity, hint }) {
+  const sev = severity || 'neutral';
+  const colors = {
+    ok: { bg: 'rgba(16,185,129,0.10)', fg: '#10b981', border: 'rgba(16,185,129,0.35)' },
+    warn: { bg: 'rgba(245,158,11,0.10)', fg: '#f59e0b', border: 'rgba(245,158,11,0.35)' },
+    crit: { bg: 'rgba(239,68,68,0.10)', fg: '#ef4444', border: 'rgba(239,68,68,0.35)' },
+    neutral: { bg: 'var(--panel)', fg: 'var(--fg)', border: 'var(--border)' },
+  };
+  const c = colors[sev];
+  return (
+    <div style={{
+      padding: '12px 14px', borderRadius: 10, background: c.bg, border: `1px solid ${c.border}`,
+      display: 'flex', alignItems: 'center', gap: 10,
+    }}>
+      <Icon size={20} style={{ color: c.fg, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 11, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
+        <div style={{ fontSize: 20, fontWeight: 800, color: c.fg, lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+        {hint && <div style={{ fontSize: 10, opacity: 0.5, marginTop: 2 }}>{hint}</div>}
+      </div>
     </div>
   );
 }
@@ -322,8 +507,6 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
   const VIEW_TABS = [
     { key: 'todos',        label: 'Todos' },
-    { key: 'estrategico',  label: 'Estratégico' },
-    { key: 'tatico',       label: 'Tático' },
     { key: 'operacional',  label: 'Operacional' },
   ];
 
@@ -381,18 +564,158 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
       {error && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
 
-      {/* ── KPI Hero strip ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-        <KpiCard icon={Wallet}       label="Carteira (R$)"      value={fmtMM(carteiraValor)}    sub={`${fmt(carteiraProcs)} processos`} accentColor="#3b82f6" />
-        <KpiCard icon={TrendingUp}   label="Ticket médio"       value={fmtMM(ticketMedio)}       sub={`${fmt(totalProcessos)} processos`} accentColor="#10b981" />
+      {/* ── Resumo executivo (narrativa) ── */}
+      {(() => {
+        const summary = [];
+        if (carteiraProcs > 0 || carteiraValor > 0) {
+          summary.push({
+            text: <>Carteira ativa de <b>{fmt(carteiraProcs)}</b> processos somando <b>{fmtMM(carteiraValor)}</b>.</>,
+          });
+        }
+        if (resultadosRess.caixa > 0) {
+          summary.push({
+            text: <>Receita em caixa de <b>{fmtMM(resultadosRess.caixa)}</b> nos processos concluídos.</>,
+          });
+        }
+        if (totalSla > 0) {
+          summary.push({
+            text: <><b>{onTimePct}%</b> dentro do prazo SLA — <b>{fmt(late)}</b> atrasados.</>,
+          });
+        }
+        const travados = safeNum(agingBuckets['31_mais']);
+        if (travados > 0) {
+          summary.push({
+            text: <>⚠️ <b>{fmt(travados)}</b> processos travados há mais de 30 dias precisam atenção.</>,
+          });
+        }
+        if (taxaSucessoGeral > 0) {
+          summary.push({
+            text: <>Taxa de sucesso geral: <b>{taxaSucessoGeral.toFixed(1)}%</b> ({fmt(deferidosN)} deferidos).</>,
+          });
+        }
+        return summary.length > 0 ? <ExecutiveSummary items={summary} /> : null;
+      })()}
+
+      {/* ── KPI Hero (2 cards principais grandes) ── */}
+      {(() => {
+        const sparkData = (tendencia30d || []).slice(-14).map((t) => ({ v: safeNum(t.total) }));
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 14 }}>
+            <KpiHeroCard
+              icon={Wallet}
+              label="Carteira em aberto"
+              value={fmtMM(carteiraValor)}
+              sub={`${fmt(carteiraProcs)} processos ativos`}
+              accentColor="#3b82f6"
+              sparkData={sparkData}
+            />
+            <KpiHeroCard
+              icon={DollarSign}
+              label="Receita em caixa"
+              value={fmtMM(safeNum(resultadosRess.caixa))}
+              sub={`Concluídos · gerado ${fmtMM(safeNum(resultadosRess.gerado))}`}
+              accentColor="#10b981"
+              sparkData={sparkData}
+            />
+          </div>
+        );
+      })()}
+
+      {/* ── KPI strip secundário (cards menores) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+        <KpiCard icon={TrendingUp}   label="Ticket médio"       value={fmtMM(ticketMedio)}       sub={`${fmt(totalProcessos)} processos`} accentColor="#0ea5e9" />
         <KpiCard icon={Award}        label="% Sucesso geral"    value={`${taxaSucessoGeral.toFixed(1)}%`} sub={`${fmt(deferidosN)} deferidos`} accentColor="#f59e0b" />
         <KpiCard icon={CheckCircle2} label="SLA (7 dias)"       value={`${onTimePct}%`}          sub={`no prazo — ${fmt(late)} atrasados`} accentColor={onTimePct >= 80 ? '#10b981' : onTimePct >= 60 ? '#f59e0b' : '#ef4444'} />
         <KpiCard icon={Clock}        label="Backlog"            value={fmt(backlogCount)}         sub="+60 dias sem movimentação"        accentColor={backlogCount > 50 ? '#ef4444' : backlogCount > 20 ? '#f59e0b' : '#10b981'} />
         <KpiCard icon={Users}        label="Taxa Aneel"         value={`${taxaAneelPct.toFixed(1)}%`} sub="processos que foram à Aneel" accentColor="#8b5cf6" />
       </div>
 
+      {/* ── Funil de conversão + Painel de saúde ── */}
+      {show('estrategico', 'tatico') && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16 }}>
+          <SectionCard
+            title="Funil de conversão"
+            subtitle="Jornada Ativos → Caixa com taxa de avanço entre etapas"
+            icon={Target}
+            accent="#3b82f6"
+          >
+            <ConversionFunnel
+              stages={[
+                { label: 'Ativos',     count: safeNum(processosCounts.ativos),     value: null,                                  color: '#3b82f6', hint: 'Em andamento' },
+                { label: 'Deferidos',  count: safeNum(processosCounts.deferidos),  value: safeNum(creditos.simples_total) + safeNum(creditos.dobro_total), color: '#8b5cf6', hint: 'Aprovação técnica' },
+                { label: 'Fluxo',      count: safeNum(processosCounts.fluxo_ressarcimento), value: null,                          color: '#06b6d4', hint: 'Devolução em andamento' },
+                { label: 'Faturamento',count: safeNum(processosCounts.faturamento),value: safeNum(resultadosRess.faturado),       color: '#f59e0b', hint: 'NF emitida' },
+                { label: 'Caixa',      count: safeNum(processosCounts.concluidos), value: safeNum(resultadosRess.caixa),          color: '#10b981', hint: 'Recebido' },
+              ]}
+            />
+          </SectionCard>
+
+          <SectionCard
+            title="Painel de saúde"
+            subtitle="Indicadores que demandam atenção operacional"
+            icon={Activity}
+            accent="#ef4444"
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {(() => {
+                const travados = safeNum(agingBuckets['31_mais']);
+                const sev = travados > 50 ? 'crit' : travados > 10 ? 'warn' : travados > 0 ? 'warn' : 'ok';
+                return (
+                  <HealthIndicator
+                    icon={AlertTriangle}
+                    label="Travados +30d"
+                    value={fmt(travados)}
+                    severity={sev}
+                    hint="Sem movimentação há mais de 30 dias"
+                  />
+                );
+              })()}
+              {(() => {
+                const sev = backlogCount > 50 ? 'crit' : backlogCount > 20 ? 'warn' : backlogCount > 0 ? 'warn' : 'ok';
+                return (
+                  <HealthIndicator
+                    icon={Clock}
+                    label="Backlog"
+                    value={fmt(backlogCount)}
+                    severity={sev}
+                    hint="+60 dias sem progredir"
+                  />
+                );
+              })()}
+              {(() => {
+                const sev = late > 20 ? 'crit' : late > 5 ? 'warn' : late > 0 ? 'warn' : 'ok';
+                return (
+                  <HealthIndicator
+                    icon={Zap}
+                    label="Prazos vencidos"
+                    value={fmt(late)}
+                    severity={sev}
+                    hint={`Limite: ${sla30d.limite_dias || 7}d`}
+                  />
+                );
+              })()}
+              {(() => {
+                const cur = throughputSemChart[throughputSemChart.length - 1]?.total || 0;
+                const prev = throughputSemChart[throughputSemChart.length - 2]?.total || 0;
+                const delta = prev > 0 ? ((cur - prev) / prev) * 100 : null;
+                const sev = delta == null ? 'neutral' : delta > 0 ? 'ok' : delta < -20 ? 'crit' : 'warn';
+                return (
+                  <HealthIndicator
+                    icon={TrendingUp}
+                    label="Throughput semanal"
+                    value={fmt(cur)}
+                    severity={sev}
+                    hint={delta == null ? 'Sem comparativo' : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}% vs semana anterior`}
+                  />
+                );
+              })()}
+            </div>
+          </SectionCard>
+        </div>
+      )}
+
       {/* ── Estratégicos: Resultados Ressarcimento ── */}
-      {show('estrategico') && <SectionCard title="Resultados Ressarcimento" subtitle="Gerado (deferidos+) / Faturado (aba Faturamento) / Caixa (Concluídos)">
+      {show('estrategico') && <SectionCard title="Resultados Ressarcimento" subtitle="Gerado (deferidos+) / Faturado (aba Faturamento) / Caixa (Concluídos)" icon={DollarSign} accent="#10b981">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
           {[
             { label: 'Gerado', value: safeNum(resultadosRess.gerado),   color: '#3b82f6', hint: 'Todos os processos que saíram de Ativos' },
@@ -413,7 +736,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
       {show('estrategico', 'tatico') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
         {/* Kanban pie */}
-        <SectionCard title="Composição Kanban" subtitle="Distribuição dos processos por coluna">
+        <SectionCard title="Composição Kanban" subtitle="Distribuição dos processos por coluna" icon={BarChart2} accent="#3b82f6">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div style={{ height: 260 }}>
               {kanbanSelected.size > 0 && hasPositive(kanbanPercentData, 'total') ? (
@@ -461,7 +784,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
         </SectionCard>
 
         {/* Status pie */}
-        <SectionCard title="Status das Requisições" subtitle="Distribuição por status de triagem">
+        <SectionCard title="Status das Requisições" subtitle="Distribuição por status de triagem" icon={Filter} accent="#8b5cf6">
           <div style={{ height: 260 }}>
             {hasPositive(statusChart, 'total') ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -481,7 +804,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
       </div>}
 
       {/* ── Tendência 30d ── */}
-      {show('tatico', 'operacional') && <SectionCard title="Tendência de movimentações (30 dias)" subtitle="Volume diário de movimentações registradas">
+      {show('tatico', 'operacional') && <SectionCard title="Tendência de movimentações (30 dias)" subtitle="Volume diário de movimentações registradas" icon={Activity} accent="#3b82f6">
         <div style={{ height: 200 }}>
           {tendenciaChart.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
@@ -499,7 +822,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
       {/* ── Throughput semana + mês ── */}
       {show('tatico', 'operacional') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <SectionCard title="Throughput Semanal" subtitle="Novas requisições por semana">
+        <SectionCard title="Throughput Semanal" subtitle="Novas requisições por semana" icon={TrendingUp} accent="#3b82f6">
           <div style={{ height: 200 }}>
             {hasPositive(throughputSemChart, 'total') ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -515,7 +838,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
           </div>
         </SectionCard>
 
-        <SectionCard title="Throughput Mensal" subtitle="Novas requisições por mês">
+        <SectionCard title="Throughput Mensal" subtitle="Novas requisições por mês" icon={TrendingUp} accent="#10b981">
           <div style={{ height: 200 }}>
             {hasPositive(throughputMesChart, 'total') ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -536,7 +859,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
       {show('tatico') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
 
         {/* SLA */}
-        <SectionCard title="SLA" subtitle={`Últimos ${sla30d.limite_dias || 7} dias`}>
+        <SectionCard title="SLA" subtitle={`Últimos ${sla30d.limite_dias || 7} dias`} icon={CheckCircle2} accent={onTimePct >= 80 ? '#10b981' : onTimePct >= 60 ? '#f59e0b' : '#ef4444'}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 36, fontWeight: 800, color: onTimePct >= 80 ? 'var(--success)' : onTimePct >= 60 ? 'var(--warning)' : 'var(--danger)' }}>
@@ -555,7 +878,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
         </SectionCard>
 
         {/* Aging */}
-        <SectionCard title="Aging (sem movimentação)" subtitle="Distribuição por tempo parado">
+        <SectionCard title="Aging (sem movimentação)" subtitle="Excluindo concluídos, indeferidos e suspensos" icon={Clock} accent="#f59e0b">
           {[
             { label: '0 – 7 dias',   value: safeNum(agingBuckets['0_7']),    color: '#10b981' },
             { label: '8 – 15 dias',  value: safeNum(agingBuckets['8_15']),   color: '#f59e0b' },
@@ -579,7 +902,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
         </SectionCard>
 
         {/* Créditos */}
-        <SectionCard title="Composição de Créditos" subtitle="Simples vs Dobro">
+        <SectionCard title="Composição de Créditos" subtitle="Simples vs Dobro" icon={Wallet} accent="#06b6d4">
           <div style={{ height: 160 }}>
             {hasPositive(creditosChart, 'total') ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -607,13 +930,13 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
       {/* ── Top Concessionárias + Clientes ── */}
       {show('estrategico') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <SectionCard title="Top Concessionárias" subtitle="Por valor estimado de ressarcimento">
+        <SectionCard title="Top Concessionárias" subtitle="Por valor estimado de ressarcimento" icon={Award} accent="#3b82f6">
           {topConcs.length > 0 ? topConcs.slice(0, 8).map((r, i) => (
             <HBarRow key={r.label} rank={i + 1} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxTopConc} color="#3b82f6" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
         </SectionCard>
 
-        <SectionCard title="Top Clientes" subtitle="Por valor estimado de ressarcimento">
+        <SectionCard title="Top Clientes" subtitle="Por valor estimado de ressarcimento" icon={Award} accent="#10b981">
           {topClientes.length > 0 ? topClientes.slice(0, 8).map((r, i) => (
             <HBarRow key={r.label} rank={i + 1} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxTopCli} color="#10b981" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
@@ -622,13 +945,13 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
       {/* ── Tempo médio etapa + WIP gestores ── */}
       {show('operacional') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <SectionCard title="Tempo médio por etapa" subtitle="Dias em cada etapa (dwell time)">
+        <SectionCard title="Tempo médio por etapa" subtitle="Dias em cada etapa (dwell time)" icon={Clock} accent="#f59e0b">
           {tempoMedio.length > 0 ? tempoMedio.slice(0, 10).map((r) => (
             <HBarRow key={r.etapa} label={r.etapa} value={safeNum(r.dias)} displayValue={`${safeNum(r.dias).toFixed(1)}d`} maxValue={maxTempo} color="#f59e0b" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
         </SectionCard>
 
-        <SectionCard title="WIP por Gestor" subtitle="Processos ativos em andamento por responsável">
+        <SectionCard title="WIP por Gestor" subtitle="Processos ativos em andamento por responsável" icon={Users} accent="#8b5cf6">
           {wipGestores.length > 0 ? wipGestores.slice(0, 10).map((r) => (
             <HBarRow key={r.label} label={r.label} value={safeNum(r.total)} displayValue={fmt(r.total)} maxValue={maxWip} color="#8b5cf6" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}

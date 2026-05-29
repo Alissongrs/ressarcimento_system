@@ -11,7 +11,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-App_S3cur3!}
       TZ: "America/Sao_Paulo"
     command:
-      - "--default-authentication-plugin=mysql_native_password"
+      - "--default-authentication-plugin=caching_sha2_password"
       - "--character-set-server=utf8mb4"
       - "--collation-server=utf8mb4_unicode_ci"
       - "--default-time-zone=-03:00"
@@ -29,87 +29,93 @@ services:
     networks:
       - backend
 
-  ollama:
-    image: ollama/ollama:0.6.2
+  redis:
+    image: redis:7-alpine
     restart: unless-stopped
-    volumes:
-      - ollama_data:/root/.ollama
+    command:
+      - "redis-server"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+      - "--maxmemory"
+      - "128mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
     healthcheck:
-      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 20s
-    networks:
-      - ai
-
-  ocr:
-    build:
-      context: ./ocr_service
-      dockerfile: Dockerfile
-      args:
-        INSTALL_OCR_EXTRAS: "1"
-    restart: unless-stopped
-    depends_on:
-      ollama:
-        condition: service_healthy
-    environment:
-      TZ: "America/Sao_Paulo"
-      # LLM no OCR service:
-      LLM_OLLAMA_URL: "http://ollama:11434"
-      LLM_OLLAMA_MODEL: "llama3.2:3b"
-      # (opcionais)
-      OCR_PROMPT_NAME: "PROMPT_FATURA_ILTTO_V1"
-      OCR_FEWSHOT_PATH: "/app/prompts/ilttio_fewshot.txt"
-      OCR_LANG: "por"
-      OCR_MAX_PAGES: "2"
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ping', timeout=2).read()\""
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 15s
-    networks:
-      - backend
-      - ai
-
-  llama-agent:
-    build:
-      context: ./ia
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    depends_on:
-      ollama:
-        condition: service_healthy
-    env_file:
-      - ./backend/.env
-    environment:
-      TZ: "America/Sao_Paulo"
-      OLLAMA_URL: "http://ollama:11434"
-      LLAMA_MODEL: "mistral"
-      LLAMA_TIMEOUT: "120"
-      PORT: "8000"
-      HOST: "0.0.0.0"
-      DEBUG: "false"
-    ports:
-      - "127.0.0.1:8001:8000"
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ping', timeout=2).read()\""
-        ]
-      interval: 10s
-      timeout: 5s
+      timeout: 3s
       retries: 5
-      start_period: 10s
+      start_period: 5s
     networks:
       - backend
-      - ai
+
+  # ====================================================================
+  # Serviços ollama / ocr / llama-agent DESATIVADOS em 29/05/2026.
+  # Motivo: pastas ./ia e ./ocr_service saíram do repo git
+  # (mantidas só localmente). Pipeline LLM agora usa Haiku (Anthropic)
+  # direto do backend. OCR via Tesseract embedded ou serviço externo.
+  # ====================================================================
+  # ollama:
+  #   image: ollama/ollama:0.6.2
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 20
+  #     start_period: 20s
+  #   networks:
+  #     - ai
+  #
+  # ocr:
+  #   build:
+  #     context: ./ocr_service
+  #     dockerfile: Dockerfile
+  #     args:
+  #       INSTALL_OCR_EXTRAS: "1"
+  #   restart: unless-stopped
+  #   depends_on:
+  #     ollama:
+  #       condition: service_healthy
+  #   environment:
+  #     TZ: "America/Sao_Paulo"
+  #     LLM_OLLAMA_URL: "http://ollama:11434"
+  #     LLM_OLLAMA_MODEL: "llama3.2:3b"
+  #     OCR_PROMPT_NAME: "PROMPT_FATURA_ILTTO_V1"
+  #     OCR_FEWSHOT_PATH: "/app/prompts/ilttio_fewshot.txt"
+  #     OCR_LANG: "por"
+  #     OCR_MAX_PAGES: "2"
+  #   networks:
+  #     - backend
+  #     - ai
+  #
+  # llama-agent:
+  #   build:
+  #     context: ./ia
+  #     dockerfile: Dockerfile
+  #   restart: unless-stopped
+  #   depends_on:
+  #     ollama:
+  #       condition: service_healthy
+  #   env_file:
+  #     - ./backend/.env
+  #   environment:
+  #     TZ: "America/Sao_Paulo"
+  #     OLLAMA_URL: "http://ollama:11434"
+  #     LLAMA_MODEL: "mistral"
+  #     LLAMA_TIMEOUT: "120"
+  #     PORT: "8000"
+  #     HOST: "0.0.0.0"
+  #     DEBUG: "false"
+  #   ports:
+  #     - "127.0.0.1:8001:8000"
+  #   networks:
+  #     - backend
+  #     - ai
 
   backend:
     image: ressarcimento-backend
@@ -121,6 +127,8 @@ services:
       - ./backend/.env
     environment:
       CORS_ALLOW_ORIGINS: "http://sure.app.br,http://sure.app.br:8080,https://sure.app.br,http://localhost,http://localhost:80,http://localhost:5173,http://127.0.0.1"
+      COOKIE_SECURE: "false"
+      LOG_FORMAT: "json"
       TZ: "America/Sao_Paulo"
 
       # Ollama (container)
@@ -139,17 +147,17 @@ services:
 
       AUDITTA_RAG_INDEX: "/app/data/catalogo.txt"
       UPLOAD_DIR: "/app/uploads"
+
+      # Redis (rate limiting distribuído)
+      REDIS_URL: "redis://redis:6379"
     ports:
       - "8080:8080"
     depends_on:
       db:
         condition: service_healthy
-      ocr:
+      redis:
         condition: service_healthy
-      llama-agent:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
+      # ocr / llama-agent / ollama desativados em 29/05/2026 — ver bloco acima
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -176,8 +184,9 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    ports:
-      - "80:80"
+    # Porta 80 exposta apenas internamente — acesso externo via Caddy
+    expose:
+      - "80"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1 >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -187,18 +196,38 @@ services:
     networks:
       - frontend
 
+  # TLS terminator — expõe HTTP(:80) e HTTPS(:443) para o mundo externo
+  # Em prod: defina CADDY_DOMAIN no .env (ex: sure.app.br) para cert Let's Encrypt automático
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+    networks:
+      - frontend
+
 volumes:
   db_data:
     driver: local
-  ollama_data:
-    driver: local
   uploads_data:
     driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+  # ollama_data desativado em 29/05/2026 junto com serviço ollama
 
 networks:
   frontend:
     driver: bridge
   backend:
     driver: bridge
-  ai:
-    driver: bridge
+  # rede 'ai' desativada em 29/05/2026 — só servia ocr/llama-agent/ollama

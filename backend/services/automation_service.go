@@ -363,7 +363,7 @@ func EnviarInformativoSemanal() {
 </div></body></html>`, appURL))
 
 	// Envia para todos os gestores ativos
-	rowsG, err := db.Query(`SELECT email FROM DM_USUARIO WHERE perfil = 'gestor' AND ativo = 1 AND email IS NOT NULL AND email != ''`)
+	rowsG, err := db.Query(`SELECT email FROM DM_USUARIO WHERE perfil = 'gestor' AND usuario_ativo = 1 AND email IS NOT NULL AND email != ''`)
 	if err != nil {
 		log.Printf("[InformativoSemanal] erro ao buscar gestores: %v", err)
 		return

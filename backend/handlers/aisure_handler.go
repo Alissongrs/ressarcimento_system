@@ -840,6 +840,8 @@ func aisureRegisterRawFaturaHistory(tx *gorm.DB, processoID int64, userName, sou
 		VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NOW(), 'fatura')`,
 		processoID, statusNome, statusNome, etapaAtual, etapaAtual, subAtual, comentario,
 	)
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	_ = SincronizarStatusProcesso(tx, int(processoID))
 }
 
 func aisureAttachRawFaturaToProcessTx(tx *gorm.DB, processoID int64, sourceURL, filename, mimeType, userName, comment string, data []byte) (int64, error) {

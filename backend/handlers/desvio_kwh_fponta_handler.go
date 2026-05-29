@@ -463,6 +463,10 @@ func CreateProcessoFromDesvioKwh(c *gin.Context) {
 
 	// vw_processos_desvio_media_kwh_fponta não possui flag de criação; nada a atualizar aqui.
 
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	// O FT_PROCESSOS ja foi criado acima na mesma tx, entao a sync atua corretamente.
+	_ = SincronizarStatusProcesso(tx, pid)
+
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao finalizar"})
 		return

@@ -1,11 +1,11 @@
 ﻿import { useEffect } from 'react';
 import { subscribeProcesso } from '../services/sseClient';
 
-export function useProcessoSSE(processoId, token, onUpdate) {
+export function useProcessoSSE(processoId, _token, onUpdate) {
   useEffect(() => {
-    if (!processoId || !token) return;
-    const unsubscribe = subscribeProcesso(processoId, token, onUpdate);
+    if (!processoId) return;
+    const unsubscribe = subscribeProcesso(processoId, null, onUpdate);
     return unsubscribe;
-  }, [processoId, token, onUpdate]);
+  }, [processoId, onUpdate]);
 }
 

@@ -18,9 +18,9 @@ var (
 	GormDB_Faturas  *gorm.DB
 )
 
-// InitGorm inicializa conexões GORM para DB_APP e DB_CONSULTA.
+// InitGorm inicializa conexões GORM para DB_APP, DB_CONSULTA e DB_FATURAS.
 func InitGorm() {
-	buildDSN := func(base string) string {
+	buildDSN := func(base, tlsMode string) string {
 		if base == "" {
 			return ""
 		}
@@ -28,11 +28,19 @@ func InitGorm() {
 		if strings.Contains(base, "?") {
 			sep = "&"
 		}
-		return base + sep + "parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=Local"
+		dsn := base + sep + "parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=Local"
+		if tlsMode != "" && tlsMode != "false" {
+			dsn += "&tls=" + tlsMode
+		}
+		return dsn
 	}
 
-	connStrApp := buildDSN(os.Getenv("DB_APP_URL"))
-	connStrConsulta := buildDSN(os.Getenv("DB_CONSULTA_URL"))
+	appTLS := strings.TrimSpace(os.Getenv("DB_APP_TLS"))
+	consultaTLS := strings.TrimSpace(os.Getenv("DB_CONSULTA_TLS"))
+	faturasTLS := strings.TrimSpace(os.Getenv("DB_FATURAS_TLS"))
+
+	connStrApp := buildDSN(os.Getenv("DB_APP_URL"), appTLS)
+	connStrConsulta := buildDSN(os.Getenv("DB_CONSULTA_URL"), consultaTLS)
 
 	timeZone := strings.TrimSpace(os.Getenv("DB_TIMEZONE"))
 	if timeZone == "" {
@@ -103,7 +111,7 @@ func InitGorm() {
 	log.Println("Conexão GORM com o Banco de Consulta estabelecida com sucesso!")
 
 	// DB_FATURAS
-	connStrFaturas := buildDSN(os.Getenv("DB_FATURAS"))
+	connStrFaturas := buildDSN(os.Getenv("DB_FATURAS"), faturasTLS)
 	if strings.TrimSpace(connStrFaturas) == "" {
 		GormDB_Faturas = nil
 		log.Println("Aviso: DB_FATURAS vazio — banco de faturas desabilitado")

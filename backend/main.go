@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"ressarcimento-backend/repositories"
 	"ressarcimento-backend/routes"
 	"ressarcimento-backend/services"
+	"ressarcimento-backend/utils"
 	_ "ressarcimento-backend/docs"
 
 	"github.com/go-co-op/gocron"
@@ -30,39 +32,44 @@ func main() {
 		log.Println("Aviso: Não foi possível carregar .env (usando variáveis do sistema).")
 	}
 
+	// Configura slog como logger padrão (JSON em prod via LOG_FORMAT=json)
+	utils.InitLogger()
+
 	// Fixar timezone padrão da aplicação em America/Sao_Paulo
 	if loc, err := time.LoadLocation("America/Sao_Paulo"); err == nil {
 		time.Local = loc
 	} else {
-		log.Printf("Aviso: falha ao carregar timezone America/Sao_Paulo: %v", err)
+		slog.Warn("falha ao carregar timezone", "tz", "America/Sao_Paulo", "err", err)
 	}
 
 	// Valida configuração de segurança JWT (crítico em produção)
 	if err := auth.ValidateJWTSetup(); err != nil {
-		log.Fatalf("ERRO CRÍTICO na validação JWT: %v", err)
+		slog.Error("validação JWT falhou", "err", err)
+		os.Exit(1)
 	}
 
 	// Abre as conexões (populará database.DB_App e database.DB_Consulta)
 	database.InitDBs()
 	database.InitGorm()
 
-	// Use a conexão principal da aplicação
 	db := database.DB_App
 	if db == nil {
-		log.Fatal("database.DB_App está nil — verifique se InitDBs() inicializa a conexão principal corretamente.")
+		slog.Error("database.DB_App está nil")
+		os.Exit(1)
 	}
 	if database.GormDB_App == nil {
-		log.Fatal("database.GormDB_App está nil — verifique se InitGorm() inicializa a conexão GORM corretamente.")
+		slog.Error("database.GormDB_App está nil")
+		os.Exit(1)
 	}
 
 	startScheduler()
 
-	// Monte o router via pacote routes (NÀO registre rotas aqui no main)
 	r := routes.SetupRouter(database.GormDB_App)
 
-	log.Println("Servidor iniciado em http://localhost:8080")
+	slog.Info("servidor iniciado", "addr", ":8080")
 	if err := r.Run(":8080"); err != nil {
-		log.Fatalf("Erro fatal ao iniciar o servidor: %v", err)
+		slog.Error("erro fatal ao iniciar servidor", "err", err)
+		os.Exit(1)
 	}
 }
 

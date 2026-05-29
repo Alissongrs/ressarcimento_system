@@ -73,7 +73,7 @@ export default function CommandPaletteHost({ onOpenAlerts }) {
         r.uc && r.nome_cliente ? `UC: ${r.uc}` : null,
         r.status_composto && r.status_composto !== ' - ' ? r.status_composto : null,
       ].filter(Boolean);
-      const dest = (role === 'admin') ? `/admin/planilha?q=${r.processo_id}` : `/historico`;
+      const dest = (role === 'admin') ? `/processos?q=${r.processo_id}` : `/historico`;
       return {
         id: `db-proc-${r.processo_id}`,
         title: `#${r.processo_id} — ${label}`,
@@ -104,7 +104,7 @@ export default function CommandPaletteHost({ onOpenAlerts }) {
       { id: 'goto-feedbacks', title: 'Admin: Feedbacks', subtitle: 'Ver feedbacks dos usuários', run: () => navigate('/adminfeedbacks') },
       { id: 'goto-prazos', title: 'Admin: Prazos', subtitle: 'Configurar prazos por coluna/etapa', run: () => navigate('/admin/prazos') },
       { id: 'goto-editor', title: 'Admin: Editor de Processos', subtitle: 'Editor completo de processos', run: () => navigate('/admin/editor') },
-      { id: 'goto-planilha', title: 'Gerenciar Processos', subtitle: 'Planilha completa de processos', run: () => navigate('/admin/planilha') },
+      { id: 'goto-planilha', title: 'Gerenciar Processos', subtitle: 'Planilha completa de processos', run: () => navigate('/processos') },
     ];
     let list = [...common];
     if (role === 'gestor' || role === 'admin') list = [...list, ...gestor];

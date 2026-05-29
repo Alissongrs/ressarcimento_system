@@ -1,3 +1,4 @@
+basePath: /api/v1
 definitions:
   handlers.CreateRequisicaoPayload:
     properties:
@@ -11,7 +12,7 @@ definitions:
         example: CEMIG
         type: string
       descricaoIrregularidade:
-        example: Cobrança indevida...
+        example: CobranÃ§a indevida...
         type: string
       enderecoCompleto:
         example: Rua X, 123 - Cidade/UF
@@ -35,7 +36,7 @@ definitions:
         example: '[{"mes":"01","ano":"2026"}]'
         type: string
       problemaIdentificado:
-        example: Descrição adicional
+        example: DescriÃ§ão adicional
         type: string
       razaoSocialFatura:
         example: CLARO S.A.
@@ -75,6 +76,8 @@ definitions:
     type: object
   handlers.DesvioKwhRow:
     properties:
+      base_len:
+        type: string
       cliente:
         type: string
       concessionaria:
@@ -85,20 +88,44 @@ definitions:
         type: integer
       descarte:
         type: integer
+      dif_abs:
+        type: string
+      dif_pct:
+        type: string
       id:
         type: integer
+      kwh_fponta:
+        type: string
+      limite_inf:
+        type: string
+      limite_sup:
+        type: string
       link:
+        type: string
+      mad:
+        type: string
+      media_base:
         type: string
       mes_ref:
         type: string
       para_analise:
         type: integer
+      score:
+        type: string
+      status:
+        type: string
       status_desvio:
+        type: string
+      status_extra:
         type: string
       tp_tensao:
         type: string
+      trim_len:
+        type: string
       uc:
         type: string
+      uc_match:
+        type: integer
       updated_at:
         type: string
       verificado:
@@ -106,10 +133,16 @@ definitions:
     type: object
   handlers.Health:
     properties:
+      idle_conns:
+        type: integer
+      in_use:
+        type: integer
       latency:
         type: string
       message:
         type: string
+      open_conns:
+        type: integer
       status:
         type: string
     type: object
@@ -142,6 +175,8 @@ definitions:
         type: integer
       id_usuario:
         type: integer
+      mail_graph_message_id:
+        type: string
       status_anterior:
         type: string
       status_novo:
@@ -174,11 +209,17 @@ definitions:
           format: int64
           type: integer
         type: object
+      backlog_count:
+        type: integer
       canais_dist_30d:
         items:
           additionalProperties: true
           type: object
         type: array
+      carteira_processos:
+        type: integer
+      carteira_valor:
+        type: number
       creditos:
         properties:
           dobro_total:
@@ -193,6 +234,8 @@ definitions:
           format: int64
           type: integer
         type: object
+      processos_em_carteira:
+        type: integer
       repasse_por_concessionaria:
         items:
           additionalProperties: true
@@ -202,6 +245,20 @@ definitions:
         type: number
       ressarcimento_envio_financeiro_total:
         type: number
+      resultados_clientes:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      resultados_ressarcimento:
+        properties:
+          caixa:
+            type: number
+          faturado:
+            type: number
+          gerado:
+            type: number
+        type: object
       sla_30d:
         additionalProperties:
           format: int64
@@ -212,6 +269,23 @@ definitions:
           format: int64
           type: integer
         type: object
+      sucesso_primeira_analise_pct:
+        type: number
+      taxa_aneel_pct:
+        type: number
+      taxa_sucesso_concessionarias:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
+      taxa_sucesso_geral:
+        description: Novos indicadores
+        type: number
+      taxa_sucesso_por_tipo:
+        items:
+          additionalProperties: true
+          type: object
+        type: array
       tempo_medio_conclusao_concessionaria:
         items:
           additionalProperties: true
@@ -237,6 +311,8 @@ definitions:
           additionalProperties: true
           type: object
         type: array
+      ticket_medio:
+        type: number
       top_clientes:
         items:
           additionalProperties: true
@@ -251,6 +327,8 @@ definitions:
         type: integer
       total_requisicoes:
         type: integer
+      valor_em_carteira:
+        type: number
       valor_histogram:
         items:
           additionalProperties: true
@@ -314,19 +392,8 @@ definitions:
         type: boolean
       mensagem:
         type: string
-    type: object
-  models.Alerta:
-    properties:
-      data_criacao:
-        type: string
-      id:
-        type: integer
-      lido:
+      para_todos:
         type: boolean
-      mensagem:
-        type: string
-      processo_id:
-        $ref: '#/definitions/sql.NullInt64'
     type: object
   models.ConcessionariaFiltro:
     properties:
@@ -359,13 +426,13 @@ definitions:
   models.UCDetalhes:
     properties:
       cliente:
-        $ref: '#/definitions/sql.NullString'
+        type: string
       cnpj:
-        $ref: '#/definitions/sql.NullString'
+        type: string
       concessionaria:
-        $ref: '#/definitions/sql.NullString'
+        type: string
       endereco_completo:
-        $ref: '#/definitions/sql.NullString'
+        type: string
       id_concessionaria:
         type: integer
       id_empresa:
@@ -373,7 +440,7 @@ definitions:
       id_uc:
         type: integer
       link_fatura:
-        $ref: '#/definitions/sql.NullString'
+        type: string
       links_faturas:
         items:
           type: string
@@ -383,7 +450,7 @@ definitions:
           $ref: '#/definitions/models.FaturaLink'
         type: array
       razao_social_fatura:
-        $ref: '#/definitions/sql.NullString'
+        type: string
       uc:
         type: string
     type: object
@@ -402,26 +469,26 @@ definitions:
       tipo_conta:
         type: string
     type: object
-  sql.NullInt64:
-    properties:
-      int64:
-        format: int64
-        type: integer
-      valid:
-        description: Valid is true if Int64 is not NULL
-        type: boolean
-    type: object
-  sql.NullString:
-    properties:
-      string:
-        type: string
-      valid:
-        description: Valid is true if String is not NULL
-        type: boolean
-    type: object
 info:
   contact: {}
+  description: API do sistema de ressarcimento (SURE)
+  title: SURE API
+  version: "1.0"
 paths:
+  /api/v1/admin/alertas/disparar-agora:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Dispara manualmente o envio de alertas para_todos vencendo hoje
+      tags:
+      - Alertas
   /api/v1/admin/editor/next-id:
     get:
       produces:
@@ -437,7 +504,7 @@ paths:
           schema:
             additionalProperties: true
             type: object
-      summary: Próximo ID de processo
+      summary: Pr?ximo ID de processo
       tags:
       - Admin
   /api/v1/admin/editor/processo:
@@ -465,7 +532,51 @@ paths:
       summary: Edita processo (admin)
       tags:
       - Admin
-  /api/v1/admin/planilha:
+  /api/v1/admin/prazos:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Lista configuraÃ§ão de prazos
+      tags:
+      - Admin
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Salva configuraÃ§ão de prazos
+      tags:
+      - Admin
+  /api/v1/admin/processos:
     get:
       parameters:
       - description: Busca
@@ -512,11 +623,11 @@ paths:
         in: query
         name: tags
         type: string
-      - description: Data criação inicial
+      - description: Data criaÃ§ão inicial
         in: query
         name: data_criacao_ini
         type: string
-      - description: Data criação final
+      - description: Data criaÃ§ão final
         in: query
         name: data_criacao_fim
         type: string
@@ -548,7 +659,7 @@ paths:
       summary: Lista planilha admin
       tags:
       - Admin
-  /api/v1/admin/planilha/bulk-comentario-replace:
+  /api/v1/admin/processos/bulk-comentario-replace:
     post:
       consumes:
       - application/json
@@ -573,7 +684,7 @@ paths:
       summary: Substitui comentários em lote
       tags:
       - Admin
-  /api/v1/admin/planilha/bulk-mover:
+  /api/v1/admin/processos/bulk-mover:
     post:
       consumes:
       - application/json
@@ -598,7 +709,7 @@ paths:
       summary: Move processos em lote (planilha)
       tags:
       - Admin
-  /api/v1/admin/planilha/export:
+  /api/v1/admin/processos/export:
     get:
       parameters:
       - description: Busca
@@ -645,11 +756,11 @@ paths:
         in: query
         name: tags
         type: string
-      - description: Data criação inicial
+      - description: Data criaÃ§ão inicial
         in: query
         name: data_criacao_ini
         type: string
-      - description: Data criação final
+      - description: Data criaÃ§ão final
         in: query
         name: data_criacao_fim
         type: string
@@ -672,7 +783,7 @@ paths:
       summary: Exporta planilha admin (CSV)
       tags:
       - Admin
-  /api/v1/admin/planilha/import:
+  /api/v1/admin/processos/import:
     post:
       consumes:
       - multipart/form-data
@@ -695,50 +806,6 @@ paths:
             additionalProperties: true
             type: object
       summary: Importa planilha admin
-      tags:
-      - Admin
-  /api/v1/admin/prazos:
-    get:
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              additionalProperties: true
-              type: object
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Lista configuração de prazos
-      tags:
-      - Admin
-    post:
-      consumes:
-      - application/json
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Salva configuração de prazos
       tags:
       - Admin
   /api/v1/ai/resumo/feedback:
@@ -768,6 +835,19 @@ paths:
       - AI
   /api/v1/alertas:
     get:
+      parameters:
+      - description: Somente vencidos
+        in: query
+        name: overdue
+        type: boolean
+      - description: Somente nao lidos
+        in: query
+        name: unread
+        type: boolean
+      - description: Filtro por data (today|tomorrow|yesterday)
+        in: query
+        name: due
+        type: string
       produces:
       - application/json
       responses:
@@ -775,7 +855,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/models.Alerta'
+              $ref: '#/definitions/handlers.alertaDTO'
             type: array
         "401":
           description: Unauthorized
@@ -783,13 +863,7 @@ paths:
             additionalProperties:
               type: string
             type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Listar alertas do usuario
+      summary: Listar alertas
       tags:
       - Alertas
     post:
@@ -834,31 +908,6 @@ paths:
       tags:
       - Alertas
   /api/v1/alertas/{id}:
-    delete:
-      parameters:
-      - description: ID do alerta
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Excluir alerta
-      tags:
-      - Alertas
     put:
       consumes:
       - application/json
@@ -938,52 +987,8 @@ paths:
       summary: Confirmar alertas
       tags:
       - Alertas
-  /api/v1/alertas/marcar-lido:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: IDs dos alertas
-        in: body
-        name: body
-        required: true
-        schema:
-          additionalProperties:
-            items:
-              type: integer
-            type: array
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Marcar alertas como lidos
-      tags:
-      - Alertas
   /api/v1/alertas/stream:
     get:
-      parameters:
-      - description: JWT
-        in: query
-        name: token
-        type: string
       produces:
       - text/event-stream
       responses:
@@ -1277,7 +1282,7 @@ paths:
           schema:
             additionalProperties: true
             type: object
-      summary: Movimentações das últimas 24h
+      summary: MovimentaÃ§ões das últimas 24h
       tags:
       - Dashboard
   /api/v1/dashboard/deferidos:
@@ -1333,7 +1338,7 @@ paths:
           schema:
             additionalProperties: true
             type: object
-      summary: Movimentações por período
+      summary: MovimentaÃ§ões por período
       tags:
       - Dashboard
   /api/v1/dashboard/stats:
@@ -1555,12 +1560,6 @@ paths:
       - DesvioKwh
   /api/v1/events:
     get:
-      parameters:
-      - description: JWT
-        in: query
-        name: token
-        required: true
-        type: string
       produces:
       - text/event-stream
       responses:
@@ -2288,6 +2287,18 @@ paths:
               type: string
             type: object
       summary: Login
+      tags:
+      - Auth
+  /api/v1/logout:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Logout
       tags:
       - Auth
   /api/v1/mail/folders:
@@ -3234,113 +3245,6 @@ paths:
       summary: Sincroniza snapshot do processo
       tags:
       - ProcessoSnapshot
-  /api/v1/processos/{id}:
-    delete:
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Exclui processo permanentemente
-      tags:
-      - Processos
-  /api/v1/processos/{id}/alerta:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Salva data de alerta
-      tags:
-      - Processos
-  /api/v1/processos/{id}/alertas:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Dados do alerta
-        in: body
-        name: body
-        required: true
-        schema:
-          additionalProperties: true
-          type: object
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "401":
-          description: Unauthorized
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Criar alerta manual para processo
-      tags:
-      - Alertas
   /api/v1/processos/{id}/backlog-check:
     post:
       parameters:
@@ -3368,127 +3272,6 @@ paths:
             additionalProperties: true
             type: object
       summary: Marca/desmarca backlog check
-      tags:
-      - Processos
-  /api/v1/processos/{id}/comentar:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Comenta processo
-      tags:
-      - Processos
-  /api/v1/processos/{id}/deferimento:
-    get:
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Busca deferimento do processo
-      tags:
-      - Processos
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Salva deferimento
-      tags:
-      - Processos
-  /api/v1/processos/{id}/descartar:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Descarta processo
       tags:
       - Processos
   /api/v1/processos/{id}/emails:
@@ -3557,6 +3340,40 @@ paths:
       summary: Envia e-mail do processo
       tags:
       - EmailProcesso
+  /api/v1/processos/{id}/emails/{emailId}/read:
+    post:
+      parameters:
+      - description: ID do processo
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: ID do e-mail
+        in: path
+        name: emailId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Marca e-mail do processo como lido (usuário atual)
+      tags:
+      - EmailProcesso
   /api/v1/processos/{id}/events:
     get:
       parameters:
@@ -3565,11 +3382,6 @@ paths:
         name: id
         required: true
         type: integer
-      - description: JWT
-        in: query
-        name: token
-        required: true
-        type: string
       produces:
       - text/event-stream
       responses:
@@ -3592,128 +3404,6 @@ paths:
       summary: SSE de eventos por processo
       tags:
       - SSE
-  /api/v1/processos/{id}/historico:
-    get:
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              additionalProperties: true
-              type: object
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Histórico de movimentações
-      tags:
-      - Processos
-  /api/v1/processos/{id}/historico/{hid}/anexos:
-    post:
-      consumes:
-      - multipart/form-data
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: integer
-      - description: ID do histórico
-        in: path
-        name: hid
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Anexa arquivo ao histórico
-      tags:
-      - Processos
-  /api/v1/processos/{id}/movimentar:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Movimenta processo
-      tags:
-      - Processos
-  /api/v1/processos/{id}/retomar:
-    post:
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Retoma processo suspenso
-      tags:
-      - Processos
   /api/v1/processos/{id}/summary:
     get:
       parameters:
@@ -3762,37 +3452,6 @@ paths:
       summary: Atualiza resumo do processo
       tags:
       - ResumoProcesso
-  /api/v1/processos/{id}/suspender:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: ID do processo
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Suspende processo
-      tags:
-      - Processos
   /api/v1/processos/{id}/tags:
     put:
       consumes:
@@ -3867,53 +3526,6 @@ paths:
       summary: Metadados de cards de processos
       tags:
       - Processos
-  /api/v1/processos/kanban:
-    get:
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              additionalProperties: true
-              type: object
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Lista processos no kanban
-      tags:
-      - Processos
-  /api/v1/processos/kanban-fast:
-    get:
-      parameters:
-      - description: Limite
-        in: query
-        name: limit
-        type: integer
-      - description: Coluna
-        in: query
-        name: coluna
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Kanban rápido
-      tags:
-      - Processos
   /api/v1/processos/prazos:
     get:
       produces:
@@ -3932,31 +3544,6 @@ paths:
             additionalProperties: true
             type: object
       summary: Processos com prazo
-      tags:
-      - Processos
-  /api/v1/processos/suspensos:
-    get:
-      parameters:
-      - description: Limite
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              additionalProperties: true
-              type: object
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Lista processos suspensos
       tags:
       - Processos
   /api/v1/register:
@@ -4052,6 +3639,32 @@ paths:
             additionalProperties: true
             type: object
       summary: Métricas de relatórios
+      tags:
+      - Relatorios
+  /api/v1/relatorios/metricas-batch:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/handlers.RelatoriosMetricasResp'
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Métricas em lote para múltiplos períodos
       tags:
       - Relatorios
   /api/v1/requisicoes:
@@ -4179,6 +3792,39 @@ paths:
       summary: Listar anexos da requisicao
       tags:
       - Requisicoes
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: ID da requisicao
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Adicionar anexos na requisicao
+      tags:
+      - Anexos
   /api/v1/requisicoes/{id}/anexos/{anexoId}:
     delete:
       parameters:
@@ -4832,7 +4478,12 @@ paths:
           schema:
             additionalProperties: true
             type: object
-      summary: Lista usuários para menções
+      summary: Lista usuários para menÃ§ões
       tags:
       - Usuarios
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"

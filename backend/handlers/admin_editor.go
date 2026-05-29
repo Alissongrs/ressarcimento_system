@@ -302,12 +302,13 @@ func AdminEditProcesso(c *gin.Context) {
 	// Deferimento (somente se houver pelo menos um campo significativo)
 	if len(body.Deferimento) > 0 {
 		var input struct {
-			DataProcedencia  *string          `json:"data_procedencia"`
-			CreditoSimples   *decimal.Decimal `json:"credito_simples"`
-			CreditoDobro     *decimal.Decimal `json:"credito_dobro"`
-			DataCreditoDobro *string          `json:"data_credito_dobro"`
-			RepasseSimples   *decimal.Decimal `json:"repasse_simples"`
-			RepasseDobro     *decimal.Decimal `json:"repasse_dobro"`
+			DataProcedencia      *string          `json:"data_procedencia"`
+			CreditoSimples       *decimal.Decimal `json:"credito_simples"`
+			CreditoDobro         *decimal.Decimal `json:"credito_dobro"`
+			DataCreditoDobro     *string          `json:"data_credito_dobro"`
+			RepasseSimples       *decimal.Decimal `json:"repasse_simples"`
+			RepasseDobro         *decimal.Decimal `json:"repasse_dobro"`
+			InstanciaDeferimento *int             `json:"instancia_deferimento"` // FK DM_INSTANCIA_DEFERIMENTO
 		}
 		if err2 := json.Unmarshal(body.Deferimento, &input); err2 == nil {
 			hasData := (input.DataProcedencia != nil && strings.TrimSpace(*input.DataProcedencia) != "") ||
@@ -315,11 +316,12 @@ func AdminEditProcesso(c *gin.Context) {
 				(input.CreditoSimples != nil && input.CreditoSimples.Sign() != 0) ||
 				(input.CreditoDobro != nil && input.CreditoDobro.Sign() != 0) ||
 				(input.RepasseSimples != nil && input.RepasseSimples.Sign() != 0) ||
-				(input.RepasseDobro != nil && input.RepasseDobro.Sign() != 0)
+				(input.RepasseDobro != nil && input.RepasseDobro.Sign() != 0) ||
+				(input.InstanciaDeferimento != nil)
 			if hasData {
-				_, err = execGorm(tx, `INSERT INTO FT_DEFERIMENTOS (id_processo, data_procedencia, credito_simples, credito_dobro, data_credito_dobro, repasse_simples, repasse_dobro)
-				   VALUES (?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?)
-                                   ON DUPLICATE KEY UPDATE data_procedencia=VALUES(data_procedencia), credito_simples=VALUES(credito_simples), credito_dobro=VALUES(credito_dobro), data_credito_dobro=VALUES(data_credito_dobro), repasse_simples=VALUES(repasse_simples), repasse_dobro=VALUES(repasse_dobro)`,
+				_, err = execGorm(tx, `INSERT INTO FT_DEFERIMENTOS (id_processo, data_procedencia, credito_simples, credito_dobro, data_credito_dobro, repasse_simples, repasse_dobro, instancia_deferimento)
+				   VALUES (?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?)
+                                   ON DUPLICATE KEY UPDATE data_procedencia=VALUES(data_procedencia), credito_simples=VALUES(credito_simples), credito_dobro=VALUES(credito_dobro), data_credito_dobro=VALUES(data_credito_dobro), repasse_simples=VALUES(repasse_simples), repasse_dobro=VALUES(repasse_dobro), instancia_deferimento=VALUES(instancia_deferimento)`,
 					pid,
 					valOrEmpty(input.DataProcedencia),
 					decimalOrNull(input.CreditoSimples),
@@ -327,10 +329,20 @@ func AdminEditProcesso(c *gin.Context) {
 					valOrEmpty(input.DataCreditoDobro),
 					decimalOrNull(input.RepasseSimples),
 					decimalOrNull(input.RepasseDobro),
+					intPtrOrNull(input.InstanciaDeferimento),
 				)
 				if err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao salvar deferimento: " + err.Error()})
 					return
+				}
+				// Propaga a instância também para FT_PROCESSOS, para queries
+				// que listam o processo terem a instância sem precisar JOIN.
+				if input.InstanciaDeferimento != nil {
+					if _, err = execGorm(tx, `UPDATE FT_PROCESSOS SET instancia_deferimento = ? WHERE id_processo = ?`,
+						*input.InstanciaDeferimento, pid); err != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao atualizar instância no processo: " + err.Error()})
+						return
+					}
 				}
 			}
 		}
@@ -410,6 +422,10 @@ func AdminEditProcesso(c *gin.Context) {
 		return
 	}
 
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	// Uma unica chamada apos o loop de upsert de historico (mesma tx, mesmo processo).
+	_ = SincronizarStatusProcesso(tx, pid)
+
 	if err = tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -450,6 +466,12 @@ func decimalOrNull(d *decimal.Decimal) interface{} {
 		return nil
 	}
 	return d
+}
+func intPtrOrNull(p *int) interface{} {
+	if p == nil {
+		return nil
+	}
+	return *p
 }
 func valOrEmpty(p *string) interface{} {
 	if p == nil {

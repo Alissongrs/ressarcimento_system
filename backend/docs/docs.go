@@ -15,6 +15,28 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/admin/alertas/disparar-agora": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Alertas"
+                ],
+                "summary": "Dispara manualmente o envio de alertas para_todos vencendo hoje",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/editor/next-id": {
             "get": {
                 "produces": [
@@ -23,7 +45,7 @@ const docTemplate = `{
                 "tags": [
                     "Admin"
                 ],
-                "summary": "Próximo ID de processo",
+                "summary": "Pr?ximo ID de processo",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -79,7 +101,72 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/admin/planilha": {
+        "/api/v1/admin/prazos": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Lista configuraÃ§ão de prazos",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Salva configuraÃ§ão de prazos",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/processos": {
             "get": {
                 "produces": [
                     "application/json"
@@ -157,13 +244,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Data criação inicial",
+                        "description": "Data criaÃ§ão inicial",
                         "name": "data_criacao_ini",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Data criação final",
+                        "description": "Data criaÃ§ão final",
                         "name": "data_criacao_fim",
                         "in": "query"
                     },
@@ -204,7 +291,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/admin/planilha/bulk-comentario-replace": {
+        "/api/v1/admin/processos/bulk-comentario-replace": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -241,7 +328,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/admin/planilha/bulk-mover": {
+        "/api/v1/admin/processos/bulk-mover": {
             "post": {
                 "consumes": [
                     "application/json"
@@ -278,7 +365,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/admin/planilha/export": {
+        "/api/v1/admin/processos/export": {
             "get": {
                 "produces": [
                     "text/csv"
@@ -356,13 +443,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Data criação inicial",
+                        "description": "Data criaÃ§ão inicial",
                         "name": "data_criacao_ini",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Data criação final",
+                        "description": "Data criaÃ§ão final",
                         "name": "data_criacao_fim",
                         "in": "query"
                     },
@@ -390,7 +477,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/admin/planilha/import": {
+        "/api/v1/admin/processos/import": {
             "post": {
                 "consumes": [
                     "multipart/form-data"
@@ -402,71 +489,6 @@ const docTemplate = `{
                     "Admin"
                 ],
                 "summary": "Importa planilha admin",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/prazos": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Admin"
-                ],
-                "summary": "Lista configuração de prazos",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": true
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            },
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Admin"
-                ],
-                "summary": "Salva configuração de prazos",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -537,28 +559,39 @@ const docTemplate = `{
                 "tags": [
                     "Alertas"
                 ],
-                "summary": "Listar alertas do usuario",
+                "summary": "Listar alertas",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "Somente vencidos",
+                        "name": "overdue",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Somente nao lidos",
+                        "name": "unread",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtro por data (today|tomorrow|yesterday)",
+                        "name": "due",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/models.Alerta"
+                                "$ref": "#/definitions/handlers.alertaDTO"
                             }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -691,66 +724,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/alertas/marcar-lido": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Alertas"
-                ],
-                "summary": "Marcar alertas como lidos",
-                "parameters": [
-                    {
-                        "description": "IDs dos alertas",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "array",
-                                "items": {
-                                    "type": "integer"
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/alertas/stream": {
             "get": {
                 "produces": [
@@ -760,14 +733,6 @@ const docTemplate = `{
                     "SSE"
                 ],
                 "summary": "SSE de alertas",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "JWT",
-                        "name": "token",
-                        "in": "query"
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "stream",
@@ -830,44 +795,6 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Alertas"
-                ],
-                "summary": "Excluir alerta",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "ID do alerta",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1282,7 +1209,7 @@ const docTemplate = `{
                 "tags": [
                     "Dashboard"
                 ],
-                "summary": "Movimentações das últimas 24h",
+                "summary": "MovimentaÃ§ões das últimas 24h",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -1342,7 +1269,7 @@ const docTemplate = `{
                 "tags": [
                     "Dashboard"
                 ],
-                "summary": "Movimentações por período",
+                "summary": "MovimentaÃ§ões por período",
                 "parameters": [
                     {
                         "type": "string",
@@ -1727,15 +1654,6 @@ const docTemplate = `{
                     "SSE"
                 ],
                 "summary": "SSE global",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "JWT",
-                        "name": "token",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "stream",
@@ -2826,6 +2744,25 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/logout": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Logout",
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4300,77 +4237,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/processos/kanban": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Lista processos no kanban",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": true
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/kanban-fast": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Kanban rápido",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Limite",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Coluna",
-                        "name": "coluna",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/processos/prazos": {
             "get": {
                 "produces": [
@@ -4401,204 +4267,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/processos/suspensos": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Lista processos suspensos",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "Limite",
-                        "name": "limit",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": true
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/{id}": {
-            "delete": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Exclui processo permanentemente",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/{id}/alerta": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Salva data de alerta",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/{id}/alertas": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Alertas"
-                ],
-                "summary": "Criar alerta manual para processo",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Dados do alerta",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/processos/{id}/backlog-check": {
             "post": {
                 "produces": [
@@ -4608,185 +4276,6 @@ const docTemplate = `{
                     "Processos"
                 ],
                 "summary": "Marca/desmarca backlog check",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/{id}/comentar": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Comenta processo",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/{id}/deferimento": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Busca deferimento do processo",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            },
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Salva deferimento",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/{id}/descartar": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Descarta processo",
                 "parameters": [
                     {
                         "type": "integer",
@@ -4918,6 +4407,56 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/processos/{id}/emails/{emailId}/read": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "EmailProcesso"
+                ],
+                "summary": "Marca e-mail do processo como lido (usuário atual)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "ID do processo",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "ID do e-mail",
+                        "name": "emailId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/processos/{id}/events": {
             "get": {
                 "produces": [
@@ -4933,13 +4472,6 @@ const docTemplate = `{
                         "description": "ID do processo",
                         "name": "id",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "JWT",
-                        "name": "token",
-                        "in": "query",
                         "required": true
                     }
                 ],
@@ -4966,187 +4498,6 @@ const docTemplate = `{
                             "additionalProperties": {
                                 "type": "string"
                             }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/{id}/historico": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Histórico de movimentações",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": true
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/{id}/historico/{hid}/anexos": {
-            "post": {
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Anexa arquivo ao histórico",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "ID do histórico",
-                        "name": "hid",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/{id}/movimentar": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Movimenta processo",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/{id}/retomar": {
-            "post": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Retoma processo suspenso",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
                         }
                     }
                 }
@@ -5209,52 +4560,6 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/processos/{id}/suspender": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Processos"
-                ],
-                "summary": "Suspende processo",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "ID do processo",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -5462,6 +4767,45 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/relatorios/metricas-batch": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Relatorios"
+                ],
+                "summary": "Métricas em lote para múltiplos períodos",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/handlers.RelatoriosMetricasResp"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/requisicoes": {
             "get": {
                 "produces": [
@@ -5655,6 +4999,56 @@ const docTemplate = `{
                             "items": {
                                 "type": "object",
                                 "additionalProperties": true
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Anexos"
+                ],
+                "summary": "Adicionar anexos na requisicao",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "ID da requisicao",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
                             }
                         }
                     },
@@ -6611,7 +6005,7 @@ const docTemplate = `{
                 "tags": [
                     "Usuarios"
                 ],
-                "summary": "Lista usuários para menções",
+                "summary": "Lista usuários para menÃ§ões",
                 "parameters": [
                     {
                         "type": "string",
@@ -6660,7 +6054,7 @@ const docTemplate = `{
                 },
                 "descricaoIrregularidade": {
                     "type": "string",
-                    "example": "Cobrança indevida..."
+                    "example": "CobranÃ§a indevida..."
                 },
                 "enderecoCompleto": {
                     "type": "string",
@@ -6692,7 +6086,7 @@ const docTemplate = `{
                 },
                 "problemaIdentificado": {
                     "type": "string",
-                    "example": "Descrição adicional"
+                    "example": "DescriÃ§ão adicional"
                 },
                 "razaoSocialFatura": {
                     "type": "string",
@@ -6751,6 +6145,9 @@ const docTemplate = `{
         "handlers.DesvioKwhRow": {
             "type": "object",
             "properties": {
+                "base_len": {
+                    "type": "string"
+                },
                 "cliente": {
                     "type": "string"
                 },
@@ -6766,10 +6163,31 @@ const docTemplate = `{
                 "descarte": {
                     "type": "integer"
                 },
+                "dif_abs": {
+                    "type": "string"
+                },
+                "dif_pct": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "integer"
                 },
+                "kwh_fponta": {
+                    "type": "string"
+                },
+                "limite_inf": {
+                    "type": "string"
+                },
+                "limite_sup": {
+                    "type": "string"
+                },
                 "link": {
+                    "type": "string"
+                },
+                "mad": {
+                    "type": "string"
+                },
+                "media_base": {
                     "type": "string"
                 },
                 "mes_ref": {
@@ -6778,14 +6196,29 @@ const docTemplate = `{
                 "para_analise": {
                     "type": "integer"
                 },
+                "score": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
                 "status_desvio": {
+                    "type": "string"
+                },
+                "status_extra": {
                     "type": "string"
                 },
                 "tp_tensao": {
                     "type": "string"
                 },
+                "trim_len": {
+                    "type": "string"
+                },
                 "uc": {
                     "type": "string"
+                },
+                "uc_match": {
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"
@@ -6798,11 +6231,20 @@ const docTemplate = `{
         "handlers.Health": {
             "type": "object",
             "properties": {
+                "idle_conns": {
+                    "type": "integer"
+                },
+                "in_use": {
+                    "type": "integer"
+                },
                 "latency": {
                     "type": "string"
                 },
                 "message": {
                     "type": "string"
+                },
+                "open_conns": {
+                    "type": "integer"
                 },
                 "status": {
                     "type": "string"
@@ -6853,6 +6295,9 @@ const docTemplate = `{
                 "id_usuario": {
                     "type": "integer"
                 },
+                "mail_graph_message_id": {
+                    "type": "string"
+                },
                 "status_anterior": {
                     "type": "string"
                 },
@@ -6901,12 +6346,21 @@ const docTemplate = `{
                         "format": "int64"
                     }
                 },
+                "backlog_count": {
+                    "type": "integer"
+                },
                 "canais_dist_30d": {
                     "type": "array",
                     "items": {
                         "type": "object",
                         "additionalProperties": true
                     }
+                },
+                "carteira_processos": {
+                    "type": "integer"
+                },
+                "carteira_valor": {
+                    "type": "number"
                 },
                 "creditos": {
                     "type": "object",
@@ -6929,6 +6383,9 @@ const docTemplate = `{
                         "format": "int64"
                     }
                 },
+                "processos_em_carteira": {
+                    "type": "integer"
+                },
                 "repasse_por_concessionaria": {
                     "type": "array",
                     "items": {
@@ -6942,6 +6399,27 @@ const docTemplate = `{
                 "ressarcimento_envio_financeiro_total": {
                     "type": "number"
                 },
+                "resultados_clientes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                },
+                "resultados_ressarcimento": {
+                    "type": "object",
+                    "properties": {
+                        "caixa": {
+                            "type": "number"
+                        },
+                        "faturado": {
+                            "type": "number"
+                        },
+                        "gerado": {
+                            "type": "number"
+                        }
+                    }
+                },
                 "sla_30d": {
                     "type": "object",
                     "additionalProperties": {
@@ -6954,6 +6432,30 @@ const docTemplate = `{
                     "additionalProperties": {
                         "type": "integer",
                         "format": "int64"
+                    }
+                },
+                "sucesso_primeira_analise_pct": {
+                    "type": "number"
+                },
+                "taxa_aneel_pct": {
+                    "type": "number"
+                },
+                "taxa_sucesso_concessionarias": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                },
+                "taxa_sucesso_geral": {
+                    "description": "Novos indicadores",
+                    "type": "number"
+                },
+                "taxa_sucesso_por_tipo": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": true
                     }
                 },
                 "tempo_medio_conclusao_concessionaria": {
@@ -6991,6 +6493,9 @@ const docTemplate = `{
                         "additionalProperties": true
                     }
                 },
+                "ticket_medio": {
+                    "type": "number"
+                },
                 "top_clientes": {
                     "type": "array",
                     "items": {
@@ -7010,6 +6515,9 @@ const docTemplate = `{
                 },
                 "total_requisicoes": {
                     "type": "integer"
+                },
+                "valor_em_carteira": {
+                    "type": "number"
                 },
                 "valor_histogram": {
                     "type": "array",
@@ -7104,26 +6612,9 @@ const docTemplate = `{
                 },
                 "mensagem": {
                     "type": "string"
-                }
-            }
-        },
-        "models.Alerta": {
-            "type": "object",
-            "properties": {
-                "data_criacao": {
-                    "type": "string"
                 },
-                "id": {
-                    "type": "integer"
-                },
-                "lido": {
+                "para_todos": {
                     "type": "boolean"
-                },
-                "mensagem": {
-                    "type": "string"
-                },
-                "processo_id": {
-                    "$ref": "#/definitions/sql.NullInt64"
                 }
             }
         },
@@ -7175,16 +6666,16 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "cliente": {
-                    "$ref": "#/definitions/sql.NullString"
+                    "type": "string"
                 },
                 "cnpj": {
-                    "$ref": "#/definitions/sql.NullString"
+                    "type": "string"
                 },
                 "concessionaria": {
-                    "$ref": "#/definitions/sql.NullString"
+                    "type": "string"
                 },
                 "endereco_completo": {
-                    "$ref": "#/definitions/sql.NullString"
+                    "type": "string"
                 },
                 "id_concessionaria": {
                     "type": "integer"
@@ -7196,7 +6687,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "link_fatura": {
-                    "$ref": "#/definitions/sql.NullString"
+                    "type": "string"
                 },
                 "links_faturas": {
                     "type": "array",
@@ -7211,7 +6702,7 @@ const docTemplate = `{
                     }
                 },
                 "razao_social_fatura": {
-                    "$ref": "#/definitions/sql.NullString"
+                    "type": "string"
                 },
                 "uc": {
                     "type": "string"
@@ -7240,43 +6731,25 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
-        },
-        "sql.NullInt64": {
-            "type": "object",
-            "properties": {
-                "int64": {
-                    "type": "integer",
-                    "format": "int64"
-                },
-                "valid": {
-                    "description": "Valid is true if Int64 is not NULL",
-                    "type": "boolean"
-                }
-            }
-        },
-        "sql.NullString": {
-            "type": "object",
-            "properties": {
-                "string": {
-                    "type": "string"
-                },
-                "valid": {
-                    "description": "Valid is true if String is not NULL",
-                    "type": "boolean"
-                }
-            }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
         }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "",
+	Version:          "1.0",
 	Host:             "",
-	BasePath:         "",
+	BasePath:         "/api/v1",
 	Schemes:          []string{},
-	Title:            "",
-	Description:      "",
+	Title:            "SURE API",
+	Description:      "API do sistema de ressarcimento (SURE)",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

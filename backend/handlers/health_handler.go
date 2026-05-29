@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"os"
 	"time"
@@ -22,9 +23,12 @@ type HealthResponse struct {
 
 // Health status de um componente individual
 type Health struct {
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
-	Latency string `json:"latency,omitempty"`
+	Status      string `json:"status"`
+	Message     string `json:"message,omitempty"`
+	Latency     string `json:"latency,omitempty"`
+	OpenConns   int    `json:"open_conns,omitempty"`
+	InUse       int    `json:"in_use,omitempty"`
+	IdleConns   int    `json:"idle_conns,omitempty"`
 }
 
 // SimpleHealthCheck health check simples (apenas status ok)
@@ -54,6 +58,11 @@ func AdvancedHealthCheck(c *gin.Context) {
 	// 2. Verifica banco de consulta (opcional)
 	if database.DB_Consulta != nil {
 		checks["database_consulta"] = checkDatabaseConsulta()
+	}
+
+	// 3b. Verifica banco de faturas GORM (opcional)
+	if database.GormDB_Faturas != nil {
+		checks["database_faturas"] = checkGormDB("faturas", database.GormDB_Faturas)
 	}
 
 	// 3. Verifica OCR service (opcional, sem bloquear)
@@ -120,9 +129,35 @@ func checkDatabase() Health {
 		}
 	}
 
+	stats := sqlDB.Stats()
 	return Health{
-		Status:  "healthy",
-		Latency: time.Since(start).String(),
+		Status:    "healthy",
+		Latency:   time.Since(start).String(),
+		OpenConns: stats.OpenConnections,
+		InUse:     stats.InUse,
+		IdleConns: stats.Idle,
+	}
+}
+
+// checkGormDB é um helper genérico para qualquer conexão GORM.
+func checkGormDB(name string, gdb interface{ DB() (*sql.DB, error) }) Health {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		return Health{Status: "unhealthy", Message: name + ": " + err.Error()}
+	}
+	if err := sqlDB.PingContext(ctx); err != nil {
+		return Health{Status: "degraded", Message: name + ": " + err.Error()}
+	}
+	stats := sqlDB.Stats()
+	return Health{
+		Status:    "healthy",
+		Latency:   time.Since(start).String(),
+		OpenConns: stats.OpenConnections,
+		InUse:     stats.InUse,
+		IdleConns: stats.Idle,
 	}
 }
 

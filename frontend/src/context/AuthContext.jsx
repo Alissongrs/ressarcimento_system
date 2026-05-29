@@ -124,6 +124,8 @@ export const AuthProvider = ({ children }) => {
     clearRemainingTimer();
     clearAuth();
     setSessionExpired(false);
+    // Limpa cookie HttpOnly via endpoint (JS não pode deletar cookies HttpOnly)
+    fetch('/api/v1/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
   };
 
   const clearSessionExpired = () => setSessionExpired(false);

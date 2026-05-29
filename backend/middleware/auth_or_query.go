@@ -14,23 +14,32 @@ import (
 
 func AuthOrQueryToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 1) Pega do header Authorization: Bearer <token>
-		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
 		var tokenString string
-		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-			tokenString = strings.TrimSpace(authHeader[7:])
+
+		// 1) Cookie auth_token (HttpOnly — prioridade máxima)
+		if cook, err := c.Cookie("auth_token"); err == nil {
+			tokenString = strings.TrimSpace(cook)
 		}
-		// 2) Fallback ?token= (útil para EventSource e também p/ debugging no front)
+
+		// 2) Authorization: Bearer <token>
+		if tokenString == "" {
+			authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
+			if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+				tokenString = strings.TrimSpace(authHeader[7:])
+			}
+		}
+
+		// 3) ?token= mantido para SSE legacy (EventSource sem withCredentials)
 		if tokenString == "" {
 			tokenString = strings.TrimSpace(c.Query("token"))
 		}
-		// 3) Limpa aspas acidentais ('" … '")
+
 		tokenString = strings.Trim(tokenString, " '\"")
 
 		if tokenString == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "token_missing",
-				"msg":   "Informe Authorization: Bearer <token> ou ?token=.",
+				"msg":   "Use cookie auth_token ou Authorization: Bearer <token>.",
 			})
 			return
 		}

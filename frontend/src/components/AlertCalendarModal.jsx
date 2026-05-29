@@ -150,8 +150,16 @@ export default function AlertCalendarModal({ open, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-5xl rounded-2xl border bg-[var(--bg)] shadow-2xl" style={{ borderColor: 'var(--border)' }}>
+    <div className="fixed inset-0 z-[120] flex items-start justify-center bg-black/50 p-4 overflow-y-auto">
+      <div
+        className="w-full max-w-5xl rounded-2xl border bg-[var(--bg)] shadow-2xl"
+        style={{
+          borderColor: 'var(--border)',
+          transform: 'scale(0.8)',
+          transformOrigin: 'top center',
+          marginBottom: '-15vh',
+        }}
+      >
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="inline-flex items-center gap-2 text-sm font-semibold">
             <CalendarDays size={18} />

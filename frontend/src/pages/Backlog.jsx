@@ -142,7 +142,7 @@ export default function Backlog() {
                   {g.items.map((r) => (
                     <tr key={r.id} className="border-b border-[var(--border)] hover:bg-[var(--panel)]/60">
                       <td className="px-3 py-2 w-16">
-                        <Link to={`/admin/planilha?pid=${r.id}`} className="text-[var(--accent)] underline">
+                        <Link to={`/processos?pid=${r.id}`} className="text-[var(--accent)] underline">
                           #{r.id}
                         </Link>
                       </td>

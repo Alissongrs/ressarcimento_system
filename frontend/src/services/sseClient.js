@@ -9,25 +9,22 @@
   return window.location.origin;
 }
 
-export function subscribeProcesso(processoId, token, onUpdate) {
-  if (!processoId || !token) return () => {};
+export function subscribeProcesso(processoId, _token, onUpdate) {
+  if (!processoId) return () => {};
   const origin = resolveOrigin();
   const url = new URL(`/api/v1/processos/${encodeURIComponent(processoId)}/events`, origin);
-  // EventSource não suporta headers — token via query param é o padrão aceito (requer HTTPS).
-  url.searchParams.set('token', token);
-  const es = new EventSource(url.toString());
+  // Cookie auth_token enviado automaticamente via withCredentials
+  const es = new EventSource(url.toString(), { withCredentials: true });
   const handler = (ev) => { try { const data = JSON.parse(ev.data || '{}'); onUpdate?.(data); } catch {} };
   es.addEventListener('update', handler);
   es.onerror = () => { try { es.close(); } catch {} };
   return () => { try { es.close(); } catch {} };
 }
 
-export function subscribeGlobal(token, onUpdate) {
-  if (!token) return () => {};
+export function subscribeGlobal(_token, onUpdate) {
   const origin = resolveOrigin();
   const url = new URL('/api/v1/events', origin);
-  url.searchParams.set('token', token);
-  const es = new EventSource(url.toString());
+  const es = new EventSource(url.toString(), { withCredentials: true });
   const handler = (ev) => { try { const data = JSON.parse(ev.data || '{}'); onUpdate?.(data); } catch {} };
   es.addEventListener('update', handler);
   es.onerror = () => { try { es.close(); } catch {} };

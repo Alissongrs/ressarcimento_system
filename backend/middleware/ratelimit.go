@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -11,6 +12,24 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// rlBackend abstracts in-memory vs Redis rate limiter backends.
+type rlBackend interface {
+	allow(key string) (allowed bool, resetIn time.Duration, limit int, remaining int)
+	close()
+}
+
+// newBackend returns a Redis-backed limiter when REDIS_URL is set, else in-memory.
+func newBackend(limit int, window time.Duration, prefix string) rlBackend {
+	if url := getenv("REDIS_URL"); url != "" {
+		if r, err := newRedisLimiter(url, limit, window, prefix); err == nil {
+			return r
+		} else {
+			slog.Warn("Redis rate limiter indisponível, usando in-memory", "prefix", prefix, "err", err)
+		}
+	}
+	return newRateLimiter(limit, window)
+}
 
 type rlRecord struct {
 	count       int
@@ -31,6 +50,8 @@ func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 		recs:   make(map[string]*rlRecord),
 	}
 }
+
+func (r *rateLimiter) close() {}
 
 // allow retorna (allowed, resetIn, limit, remaining)
 func (r *rateLimiter) allow(key string) (bool, time.Duration, int, int) {
@@ -88,7 +109,7 @@ var getenv = os.Getenv
 func GlobalRateLimit() gin.HandlerFunc {
 	limit := getEnvInt("GLOBAL_RATE_LIMIT_PER_MIN", 1000)
 	window := time.Minute
-	rl := newRateLimiter(limit, window)
+	rl := newBackend(limit, window, "rl:global")
 
 	// Rotas excluídas do rate limiting global
 	excludedPaths := map[string]bool{
@@ -110,7 +131,7 @@ func GlobalRateLimit() gin.HandlerFunc {
 			return
 		}
 		// Pula rate limit para rotas de alto volume de leitura
-		if strings.HasPrefix(path, "/api/v1/admin/planilha") || strings.HasPrefix(path, "/api/admin/planilha") {
+		if strings.HasPrefix(path, "/api/v1/admin/processos") || strings.HasPrefix(path, "/api/admin/processos") {
 			c.Next()
 			return
 		}
@@ -151,7 +172,7 @@ func GlobalRateLimit() gin.HandlerFunc {
 func AuthRateLimit() gin.HandlerFunc {
 	limit := getEnvInt("AUTH_RATE_LIMIT_PER_5MIN", 30)
 	window := 5 * time.Minute
-	rl := newRateLimiter(limit, window)
+	rl := newBackend(limit, window, "rl:auth")
 
 	return func(c *gin.Context) {
 		key := "auth-ip:" + c.ClientIP()
@@ -181,7 +202,7 @@ func AuthRateLimit() gin.HandlerFunc {
 func OCRChatRateLimit() gin.HandlerFunc {
 	limit := getEnvInt("OCR_CHAT_MAX_PER_MIN", 12)
 	window := time.Minute
-	rl := newRateLimiter(limit, window)
+	rl := newBackend(limit, window, "rl:ocr")
 
 	return func(c *gin.Context) {
 		key := userOrIP(c)

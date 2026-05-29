@@ -214,6 +214,9 @@ func SalvarFluxoRessarcimento(c *gin.Context) {
 		return
 	}
 
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	_ = SincronizarStatusProcesso(tx, processoID)
+
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar a transacao"})
 		return

@@ -26,6 +26,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import api from '../services/apiClient.js';
+import { sanitizeChat } from '../utils/safeHtml.js';
 
 // ─── Markdown simples (sem dependência extra) ──────────────────────────────
 function renderMarkdown(text) {
@@ -843,7 +844,7 @@ export default function GlobalChatWidget() {
                       wordBreak: 'break-word',
                     }}
                     // eslint-disable-next-line react/no-danger
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                    dangerouslySetInnerHTML={{ __html: sanitizeChat(renderMarkdown(msg.content)) }}
                   />
                   {msg.role === 'assistant' && msg.context && (
                     <ChartToggle msgId={msg.id} context={msg.context} expanded={expanded} />

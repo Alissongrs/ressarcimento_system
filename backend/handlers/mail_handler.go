@@ -2093,6 +2093,8 @@ func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note st
 	if err != nil {
 		return 0, err
 	}
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	_ = SincronizarStatusProcesso(tx, int(processoID))
 	id, _ := res.LastInsertId()
 	return id, nil
 }
@@ -2185,6 +2187,8 @@ func registerEmailMoveHistory(tx *gorm.DB, processoID int64, userID int64, note 
 	if err != nil {
 		return 0, err
 	}
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	_ = SincronizarStatusProcesso(tx, int(processoID))
 	id, _ := res.LastInsertId()
 	return id, nil
 }

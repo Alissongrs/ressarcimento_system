@@ -1224,6 +1224,38 @@ END`, strings.Join(insertCols, ", "), strings.Join(insertVals, ", "))
 		}
 	}
 
-    log.Println("✅ Todas as migrações concluídas com sucesso")
+	// ─────────────────────────────────────────────────────────────
+	// Cleanup: DM_USUARIO tinha colunas duplicadas do refactor que
+	// nunca foram migradas. As colunas-alvo (`is_admin`, `role`,
+	// `ativo`, `created_at`, `updated_at`) não são lidas pelo código —
+	// o sistema usa `perfil`, `usuario_ativo` e `data_criacao` (originais).
+	// Drop ordenado: is_admin é GENERATED de role, então sai primeiro.
+	// ─────────────────────────────────────────────────────────────
+	dropDMUsuarioCol := func(col string) {
+		var n int
+		if err := db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME = 'DM_USUARIO'
+			  AND COLUMN_NAME = ?`, col).Scan(&n); err != nil {
+			log.Printf("[migrate] aviso: falha ao verificar DM_USUARIO.%s: %v", col, err)
+			return
+		}
+		if n == 0 {
+			return
+		}
+		log.Printf("[migrate] Removendo coluna obsoleta DM_USUARIO.%s ...", col)
+		if _, err := db.Exec(fmt.Sprintf("ALTER TABLE DM_USUARIO DROP COLUMN `%s`", col)); err != nil {
+			log.Printf("[migrate] aviso: falha ao remover DM_USUARIO.%s: %v", col, err)
+		}
+	}
+	dropDMUsuarioCol("is_admin")    // STORED GENERATED de (role = 'admin')
+	dropDMUsuarioCol("role")
+	dropDMUsuarioCol("ativo")
+	dropDMUsuarioCol("created_at")
+	dropDMUsuarioCol("updated_at")
+
+	log.Println("✅ Todas as migrações concluídas com sucesso")
 	return nil
 }

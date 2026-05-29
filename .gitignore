@@ -1,68 +1,115 @@
-# OS/Editor
+# ========================================
+# .gitignore — Sistema Ressarcimento
+# Critério: só código do sistema (backend Go + frontend React + Docker)
+# Scripts Python (ia/, ocr_service/) e dados ficam fora do repo
+# ========================================
+
+# OS / Editor
 .DS_Store
 Thumbs.db
 .vscode/
-.venv/
+.idea/
 *.swp
 
-# Archives
-*.zip
+# ========================================
+# Pastas excluídas do repo (per decisão 2026-05-29)
+# Esses subprojetos rodam local ou têm pipeline próprio
+# ========================================
+/ia/
+/ocr_service/
+/scripts/
+/backups/
+/dist/
 
-# Env/Secrets
+# Mantém docker-compose e Docker assets (se houver)
+!/docker/
+
+# ========================================
+# Env / Secrets
+# ========================================
 .env
 *.env
 !*.env.example
 backend/.env
 backend/.env.local
 
-# Backend artifacts/logs
+# ========================================
+# Backend Go — artifacts/binários/logs
+# ========================================
 backend/ressarcimento-backend
 backend/ressarcimento-backend.exe
+backend/backend
 backend/backend.exe
 backend/server
 backend/server.exe
 backend/server.log
 backend/.sql_cache/
-backend/uploads/
 backend/.query_history.json
+backend/uploads/
 
-# Python cache
+# ========================================
+# Python — caches / venvs
+# ========================================
 **/__pycache__/
 *.pyc
 *.pyo
+**/venv/
+**/.venv/
 
-# MCP (configuração local)
-.mcp.json
-
-# Frontend build/deps
+# ========================================
+# Frontend — builds / deps
+# ========================================
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/.vite-temp/
 frontend/.vite_theme_fix/
+frontend/public/flowtory-craft-main/
 
-# Logs
+# ========================================
+# Documentação / arquivos avulsos NA RAIZ
+# (mantém docs/ e backend/data/*.txt essenciais)
+# ========================================
+/*.md
+/*.sql
+/*.txt
+/*.json
+!docker-compose.yml.example
+!package.json
+!package-lock.json
+
+# Mantém docs/ permitidos
+!docs/
+!docs/**
+
+# Mantém CLAUDE.md e README na raiz (úteis pra dev)
+!/README.md
+!/CLAUDE.md
+
+# Mantém backend/data/ (montado como volume em prod)
+!backend/data/
+!backend/data/**
+
+# ========================================
+# Logs / temporários
+# ========================================
 *.log
-
-
-# Docs
-*.md
-
-# backups/temporários
 *.bak
 *.save
 *~
+
+# ========================================
+# Arquivos PDF/anexos de teste — só na raiz
+# (backend/data/, backend/consulta/, docs/ ficam preservados)
+# ========================================
+/*.pdf
+/*.xlsx
+/*.docx
+
+# ========================================
+# Outros
+# ========================================
+*.zip
+.mcp.json
 ressarcimento_system_old_*/
-
-# Backups gerados pelos scripts
-/backups/
-
-# Python virtual environments
-ia/venv/
-**/venv/
-ia/carga_query.sql
-
-# Permitir docs
-!docs/
-!docs/*.md
-!CLAUDE.md
+FATURA_DADOS_EXTRAIDOS_LOG.json

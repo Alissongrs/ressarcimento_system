@@ -13,35 +13,29 @@ import (
 
 func buildAuth(allowQueryAlways bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 1) Authorization: Bearer <token>
-		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
 		var tokenString string
-		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-			tokenString = strings.TrimSpace(authHeader[len("Bearer "):])
+
+		// 1) Cookie auth_token (HttpOnly — prioridade máxima)
+		if cook, err := c.Cookie("auth_token"); err == nil {
+			tokenString = strings.TrimSpace(cook)
 		}
 
-		// 2) Fallback: ?token=
-		// - Se allowQueryAlways = true, sempre aceita.
-		// - Se false, aceita só para SSE (EventSource não manda Authorization)
+		// 2) Authorization: Bearer <token> (clientes API / dev cross-origin)
 		if tokenString == "" {
-			accept := strings.ToLower(c.GetHeader("Accept"))
-			path := c.Request.URL.Path
-			isSSE := strings.Contains(accept, "text/event-stream") ||
-				strings.HasPrefix(path, "/api/events") ||
-				strings.HasPrefix(path, "/api/sse") ||
-				strings.HasPrefix(path, "/api/alertas/stream") ||
-				strings.HasSuffix(path, "/events")
-
-			if allowQueryAlways || isSSE {
-				if qs := strings.TrimSpace(c.Query("token")); qs != "" {
-					tokenString = qs
-				}
+			authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
+			if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+				tokenString = strings.TrimSpace(authHeader[len("Bearer "):])
 			}
+		}
+
+		// 3) ?token= mantido apenas como último recurso para SSE legacy
+		if tokenString == "" && allowQueryAlways {
+			tokenString = strings.TrimSpace(c.Query("token"))
 		}
 
 		if tokenString == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "Token ausente. Use Authorization: Bearer <token> ou ?token= para SSE.",
+				"error": "Token ausente. Use cookie auth_token ou Authorization: Bearer <token>.",
 			})
 			return
 		}

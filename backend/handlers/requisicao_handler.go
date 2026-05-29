@@ -1110,6 +1110,10 @@ func GetRequisicaoByID(c *gin.Context) {
 		TipoIrregularidade      string  `json:"tipo_irregularidade"`
 		SubtipoIrregularidade   string  `json:"subtipo_irregularidade"`
 		LinkFatura              string  `json:"link_fatura"`
+		// Instância do deferimento atual (FT_PROCESSOS.instancia_deferimento → DM_INSTANCIA_DEFERIMENTO).
+		// 0 quando ainda não escolhido.
+		InstanciaDeferimento     int    `json:"instancia_deferimento"`
+		InstanciaDeferimentoNome string `json:"instancia_deferimento_nome"`
 	}
 
 	const q = `
@@ -1128,11 +1132,15 @@ func GetRequisicaoByID(c *gin.Context) {
 				COALESCE(r.periodos_irregularidade, '')  AS periodos_irregularidade,
 				COALESCE(ti.nome, '')                     AS tipo_irregularidade,
 				COALESCE(sti.nome, '')                    AS subtipo_irregularidade,
-				COALESCE(r.link_fatura, '')              AS link_fatura
+				COALESCE(r.link_fatura, '')              AS link_fatura,
+				COALESCE(p.instancia_deferimento, 0)      AS instancia_deferimento,
+				COALESCE(di.nome, '')                     AS instancia_deferimento_nome
 			FROM FT_REQUISICOES r
 			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
 			LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo = r.id_tipo_irregularidade
 			LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo = r.id_subtipo_irregularidade
+			LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
+			LEFT JOIN DM_INSTANCIA_DEFERIMENTO di ON di.id_instancia = p.instancia_deferimento
 			WHERE r.id_requisicao = ?
 			LIMIT 1`
 
@@ -1153,12 +1161,14 @@ func GetRequisicaoByID(c *gin.Context) {
 		&d.TipoIrregularidade,
 		&d.SubtipoIrregularidade,
 		&d.LinkFatura,
+		&d.InstanciaDeferimento,
+		&d.InstanciaDeferimentoNome,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "RequisiÃ§ão não encontrada"})
 			return
 		}
-		// Fallback: ambientes sem tabela/coluna de subtipo.
+		// Fallback: ambientes sem tabela/coluna de subtipo ou DM_INSTANCIA_DEFERIMENTO.
 		log.Printf("GetRequisicaoByID: erro na query completa id=%s: %v", id, err)
 		const qFallback = `
 			SELECT
@@ -1176,7 +1186,9 @@ func GetRequisicaoByID(c *gin.Context) {
 				COALESCE(r.periodos_irregularidade, '')  AS periodos_irregularidade,
 				''                                        AS tipo_irregularidade,
 				''                                        AS subtipo_irregularidade,
-				COALESCE(r.link_fatura, '')              AS link_fatura
+				COALESCE(r.link_fatura, '')              AS link_fatura,
+				0                                         AS instancia_deferimento,
+				''                                        AS instancia_deferimento_nome
 			FROM FT_REQUISICOES r
 			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
 			WHERE r.id_requisicao = ?
@@ -1197,6 +1209,8 @@ func GetRequisicaoByID(c *gin.Context) {
 			&d.TipoIrregularidade,
 			&d.SubtipoIrregularidade,
 			&d.LinkFatura,
+			&d.InstanciaDeferimento,
+			&d.InstanciaDeferimentoNome,
 		); err2 != nil {
 			if errors.Is(err2, sql.ErrNoRows) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "RequisiÃ§ão não encontrada"})
@@ -1701,20 +1715,28 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 				subID = sql.NullInt64{Int64: 1, Valid: true}
 			}
 			responsavelID := sql.NullInt64{Int64: gestorID, Valid: gestorID > 0}
+			// INSERT ... ON DUPLICATE KEY UPDATE — cria o processo se ainda não
+			// existe (caso da requisição aprovada sem registro em FT_PROCESSOS),
+			// ou atualiza os campos se já existir. Antes era só UPDATE, e quando
+			// o processo não existia o UPDATE afetava 0 linhas silenciosamente,
+			// causando 404 quando o front tentava movimentar o processo depois.
 			if _, err := execGorm(tx,
-				`UPDATE FT_PROCESSOS
-				 SET id_etapa_processo = 1,
-				     etapa = 'Distribuidora',
-				     sub_etapa = ?,
-				     id_sub_etapa_processo = ?,
-				     id_coluna = 1,
-				     nome_coluna = 'Ativos',
-				     id_responsavel = ?,
-				     ultima_atualizacao = NOW()
-				 WHERE id_processo = ?`,
-				subEtapa, nullIntToIface(subID), nullIntToIface(responsavelID), id,
+				`INSERT INTO FT_PROCESSOS
+				    (id_processo, id_etapa_processo, etapa, sub_etapa, id_sub_etapa_processo,
+				     id_coluna, nome_coluna, id_responsavel, relevancia, ultima_atualizacao)
+				 VALUES (?, 1, 'Distribuidora', ?, ?, 1, 'Ativos', ?, 0, NOW())
+				 ON DUPLICATE KEY UPDATE
+				     id_etapa_processo     = VALUES(id_etapa_processo),
+				     etapa                 = VALUES(etapa),
+				     sub_etapa             = VALUES(sub_etapa),
+				     id_sub_etapa_processo = VALUES(id_sub_etapa_processo),
+				     id_coluna             = VALUES(id_coluna),
+				     nome_coluna           = VALUES(nome_coluna),
+				     id_responsavel        = VALUES(id_responsavel),
+				     ultima_atualizacao    = NOW()`,
+				id, subEtapa, nullIntToIface(subID), nullIntToIface(responsavelID),
 			); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar etapa/subetapa do processo"})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar/atualizar processo: " + err.Error()})
 				return
 			}
 		}
@@ -1741,6 +1763,12 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 				return
 			}
 		}
+	}
+
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	// Cobre classificacao/comentario/status registrados acima na mesma tx.
+	if idInt, convErr := strconv.Atoi(id); convErr == nil {
+		_ = SincronizarStatusProcesso(tx, idInt)
 	}
 
 	if err := tx.Commit().Error; err != nil {

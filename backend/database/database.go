@@ -2,13 +2,16 @@
 package database
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 )
 
 var (
@@ -16,10 +19,63 @@ var (
 	DB_Consulta *sql.DB
 )
 
+func init() {
+	registerTLSConfigs()
+}
+
+// registerTLSConfigs registra as configs TLS disponíveis para o driver MySQL.
+// Aceita DB_APP_TLS / DB_CONSULTA_TLS = "false"|""|"skip-verify"|"rds"|"true".
+func registerTLSConfigs() {
+	// skip-verify: criptografa sem validar certificado do servidor
+	_ = mysql.RegisterTLSConfig("skip-verify", &tls.Config{
+		InsecureSkipVerify: true, //nolint:gosec // intencional: criptografa sem pinning
+	})
+
+	// rds: usa bundle de CA do AWS RDS (certs/global-bundle.pem ao lado do binário)
+	if pem := findRDSBundle(); pem != "" {
+		pool := x509.NewCertPool()
+		data, err := os.ReadFile(pem)
+		if err == nil && pool.AppendCertsFromPEM(data) {
+			_ = mysql.RegisterTLSConfig("rds", &tls.Config{
+				RootCAs:    pool,
+				MinVersion: tls.VersionTLS12,
+			})
+			log.Printf("TLS RDS: bundle carregado de %s", pem)
+		} else {
+			log.Printf("TLS RDS: falha ao carregar %s — usando skip-verify como fallback", pem)
+			_ = mysql.RegisterTLSConfig("rds", &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec
+			})
+		}
+	}
+}
+
+// findRDSBundle procura global-bundle.pem em locais convencionais.
+// Ordem: DB_RDS_CERT_PATH env → junto ao binário → CWD → /etc/ssl/certs.
+func findRDSBundle() string {
+	if env := strings.TrimSpace(os.Getenv("DB_RDS_CERT_PATH")); env != "" {
+		return env
+	}
+	candidates := []string{"certs/global-bundle.pem"}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append([]string{filepath.Join(filepath.Dir(exe), "certs", "global-bundle.pem")}, candidates...)
+	}
+	candidates = append(candidates, "/etc/ssl/certs/aws-rds-global-bundle.pem")
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
 // InitDBs configura as conexões com os bancos de dados da aplicação e de consulta.
 func InitDBs() {
+	appTLS := strings.TrimSpace(os.Getenv("DB_APP_TLS"))
+	consultaTLS := strings.TrimSpace(os.Getenv("DB_CONSULTA_TLS"))
+
 	// Monta DSNs garantindo UTF-8 e timezone local
-	buildDSN := func(base string) string {
+	buildDSN := func(base, tlsMode string) string {
 		if base == "" {
 			return ""
 		}
@@ -27,12 +83,14 @@ func InitDBs() {
 		if strings.Contains(base, "?") {
 			sep = "&"
 		}
-		// Fixar timezone via sessão (abaixo) e usar loc=Local para não depender de tabelas TZ do MySQL
-		// Ajustamos a collation da sessão abaixo com fallback para 0900 quando suportado
-		return fmt.Sprintf("%s%sparseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=Local", base, sep)
+		dsn := fmt.Sprintf("%s%sparseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=Local", base, sep)
+		if tlsMode != "" && tlsMode != "false" {
+			dsn += "&tls=" + tlsMode
+		}
+		return dsn
 	}
-	connStrApp := buildDSN(os.Getenv("DB_APP_URL"))
-	connStrConsulta := buildDSN(os.Getenv("DB_CONSULTA_URL"))
+	connStrApp := buildDSN(os.Getenv("DB_APP_URL"), appTLS)
+	connStrConsulta := buildDSN(os.Getenv("DB_CONSULTA_URL"), consultaTLS)
 
 	timeZone := strings.TrimSpace(os.Getenv("DB_TIMEZONE"))
 	if timeZone == "" {

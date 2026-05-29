@@ -1016,6 +1016,12 @@ func MovimentarProcesso(c *gin.Context) {
 		}
 	}
 
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	// Cobre tanto o INSERT principal quanto o avanco automatico aninhado (mesma tx).
+	if willInsertHist {
+		_ = SincronizarStatusProcesso(tx, processoID)
+	}
+
 	// Commit (mesmo se não tiver histórico — evita handler sem resposta)
 	if err := tx.Commit().Error; err != nil {
 		log.Printf("[DEBUG-MOV] commit error (proc=%d): %v", processoID, err)
@@ -1668,6 +1674,9 @@ func ComentarProcesso(c *gin.Context) {
 		}
 	}
 
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	_ = SincronizarStatusProcesso(tx, processoID)
+
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar transação"})
 		return
@@ -1930,6 +1939,9 @@ func SalvarDeferimentoSimples(c *gin.Context) {
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
 		processoID, gestorID, etapaNome.String, etapaNome.String, etapaNome.String, etapaNome.String, subEtapa.String, msg)
 
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	_ = SincronizarStatusProcesso(tx, processoID)
+
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "falha ao finalizar"})
 		return
@@ -2068,6 +2080,9 @@ func DescartarProcesso(c *gin.Context) {
 		return
 	}
 
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	_ = SincronizarStatusProcesso(tx, processoID)
+
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar transação"})
 		return
@@ -2158,6 +2173,11 @@ func SuspenderProcesso(c *gin.Context) {
 		etapaAtual.String, "Suspenso", "Suspenso",
 		strings.TrimSpace(body.Comentario),
 	)
+
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	// No-op para processos suspensos (a propria funcao filtra suspenso=0); o UPDATE
+	// acima ja deixou o estado coerente, mantemos a chamada por consistencia.
+	_ = SincronizarStatusProcesso(tx, processoID)
 
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar transação"})
@@ -2273,6 +2293,9 @@ func RetomarProcesso(c *gin.Context) {
 		etapaAtual.String, restoredStage, restoredSub,
 		strings.TrimSpace(body.Comentario),
 	)
+
+	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
+	_ = SincronizarStatusProcesso(tx, processoID)
 
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao finalizar transação"})

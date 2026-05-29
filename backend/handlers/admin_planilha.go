@@ -60,7 +60,7 @@ type PlanilhaRow struct {
     ScorePercentual   *float64 `json:"score_percentual"`
 }
 
-// GET /api/v1/admin/planilha
+// GET /api/v1/admin/processos
 // AdminPlanilhaList godoc
 // @Summary      Lista planilha admin
 // @Tags         Admin
@@ -83,7 +83,7 @@ type PlanilhaRow struct {
 // @Produce      json
 // @Success      200  {object}  map[string]any
 // @Failure      500  {object}  map[string]any
-// @Router       /api/v1/admin/planilha [get]
+// @Router       /api/v1/admin/processos [get]
 func AdminPlanilhaList(c *gin.Context) {
     q := strings.TrimSpace(c.Query("q"))
     etapa := strings.TrimSpace(c.Query("etapa"))
@@ -385,7 +385,7 @@ func AdminPlanilhaList(c *gin.Context) {
     c.JSON(http.StatusOK, gin.H{"rows": out})
 }
 
-// POST /api/v1/admin/planilha/bulk-mover
+// POST /api/v1/admin/processos/bulk-mover
 // AdminPlanilhaBulkMover godoc
 // @Summary      Move processos em lote (planilha)
 // @Tags         Admin
@@ -394,7 +394,7 @@ func AdminPlanilhaList(c *gin.Context) {
 // @Success      200  {object}  map[string]any
 // @Failure      400  {object}  map[string]any
 // @Failure      500  {object}  map[string]any
-// @Router       /api/v1/admin/planilha/bulk-mover [post]
+// @Router       /api/v1/admin/processos/bulk-mover [post]
 func AdminPlanilhaBulkMover(c *gin.Context) {
     var body struct{
         ProcessoIDs []int64 `json:"processo_ids"`
@@ -458,6 +458,9 @@ func AdminPlanilhaBulkMover(c *gin.Context) {
             return
         }
 
+        // Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort, por processo).
+        _ = SincronizarStatusProcesso(tx, int(pid))
+
         // Se saiu de Ativos (id_coluna=1): invalida cache e grava training log
         if oldColuna.Valid && oldColuna.Int64 == 1 && reqID.Valid && colID.Valid {
             go func(rID int64, newCol int64) {
@@ -471,7 +474,7 @@ func AdminPlanilhaBulkMover(c *gin.Context) {
     c.JSON(http.StatusOK, gin.H{"ok": true, "count": len(body.ProcessoIDs)})
 }
 
-// POST /api/v1/admin/planilha/bulk-comentario-replace
+// POST /api/v1/admin/processos/bulk-comentario-replace
 // AdminPlanilhaBulkComentarioReplace godoc
 // @Summary      Substitui comentários em lote
 // @Tags         Admin
@@ -480,7 +483,7 @@ func AdminPlanilhaBulkMover(c *gin.Context) {
 // @Success      200  {object}  map[string]any
 // @Failure      400  {object}  map[string]any
 // @Failure      500  {object}  map[string]any
-// @Router       /api/v1/admin/planilha/bulk-comentario-replace [post]
+// @Router       /api/v1/admin/processos/bulk-comentario-replace [post]
 func AdminPlanilhaBulkComentarioReplace(c *gin.Context) {
     var body struct{
         HistoricoIDs []int64 `json:"historico_ids"`
@@ -506,7 +509,7 @@ func AdminPlanilhaBulkComentarioReplace(c *gin.Context) {
     c.JSON(http.StatusOK, gin.H{"ok": true, "count": len(body.HistoricoIDs)})
 }
 
-// POST /api/v1/admin/planilha/recalcular-coluna
+// POST /api/v1/admin/processos/recalcular-coluna
 // Recalcula coluna do kanban para processos com dados (deferimento/fluxo/faturamento).
 func AdminPlanilhaRecalcularColuna(c *gin.Context) {
     db := database.GormDB_App
@@ -587,7 +590,7 @@ func AdminPlanilhaRecalcularColuna(c *gin.Context) {
     })
 }
 
-// GET /api/v1/admin/planilha/export
+// GET /api/v1/admin/processos/export
 // AdminPlanilhaExport godoc
 // @Summary      Exporta planilha admin (CSV)
 // @Tags         Admin
@@ -608,7 +611,7 @@ func AdminPlanilhaRecalcularColuna(c *gin.Context) {
 // @Produce      text/csv
 // @Success      200  {file}  file
 // @Failure      500  {object}  map[string]any
-// @Router       /api/v1/admin/planilha/export [get]
+// @Router       /api/v1/admin/processos/export [get]
 func AdminPlanilhaExport(c *gin.Context) {
     q := strings.TrimSpace(c.Query("q"))
     etapa := strings.TrimSpace(c.Query("etapa"))
@@ -1044,7 +1047,7 @@ func AdminPlanilhaExport(c *gin.Context) {
     w.Flush()
 }
 
-// POST /api/v1/admin/planilha/import
+// POST /api/v1/admin/processos/import
 // AdminPlanilhaImport godoc
 // @Summary      Importa planilha admin
 // @Tags         Admin
@@ -1053,7 +1056,7 @@ func AdminPlanilhaExport(c *gin.Context) {
 // @Success      200  {object}  map[string]any
 // @Failure      400  {object}  map[string]any
 // @Failure      500  {object}  map[string]any
-// @Router       /api/v1/admin/planilha/import [post]
+// @Router       /api/v1/admin/processos/import [post]
 func AdminPlanilhaImport(c *gin.Context) {
     file, _, err := c.Request.FormFile("file")
     if err != nil {
@@ -1243,6 +1246,9 @@ func AdminPlanilhaImport(c *gin.Context) {
                 c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("falha historico %d: %v", pid, err)})
                 return
             }
+
+            // Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort, por processo).
+            _ = SincronizarStatusProcesso(tx, int(pid))
         }
 
         count++

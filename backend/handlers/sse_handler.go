@@ -8,19 +8,16 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 
-	"ressarcimento-backend/auth"
 	"ressarcimento-backend/sse"
 )
 
-// StreamProcessoEvents expõe um endpoint SSE por processo: /api/processos/:id/events?token=...
-// Valida o token JWT via query param (EventSource não envia headers customizados) e transmite eventos.
+// StreamProcessoEvents expõe um endpoint SSE por processo: /api/processos/:id/events
+// Auth via cookie auth_token ou Authorization: Bearer (middleware AuthOrQueryToken).
 // @Summary SSE de eventos por processo
 // @Tags SSE
 // @Produce text/event-stream
 // @Param id path int true "ID do processo"
-// @Param token query string true "JWT"
 // @Success 200 {string} string "stream"
 // @Failure 400 {object} map[string]string
 // @Failure 401 {object} map[string]string
@@ -33,18 +30,8 @@ func StreamProcessoEvents(c *gin.Context) {
 		return
 	}
 
-	tokenStr := c.Query("token")
-	if tokenStr == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token ausente"})
-		return
-	}
-
-	claims := &auth.Claims{}
-	tok, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
-		return auth.JwtKey, nil
-	})
-	if err != nil || !tok.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token inválido"})
+	if _, ok := c.Get("userID"); !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
 		return
 	}
 
@@ -89,27 +76,16 @@ func StreamProcessoEvents(c *gin.Context) {
 }
 
 // StreamGlobalEvents: SSE global (processoID = 0) para eventos gerais
-// Endpoint: GET /api/events?token=...
+// Auth via cookie auth_token ou Authorization: Bearer (middleware AuthOrQueryToken).
 // @Summary SSE global
 // @Tags SSE
 // @Produce text/event-stream
-// @Param token query string true "JWT"
 // @Success 200 {string} string "stream"
 // @Failure 401 {object} map[string]string
 // @Router /api/v1/events [get]
 func StreamGlobalEvents(c *gin.Context) {
-	tokenStr := c.Query("token")
-	if tokenStr == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token ausente"})
-		return
-	}
-
-	claims := &auth.Claims{}
-	tok, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
-		return auth.JwtKey, nil
-	})
-	if err != nil || !tok.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token inválido"})
+	if _, ok := c.Get("userID"); !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
 		return
 	}
 

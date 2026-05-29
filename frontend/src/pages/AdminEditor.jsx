@@ -24,7 +24,7 @@ import { confirmAction } from '../utils/confirm.js';
 import './admin-editor.css';
 
 // Toast substituído por modal centralizado nesta tela
-import AdminPlanilha from './AdminPlanilha.jsx';
+import ControleProcessos from './ControleProcessos.jsx';
 
 export default function AdminEditor() {
   const { user } = useAuth();
@@ -663,7 +663,7 @@ const normalizeDateInput = (s) => {
       <Toolbar />
 
       {planilhaOpen ? (
-        <AdminPlanilha />
+        <ControleProcessos />
       ) : (
         <>
           <div

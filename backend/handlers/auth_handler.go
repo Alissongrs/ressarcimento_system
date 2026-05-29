@@ -14,6 +14,7 @@ import (
 	"ressarcimento-backend/auth"
 	"ressarcimento-backend/database"
 	"ressarcimento-backend/models"
+	"ressarcimento-backend/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -107,16 +108,20 @@ func verifyPassword(password, hash string, userID int64) (bool, error) {
 // @Failure 500 {object} map[string]string
 // @Router /api/v1/register [post]
 func Register(c *gin.Context) {
-	var user models.User
-	if err := c.ShouldBindJSON(&user); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos"})
+	var input struct {
+		Nome           string `json:"nome"           binding:"required,min=2,max=120"`
+		Email          string `json:"email"          binding:"required,email"`
+		Senha          string `json:"senha"          binding:"required,min=8,max=128"`
+		IDDepartamento int64  `json:"id_departamento" binding:"required,min=1"`
+	}
+	if utils.BindAndValidate(c, &input) {
 		return
 	}
-
-	// ValidaÃ§ão: departamento é obrigatório
-	if user.IDDepartamento == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "O departamento é obrigatório"})
-		return
+	user := models.User{
+		Nome:           input.Nome,
+		Email:          input.Email,
+		Senha:          input.Senha,
+		IDDepartamento: input.IDDepartamento,
 	}
 
 	// Gera hash seguro com bcrypt
@@ -154,11 +159,10 @@ func Register(c *gin.Context) {
 // @Router /api/v1/login [post]
 func Login(c *gin.Context) {
 	var input struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email    string `json:"email"    binding:"required,email"`
+		Password string `json:"password" binding:"required,min=6,max=128"`
 	}
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados de entrada inválidos"})
+	if utils.BindAndValidate(c, &input) {
 		return
 	}
 
@@ -227,9 +231,33 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	cookieSecure := os.Getenv("COOKIE_SECURE") == "true"
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(
+		"auth_token",
+		tokenString,
+		int(time.Until(expirationTime).Seconds()),
+		"/",
+		"",
+		cookieSecure,
+		true, // HttpOnly
+	)
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Login bem-sucedido!",
 		"token":   tokenString,
 	})
+}
+
+// Logout limpa o cookie de autenticação.
+// @Summary Logout
+// @Tags Auth
+// @Success 200 {object} map[string]string
+// @Router /api/v1/logout [post]
+func Logout(c *gin.Context) {
+	cookieSecure := os.Getenv("COOKIE_SECURE") == "true"
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("auth_token", "", -1, "/", "", cookieSecure, true)
+	c.JSON(http.StatusOK, gin.H{"message": "Logout realizado com sucesso"})
 }
 

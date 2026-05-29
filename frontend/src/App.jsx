@@ -30,6 +30,7 @@ import {
   PlusCircle,
   History,
   Home,
+  CalendarClock,
   Receipt,
   ChevronRight,
   LayoutDashboard,
@@ -40,6 +41,8 @@ import {
 
 import FeedbackModal from './components/FeedbackModal.jsx';
 import Toast from './components/Toast.jsx';
+import WelcomeBriefingModal, { shouldShowWelcomeModal } from './components/WelcomeBriefingModal.jsx';
+import HomePage from './pages/Home.jsx';
 import CommandPaletteHost from './components/CommandPaletteHost.jsx';
 import PageContainer from './components/PageContainer.jsx';
 
@@ -67,9 +70,9 @@ import Historico from './pages/HistoricoFixed.jsx';
 import AdminFeedbacks from './pages/AdminFeedbacks.jsx';
 import AdminPrazos from './pages/AdminPrazos.jsx';
 import AdminEditor from './pages/AdminEditor.jsx';
-import AdminPlanilha from './pages/AdminPlanilha.jsx';
 import Backlog from './pages/Backlog.jsx';
 import RequisicaoForm from './pages/RequisicaoForm.jsx';
+import ChatRequisicao from './pages/ChatRequisicao.jsx';
 
 // Alerts SSE
 import { getUnreadCount, connectAlertasSSE } from './services/alertaService.js';
@@ -124,14 +127,15 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const navigate = useNavigate();
   const baseItems = [
-    { to: '/', label: 'Início', Icon: Home },
+    { to: '/prazos', label: 'Prazos', Icon: CalendarClock },
     { to: '/novo', label: 'Nova Requisição', Icon: FilePlus },
-    { to: '/admin/planilha', label: 'Gerenciar Processos', Icon: LayoutDashboard },
+    { to: '/Requisicoes', label: 'Requisições', Icon: Inbox },
+    { to: '/processos', label: 'Controle de Processos', Icon: LayoutDashboard },
     { to: '/backlog', label: 'Backlog', Icon: Archive },
     { to: '/auditoria', label: 'Auditoria', Icon: ShieldCheck },
     { to: '/analise-desvio', label: 'Análise de Desvio', Icon: TrendingUp },
-    { to: '/historico', label: 'Histórico', Icon: History },
-    { to: '/dashboard', label: 'Métricas', Icon: BarChart3 },
+    { to: '/dashboard', label: 'Métricas', Icon: BarChart3, adminOnly: true },
+    { to: '/historico', label: 'Histórico', Icon: History, adminOnly: true },
   ];
   const adminItems = [{ to: '/admin/editor', label: 'Editor', Icon: FilePenLine }];
   const items = role === 'admin' ? baseItems.concat(adminItems) : baseItems.filter((i) => !i.adminOnly);
@@ -141,7 +145,23 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
   return (
     <header className="top-nav">
       <div className="top-nav-inner">
-        <div className="top-nav-brand">SURE</div>
+        <button
+          type="button"
+          className="top-nav-brand"
+          onClick={() => navigate('/')}
+          title="Ir para a tela inicial"
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 6, padding: 0,
+          }}
+        >
+          <img
+            src="/icone_sure.png"
+            alt="SURE"
+            style={{ width: 32, height: 32, objectFit: 'contain', display: 'block' }}
+          />
+          <span style={{ fontWeight: 700, letterSpacing: '0.5px' }}>SURE</span>
+        </button>
         <nav className="top-nav-links">
           <div className="top-nav-links-scroll">
             {visibleItems.map((item) => (
@@ -202,7 +222,6 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
                 aria-label="Calendário de alertas"
               >
                 <CalendarDays className="top-nav-icon" />
-                {Number(unread) > 0 && <span className="top-nav-badge">{unread > 99 ? '99+' : unread}</span>}
               </button>
               <button
                 type="button"
@@ -212,7 +231,6 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
                 aria-label="Caixa de Email"
               >
                 <MailIcon className="top-nav-icon" />
-                {Number(mailUnread) > 0 && <span className="top-nav-badge">{mailUnread}</span>}
               </button>
             </>
           )}
@@ -253,6 +271,15 @@ function App() {
   const [openAlertCalendar, setOpenAlertCalendar] = useState(false);
   const [openFeedback, setOpenFeedback] = useState(false);
   const [toast, setToast] = useState({ open: false, type: 'info', text: '', position: 'bottom-right' });
+
+  // Welcome briefing modal — só pra gestores, 1x por sessão
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  useEffect(() => {
+    if (user && shouldShowWelcomeModal(user)) {
+      setWelcomeOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.tipo_conta]);
 
   // Mail polling
   const [mailUnread, setMailUnread] = useState(0);
@@ -507,7 +534,12 @@ function App() {
           <ChevronRight className="sidebar-handle-icon" size={16} />
         </button>
         <div className="mb-6 px-2 flex flex-col items-center">
-          <div className="text-lg font-extrabold sidebar-brand">SURE</div>
+          <img
+            src="/icone_sure.png"
+            alt="SURE — Sistema Unificado de Ressarcimento"
+            className="sidebar-brand-logo"
+            style={{ width: '40px', height: '40px', objectFit: 'contain', flexShrink: 0 }}
+          />
         </div>
 
         {/* ORDEM: Início, Nova Requisição, Requisições, Processos, Backlog, resto */}
@@ -562,7 +594,7 @@ function App() {
 
           {/* 3) Gerenciar Processos */}
           <NavLink
-            to="/admin/planilha"
+            to="/processos"
             className={({ isActive }) =>
               `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
                 isActive
@@ -624,35 +656,39 @@ function App() {
             <span className={`text-sm font-medium sidebar-label ${solicitanteClass('analise')}`}>Análise de Desvio</span>
           </NavLink>
 
-          <NavLink
-            to="/historico"
-            className={({ isActive }) =>
-              `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                isActive
-                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                  : 'hover:bg-[var(--menu-hover)]'
-              }`
-            }
-            title="Histórico"
-          >
-            <History className="sidebar-icon" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('historico')}`}>Histórico</span>
-          </NavLink>
+          {role === 'admin' && (
+            <NavLink
+              to="/historico"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="Histórico"
+            >
+              <History className="sidebar-icon" strokeWidth={1.25} />
+              <span className={`text-sm font-medium sidebar-label ${solicitanteClass('historico')}`}>Histórico</span>
+            </NavLink>
+          )}
 
-          <NavLink
-            to="/dashboard"
-            className={({ isActive }) =>
-              `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                isActive
-                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                  : 'hover:bg-[var(--menu-hover)]'
-              }`
-            }
-            title="Métricas"
-          >
-            <BarChart3 className="sidebar-icon" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('metricas')}`}>Métricas</span>
-          </NavLink>
+          {role === 'admin' && (
+            <NavLink
+              to="/dashboard"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="Métricas"
+            >
+              <BarChart3 className="sidebar-icon" strokeWidth={1.25} />
+              <span className={`text-sm font-medium sidebar-label ${solicitanteClass('metricas')}`}>Métricas</span>
+            </NavLink>
+          )}
 
           {role === 'admin' && (
             <NavLink
@@ -715,7 +751,12 @@ function App() {
           <ChevronRight className="sidebar-handle-icon" size={16} />
         </button>
         <div className="mb-6 px-2 flex flex-col items-center">
-          <h1 className="text-base font-semibold sidebar-brand">SURE</h1>
+          <img
+            src="/icone_sure.png"
+            alt="SURE — Sistema Unificado de Ressarcimento"
+            className="sidebar-brand-logo"
+            style={{ width: '40px', height: '40px', objectFit: 'contain', flexShrink: 0 }}
+          />
         </div>
 
         {/* ORDEM: Início, Nova Requisição, Requisições, Processos, Backlog, resto */}
@@ -766,7 +807,7 @@ function App() {
           </NavLink>
 
           <NavLink
-            to="/admin/planilha"
+            to="/processos"
             className={({ isActive }) =>
               `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
                 isActive
@@ -797,35 +838,39 @@ function App() {
 
           {null}
 
-          <NavLink
-            to="/historico"
-            className={({ isActive }) =>
-              `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                isActive
-                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                  : 'hover:bg-[var(--menu-hover)]'
-              }`
-            }
-            title="Histórico"
-          >
-            <History className="sidebar-icon shrink-0" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('historico')}`}>Histórico</span>
-          </NavLink>
+          {role === 'admin' && (
+            <NavLink
+              to="/historico"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="Histórico"
+            >
+              <History className="sidebar-icon shrink-0" strokeWidth={1.25} />
+              <span className={`text-sm font-medium sidebar-label ${solicitanteClass('historico')}`}>Histórico</span>
+            </NavLink>
+          )}
 
-          <NavLink
-            to="/dashboard"
-            className={({ isActive }) =>
-              `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                isActive
-                  ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                  : 'hover:bg-[var(--menu-hover)]'
-              }`
-            }
-            title="Métricas"
-          >
-            <BarChart3 className="sidebar-icon shrink-0" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('metricas')}`}>Métricas</span>
-          </NavLink>
+          {role === 'admin' && (
+            <NavLink
+              to="/dashboard"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="Métricas"
+            >
+              <BarChart3 className="sidebar-icon shrink-0" strokeWidth={1.25} />
+              <span className={`text-sm font-medium sidebar-label ${solicitanteClass('metricas')}`}>Métricas</span>
+            </NavLink>
+          )}
 
           <NavLink
             to="/auditoria"
@@ -916,34 +961,42 @@ function App() {
                       path="/"
                       element={
                         role === 'gestor' || role === 'admin' ? (
-                          <HomeGestorAdmin />
+                          <HomePage />
                         ) : (
                           <ChatRequisicao />
                         )
                       }
                     />
+                    <Route path="/prazos" element={<HomeGestorAdmin />} />
                     <Route path="/backlog" element={<Backlog />} />
                     <Route path="/novo" element={<RequisicaoForm />} />
 
                     {role === 'gestor' || role === 'admin' ? (
                       <>
                         <Route path="/Requisicoes" element={<Requisicoes />} />
-                        <Route path="/historico" element={<Historico />} />
                         <Route path="/gestao" element={<GestaoRequisicoes />} />
-                        <Route path="/dashboard" element={<Relatorios />} />
                         <Route path="/processos" element={<ControleProcessos />} />
                         <Route path="/analise-desvio" element={<AnaliseDesvio />} />
                         <Route path="/caixa-de-email" element={<CaixaDeEmail />} />
 
-                        {role === 'admin' && (
+                        {role === 'admin' ? (
                           <>
+                            <Route path="/historico" element={<Historico />} />
+                            <Route path="/dashboard" element={<Relatorios />} />
                             {/* Preferred admin feedbacks route */}
                             <Route path="/adminfeedbacks" element={<AdminFeedbacks />} />
                             {/* Alias to maintain compatibility */}
                             <Route path="/admin/feedbacks" element={<AdminFeedbacks />} />
                             <Route path="/admin/prazos" element={<AdminPrazos />} />
                             <Route path="/admin/editor" element={<AdminEditor />} />
-                            <Route path="/admin/planilha" element={<AdminPlanilha />} />
+                            <Route path="/admin/planilha" element={<Navigate to="/processos" replace />} />
+                          </>
+                        ) : (
+                          <>
+                            {/* Gestor não tem acesso — redireciona para a Home */}
+                            <Route path="/historico" element={<Navigate to="/" replace />} />
+                            <Route path="/dashboard" element={<Navigate to="/" replace />} />
+                            <Route path="/admin/editor" element={<Navigate to="/" replace />} />
                           </>
                         )}
                       </>
@@ -964,6 +1017,11 @@ function App() {
                 )}
               </Routes>
             </PageContainer>
+
+            {/* Modal de boas-vindas (gestor only) */}
+            {welcomeOpen && (
+              <WelcomeBriefingModal user={user} onClose={() => setWelcomeOpen(false)} />
+            )}
 
             {/* Modal de feedback */}
             <FeedbackModal
