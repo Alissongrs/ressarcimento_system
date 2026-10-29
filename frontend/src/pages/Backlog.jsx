@@ -157,7 +157,10 @@ export default function Backlog() {
                       <td className="px-3 py-2 w-44 whitespace-nowrap">
                         {!r.checked ? (
                           <button
-                            className="px-3 py-1 rounded-full text-xs font-semibold border transition bg-amber-500 text-white border-amber-500 hover:bg-amber-600 disabled:opacity-60"
+                            className="px-3 py-1 rounded-full text-xs font-semibold border transition disabled:opacity-60"
+                            style={{ background: 'var(--warning)', color: '#fff', borderColor: 'var(--warning)' }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--warning) 85%, black)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--warning)'; }}
                             disabled={updating}
                             onClick={async () => {
                               setUpdating(true);
@@ -177,7 +180,14 @@ export default function Backlog() {
                           </button>
                         ) : (
   <button
-    className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-500 border border-amber-400 hover:bg-amber-500/30 disabled:opacity-60"
+    className="px-3 py-1 rounded-full text-xs font-semibold border disabled:opacity-60"
+    style={{
+      background: 'color-mix(in srgb, var(--warning) 20%, transparent)',
+      color: 'var(--warning)',
+      borderColor: 'color-mix(in srgb, var(--warning) 45%, transparent)',
+    }}
+    onMouseEnter={(e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--warning) 30%, transparent)'; }}
+    onMouseLeave={(e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--warning) 20%, transparent)'; }}
     disabled={updating}
     onClick={async () => {
       setUpdating(true);
@@ -209,11 +219,12 @@ export default function Backlog() {
   );
 
   return (
-    <div className="max-w-6xl mx-auto p-6 text-[var(--fg)]">
+    <div className="w-full p-4 md:p-6 text-[var(--fg)]">
       <div className="mb-4">
         <h1 className="text-2xl font-bold">Backlog</h1>
         <p className="opacity-80">
-          Processos com última movimentação mais antiga (aparecem a partir de 60 dias sem movimentação).
+          Processos em "Em elaboração" com prazo vencido (Distribuidora/Ouvidoria: dias úteis;
+          ANEEL/SMA: dias corridos — ver página Prazos para os "Aguardando retorno").
         </p>
       </div>
 
@@ -239,17 +250,17 @@ export default function Backlog() {
       </div>
 
       {loading && <div className="opacity-70 sap-loading">Carregando...</div>}
-      {err && <div className="text-red-500 text-sm mb-3">{err}</div>}
+      {err && <div className="text-[var(--danger)] text-sm mb-3">{err}</div>}
 
       {!loading && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
           <button
             type="button"
             onClick={() => aguardandoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-            className="text-left p-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] transition hover:border-amber-400"
+            className="text-left p-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] transition hover:border-[var(--warning)]/60"
           >
             <div className="text-xs opacity-70">Aguardando definição</div>
-            <div className="text-2xl font-bold text-amber-400">{aguardando.length}</div>
+            <div className="text-2xl font-bold text-[var(--warning)]">{aguardando.length}</div>
           </button>
           <button
             type="button"

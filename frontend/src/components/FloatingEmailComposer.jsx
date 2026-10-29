@@ -95,8 +95,8 @@ export default function FloatingEmailComposer() {
         onClick={restore}
         className="fixed bottom-4 right-6 z-[200] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border border-[var(--border)] bg-[var(--panel)]/95 backdrop-blur-sm hover:bg-[var(--panel)] transition-colors"
       >
-        <div className="w-8 h-8 rounded-lg bg-blue-600/20 flex items-center justify-center">
-          <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="w-8 h-8 rounded-lg bg-[color-mix(in_srgb,var(--accent)_20%,transparent)] flex items-center justify-center">
+          <svg className="w-4 h-4 text-[var(--accent)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
           </svg>
         </div>
@@ -120,7 +120,7 @@ export default function FloatingEmailComposer() {
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-2.5 rounded-t-xl flex-shrink-0 select-none"
-        style={{ background: 'linear-gradient(135deg, #1e3a5f, #0f2340)' }}
+        style={{ background: 'var(--gradient-primary)' }}
       >
         <span className="text-white text-sm font-semibold truncate max-w-[380px]">
           {subject || 'Nova mensagem'}
@@ -206,15 +206,15 @@ export default function FloatingEmailComposer() {
             </svg>
             {files.length > 0 ? `${files.length} arquivo(s)` : 'Anexar'}
           </button>
-          {error && <span className="text-xs text-red-400">{error}</span>}
-          {sent  && <span className="text-xs text-green-400">Enviado!</span>}
+          {error && <span className="text-xs text-[var(--danger)]">{error}</span>}
+          {sent  && <span className="text-xs text-[var(--success)]">Enviado!</span>}
         </div>
 
         <button
           onClick={handleSend}
           disabled={sending}
           className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-50 transition-colors"
-          style={{ backgroundColor: '#1d4ed8' }}
+          style={{ backgroundColor: 'var(--accent)' }}
         >
           {sending ? (
             <><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Enviando...</>

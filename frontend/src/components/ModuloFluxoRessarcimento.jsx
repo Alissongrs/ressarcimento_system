@@ -95,7 +95,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
                 <div className="flex gap-2">
                     <button
                         onClick={adicionarItem}
-                        className="flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs transition-colors"
+                        className="flex items-center gap-1 px-3 py-1 bg-[var(--success)] hover:bg-[color-mix(in_srgb,var(--success)_85%,black)] text-white rounded text-xs transition-colors"
                         title="Adicionar nova devolução"
                     >
                         <Plus size={14} />
@@ -121,7 +121,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
                             {itens.length > 1 && (
                                 <button
                                     onClick={() => removerItem(index)}
-                                    className="text-red-400 hover:text-red-300 transition-colors"
+                                    className="text-[var(--danger)] hover:opacity-80 transition-colors"
                                     title="Remover esta devolução"
                                 >
                                     <Trash2 size={14} />

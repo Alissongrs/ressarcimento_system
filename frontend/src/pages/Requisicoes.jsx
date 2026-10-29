@@ -37,6 +37,7 @@ import {
   movimentarProcesso,
   searchGlobalHistorico,
 } from '../services/requisicaoService';
+import { movimentar as movimentarV2 } from '../services/processoV2Service.js';
 import api, { withAuthToken } from '../services/apiClient';
 import { getSummary, refreshSummary } from '../services/summaryService';
 import { sendResumoFeedback } from '../services/resumoFeedbackService';
@@ -292,10 +293,10 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject, scoreData, onScoreLoad }
     pickFirst(requisicao, ['faturas', 'faturas_count', 'qtd_faturas', 'total_faturas', 'faturasTotal'], 0),
   );
   const statusColor =
-    norm(statusLabel).includes('aprov') ? 'text-emerald-500 bg-emerald-500/10 border-emerald-500/30' :
-    norm(statusLabel).includes('rejeit') ? 'text-red-500 bg-red-500/10 border-red-500/30' :
-    norm(statusLabel).includes('analise') ? 'text-amber-500 bg-amber-500/10 border-amber-500/30' :
-    'text-sky-500 bg-sky-500/10 border-sky-500/30';
+    norm(statusLabel).includes('aprov') ? 'text-[var(--success)] bg-[color-mix(in_srgb,var(--success)_10%,transparent)] border-[color-mix(in_srgb,var(--success)_30%,transparent)]' :
+    norm(statusLabel).includes('rejeit') ? 'text-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] border-[color-mix(in_srgb,var(--danger)_30%,transparent)]' :
+    norm(statusLabel).includes('analise') ? 'text-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] border-[color-mix(in_srgb,var(--warning)_30%,transparent)]' :
+    'text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] border-[color-mix(in_srgb,var(--accent)_30%,transparent)]';
 
   // Trigger score load quando o card for renderizado
   // onScoreLoad (fetchScoreForRow) já faz dedup internamente — scoreData não precisa ser dep
@@ -305,15 +306,29 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject, scoreData, onScoreLoad }
 
   const score = scoreData?.[id];
   const isRejected = norm(statusLabel).includes('rejeit');
+  // DESTAQUE (do backend): 'ouro' = VERDADEIRO conferido (ressarcimento real);
+  // 'laranja' = CANDIDATO de recuperação em aberto (mérito legal a confirmar pela analista).
+  const destaque = String(pickFirst(requisicao, ['destaque'], '') || '').toLowerCase();
+  const criadorId = Number(pickFirst(requisicao, ['id_usuario', 'usuario_id', 'id_usuario_gestor', 'criado_por_id'], 0));
+  const isLaranja = destaque === 'laranja' && !isRejected;
+  const isOuro = !isLaranja && (destaque === 'ouro' || criadorId === 1) && !isRejected;
 
   return (
     <div
-      className="glass-card gradient-card shadow-medium p-3 rounded-lg border border-[var(--border)] text-[var(--fg)] space-y-2 flex flex-col cursor-pointer"
+      className={`glass-card gradient-card shadow-medium p-3 rounded-lg border text-[var(--fg)] space-y-2 flex flex-col cursor-pointer ${isLaranja ? 'req-card-laranja' : isOuro ? 'req-card-ouro' : 'border-[var(--border)]'}`}
       onClick={() => onOpen?.(requisicao)}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-xs font-bold text-[var(--accent)]">REQ-{String(id).padStart(3, '0')}</div>
+          <div className="text-xs font-bold text-[var(--accent)] flex items-center gap-1">
+            {isOuro && (
+              <span title="VERDADEIRO — ressarcimento conferido no PDF" style={{ color: '#7a5c00' }}>★</span>
+            )}
+            {isLaranja && (
+              <span title="Candidato — recuperação em aberto, mérito legal a confirmar" style={{ color: '#a2470a' }}>◆</span>
+            )}
+            REQ-{String(id).padStart(3, '0')}
+          </div>
           <div className="text-[11px] opacity-70">UC {uc}</div>
         </div>
         <div className="flex items-center gap-2">
@@ -323,7 +338,7 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject, scoreData, onScoreLoad }
           <span
             role="button"
             tabIndex={0}
-            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-red-500/10"
+            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-[color-mix(in_srgb,var(--danger)_10%,transparent)]"
             title="Rejeitar requisição"
             onClick={(e) => {
               e.stopPropagation();
@@ -336,13 +351,13 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject, scoreData, onScoreLoad }
               }
             }}
           >
-            <Trash2 size={12} className="text-red-500 opacity-90" />
+            <Trash2 size={12} className="text-[var(--danger)] opacity-90" />
           </span>
         </div>
       </div>
 
       <div className="text-xs font-semibold truncate">{cliente}</div>
-      <div className="text-xs font-bold text-emerald-500">{formatCurrencyBR(valor)}</div>
+      <div className="text-xs font-bold text-[var(--success)]">{formatCurrencyBR(valor)}</div>
       <div className="flex justify-between items-center text-[11px] opacity-70">
         <span className="flex items-center gap-1"><Clock size={12} /> {calcAprovado.text}</span>
       </div>
@@ -856,7 +871,7 @@ const fromDateTimeLocal = (inputValue) => {
 
 const nowDb = () => new Date().toISOString().slice(0, 19).replace('T', ' ');
 const buildComentarioFinal = ({ texto }) => String(texto || '').trim();
-const METRICAS_PIE_COLOR = '#4f83ff';
+const METRICAS_PIE_COLOR = 'var(--accent)';
 const formatDateBR = (date) => {
   const d = new Date(date);
   if (Number.isNaN(d.getTime())) return '';
@@ -1072,15 +1087,15 @@ const ScoreBadge = memo(function ScoreBadge({ score }) {
   if (score === undefined || score === null) return <span className="text-xs opacity-40">-</span>;
 
   if (score?.erro) {
-    return <span className="text-[9px] text-red-500 opacity-40">erro</span>;
+    return <span className="text-[9px] text-[var(--danger)] opacity-40">erro</span>;
   }
 
   const percentage = typeof score === 'number' ? score : score?.percentual || score?.percentage || 0;
   const displayPercent = Math.round(percentage);
 
   let bgColor = 'bg-gray-300 text-gray-600'; // default/low
-  if (displayPercent >= 70) bgColor = 'bg-green-500 text-white'; // high
-  else if (displayPercent >= 40) bgColor = 'bg-yellow-500 text-white'; // medium
+  if (displayPercent >= 70) bgColor = 'bg-[var(--success)] text-white'; // high
+  else if (displayPercent >= 40) bgColor = 'bg-[var(--warning)] text-white'; // medium
 
   return (
     <div
@@ -1139,7 +1154,7 @@ const ProcessoCard = memo(function ProcessoCard({ row, onOpen, onIndeferir }) {
         <div className="flex items-center gap-2">
           {hasSeqError && (
             <span
-              className="text-[10px] px-1.5 py-0.5 rounded border border-red-500 text-red-500"
+              className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--danger)] text-[var(--danger)]"
               title="Sequência incompleta: Fluxo/Faturamento sem Deferidos"
             >
               Sequência
@@ -1148,7 +1163,7 @@ const ProcessoCard = memo(function ProcessoCard({ row, onOpen, onIndeferir }) {
           <span
             role="button"
             tabIndex={0}
-            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-red-500/10"
+            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-[color-mix(in_srgb,var(--danger)_10%,transparent)]"
             title="Indeferir processo"
             onClick={(e) => {
               e.stopPropagation();
@@ -1161,7 +1176,7 @@ const ProcessoCard = memo(function ProcessoCard({ row, onOpen, onIndeferir }) {
               }
             }}
           >
-            <Trash2 size={12} className="text-red-500 opacity-90" />
+            <Trash2 size={12} className="text-[var(--danger)] opacity-90" />
           </span>
           <div className="text-[11px] px-2 py-0.5 rounded-full bg-[var(--muted)]/70 opacity-90">
             {category}
@@ -2205,12 +2220,12 @@ function ProcessoDrawer({
                                           </button>
                                           {extState?.data && (() => {
                                             const d = extState.data;
-                                            const tipoColors = { deferido: '#22c55e', indeferido: '#ef4444', em_analise: '#f59e0b', solicita_documentos: '#3b82f6', outros: '#6b7280' };
+                                            const tipoColors = { deferido: 'var(--success)', indeferido: 'var(--danger)', em_analise: 'var(--warning)', solicita_documentos: 'var(--accent)', outros: 'var(--fg)' };
                                             const tipoLabels = { deferido: 'Deferido', indeferido: 'Indeferido', em_analise: 'Em Análise', solicita_documentos: 'Solicita Documentos', outros: 'Outros' };
                                             const color = tipoColors[d.tipo_resposta] || tipoColors.outros;
                                             const label = tipoLabels[d.tipo_resposta] || d.tipo_resposta;
                                             return (
-                                              <div style={{ border: `1px solid ${color}40`, borderRadius: 8, padding: '8px 10px', background: `${color}10`, fontSize: 11 }}>
+                                              <div style={{ border: `1px solid color-mix(in srgb, ${color} 40%, transparent)`, borderRadius: 8, padding: '8px 10px', background: `color-mix(in srgb, ${color} 10%, transparent)`, fontSize: 11 }}>
                                                 <div style={{ fontWeight: 700, color, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
                                                   <Sparkles size={10} /> {label}
                                                 </div>
@@ -2335,12 +2350,12 @@ function ProcessoDrawer({
                       const pct = rawPct != null ? Math.round(Number(rawPct)) : null;
                       const labelColor =
                         pct === null ? 'text-gray-400' :
-                        pct >= 70 ? 'text-green-500' :
-                        pct >= 40 ? 'text-yellow-500' : 'text-red-400';
+                        pct >= 70 ? 'text-[var(--success)]' :
+                        pct >= 40 ? 'text-[var(--warning)]' : 'text-[var(--danger)]';
                       const barColor =
                         pct === null ? 'bg-gray-300' :
-                        pct >= 70 ? 'bg-green-500' :
-                        pct >= 40 ? 'bg-yellow-500' : 'bg-red-400';
+                        pct >= 70 ? 'bg-[var(--success)]' :
+                        pct >= 40 ? 'bg-[var(--warning)]' : 'bg-[var(--danger)]';
 
                       return (
                         <div className="flex flex-col gap-4 pt-1">
@@ -2987,16 +3002,16 @@ function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
         {/* ── Header ── */}
         <div
           className="flex items-center justify-between px-5 py-3.5 flex-shrink-0 select-none"
-          style={{ background: 'linear-gradient(135deg, #1e3a5f, #0f2340)' }}
+          style={{ background: 'var(--gradient-primary)' }}
         >
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-500/20 flex items-center justify-center flex-shrink-0">
-              <Mail size={17} className="text-blue-300" />
+            <div className="w-9 h-9 rounded-xl bg-[color-mix(in_srgb,var(--accent-2)_20%,transparent)] flex items-center justify-center flex-shrink-0">
+              <Mail size={17} className="text-[var(--accent-2)]" />
             </div>
             <div className="min-w-0">
               <div className="text-white text-sm font-semibold">Gerar Email com IA</div>
               <div className="text-white/50 text-[11px] truncate max-w-[480px]">
-                {uc && <span className="text-blue-300/80">UC {uc}</span>}
+                {uc && <span className="text-[color-mix(in_srgb,var(--accent-2)_80%,transparent)]">UC {uc}</span>}
                 {uc && cliente && <span className="text-white/30 mx-1.5">·</span>}
                 {cliente && <span>{cliente}</span>}
                 {tipoNome && <span className="text-white/30 mx-1.5">·</span>}
@@ -3042,8 +3057,8 @@ function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
         {/* ── Corpo: loading ou editor ── */}
         {generating ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-blue-600/15 flex items-center justify-center">
-              <svg className="animate-spin w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none">
+            <div className="w-12 h-12 rounded-2xl bg-[color-mix(in_srgb,var(--accent)_15%,transparent)] flex items-center justify-center">
+              <svg className="animate-spin w-6 h-6 text-[var(--accent)]" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
               </svg>
@@ -3101,14 +3116,14 @@ function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
               </svg>
               Compositor
             </button>
-            {error && <span className="text-xs text-red-400">{error}</span>}
-            {sent  && <span className="text-xs text-green-400 font-medium">Enviado!</span>}
+            {error && <span className="text-xs text-[var(--danger)]">{error}</span>}
+            {sent  && <span className="text-xs text-[var(--success)] font-medium">Enviado!</span>}
           </div>
           <button
             onClick={handleSend}
             disabled={sending || generating}
             className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-50 transition-colors"
-            style={{ backgroundColor: '#1d4ed8' }}
+            style={{ backgroundColor: 'var(--accent)' }}
           >
             {sending ? (
               <><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Enviando...</>
@@ -3301,6 +3316,11 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
   const [reqEtapas, setReqEtapas] = useState([]);
   const reqStatusLabel = normalizeReqStatusValue(reqDetails?.status || reqDetails?.Status || 'Nova Requisição');
   const isNovaRequisicao = norm(reqStatusLabel).includes('nova requisicao') || norm(reqStatusLabel).includes('pendente');
+  // Pré-decisão = requisição ainda em triagem (Nova Requisição OU Em Análise): mostra
+  // Comentário + Aprovar/Rejeitar. A tratativa com a distribuidora (Registrar comentário/
+  // Enviar e-mail) só aparece DEPOIS de Aprovado (fluxo 2 passos). Água movida p/ "Em Análise"
+  // (aguardando doc técnica de vazamento + foto do hidrômetro) precisa manter Aprovar/Rejeitar.
+  const isPreDecisao = isNovaRequisicao || reqStatusLabel === 'Em Análise';
   const [showAtivosMetricas, setShowAtivosMetricas] = useState(false);
 
   const scheduleQuickConfirm = useCallback((text = 'Salvamento enviado. Aguarde confirmação.') => {
@@ -3875,16 +3895,18 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
       safeRows.forEach((req) => {
         const k = norm(normalizeReqStatusValue(req?.status || 'Nova Requisição'));
 
-        // Regra especial: aprovado só conta se estiver na etapa/sub-etapa certa
-        if (k.includes('aprov')) {
-          const triagem = Number(pickFirst(req || {}, ['triagem', 'Triagem'], 0)) || 0;
-          const criado = Number(pickFirst(req || {}, ['processo_criado', 'processoCriado'], 0)) || 0;
-          if (triagem === 1 && criado === 1) cols.Aprovado.push(req);
-          return;
-        }
-
+        // Fluxo 2 passos (07/2026): aprovar só muda id_status=3; o processo nasce
+        // num passo separado ("Criar processo"). Requisições Aprovadas continuam
+        // aparecendo na coluna Aprovado até serem promovidas a processo.
         if (k.includes('nova requisicao') || k.includes('pendente')) cols['Nova Requisição'].push(req);
         else if (k.includes('analise')) cols['Em Análise'].push(req);
+        else if (k.includes('aprov')) {
+          // Aprovado só mostra requisições APROVADAS que AINDA NÃO viraram processo.
+          // Sinal confiável = não existir linha em FT_PROCESSOS (etapa vazia no join).
+          // (triagem/processo_criado não são confiáveis no dado atual.)
+          const jaTemProcesso = !!String(req?.etapa || '').trim();
+          if (!jaTemProcesso) cols.Aprovado.push(req);
+        }
         else if (k.includes('rejeit')) cols.Rejeitado.push(req);
         else cols['Nova Requisição'].push(req);
       });
@@ -4568,33 +4590,37 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
     }
   }, [selectedReqId, reqEmail, notifyNetworkChange]);
 
-  const handleReqEnviarAtivos = useCallback(async () => {
+  // Cria processo a partir da requisição: aplica destino canônico no v2
+  // → Instância: Distribuidora (id=1) · Etapa: Reclamação (id=1) · Status: Aguardando retorno (id=3)
+  const handleReqCriarProcesso = useCallback(async () => {
     if (!selectedReqId) return;
     if (
       !window.confirm(
-        'Deseja tornar esta requisição um processo e enviar para Ativos (Distribuidora / Primeira reclamação da etapa - Aguardando retorno)?',
+        'Deseja tornar esta requisição um processo? Destino: Distribuidora · Reclamação · Aguardando retorno.',
       )
     ) {
       return;
     }
     setReqSaving(true);
     try {
-      const fd = new FormData();
-      fd.append('etapa_atual', 'Distribuidora');
-      fd.append('sub_etapa', 'Primeira reclamação da etapa - Aguardando retorno');
-      fd.append('comentario', 'Processo aprovado na triagem de Requisi\u00E7\u00F5es.');
-      await movimentarProcesso(selectedReqId, fd);
+      await movimentarV2(selectedReqId, {
+        etapa_id: 1,        // Reclama\u00E7\u00E3o
+        instancia_id: 1,    // Distribuidora
+        status_id: 3,       // Aguardando retorno
+        aprovacao_id: null,
+        comentario: 'Processo criado a partir da triagem de Requisi\u00E7\u00F5es.',
+      });
       try {
         await atualizarRequisicaoCompleta(selectedReqId, { processo_criado: 1, triagem: 0 });
       } catch {}
       await loadRequisicoes();
-      setToast({ open: true, type: 'success', text: 'Processo enviado para Ativos.' });
+      setToast({ open: true, type: 'success', text: 'Processo criado.' });
       closeReqDrawer();
     } catch (err) {
       setToast({
         open: true,
         type: 'error',
-        text: err?.response?.data?.error || err?.message || 'Falha ao mover processo.',
+        text: err?.response?.data?.error || err?.message || 'Falha ao criar processo.',
       });
       notifyNetworkChange(err);
     } finally {
@@ -4715,13 +4741,15 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
     }
   }, [selectedReqId, reqInfoDraft, reqDetails, loadRequisicoes, notifyNetworkChange]);
 
-  const saveReqClassificacao = useCallback(async () => {
+  const saveReqClassificacao = useCallback(async (tipoArg, subtipoArg) => {
     if (!selectedReqId) return;
+    const tipoId = tipoArg !== undefined ? tipoArg : reqInfoDraft.id_tipo_irregularidade;
+    const subtipoId = subtipoArg !== undefined ? subtipoArg : reqInfoDraft.id_subtipo_irregularidade;
     setReqSaving(true);
     try {
       await atualizarRequisicaoCompleta(selectedReqId, {
-        id_tipo_irregularidade: reqInfoDraft.id_tipo_irregularidade || null,
-        id_subtipo_irregularidade: reqInfoDraft.id_subtipo_irregularidade || null,
+        id_tipo_irregularidade: tipoId || null,
+        id_subtipo_irregularidade: subtipoId || null,
       });
       const det = await getRequisicaoById(selectedReqId);
       setReqDetails(det || reqDetails);
@@ -5933,7 +5961,7 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
                     </div>
 
                     {summaryFeedback.error ? (
-                      <div className="text-xs text-red-400 mt-2">{summaryFeedback.error}</div>
+                      <div className="text-xs text-[var(--danger)] mt-2">{summaryFeedback.error}</div>
                     ) : null}
                   </div>
                 ) : null}
@@ -6338,7 +6366,7 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
                   className="h-full transition-all"
                   style={{
                     width: `${Math.max(0, Math.min(100, progressPct))}%`,
-                    backgroundColor: '#39ff14',
+                    backgroundColor: 'var(--success)',
                   }}
                 />
                 <div
@@ -6772,13 +6800,15 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
                         <select
                           className="input-themed w-full"
                           value={reqInfoDraft.id_tipo_irregularidade}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const v = e.target.value;
                             setReqInfoDraft((prev) => ({
                               ...prev,
-                              id_tipo_irregularidade: e.target.value,
+                              id_tipo_irregularidade: v,
                               id_subtipo_irregularidade: '',
-                            }))
-                          }
+                            }));
+                            saveReqClassificacao(v, '');
+                          }}
                         >
                           <option value="">Irregularidade</option>
                           {reqTiposIrregularidade.map((t, idx) => {
@@ -6794,9 +6824,11 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
                         <select
                           className="input-themed w-full"
                           value={reqInfoDraft.id_subtipo_irregularidade}
-                          onChange={(e) =>
-                            setReqInfoDraft((prev) => ({ ...prev, id_subtipo_irregularidade: e.target.value }))
-                          }
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setReqInfoDraft((prev) => ({ ...prev, id_subtipo_irregularidade: v }));
+                            saveReqClassificacao(reqInfoDraft.id_tipo_irregularidade, v);
+                          }}
                           disabled={!reqInfoDraft.id_tipo_irregularidade}
                         >
                           <option value="">Subirregularidade</option>
@@ -6811,16 +6843,7 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
                           })}
                         </select>
                       </div>
-                      <div className="mt-2 flex justify-end">
-                        <button
-                          type="button"
-                          className="btn-press px-3 py-1.5 rounded border border-[var(--panel-border)] bg-[var(--panel)] text-xs hover:opacity-90"
-                          disabled={reqSaving}
-                          onClick={saveReqClassificacao}
-                        >
-                          Salvar classificação
-                        </button>
-                      </div>
+                      <div className="mt-1 text-[10px] opacity-60">Salva automaticamente ao selecionar.</div>
                     </div>
 
                     <div className="sap-card border panel-border p-3">
@@ -6989,7 +7012,7 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
                           type="button"
                           onClick={() => setReqEmailModalOpen(true)}
                           className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border font-semibold transition-colors"
-                          style={{ borderColor: '#2563eb', color: '#60a5fa', backgroundColor: 'rgba(37,99,235,0.08)' }}
+                          style={{ borderColor: 'var(--accent)', color: 'var(--accent-2)', backgroundColor: 'color-mix(in srgb, var(--accent) 8%, transparent)' }}
                           title="Gerar rascunho de email com IA baseado nesta requisição"
                         >
                           <Mail size={12} />
@@ -7069,7 +7092,7 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
 
                   <div className="sap-card border panel-border p-3">
                     <div className="text-xs font-semibold mb-2">
-                      {isNovaRequisicao ? 'Comentário' : 'Tratativa da primeira reclamação'}
+                      {isPreDecisao ? 'Comentário' : 'Tratativa da primeira reclamação'}
                     </div>
                     <textarea
                       rows={3}
@@ -7108,14 +7131,14 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
                       />
                     </div>
 
-                    {!isNovaRequisicao && (
+                    {!isPreDecisao && (
                       <div className="mb-3">
                         <div className="text-[11px] font-semibold mb-1">Canais de comunicação</div>
                         <CanaisSelector canais={reqCanais} onToggle={toggleReqCanal} />
                       </div>
                     )}
 
-                    {isNovaRequisicao ? (
+                    {isPreDecisao ? (
                       <div className="flex flex-wrap items-center gap-2 text-xs">
                         <button
                           type="button"
@@ -7166,9 +7189,9 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
                           type="button"
                           className="btn-press req-btn-ativos px-3 py-1.5 rounded-md border"
                           disabled={reqSaving}
-                          onClick={handleReqEnviarAtivos}
+                          onClick={handleReqCriarProcesso}
                         >
-                          Enviar para Ativos
+                          Criar processo
                         </button>
                       </div>
                     )}
@@ -7409,6 +7432,22 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
                       className="input-themed w-full mt-1"
                       value={reqInfoDraft.uc}
                       onChange={(e) => setReqInfoDraft((prev) => ({ ...prev, uc: e.target.value }))}
+                      onBlur={async (e) => {
+                        // Busca automática no sgeeasy (UC + UCs_Anteriores) ao sair do campo.
+                        const ucv = String(e.target.value || '').trim();
+                        if (ucv.replace(/\D/g, '').length < 4) return;
+                        try {
+                          const { data } = await api.get('/api/v1/faturas/buscar-uc', { params: { uc: ucv } });
+                          if (data) {
+                            setReqInfoDraft((prev) => ({
+                              ...prev,
+                              cliente: prev.cliente || data.cliente || data.razao_social || '',
+                              concessionaria: prev.concessionaria || data.concessionaria || '',
+                              link_fatura: prev.link_fatura || data.ultimo_link || '',
+                            }));
+                          }
+                        } catch { /* UC não encontrada no sgeeasy — ignora */ }
+                      }}
                     />
                   </div>
                   <div>
@@ -7625,10 +7664,10 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
         .btn-press { transition: transform 120ms ease, box-shadow 120ms ease; }
         .btn-press:active { transform: translateY(1px); box-shadow: inset 0 2px 4px rgba(0,0,0,0.15); }
         .req-btn-email { background: #e8ddc9; color: #111; }
-        .req-btn-ativos { background: #1f7a3a; border-color: #d4af37; color: #d4af37; }
-        .req-btn-analise { background: #f4d44d; border-color: #c9a83a; color: #3a2c00; }
-        .req-btn-aprovar { background: #1f7a3a; border-color: #0f5a2a; color: #f5f0c5; }
-        .req-btn-rejeitar { background: #b02020; border-color: #7a1414; color: #fff2f2; }
+        .req-btn-ativos { background: var(--success); border-color: #d4af37; color: #d4af37; }
+        .req-btn-analise { background: var(--warning); border-color: color-mix(in srgb, var(--warning) 70%, black); color: #3a2c00; }
+        .req-btn-aprovar { background: var(--success); border-color: color-mix(in srgb, var(--success) 70%, black); color: #f5f0c5; }
+        .req-btn-rejeitar { background: var(--danger); border-color: color-mix(in srgb, var(--danger) 70%, black); color: #fff2f2; }
       `}</style>
     </div>
   );

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Preview — Janela de novidades (novo tamanho)</title>
+<style>
+  :root { --accent:#5cc8ff; --gradient-primary:#2563eb; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+         /* fundo imita o app por trás do overlay */
+         background:#0a1521; }
+  /* overlay idêntico ao do componente */
+  .overlay { position:fixed; inset:0; z-index:2000; display:flex; align-items:center;
+             justify-content:center; background:rgba(3,8,16,0.55); padding:16px; }
+  /* >>> card com O NOVO TAMANHO <<< */
+  .card { width:clamp(340px,62vw,760px); max-height:90vh; overflow:auto;
+          background:#0c1a28; color:#f3f8fd;
+          border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+          border-radius:14px; box-shadow:0 24px 70px rgba(0,0,0,0.6); }
+  .card p,.card b,.card strong,.card label,.card span { color:#fff; }
+  .head { display:flex; align-items:center; gap:8px; padding:12px 14px;
+          border-bottom:1px solid rgba(255,255,255,0.08); }
+  .head b { font-size:14px; }
+  .ico { color:var(--accent); display:inline-flex; }
+  .btnx { margin-left:auto; background:none; border:none; color:rgba(255,255,255,0.7);
+          cursor:pointer; padding:3px; font-size:16px; line-height:1; }
+  .body { padding:12px 14px; display:flex; flex-direction:column; gap:12px; }
+  .aviso { font-size:13px; line-height:1.55;
+           background:color-mix(in srgb, var(--accent) 14%, transparent);
+           border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+           border-radius:10px; padding:10px 12px; white-space:pre-wrap; }
+  .sec-t { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
+           margin-bottom:6px; }
+  .sec-p { font-size:12.5px; line-height:1.5; margin:0 0 8px; }
+  .foot { display:flex; align-items:center; gap:10px; padding:10px 14px;
+          border-top:1px solid rgba(255,255,255,0.08); flex-wrap:wrap; }
+  .foot label { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; cursor:pointer; }
+  .cta { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600;
+         padding:7px 12px; border-radius:8px; cursor:pointer; border:1px solid transparent;
+         background:var(--gradient-primary); color:#fff; margin-left:auto; }
+  svg { display:block; }
+  /* régua de largura só pro preview */
+  .ruler { position:fixed; top:8px; left:0; right:0; text-align:center; z-index:3000;
+           font:600 12px/1 monospace; color:#9fc7dd; pointer-events:none; }
+</style>
+</head>
+<body>
+<div class="ruler" id="ruler">largura atual do card: — px</div>
+<div class="overlay">
+  <div class="card" id="card" role="dialog" aria-label="Informativo do sistema">
+    <!-- Cabeçalho -->
+    <div class="head">
+      <span class="ico">📣</span>
+      <b>Novidades do SURE</b>
+      <button class="btnx" title="Fechar">✕</button>
+    </div>
+
+    <div class="body">
+      <!-- Aviso editável de exemplo -->
+      <div class="aviso">Exemplo de aviso publicado pelo admin. Esta área aparece quando há um aviso ativo.</div>
+
+      <!-- Como funciona a aprovação -->
+      <div>
+        <div class="sec-t">Como funciona a aprovação</div>
+        <p class="sec-p">Você faz um pedido no chat; a SURE mostra uma <b>prévia</b>. Depois que o <b>gestor aprova</b>, a ação é executada e aparece no seu <b>Histórico</b>.</p>
+        <svg viewBox="0 0 640 96" width="100%" role="img" aria-label="Fluxo de aprovação">
+          <defs><marker id="ah" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+          <!-- 5 passos, o do meio destacado -->
+          <g><rect x="8"   y="20" width="112" height="48" rx="10" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.15)"/><text x="64"  y="40" text-anchor="middle" font-size="12.5" font-weight="700" fill="#e6edf3">Você pede</text><text x="64"  y="56" text-anchor="middle" font-size="9.5" fill="rgba(230,237,243,0.6)">no chat</text><path d="M122 44 L134 44" stroke="var(--accent)" stroke-width="2" marker-end="url(#ah)"/></g>
+          <g><rect x="136" y="20" width="112" height="48" rx="10" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.15)"/><text x="192" y="40" text-anchor="middle" font-size="12.5" font-weight="700" fill="#e6edf3">Prévia</text><text x="192" y="56" text-anchor="middle" font-size="9.5" fill="rgba(230,237,243,0.6)">a SURE mostra</text><path d="M250 44 L262 44" stroke="var(--accent)" stroke-width="2" marker-end="url(#ah)"/></g>
+          <g><rect x="264" y="20" width="112" height="48" rx="10" fill="color-mix(in srgb, var(--accent) 22%, transparent)" stroke="var(--accent)" stroke-width="2"/><text x="320" y="40" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent)">Aprovação</text><text x="320" y="56" text-anchor="middle" font-size="9.5" fill="rgba(230,237,243,0.6)">o gestor OK</text><path d="M378 44 L390 44" stroke="var(--accent)" stroke-width="2" marker-end="url(#ah)"/></g>
+          <g><rect x="392" y="20" width="112" height="48" rx="10" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.15)"/><text x="448" y="40" text-anchor="middle" font-size="12.5" font-weight="700" fill="#e6edf3">Executado</text><text x="448" y="56" text-anchor="middle" font-size="9.5" fill="rgba(230,237,243,0.6)">feito no banco</text><path d="M506 44 L518 44" stroke="var(--accent)" stroke-width="2" marker-end="url(#ah)"/></g>
+          <g><rect x="520" y="20" width="112" height="48" rx="10" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.15)"/><text x="576" y="40" text-anchor="middle" font-size="12.5" font-weight="700" fill="#e6edf3">Histórico</text><text x="576" y="56" text-anchor="middle" font-size="9.5" fill="rgba(230,237,243,0.6)">aparece pra você</text></g>
+        </svg>
+      </div>
+
+      <!-- Movimentação -->
+      <div>
+        <div class="sec-t">Exemplo de movimentação</div>
+        <p class="sec-p">A etapa do processo avança pelo <b>Kanban</b> — uma por vez. Cada passo é registrado no histórico.</p>
+        <svg viewBox="0 0 640 70" width="100%" role="img" aria-label="Movimentação de etapas">
+          <text x="320" y="14" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.72)">cada mudança grava no histórico do processo</text>
+          <g><rect x="6"   y="26" width="92" height="30" rx="8" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.14)"/><text x="52"  y="45" text-anchor="middle" font-size="10.5" font-weight="600" fill="rgba(230,237,243,0.85)">Reclamação</text><path d="M100 41 L110 41" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/></g>
+          <g><rect x="112" y="26" width="92" height="30" rx="8" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.14)"/><text x="158" y="45" text-anchor="middle" font-size="10.5" font-weight="600" fill="rgba(230,237,243,0.85)">Contestação</text><path d="M206 41 L216 41" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/></g>
+          <g><rect x="218" y="26" width="92" height="30" rx="8" fill="color-mix(in srgb, var(--accent) 20%, transparent)" stroke="var(--accent)" stroke-width="2"/><text x="264" y="45" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--accent)">Conciliação</text><path d="M312 41 L322 41" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/></g>
+          <g><rect x="324" y="26" width="92" height="30" rx="8" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.14)"/><text x="370" y="45" text-anchor="middle" font-size="10.5" font-weight="600" fill="rgba(230,237,243,0.85)">Faturamento</text><path d="M418 41 L428 41" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/></g>
+          <g><rect x="430" y="26" width="92" height="30" rx="8" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.14)"/><text x="476" y="45" text-anchor="middle" font-size="10.5" font-weight="600" fill="rgba(230,237,243,0.85)">Repasse</text><path d="M524 41 L534 41" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/></g>
+          <g><rect x="536" y="26" width="92" height="30" rx="8" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.14)"/><text x="582" y="45" text-anchor="middle" font-size="10.5" font-weight="600" fill="rgba(230,237,243,0.85)">Encerramento</text></g>
+        </svg>
+      </div>
+
+      <!-- Falar e ouvir -->
+      <div>
+        <div class="sec-t">Falar e ouvir no chat</div>
+        <p class="sec-p">No chat da SURE você pode <b>falar</b> em vez de digitar e <b>ouvir</b> as respostas:</p>
+        <svg viewBox="0 0 600 104" width="100%" role="img" aria-label="Botões de voz e áudio do chat">
+          <g>
+            <rect x="108" y="18" width="44" height="44" rx="11" fill="var(--accent)"/>
+            <rect x="125" y="27" width="10" height="15" rx="5" fill="#fff"/>
+            <path d="M121 38 a9 9 0 0 0 18 0" stroke="#fff" stroke-width="2" fill="none"/>
+            <path d="M130 47 L130 52 M124 52 L136 52" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+            <text x="130" y="78" text-anchor="middle" font-size="12" font-weight="700" fill="#e6edf3">Microfone</text>
+            <text x="130" y="93" text-anchor="middle" font-size="10" fill="rgba(230,237,243,0.65)">fala → vira texto</text>
+          </g>
+          <g>
+            <rect x="278" y="18" width="44" height="44" rx="11" fill="var(--accent)"/>
+            <path d="M290 36 L290 44 M295 32 L295 48 M300 28 L300 52 M305 33 L305 47 M310 35 L310 45" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+            <text x="300" y="78" text-anchor="middle" font-size="12" font-weight="700" fill="#e6edf3">Conversa</text>
+            <text x="300" y="93" text-anchor="middle" font-size="10" fill="rgba(230,237,243,0.65)">“oi sure” / “tchau sure”</text>
+          </g>
+          <g>
+            <rect x="448" y="18" width="44" height="44" rx="11" fill="var(--accent)"/>
+            <path d="M459 36 H464 L469 31 V49 L464 44 H459 Z" fill="#fff"/>
+            <path d="M473 35 a6 6 0 0 1 0 10" stroke="#fff" stroke-width="2" fill="none"/>
+            <path d="M477 32 a10 10 0 0 1 0 16" stroke="#fff" stroke-width="2" fill="none"/>
+            <text x="470" y="78" text-anchor="middle" font-size="12" font-weight="700" fill="#e6edf3">Voz</text>
+            <text x="470" y="93" text-anchor="middle" font-size="10" fill="rgba(230,237,243,0.65)">a SURE responde falando</text>
+          </g>
+        </svg>
+        <p style="font-size:11.5px;line-height:1.45;margin:6px 0 0;">
+          <b>Microfone</b>: dita e vira texto. <b>Conversa</b>: diga “oi sure” para pedir e “tchau sure” para confirmar. <b>Voz</b>: a SURE responde em áudio. (Chrome ou Edge, com microfone permitido.)
+        </p>
+      </div>
+    </div>
+
+    <!-- Rodapé -->
+    <div class="foot">
+      <label><input type="checkbox"> Não exibir mais essa mensagem</label>
+      <button class="cta">Entendi ›</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // mostra a largura real que o clamp resolveu, atualiza ao redimensionar
+  const card = document.getElementById('card');
+  const ruler = document.getElementById('ruler');
+  const upd = () => ruler.textContent = 'largura atual do card: ' + Math.round(card.getBoundingClientRect().width) + ' px  (clamp 340 / 62vw / 760)';
+  new ResizeObserver(upd).observe(card);
+  upd();
+</script>
+</body>
+</html>

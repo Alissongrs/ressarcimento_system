@@ -469,6 +469,18 @@ func RejeitarFaturaFDEHandler(c *gin.Context) {
 	}
 	rows, _ := res.RowsAffected()
 
+	// Persiste a rejeição TAMBÉM em FATURA_REANALISES (recomendacao='REJEITADO') — que é
+	// ONDE A LISTA (Análise de Desvio / Auditoria / Inconclusivos) filtra os rejeitados
+	// (NOT EXISTS ... FATURA_REANALISES). Sem isto a rejeição ficava só em
+	// fichas_apontadas.decisao_final e a fatura REAPARECIA na lista após refresh.
+	if _, e := sqlDB.Exec(`INSERT INTO FATURA_REANALISES
+		(fatura_id, modelo, justificativa, recomendacao, resposta_crua, confianca_final, pdf_anexado, usuario_id, usuario_nome, criado_em)
+		VALUES (?, 'humano-ui', ?, 'REJEITADO', '', NULL, 0, NULL, 'usuario', NOW())`,
+		id, motivo); e != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("rejeição não persistida em FATURA_REANALISES: %v", e)})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"id":               id,
 		"rows_affected":    rows,

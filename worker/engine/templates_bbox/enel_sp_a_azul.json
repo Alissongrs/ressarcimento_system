@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "distribuidora": "enel_sp_a_azul",
+    "fonte_calibracao": "enel_sp_a_azul_5.pdf",
+    "data_calibracao": "2026-05-20",
+    "auto_gerado": true
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [
+        0.172,
+        0.124,
+        0.205,
+        0.144,
+        0
+      ],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "default": null,
+      "_anchor": "A4"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [
+        0.324,
+        0.151,
+        0.385,
+        0.171,
+        0
+      ],
+      "regex": "(Verde|Azul|Convencional|Branca|Mon[óo]?mia|MT[VACB])",
+      "default": null,
+      "_anchor": "Azul"
+    }
+  }
+}

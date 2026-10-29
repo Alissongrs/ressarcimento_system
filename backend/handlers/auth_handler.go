@@ -117,6 +117,11 @@ func Register(c *gin.Context) {
 	if utils.BindAndValidate(c, &input) {
 		return
 	}
+	// P2-6: auto-registro só para domínios corporativos autorizados (default @amee.com.br).
+	if !utils.EmailDomainAllowed(input.Email) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Registro permitido apenas para e-mails corporativos autorizados. Fale com um administrador."})
+		return
+	}
 	user := models.User{
 		Nome:           input.Nome,
 		Email:          input.Email,
@@ -217,6 +222,7 @@ func Login(c *gin.Context) {
 		UserID:    user.ID,
 		TipoConta: user.TipoConta,
 		Nome:      user.Nome,
+		Email:     user.Email,
 		UserName:  userName,
 		Role:      role,
 		RegisteredClaims: jwt.RegisteredClaims{

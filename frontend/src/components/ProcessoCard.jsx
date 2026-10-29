@@ -200,10 +200,10 @@ export default function ProcessoCard({ processo, meta, onClick, prazoConfig = nu
     if (!ultimaMov) return null;
     const diasPassados = Math.floor((Date.now() - ultimaMov.getTime()) / 86400000);
     const diasRestantes = prazoConfig.prazoDias - diasPassados;
-    if (diasRestantes <= 0) return { label: 'SLA vencido', cor: 'bg-red-600 text-white', dias: diasRestantes };
+    if (diasRestantes <= 0) return { label: 'SLA vencido', cor: 'bg-[var(--danger)] text-white', dias: diasRestantes };
     const pct = diasRestantes / prazoConfig.prazoDias;
-    if (pct <= 0.3) return { label: `${diasRestantes}d restantes`, cor: 'bg-amber-500 text-black', dias: diasRestantes };
-    return { label: `${diasRestantes}d restantes`, cor: 'bg-emerald-600 text-white', dias: diasRestantes };
+    if (pct <= 0.3) return { label: `${diasRestantes}d restantes`, cor: 'bg-[var(--warning)] text-black', dias: diasRestantes };
+    return { label: `${diasRestantes}d restantes`, cor: 'bg-[var(--success)] text-white', dias: diasRestantes };
   }, [prazoConfig, processo, nowTick]);
 
   // Última movimentação (histórico)
@@ -507,9 +507,9 @@ const ultimaDataISO = useMemo(() => {
   // Classes de borda: prioridade (favorito > suspenso > default) – alertas desativados
   const borderClasses = (() => {
     // Alertas desativados: ignora contornos de vencido
-    if (alertaVencido) return 'border-2 border-red-500 ring-1 ring-red-500/30';
-    if (fav) return 'border-2 border-yellow-400 ring-1 ring-yellow-400/30';
-    if (suspLocal) return 'border-2 border-amber-500 ring-1 ring-amber-300/30';
+    if (alertaVencido) return 'border-2 border-[var(--danger)] ring-1 ring-[var(--danger)]/30';
+    if (fav) return 'border-2 border-[var(--warning)] ring-1 ring-[var(--warning)]/30';
+    if (suspLocal) return 'border-2 border-[var(--warning)] ring-1 ring-[var(--warning)]/30';
     return 'border panel-border hover:border-[var(--accent)]/60';
   })();
 
@@ -530,7 +530,7 @@ const ultimaDataISO = useMemo(() => {
       {/* FITA: Suspenso */}
       {suspLocal && (
         <div className="absolute top-0 right-0 w-20 h-20 overflow-hidden pointer-events-none">
-          <span className="absolute right-[-36px] top-2 rotate-45 bg-amber-600 text-white text-[10px] px-6 py-0.5 shadow">
+          <span className="absolute right-[-36px] top-2 rotate-45 bg-[var(--warning)] text-white text-[10px] px-6 py-0.5 shadow">
             Suspenso
           </span>
         </div>
@@ -538,7 +538,7 @@ const ultimaDataISO = useMemo(() => {
 
       {/* FITA: Vencido */}
       {alertaVencido && (
-        <div className="absolute -left-2 -top-2 flex items-center gap-1 rounded-md bg-red-600 text-white text-[10px] px-2 py-0.5 shadow">
+        <div className="absolute -left-2 -top-2 flex items-center gap-1 rounded-md bg-[var(--danger)] text-white text-[10px] px-2 py-0.5 shadow">
           <AlertTriangle size={12} /> Vencido
         </div>
       )}
@@ -556,10 +556,10 @@ const ultimaDataISO = useMemo(() => {
           <div className="flex flex-wrap items-center gap-2 min-w-0">
             <h4 className="text-lg font-extrabold text-[var(--fg)]">PROC-{String(pid || '').padStart(3,'0')}</h4>
             {uc && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold max-w-[180px] truncate" style={{ background:'#DBEAFE', color:'#1D4ED8' }}>UC {uc}</span>
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold max-w-[180px] truncate" style={{ background: 'color-mix(in srgb, var(--accent) 14%, var(--card))', color: 'var(--accent)' }}>UC {uc}</span>
             )}
             {subEtapa && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold max-w-[220px] truncate" style={{ background:'#D1FAE5', color:'#065F46' }}>{subEtapa}</span>
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold max-w-[220px] truncate" style={{ background: 'color-mix(in srgb, var(--success) 14%, var(--card))', color: 'var(--success)' }}>{subEtapa}</span>
             )}
           </div>
           <div className="mt-0.5 text-sm opacity-80 whitespace-nowrap overflow-hidden text-ellipsis">
@@ -577,7 +577,7 @@ const ultimaDataISO = useMemo(() => {
       {false && processo?.__alarmeFromCustom && sev && (
             <span
               className={[ 'px-1.5 py-0.5 rounded border text-[10px]',
-                sev==='crit' ? 'bg-red-600/20 text-red-300 border-red-600/40' : (sev==='warn' ? 'bg-amber-500/20 text-amber-300 border-amber-600/40' : (sev==='info' ? 'bg-blue-600/20 text-blue-300 border-blue-600/40' : 'hidden'))
+                sev==='crit' ? 'bg-[var(--danger)]/20 text-[var(--danger)] border-[var(--danger)]/40' : (sev==='warn' ? 'bg-[var(--warning)]/20 text-[var(--warning)] border-[var(--warning)]/40' : (sev==='info' ? 'bg-[var(--accent)]/20 text-[var(--accent)] border-[var(--accent)]/40' : 'hidden'))
               ].join(' ')}
               title={`Alarme: ${sev}`}
             >{sev}</span>
@@ -587,7 +587,7 @@ const ultimaDataISO = useMemo(() => {
             type="button"
             className={[
               'relative p-1 rounded-md transition-colors',
-              alertaVencido ? 'text-red-500 hover:bg-red-500/10' : (alertasCount > 0 || effectiveAlertDate ? 'text-amber-500 hover:bg-amber-500/10' : 'text-[var(--fg)]/70 hover:bg-[var(--panel)]')
+              alertaVencido ? 'text-[var(--danger)] hover:bg-[var(--danger)]/10' : (alertasCount > 0 || effectiveAlertDate ? 'text-[var(--warning)] hover:bg-[var(--warning)]/10' : 'text-[var(--fg)]/70 hover:bg-[var(--panel)]')
             ].join(' ')}
             title="Criar alerta do processo"
             aria-label="Criar alerta do processo"
@@ -599,7 +599,7 @@ const ultimaDataISO = useMemo(() => {
             {(alertasCount > 0 || alertaVencido || effectiveAlertDate) && (
               <span className={[
                 'absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full text-[10px] leading-[18px] text-center px-[4px]',
-                alertaVencido ? 'bg-red-600 text-white' : 'bg-amber-500 text-black'
+                alertaVencido ? 'bg-[var(--danger)] text-white' : 'bg-[var(--warning)] text-black'
               ].join(' ')}>
                 {alertaVencido ? '!' : (alertasCount > 0 ? alertasCount : '•')}
               </span>
@@ -614,7 +614,7 @@ const ultimaDataISO = useMemo(() => {
               onClick={handleSuspender}
               onMouseDown={(e) => e.stopPropagation()}
               onKeyDown={(e) => e.stopPropagation()}
-              className="p-1 rounded-md text-red-500 hover:bg-red-500/10 transition-colors"
+              className="p-1 rounded-md text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
             >
               <PauseCircle size={18} />
             </button>
@@ -626,7 +626,7 @@ const ultimaDataISO = useMemo(() => {
               onClick={handleRetomar}
               onMouseDown={(e) => e.stopPropagation()}
               onKeyDown={(e) => e.stopPropagation()}
-              className="p-1 rounded-md text-green-500 hover:bg-green-500/10 transition-colors"
+              className="p-1 rounded-md text-[var(--success)] hover:bg-[var(--success)]/10 transition-colors"
             >
               <PlayCircle size={18} />
             </button>
@@ -642,7 +642,7 @@ const ultimaDataISO = useMemo(() => {
             aria-label="Favorito"
             className={[
               'p-1 rounded-md transition-colors',
-              fav ? 'text-yellow-400 bg-yellow-400/10' : 'text-[var(--fg)]/70 hover:text-yellow-300 hover:panel-bg-80'
+              fav ? 'text-[var(--warning)] bg-[var(--warning)]/10' : 'text-[var(--fg)]/70 hover:text-[var(--warning)] hover:panel-bg-80'
             ].join(' ')}
           >
             <Star size={18} className={fav ? 'fill-current' : ''} />
@@ -659,7 +659,7 @@ const ultimaDataISO = useMemo(() => {
           <BadgeDollarSign size={16} className="mt-0.5 opacity-70" />
           <div className="flex items-center gap-3">
             <div className="text-xs opacity-70 w-[120px]">Valor estimado:</div>
-            <div className="font-semibold tabular-nums" style={{ color: (isIndeferido && valorDisplay != null) ? '#DC2626' : (valorDisplay != null ? '#10B981' : 'var(--fg)') }}>{valorDisplay != null ? brl(valorDisplay) : '-'}</div>
+            <div className="font-semibold tabular-nums" style={{ color: (isIndeferido && valorDisplay != null) ? 'var(--danger)' : (valorDisplay != null ? 'var(--success)' : 'var(--fg)') }}>{valorDisplay != null ? brl(valorDisplay) : '-'}</div>
           </div>
         </div>
         <div className="flex items-start gap-2">
@@ -677,10 +677,10 @@ const ultimaDataISO = useMemo(() => {
           </div>
         </div>
         <div className="flex items-start gap-2">
-          <Bell size={16} className={`mt-0.5 ${alertaVencido ? 'text-red-500' : 'opacity-70'}`} />
+          <Bell size={16} className={`mt-0.5 ${alertaVencido ? 'text-[var(--danger)]' : 'opacity-70'}`} />
           <div className="flex items-center gap-3">
             <div className="text-xs opacity-70 w-[120px]">Próximo alerta:</div>
-            <div className={`font-semibold tabular-nums ${alertaVencido ? 'text-red-500' : ''}`}>{effectiveAlertDate ? fmtDataCurta(effectiveAlertDate) : '-'}</div>
+            <div className={`font-semibold tabular-nums ${alertaVencido ? 'text-[var(--danger)]' : ''}`}>{effectiveAlertDate ? fmtDataCurta(effectiveAlertDate) : '-'}</div>
           </div>
         </div>
         <div className="flex items-start gap-2">
@@ -799,7 +799,7 @@ const ultimaDataISO = useMemo(() => {
                   className="w-full rounded-lg border px-3 py-2 text-sm bg-[var(--bg)] border-[var(--border)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
                 />
               </div>
-              {alertError && <div className="text-xs text-red-500">{alertError}</div>}
+              {alertError && <div className="text-xs text-[var(--danger)]">{alertError}</div>}
             </div>
             <div className="px-4 py-3 border-t panel-border flex items-center justify-between gap-2">
               <button onClick={() => setAlertModalOpen(false)} className="btn-outline">Cancelar</button>

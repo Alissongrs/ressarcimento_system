@@ -1,0 +1,162 @@
+{
+  "_meta": {
+    "id_fonte": null,
+    "arquivo_origem": "4_3249_43B.pdf",
+    "distribuidora": "Neoenergia Coelba",
+    "razao_social_distribuidora": "Companhia de Eletricidade do Estado da Bahia",
+    "marca_grupo": "Neoenergia",
+    "tipo_documento": "DANFE/NF3e (2ª via)",
+    "subgrupo_modalidade": "A4 Livre / Verde (ACL)",
+    "classe": "Comercial",
+    "tipo_fornecimento": "Trifásico",
+    "tem_gd": false,
+    "tem_acl": true,
+    "tem_debito_automatico": true,
+    "ano_referencia": "2025",
+    "criado_por": "usuario_manual_gpt_externo",
+    "criado_em": "2026-05-24",
+    "template_id": "neoenergia_coelba_danfe_a4_livre_verde_acl_segunda_via_debito_automatico",
+    "uso": "Gold-standard layout Coelba A4 Livre Verde ACL com perda 2,5%, Uso Sistema Fio-Lim, Dif. Desc. Ft.Alter. negativo, débito automático e canhoto com valor 0,00 (deve ser ignorado em favor do total real)."
+  },
+  "diagnostico_layout": {
+    "paginas_pdf": 3,
+    "pagina_1": "Cobrança principal: cabeçalho, cliente, NF3e, leituras, itens, tributos, medição, canhoto débito automático",
+    "pagina_2": "Demonstrativo de consumo, gráficos, fator de carga, perda de transformação",
+    "pagina_3": "Informativa/privacidade/endereçamento postal (NÃO usar para cobrança)",
+    "problema_principal_ocr": "Text layer começa pela tabela de itens antes do cabeçalho. Valores negativos com hífen no final ('16,38-', '6,10-'). Canhoto mostra 'Valor do Documento 0,00' por ser débito automático — pode sobrescrever erroneamente o total real R$ 2.477,19 se parser usar último valor monetário. Cliente CNPJ mascarado (33.041.***/****-**) — não reconstruir.",
+    "estrategia_recomendada": [
+      "Criar template próprio para Neoenergia Coelba A4 Livre Verde",
+      "Não reaproveitar templates Energisa, Enel, CPFL ou Copel",
+      "Página 1 é fonte principal de cobrança",
+      "Página 2 complementa demonstrativo",
+      "Página 3 é informativa — não sobrescrever campos",
+      "Normalizar valores negativos com hífen no final",
+      "Não usar 'Valor do Documento 0,00' do canhoto como total",
+      "Guardar CNPJ cliente como mascarado (não reconstruir)"
+    ]
+  },
+  "assinatura_template": {
+    "marcadores": [
+      "Neoenergia",
+      "Coelba",
+      "COMPANHIA DE ELETRICIDADE DO ESTADO DA BAHIA",
+      "DANFE - DOCUMENTO AUXILIAR DA NOTA FISCAL DE ENERGIA ELÉTRICA ELETRÔNICA 2ª VIA",
+      "CLASSIFICAÇÃO: A4 Livre - Verde",
+      "Uso Sistema Fio",
+      "Uso Sistema Encar.NP",
+      "Cons.Reat.Exc.NPonta",
+      "Pagamento através de Débito Automático em Conta Corrente",
+      "Acrescentar aos Consumos/Demandas Medidos a Perda de Transformação de: 2,50%"
+    ]
+  },
+  "campos_extraidos": {
+    "cliente": {
+      "razao_social": "VIA SA",
+      "cnpj_mascarado": "33.041.***/****-**",
+      "endereco_uc": "RUA OTENES 2",
+      "bairro_localidade": "CENTRO-CRUZ DAS ALMAS/CRUZ DAS ALMAS",
+      "cidade": "CRUZ DAS ALMAS",
+      "uf": "BA",
+      "cep": "44380-000"
+    },
+    "distribuidora": {
+      "razao_social": "COMPANHIA DE ELETRICIDADE DO ESTADO DA BAHIA",
+      "cnpj": "15.139.629/0001-94",
+      "ie": "00478696",
+      "endereco": "AV. EDGARD SANTOS, 300, CABULA VI, SALVADOR, BAHIA, CEP 41181-900"
+    },
+    "identificadores": {
+      "codigo_instalacao": "1296513",
+      "codigo_cliente": "7046402329",
+      "medidor": "82048219"
+    },
+    "ligacao_tecnica": {
+      "classificacao": "A4 Livre - Verde",
+      "classe": "Comercial",
+      "tipo_fornecimento": "Trifásico",
+      "ambiente": "Livre / ACL",
+      "modalidade_tarifaria": "Verde",
+      "subgrupo": "A4",
+      "montante_uso_contratado_kw": 55,
+      "bandeira_tarifaria": "Vermelha P2",
+      "perda_transformacao_pct": 2.50,
+      "fator_carga": {"ponta": 0.25, "fora_ponta": 0.36}
+    },
+    "nota_fiscal": {
+      "numero_nf": "911267134",
+      "serie": "000",
+      "data_emissao": "22/10/2025",
+      "chave_acesso": "29251015139629000194660009112671341032300796",
+      "chave_acesso_formatada": "2925 1015 1396 2900 0194 6600 0911 2671 3410 3230 0796",
+      "chave_valida_mod11": true,
+      "protocolo": "3292500068577408 - 23/10/2025 às 03:09:08",
+      "url_consulta": "https://dfe-portal.svrs.rs.gov.br/Nf3e/consulta"
+    },
+    "vencimento_valor": {
+      "mes_ref": "09/2025",
+      "vencimento": "31/10/2025",
+      "total_a_pagar": "2.477,19",
+      "segunda_via": true
+    },
+    "periodo_leitura": {
+      "anterior": "31/08/2025",
+      "atual": "30/09/2025",
+      "dias": 30,
+      "proxima": "31/10/2025"
+    },
+    "tributos": {
+      "pis":    {"base": "1.958,92", "aliquota_pct": "1,29",  "valor": "25,28"},
+      "cofins": {"base": "1.958,92", "aliquota_pct": "5,95",  "valor": "116,57"},
+      "icms":   {"base": "1.343,83", "aliquota_pct": "20,50", "valor": "275,49"}
+    },
+    "itens_fatura": [
+      {"descricao": "Demanda Reativa Exc.",  "unidade": "kVAr",  "quantidade": "0,00",     "valor": "0,00"},
+      {"descricao": "Uso Sistema Fio",       "unidade": "kW",    "quantidade": "12,25",    "valor": "321,00"},
+      {"descricao": "Uso Sistema Encar.NP",  "unidade": "kWh",   "quantidade": "148,27",   "valor": "279,47"},
+      {"descricao": "Uso Sistema Encar.FP",  "unidade": "kWh",   "quantidade": "2.897,64", "valor": "398,51"},
+      {"descricao": "Cons.Reat.Exc.NPonta",  "unidade": "kVARh", "quantidade": "199,21",   "valor": "74,89"},
+      {"descricao": "Cons.Reat Exc.FPonta",  "unidade": "kVARh", "quantidade": "735,48",   "valor": "276,50"},
+      {"descricao": "Cob. ICMS Subven-CDE",  "valor": "118,67"},
+      {"descricao": "Cb.ICMSCDEDif.Ft.Alt",  "valor": "4,60"},
+      {"descricao": "Ilum. Púb. Municipal",  "valor": "119,49"},
+      {"descricao": "Dif. Desc. Ft.Alter.",  "valor": "-16,38"},
+      {"descricao": "Dif.Des.Ft.Alt-Enca.",  "valor": "-6,10"},
+      {"descricao": "Uso Sistema Fio-Lim",   "unidade": "kW",    "quantidade": "42,75",    "valor": "890,60"},
+      {"descricao": "Imp.Som/Dim-C/Impost",  "valor": "15,94"}
+    ],
+    "pagamento": {
+      "tipo": "Débito automático em conta corrente",
+      "banco": "341-7",
+      "agencia": "0018",
+      "codigo_cliente_para_debito": "7046402329",
+      "valor_documento_canhoto": "0,00",
+      "observacao": "Canhoto traz 0,00 por ser débito automático — usar total real 2.477,19"
+    }
+  },
+  "validacoes": {
+    "soma_itens_bate_total": true,
+    "calculo_total": "0,00 + 321,00 + 279,47 + 398,51 + 74,89 + 276,50 + 118,67 + 4,60 + 119,49 - 16,38 - 6,10 + 890,60 + 15,94 = 2.477,19",
+    "perda_2_5_quantidades": [
+      "Consumo ativo ponta: 144,65 * 1,025 = 148,27 kWh",
+      "Consumo ativo fora ponta: 2.826,97 * 1,025 = 2.897,64 kWh",
+      "Demanda fora ponta: 11,95 * 1,025 = 12,25 kW"
+    ],
+    "uso_sistema_fio_lim": "55,00 kW contratados - 12,25 kW Uso Sistema Fio = 42,75 kW em Uso Sistema Fio-Lim"
+  },
+  "regex_sugeridos": {
+    "normalizacao_negativos": "(\\d{1,3}(?:\\.\\d{3})*,\\d{2})-",
+    "tributos": "(PIS|COFINS|ICMS)\\s+([\\d.,]+)\\s+([\\d.,]+)\\s+([\\d.,]+)",
+    "debito_automatico": "Pagamento atrav[eé]s de D[eé]bito Autom[aá]tico.*?Banco:\\s*([0-9-]+)\\s*Ag[êe]ncia:\\s*(\\d+)"
+  },
+  "guardrails": [
+    "Não usar template Energisa, Enel, CPFL ou Copel",
+    "Não classificar como GD (não há créditos de energia injetada — só Dif. Desc. Ft.Alter. negativo de ajuste)",
+    "Não reconstruir CNPJ do cliente (mascarado)",
+    "Normalizar valores negativos com hífen no final ('16,38-' → '-16,38')",
+    "Não sobrescrever total com 'Valor do Documento 0,00' do canhoto débito automático",
+    "Aplicar perda 2,50% nas quantidades de consumo/demanda",
+    "Separar consumo/demanda ponta e fora ponta",
+    "Página 3 é informativa — não usar para cobrança",
+    "Uso Sistema Fio-Lim ≠ demanda medida — é complemento até montante contratado"
+  ]
+}

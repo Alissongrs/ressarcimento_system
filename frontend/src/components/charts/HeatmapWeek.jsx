@@ -57,9 +57,9 @@ export default function HeatmapWeek({ data = [] }) {
                 style={{
                   background:
                     v === 0
-                      ? "rgba(148,163,184,0.15)" // slate-400/15
-                      : `rgba(59,130,246,${0.15 + 0.85 * (v / max)})`, // azul com intensidade
-                  border: "1px solid rgba(148,163,184,0.15)",
+                      ? "color-mix(in srgb, var(--fg) 15%, transparent)" // neutro
+                      : `color-mix(in srgb, var(--accent) ${(0.15 + 0.85 * (v / max)) * 100}%, transparent)`, // azul com intensidade
+                  border: "1px solid color-mix(in srgb, var(--fg) 15%, transparent)",
                 }}
               />
             ))}
@@ -70,7 +70,7 @@ export default function HeatmapWeek({ data = [] }) {
       {/* Legenda */}
       <div className="flex items-center gap-2 mt-3 text-xs opacity-70">
         <span>Baixo</span>
-        <div className="flex-1 h-2 bg-gradient-to-r from-[rgba(148,163,184,0.15)] to-[rgba(59,130,246,1)] rounded" />
+        <div className="flex-1 h-2 bg-gradient-to-r from-[color-mix(in_srgb,var(--fg)_15%,transparent)] to-[var(--accent)] rounded" />
         <span>Alto</span>
       </div>
     </div>

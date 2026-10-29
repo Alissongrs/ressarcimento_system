@@ -1,35 +1,19 @@
-﻿import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+﻿import React, { createContext, useContext, useEffect, useMemo } from 'react';
 
-const ThemeContext = createContext({ theme: 'light-4', setTheme: () => {} });
+const ThemeContext = createContext({ theme: 'sap', setTheme: () => {} });
 
-// Temas disponíveis: Padrão (Claro D), Rosa e Azul
-const THEMES = [
-  'dark-navy',
-  'light-4',
-  'pink',
-  'azul',
-  'sap',
-  'navy',
-  'orange-gray',
-  'green-orange',
-  'orange-purple-green',
-];
+// Padrão único do sistema: SAP. Seletor de tema removido — não há mais escolha do
+// usuário, sempre carrega nesse tema (mesmo que o navegador tenha um 'theme' antigo
+// salvo em localStorage de antes dessa decisão).
+const THEME = 'sap';
 
 export function ThemeProvider({ children }) {
-  const [theme, setThemeState] = useState('dark-navy');
-
   useEffect(() => {
-    const saved = localStorage.getItem('theme') || 'dark-navy';
-    setThemeState(THEMES.includes(saved) ? saved : 'dark-navy');
+    document.documentElement.setAttribute('data-theme', THEME);
+    localStorage.setItem('theme', THEME);
   }, []);
 
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('theme', theme);
-  }, [theme]);
-
-  const setTheme = (t) => setThemeState(THEMES.includes(t) ? t : 'dark-navy');
-  const value = useMemo(() => ({ theme, setTheme }), [theme]);
+  const value = useMemo(() => ({ theme: THEME, setTheme: () => {} }), []);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 

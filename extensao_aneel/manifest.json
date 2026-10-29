@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "SURE — Consulta ANEEL",
+  "version": "1.0.0",
+  "description": "Depois que você entra na Ouvidoria da ANEEL, lê a situação dos protocolos abertos e devolve ao SURE.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www2.aneel.gov.br/faleconosco/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://sure.app.br/*", "http://sure.app.br/*", "http://179.127.26.37/*", "http://localhost/*"],
+      "js": ["content_sure.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www2.aneel.gov.br/faleconosco/*"],
+      "js": ["content_aneel.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

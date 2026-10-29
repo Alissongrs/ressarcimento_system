@@ -154,7 +154,10 @@ const Register = ({ onSwitchToLogin }) => {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {errors.api && (
-              <p className="text-sm text-red-600 text-center bg-red-100 p-2 rounded">
+              <p
+                className="text-sm text-[var(--danger)] text-center p-2 rounded"
+                style={{ backgroundColor: 'color-mix(in srgb, var(--danger) 15%, var(--card))' }}
+              >
                 {errors.api}
               </p>
             )}
@@ -171,7 +174,7 @@ const Register = ({ onSwitchToLogin }) => {
                 onChange={onChange}
                 required
               />
-              {errors.name && <p className="text-sm text-red-600">{errors.name}</p>}
+              {errors.name && <p className="text-sm text-[var(--danger)]">{errors.name}</p>}
             </div>
 
             {/* Email corporativo: parte local + domínio corporativo */}
@@ -198,7 +201,7 @@ const Register = ({ onSwitchToLogin }) => {
                   ))}
                 </select>
               </div>
-              {errors.email && <p className="text-sm text-red-600">{errors.email}</p>}
+              {errors.email && <p className="text-sm text-[var(--danger)]">{errors.email}</p>}
             </div>
 
             {/* Departamento */}
@@ -227,7 +230,7 @@ const Register = ({ onSwitchToLogin }) => {
                 ))}
               </select>
               {errors.departamento && (
-                <p className="text-sm text-red-600">{errors.departamento}</p>
+                <p className="text-sm text-[var(--danger)]">{errors.departamento}</p>
               )}
             </div>
 
@@ -255,7 +258,7 @@ const Register = ({ onSwitchToLogin }) => {
                 </Button>
               </div>
               {errors.password && (
-                <p className="text-sm text-red-600">{errors.password}</p>
+                <p className="text-sm text-[var(--danger)]">{errors.password}</p>
               )}
             </div>
 
@@ -283,7 +286,7 @@ const Register = ({ onSwitchToLogin }) => {
                 </Button>
               </div>
               {errors.confirmPassword && (
-                <p className="text-sm text-red-600">{errors.confirmPassword}</p>
+                <p className="text-sm text-[var(--danger)]">{errors.confirmPassword}</p>
               )}
             </div>
 

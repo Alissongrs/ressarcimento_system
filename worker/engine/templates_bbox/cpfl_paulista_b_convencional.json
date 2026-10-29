@@ -1,0 +1,30 @@
+{
+  "_meta": {
+    "distribuidora": "CPFL PAULISTA",
+    "grupo": "B",
+    "modalidade": "Convencional",
+    "fonte_calibracao": "_modelo_cpfl_paulista_b_1238.pdf",
+    "data_calibracao": "2026-05-20",
+    "observacoes": "Variantes de layout CPFL: 1238/1374 com Classificação em x~0.65, 1499 com Classificação em x~0.18."
+  },
+  "campos": {
+    "subgrupo": {
+      "bboxes": [
+        [0.64, 0.300, 0.69, 0.320, 0],
+        [0.17, 0.225, 0.21, 0.245, 0]
+      ],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "default": "B3",
+      "_anchor": "B3 em CLASSIFICAÇÃO (2 layouts)"
+    },
+    "modalidade_tarifaria": {
+      "bboxes": [
+        [0.57, 0.300, 0.66, 0.320, 0],
+        [0.10, 0.225, 0.19, 0.245, 0]
+      ],
+      "regex": "(Verde|Azul|Convencional|Branca)",
+      "default": "Convencional",
+      "_anchor": "Convencional em CLASSIFICAÇÃO (2 layouts)"
+    }
+  }
+}

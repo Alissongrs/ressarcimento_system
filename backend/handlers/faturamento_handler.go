@@ -162,30 +162,42 @@ func SalvarFaturamento(c *gin.Context) {
 	if s := strings.TrimSpace(request.SubEtapa); s != "" {
 		subTxt = s
 		subID, _ := resolveSubEtapaIDGorm(tx, subTxt)
-		if _, err := execGorm(tx, "UPDATE FT_PROCESSOS SET sub_etapa = ?, id_sub_etapa_processo = ?, ultima_atualizacao = NOW() WHERE id_processo = ?", subTxt, nullIntToIface(subID), processoID); err != nil {
+		if _, err := execGorm(tx, "UPDATE FT_PROCESSOS SET sub_etapa = ?, id_status_atual /* TODO V2 */ = ?, ultima_atualizacao = NOW() WHERE id_processo = ?", subTxt, nullIntToIface(subID), processoID); err != nil {
 			log.Printf("Erro ao atualizar sub_etapa do processo %d no faturamento: %v", processoID, err)
 		}
 	}
 
-	statusNome := strings.TrimSpace(getStatusNomeByRequisicaoGorm(tx, int64(processoID)))
-	if statusNome == "" {
-		statusNome = "Em andamento"
+	// P1-1: histórico no schema V2. Faturamento não muda etapa/status,
+	// então anterior = novo, preenchidos com o snapshot atual do processo.
+	var curEtapa, curStatus, curInst, curAprov sql.NullInt64
+	_ = queryRowGorm(tx, `SELECT id_etapa_atual, id_status_atual, id_instancia_atual, id_aprovacao_atual
+	                        FROM FT_PROCESSOS WHERE id_processo = ?`, processoID).
+		Scan(&curEtapa, &curStatus, &curInst, &curAprov)
+
+	var gestorIface interface{}
+	if gestorID > 0 {
+		gestorIface = gestorID
 	}
+
 	_, err = execGorm(tx, `
-        INSERT INTO FT_HISTORICO_MOVIMENTACOES 
-        (id_requisicao, id_usuario_gestor,
-         status_anterior, status_novo,
-         etapa_anterior, etapa_nova, sub_etapa,
-         comentario, data_movimentacao) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		processoID, gestorID,
-		statusNome, statusNome,
-		"Faturamento", "Faturamento", subTxt,
-		histComment, time.Now())
+        INSERT INTO FT_HISTORICO_MOVIMENTACOES
+        (id_processo, id_usuario_gestor,
+         id_etapa_anterior, id_instancia_anterior, id_status_anterior, id_aprovacao_anterior,
+         id_etapa_nova,     id_instancia_nova,     id_status_novo,     id_aprovacao_nova,
+         tipo_movimentacao, comentario, data_movimentacao)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		processoID, gestorIface,
+		curEtapa, curInst, curStatus, curAprov,
+		curEtapa, curInst, curStatus, curAprov,
+		"faturamento", histComment, time.Now())
 
 	if err != nil {
-		log.Printf("Erro ao registrar no histórico: %v", err)
-		// Não falha a operaÃ§ão por causa do histórico
+		// P1-1: fail-hard — NÃO gravar faturamento sem a trilha de auditoria.
+		// Antes o erro era engolido e o histórico nunca era escrito (schema V1 quebrado),
+		// deixando FT_PROCESSOS dessincronizado. Agora o defer tx.Rollback() desfaz tudo.
+		log.Printf("Erro ao registrar histórico (faturamento) do processo %d: %v", processoID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar histórico do faturamento"})
+		return
 	}
 
 	// Notificar imediato para atualizar histórico na UI

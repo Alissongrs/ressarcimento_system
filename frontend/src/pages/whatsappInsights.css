@@ -1,0 +1,47 @@
+/* Aba Insights do WhatsApp — séries: recebidas = slot 1 (azul), enviadas = slot 2 (laranja),
+   paleta categórica validada (claro e escuro). Texto sempre nas cores de texto, nunca na cor da série. */
+.wa-ins {
+  --wa-rec: #2a78d6;
+  --wa-env: #eb6834;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .wa-ins { --wa-rec: #3987e5; --wa-env: #d95926; }
+}
+:root[data-theme="dark"] .wa-ins { --wa-rec: #3987e5; --wa-env: #d95926; }
+
+.wa-ins-muted { color: var(--fg); opacity: .65; }
+.wa-ins-rec { background: var(--wa-rec); }
+.wa-ins-env { background: var(--wa-env); }
+.wa-ins-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; }
+
+.wa-ins-plot { position: relative; display: flex; height: 180px; padding-left: 34px; }
+.wa-ins-grid {
+  position: absolute; left: 0; top: 0; bottom: 18px; width: 100%;
+  display: flex; flex-direction: column; justify-content: space-between; pointer-events: none;
+}
+.wa-ins-grid span {
+  font-size: 10px; color: var(--fg); opacity: .55; line-height: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 0;
+}
+.wa-ins-grid span { display: block; width: 100%; text-indent: 0; }
+.wa-ins-cols { position: relative; flex: 1; display: flex; gap: 2px; align-items: stretch; }
+.wa-ins-col { position: relative; flex: 1; display: flex; flex-direction: column; min-width: 0; cursor: default; }
+.wa-ins-col:hover .wa-ins-stack { background: color-mix(in srgb, var(--fg) 5%, transparent); }
+.wa-ins-stack { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; border-radius: 4px 4px 0 0; }
+.wa-ins-bar { width: 100%; max-width: 22px; margin: 0 auto; min-height: 2px; }
+.wa-ins-stack .wa-ins-bar:first-child { border-radius: 4px 4px 0 0; }
+.wa-ins-x { height: 18px; font-size: 10px; text-align: center; white-space: nowrap; color: var(--fg); opacity: .6; padding-top: 3px; }
+.wa-ins-tip {
+  position: absolute; bottom: 100%; z-index: 5; margin-bottom: 4px; padding: 6px 8px; border-radius: 6px;
+  font-size: 11px; line-height: 1.5; white-space: nowrap; pointer-events: none;
+  background: var(--card); color: var(--fg); border: 1px solid var(--border); box-shadow: 0 4px 14px rgba(0,0,0,.15);
+}
+
+.wa-ins-hbar-track { height: 10px; border-radius: 4px; background: color-mix(in srgb, var(--border) 50%, transparent); }
+.wa-ins-hbar { height: 100%; border-radius: 4px; }
+
+.wa-ins-row:hover { background: var(--menu-hover); }
+.wa-ins-tag {
+  font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px;
+  color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent);
+}

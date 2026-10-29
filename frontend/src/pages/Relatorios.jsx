@@ -171,7 +171,7 @@ export default function Relatorios() {
             </button>
           </div>
         </div>
-        {filterError && <div className="text-xs text-red-500">{filterError}</div>}
+        {filterError && <div className="text-xs" style={{ color: 'var(--danger)' }}>{filterError}</div>}
       </div>
 
       <div>

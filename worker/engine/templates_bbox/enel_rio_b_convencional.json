@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "distribuidora": "enel_rio_b_convencional",
+    "fonte_calibracao": "enel_rio_b_convencional_11309.pdf",
+    "data_calibracao": "2026-05-20",
+    "auto_gerado": true
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [
+        0.073,
+        0.09,
+        0.104,
+        0.106,
+        0
+      ],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "default": "B3",
+      "_anchor": "B3"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [
+        0.143,
+        0.24,
+        0.206,
+        0.256,
+        0
+      ],
+      "regex": "(Verde|Azul|Convencional|Branca|Mon[óo]?mia|MT[VACB])",
+      "default": "Convencional",
+      "_anchor": "Verde"
+    }
+  }
+}

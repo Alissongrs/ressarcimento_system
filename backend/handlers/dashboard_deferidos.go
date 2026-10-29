@@ -41,12 +41,12 @@ SELECT
   DATE_FORMAT(d.data_credito_dobro, '%Y-%m-%d')   AS data_procedencia_dobro,
   COALESCE(r.descricao_irregularidade, '') AS obs,
   COALESCE(u.nome_usuario, '')             AS responsavel,
-  COALESCE(s.status, '')                   AS status,
+  COALESCE(s.nome, '')                     AS status,
   COALESCE(r.uc, '')                       AS unidade
 FROM FT_DEFERIMENTOS d
 JOIN FT_PROCESSOS p ON p.id_processo = d.id_processo
 LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = d.id_processo
-LEFT JOIN DM_STATUS s ON s.id_status = r.id_status
+LEFT JOIN DM_STATUS_PROCESSO s /* TODO V2 */ ON s.id_status = r.id_status
 LEFT JOIN DM_USUARIO u ON u.id_usuario = p.id_responsavel
 `
 	rows, err := queryGorm(database.GormDB_App, query)

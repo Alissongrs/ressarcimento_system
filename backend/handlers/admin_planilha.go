@@ -17,7 +17,7 @@ import (
 
 // PlanilhaRow representa uma linha "achatada" (processo x item do histórico)
 type PlanilhaRow struct {
-    ProcessoID        int64   `json:"processo_id"`
+    ProcessoID        int64   `json:"id_processo"`
     Uc                string  `json:"uc"`
     CNPJ              string  `json:"cnpj"`
     Concessionaria    string  `json:"concessionaria"`
@@ -106,7 +106,7 @@ func AdminPlanilhaList(c *gin.Context) {
     // Monta SQL base (usa LEFT JOIN e subselect para pegar último fluxo/faturamento)
     sqlBase := `
         SELECT
-          p.id_processo                                     AS processo_id,
+          p.id_processo                                     AS id_processo,
           COALESCE(r.uc, '')                                AS uc,
           COALESCE(r.cnpj, '')                              AS cnpj,
           COALESCE(r.concessionaria, '')                    AS concessionaria,
@@ -114,8 +114,8 @@ func AdminPlanilhaList(c *gin.Context) {
           COALESCE(ti.nome, '')                             AS tipo_irregularidade,
           COALESCE(sti.nome, '')                            AS subtipo_irregularidade,
           COALESCE(r.ressarcimento_estimado, 0)             AS ressarcimento_estimado,
-          COALESCE(p.nome_coluna, kanb.nome_coluna, '')     AS nome_coluna,
-          COALESCE(etapa.etapa, '')                         AS etapa_atual,
+          COALESCE(CASE WHEN p.id_aprovacao_atual=2 THEN 'Indeferidos' WHEN p.id_status_atual=5 THEN 'Suspensos' WHEN p.id_etapa_atual=6 THEN 'Concluídos' WHEN p.id_etapa_atual IN (4,5) THEN 'Faturamento' WHEN p.id_aprovacao_atual=1 THEN 'Deferidos' ELSE 'Ativos' END, '')     AS nome_coluna,
+          COALESCE(etapa.nome, '')                         AS etapa_atual,
 
           COALESCE(d.credito_simples, 0)                    AS credito_simples,
           COALESCE(DATE_FORMAT(d.data_procedencia, '%Y-%m-%d'), '') AS data_simples,
@@ -140,17 +140,16 @@ func AdminPlanilhaList(c *gin.Context) {
           COALESCE(h.id_historico, 0)                       AS id_historico,
           COALESCE(DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s'), '') AS hist_data,
           COALESCE(h.comentario, '')                        AS hist_comentario,
-          COALESCE(h.etapa_nova, '')                        AS etapa,
-          COALESCE(h.sub_etapa, '')                         AS sub_etapa,
+          COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova), '')                        AS etapa,
+          COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), '')                         AS sub_etapa,
           COALESCE(h.tipo_movimentacao, '')                 AS tipo_movimentacao,
           p.score_percentual                                AS score_percentual
         FROM FT_PROCESSOS p
         JOIN FT_REQUISICOES r         ON r.id_requisicao = p.id_processo
-        JOIN DM_ETAPAS_PROCESSO etapa ON p.id_etapa_processo = etapa.id_etapa_processo
-        JOIN DM_KANBAN_COLUNAS kanb ON etapa.id_coluna_kanban = kanb.id_coluna
+        JOIN DM_ETAPAS etapa ON etapa.id_etapa = p.id_etapa_atual
         LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo = r.id_tipo_irregularidade
         LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo = r.id_subtipo_irregularidade
-        LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = p.id_processo
+        LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_processo = p.id_processo
         LEFT JOIN FT_DEFERIMENTOS d        ON d.id_processo     = p.id_processo
         LEFT JOIN (
           SELECT x.id_processo, x.forma_devolucao, x.valor, x.simples, x.dobro, x.simples_dobro, x.data_devolucao, x.data_envio_financeiro, x.created_at
@@ -185,11 +184,11 @@ func AdminPlanilhaList(c *gin.Context) {
         }
     }
     if etapa != "" {
-        where = append(where, "LOWER(COALESCE(h.etapa_nova,'')) = ?")
+        where = append(where, "LOWER(COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),'')) = ?")
         args = append(args, strings.ToLower(etapa))
     }
     if sub != "" {
-        where = append(where, "LOWER(COALESCE(h.sub_etapa,'')) = ?")
+        where = append(where, "LOWER(COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),'')) = ?")
         args = append(args, strings.ToLower(sub))
     }
     if ini != "" {
@@ -201,7 +200,7 @@ func AdminPlanilhaList(c *gin.Context) {
         args = append(args, fim)
     }
     if coluna != "" {
-        where = append(where, "LOWER(COALESCE(p.nome_coluna, kanb.nome_coluna)) = ?")
+        where = append(where, "LOWER(COALESCE(CASE WHEN p.id_aprovacao_atual=2 THEN 'Indeferidos' WHEN p.id_status_atual=5 THEN 'Suspensos' WHEN p.id_etapa_atual=6 THEN 'Concluídos' WHEN p.id_etapa_atual IN (4,5) THEN 'Faturamento' WHEN p.id_aprovacao_atual=1 THEN 'Deferidos' ELSE 'Ativos' END,'')) = ?")
         args = append(args, strings.ToLower(coluna))
     }
     if len(where) > 0 {
@@ -217,7 +216,7 @@ func AdminPlanilhaList(c *gin.Context) {
         // Fallback simples: remove joins de fluxo/faturamento (caso colunas/tabelas não existam).
         sqlBaseFallback := `
         SELECT
-          p.id_processo                                     AS processo_id,
+          p.id_processo                                     AS id_processo,
           COALESCE(r.uc, '')                                AS uc,
           COALESCE(r.cnpj, '')                              AS cnpj,
           COALESCE(r.concessionaria, '')                    AS concessionaria,
@@ -225,8 +224,8 @@ func AdminPlanilhaList(c *gin.Context) {
           ''                                                AS tipo_irregularidade,
           ''                                                AS subtipo_irregularidade,
           0                                                 AS ressarcimento_estimado,
-          COALESCE(p.nome_coluna, kanb.nome_coluna, '')     AS nome_coluna,
-          COALESCE(etapa.etapa, '')                         AS etapa_atual,
+          COALESCE(CASE WHEN p.id_aprovacao_atual=2 THEN 'Indeferidos' WHEN p.id_status_atual=5 THEN 'Suspensos' WHEN p.id_etapa_atual=6 THEN 'Concluídos' WHEN p.id_etapa_atual IN (4,5) THEN 'Faturamento' WHEN p.id_aprovacao_atual=1 THEN 'Deferidos' ELSE 'Ativos' END, '')     AS nome_coluna,
+          COALESCE(etapa.nome, '')                         AS etapa_atual,
 
           COALESCE(d.credito_simples, 0)                    AS credito_simples,
           COALESCE(DATE_FORMAT(d.data_procedencia, '%Y-%m-%d'), '') AS data_simples,
@@ -251,15 +250,14 @@ func AdminPlanilhaList(c *gin.Context) {
           COALESCE(h.id_historico, 0)                       AS id_historico,
           COALESCE(DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s'), '') AS hist_data,
           COALESCE(h.comentario, '')                        AS hist_comentario,
-          COALESCE(h.etapa_nova, '')                        AS etapa,
-          COALESCE(h.sub_etapa, '')                         AS sub_etapa,
+          COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova), '')                        AS etapa,
+          COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), '')                         AS sub_etapa,
           COALESCE(h.tipo_movimentacao, '')                 AS tipo_movimentacao,
           p.score_percentual                                AS score_percentual
         FROM FT_PROCESSOS p
         JOIN FT_REQUISICOES r         ON r.id_requisicao = p.id_processo
-        JOIN DM_ETAPAS_PROCESSO etapa ON p.id_etapa_processo = etapa.id_etapa_processo
-        JOIN DM_KANBAN_COLUNAS kanb ON etapa.id_coluna_kanban = kanb.id_coluna
-        LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = p.id_processo
+        JOIN DM_ETAPAS etapa ON etapa.id_etapa = p.id_etapa_atual
+        LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_processo = p.id_processo
         LEFT JOIN FT_DEFERIMENTOS d        ON d.id_processo     = p.id_processo
         `
         if len(where) > 0 {
@@ -294,7 +292,7 @@ func AdminPlanilhaList(c *gin.Context) {
     if len(out) == 0 {
         sqlBaseAlt := `
         SELECT
-          r.id_requisicao                                   AS processo_id,
+          r.id_requisicao                                   AS id_processo,
           COALESCE(r.uc, '')                                AS uc,
           COALESCE(r.cnpj, '')                              AS cnpj,
           COALESCE(r.concessionaria, '')                    AS concessionaria,
@@ -302,8 +300,8 @@ func AdminPlanilhaList(c *gin.Context) {
           COALESCE(ti.nome, '')                             AS tipo_irregularidade,
           COALESCE(sti.nome, '')                            AS subtipo_irregularidade,
           COALESCE(r.ressarcimento_estimado, 0)             AS ressarcimento_estimado,
-          COALESCE(p.nome_coluna, kanb.nome_coluna, '')     AS nome_coluna,
-          COALESCE(etapa.etapa, '')                         AS etapa_atual,
+          COALESCE(CASE WHEN p.id_aprovacao_atual=2 THEN 'Indeferidos' WHEN p.id_status_atual=5 THEN 'Suspensos' WHEN p.id_etapa_atual=6 THEN 'Concluídos' WHEN p.id_etapa_atual IN (4,5) THEN 'Faturamento' WHEN p.id_aprovacao_atual=1 THEN 'Deferidos' ELSE 'Ativos' END, '')     AS nome_coluna,
+          COALESCE(etapa.nome, '')                         AS etapa_atual,
 
           COALESCE(d.credito_simples, 0)                    AS credito_simples,
           COALESCE(DATE_FORMAT(d.data_procedencia, '%Y-%m-%d'), '') AS data_simples,
@@ -328,16 +326,15 @@ func AdminPlanilhaList(c *gin.Context) {
           COALESCE(h.id_historico, 0)                       AS id_historico,
           COALESCE(DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s'), '') AS hist_data,
           COALESCE(h.comentario, '')                        AS hist_comentario,
-          COALESCE(h.etapa_nova, '')                        AS etapa,
-          COALESCE(h.sub_etapa, '')                         AS sub_etapa,
+          COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova), '')                        AS etapa,
+          COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), '')                         AS sub_etapa,
           COALESCE(h.tipo_movimentacao, '')                 AS tipo_movimentacao,
           p.score_percentual                                AS score_percentual
         FROM FT_REQUISICOES r
         LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
-        LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = r.id_requisicao
+        LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_processo = r.id_requisicao
         LEFT JOIN FT_DEFERIMENTOS d ON d.id_processo = r.id_requisicao
-        LEFT JOIN DM_ETAPAS_PROCESSO etapa ON p.id_etapa_processo = etapa.id_etapa_processo
-        LEFT JOIN DM_KANBAN_COLUNAS kanb ON etapa.id_coluna_kanban = kanb.id_coluna
+        LEFT JOIN DM_ETAPAS etapa ON etapa.id_etapa = p.id_etapa_atual
         LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo = r.id_tipo_irregularidade
         LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo = r.id_subtipo_irregularidade
         LEFT JOIN (
@@ -397,7 +394,7 @@ func AdminPlanilhaList(c *gin.Context) {
 // @Router       /api/v1/admin/processos/bulk-mover [post]
 func AdminPlanilhaBulkMover(c *gin.Context) {
     var body struct{
-        ProcessoIDs []int64 `json:"processo_ids"`
+        ProcessoIDs []int64 `json:"id_processos"`
         Etapa       string  `json:"etapa"`
         SubEtapa    string  `json:"sub_etapa"`
         Comentario  string  `json:"comentario"`
@@ -418,18 +415,19 @@ func AdminPlanilhaBulkMover(c *gin.Context) {
     if tx.Error != nil { c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()}); return }
     defer tx.Rollback()
 
-    // Mapear etapa -> id_etapa_processo
+    // Mapear etapa -> id_etapa_atual /* TODO V2 */
     var etapaID sql.NullInt64
-    _ = queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", strings.TrimSpace(body.Etapa)).Scan(&etapaID)
+    _ = queryRowGorm(tx, "SELECT id_etapa FROM DM_ETAPAS WHERE nome = ?", strings.TrimSpace(body.Etapa)).Scan(&etapaID)
     if !etapaID.Valid { etapaID = sql.NullInt64{Int64: 1, Valid: true} }
 
     var colID sql.NullInt64
     var colNome sql.NullString
     _ = queryRowGorm(tx, `
-        SELECT k.id_coluna, k.nome_coluna
-          FROM DM_ETAPAS_PROCESSO e
-          JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-         WHERE e.id_etapa_processo = ?`,
+        SELECT
+          CASE WHEN e.id_etapa=6 THEN 5 WHEN e.id_etapa IN (4,5) THEN 4 ELSE 1 END AS id_coluna,
+          CASE WHEN e.id_etapa=6 THEN 'Concluídos' WHEN e.id_etapa IN (4,5) THEN 'Faturamento' ELSE 'Ativos' END AS nome_coluna
+          FROM DM_ETAPAS e
+         WHERE e.id_etapa = ?`,
         etapaID.Int64,
     ).Scan(&colID, &colNome)
 
@@ -438,10 +436,10 @@ func AdminPlanilhaBulkMover(c *gin.Context) {
         // Captura coluna e id_requisicao atuais antes de mover
         var oldColuna sql.NullInt64
         var reqID sql.NullInt64
-        _ = queryRowGorm(tx, `SELECT id_coluna, id_requisicao FROM FT_PROCESSOS WHERE id_processo = ?`, pid).Scan(&oldColuna, &reqID)
+        _ = queryRowGorm(tx, `SELECT (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END), p.id_processo FROM FT_PROCESSOS p WHERE p.id_processo = ?`, pid).Scan(&oldColuna, &reqID)
 
         // Atualiza processo
-        if _, err := execGorm(tx, "UPDATE FT_PROCESSOS SET id_etapa_processo = ?, sub_etapa = ?, id_sub_etapa_processo = ?, id_coluna = ?, nome_coluna = ?, ultima_atualizacao = NOW() WHERE id_processo = ?",
+        if _, err := execGorm(tx, "UPDATE FT_PROCESSOS SET id_etapa_atual /* TODO V2 */ = ?, sub_etapa = ?, id_status_atual /* TODO V2 */ = ?, id_coluna = ?, nome_coluna = ?, ultima_atualizacao = NOW() WHERE id_processo = ?",
             etapaID.Int64, strings.TrimSpace(body.SubEtapa), nullIntToIface(subID),
             nullIntToIface(colID), func() interface{} { if colNome.Valid { return colNome.String }; return nil }(),
             pid,
@@ -450,10 +448,21 @@ func AdminPlanilhaBulkMover(c *gin.Context) {
             return
         }
         // Registra histórico da movimentação (status compatível com DM_STATUS)
-        statusNome := getStatusNomeByRequisicaoGorm(tx, int64(pid))
-        if _, err := execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR))`,
-            pid, userIDNull, statusNome, statusNome, body.Etapa, body.Etapa, strings.TrimSpace(body.SubEtapa), strings.TrimSpace(body.Comentario)); err != nil {
+        if _, err := execGorm(tx, `
+            INSERT INTO FT_HISTORICO_MOVIMENTACOES
+              (id_processo, id_usuario_gestor,
+               id_etapa_anterior, id_etapa_nova,
+               id_instancia_anterior, id_instancia_nova,
+               id_status_anterior, id_status_novo,
+               comentario, data_movimentacao, tipo_movimentacao)
+            SELECT ?, ?,
+               (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+               (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+               p.id_instancia_atual, p.id_instancia_atual,
+               p.id_status_atual, p.id_status_atual,
+               ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'movimentacao'
+              FROM FT_PROCESSOS p WHERE p.id_processo = ?`,
+            pid, userIDNull, body.Etapa, body.Etapa, strings.TrimSpace(body.Comentario), pid); err != nil {
             c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("falha ao registrar histórico %d: %v", pid, err)})
             return
         }
@@ -680,15 +689,15 @@ func AdminPlanilhaExport(c *gin.Context) {
           COALESCE(DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s'), '') AS data_criacao,
           COALESCE(r.id_status, 0) AS id_status,
           COALESCE(r.ressarcimento_estimado, 0) AS ressarcimento_estimado,
-          COALESCE(s.status, '') AS status,
+          COALESCE(s.nome, '') AS status,
           COALESCE(DATE_FORMAT(p.ultima_atualizacao, '%Y-%m-%d %H:%i:%s'), '') AS ultima_atualizacao,
           COALESCE(DATE_FORMAT(h.ultima_movimentacao_historico, '%Y-%m-%d %H:%i:%s'), '') AS ultima_movimentacao_historico,
           COALESCE(h.etapa_historico, '') AS etapa_historico,
           COALESCE(h.sub_etapa_historico, '') AS sub_etapa_historico,
-          COALESCE(ep.etapa, '') AS etapa,
-          COALESCE(p.sub_etapa, '') AS sub_etapa,
-          COALESCE(p.nome_coluna, k.nome_coluna, '') AS coluna_kanban,
-          IF(p.suspenso = 1, 'Suspenso', '') AS suspenso,
+          COALESCE(ep.nome, '') AS etapa,
+          COALESCE('' /* TODO V2: removida */, '') AS sub_etapa,
+          COALESCE(CASE WHEN p.id_aprovacao_atual=2 THEN 'Indeferidos' WHEN p.id_status_atual=5 THEN 'Suspensos' WHEN p.id_etapa_atual=6 THEN 'Concluídos' WHEN p.id_etapa_atual IN (4,5) THEN 'Faturamento' WHEN p.id_aprovacao_atual=1 THEN 'Deferidos' ELSE 'Ativos' END, '') AS coluna_kanban,
+          IF((p.id_status_atual=5)/* TODO V2 */ = 1, 'Suspenso', '') AS suspenso,
           COALESCE(d.qtde_deferidos, 0) AS qtde_deferidos,
           COALESCE(DATE_FORMAT(d.data_credito_simples, '%Y-%m-%d'), '') AS data_deferido_simples,
           COALESCE(DATE_FORMAT(d.data_credito_dobro, '%Y-%m-%d'), '') AS data_deferido_dobro,
@@ -706,10 +715,9 @@ func AdminPlanilhaExport(c *gin.Context) {
           COALESCE(ft.numero_nf, '') AS primeira_nf,
           COALESCE(ft.valor_fat, 0) AS valor_fat
         FROM FT_REQUISICOES r
-        LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+        LEFT JOIN DM_STATUS_PROCESSO s /* TODO V2 */ ON r.id_status = s.id_status
         LEFT JOIN FT_PROCESSOS p ON r.id_requisicao = p.id_processo
-        LEFT JOIN DM_ETAPAS_PROCESSO ep ON p.id_etapa_processo = ep.id_etapa_processo
-        LEFT JOIN DM_KANBAN_COLUNAS k ON ep.id_coluna_kanban = k.id_coluna
+        LEFT JOIN DM_ETAPAS ep ON ep.id_etapa = p.id_etapa_atual
         LEFT JOIN (
           SELECT
             id_processo,
@@ -727,20 +735,20 @@ func AdminPlanilhaExport(c *gin.Context) {
           SELECT t2.*
           FROM (
             SELECT
-              RANK() OVER (PARTITION BY id_requisicao ORDER BY id_requisicao, ultima_movimentacao_historico DESC, id_historico DESC) AS n_rank,
+              RANK() OVER (PARTITION BY id_processo ORDER BY id_processo, ultima_movimentacao_historico DESC, id_historico DESC) AS n_rank,
               t.*
             FROM (
               SELECT DISTINCT
-                id_requisicao,
+                id_processo,
                 id_historico,
-                etapa_nova AS etapa_historico,
-                sub_etapa AS sub_etapa_historico,
+                (SELECT nome FROM DM_ETAPAS WHERE id_etapa = id_etapa_nova) AS etapa_historico,
+                (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = id_status_novo) AS sub_etapa_historico,
                 data_movimentacao AS ultima_movimentacao_historico
               FROM FT_HISTORICO_MOVIMENTACOES
             ) t
           ) t2
           WHERE n_rank = 1
-        ) h ON r.id_requisicao = h.id_requisicao
+        ) h ON r.id_requisicao = h.id_processo
         LEFT JOIN (
           SELECT
             id_processo,
@@ -799,15 +807,15 @@ func AdminPlanilhaExport(c *gin.Context) {
         args = append(args, idStatusFilter)
     }
     if statusFilter != "" {
-        where = append(where, "LOWER(COALESCE(s.status,'')) = ?")
+        where = append(where, "LOWER(COALESCE(s.nome,'')) = ?")
         args = append(args, strings.ToLower(statusFilter))
     }
     if etapa != "" {
-        where = append(where, "LOWER(COALESCE(ep.etapa,'')) = ?")
+        where = append(where, "LOWER(COALESCE(ep.nome,'')) = ?")
         args = append(args, strings.ToLower(etapa))
     }
     if sub != "" {
-        where = append(where, "LOWER(COALESCE(p.sub_etapa,'')) = ?")
+        where = append(where, "LOWER(COALESCE('' /* TODO V2: removida */,'')) = ?")
         args = append(args, strings.ToLower(sub))
     }
     if etapaHistFilter != "" {
@@ -827,7 +835,7 @@ func AdminPlanilhaExport(c *gin.Context) {
         args = append(args, fim)
     }
     if coluna != "" {
-        where = append(where, "LOWER(COALESCE(p.nome_coluna, k.nome_coluna)) = ?")
+        where = append(where, "LOWER(COALESCE(CASE WHEN p.id_aprovacao_atual=2 THEN 'Indeferidos' WHEN p.id_status_atual=5 THEN 'Suspensos' WHEN p.id_etapa_atual=6 THEN 'Concluídos' WHEN p.id_etapa_atual IN (4,5) THEN 'Faturamento' WHEN p.id_aprovacao_atual=1 THEN 'Deferidos' ELSE 'Ativos' END,'')) = ?")
         args = append(args, strings.ToLower(coluna))
     }
     if ultimaAtualIni != "" {
@@ -848,9 +856,9 @@ func AdminPlanilhaExport(c *gin.Context) {
     }
     if suspensoFilter != "" {
         if strings.EqualFold(suspensoFilter, "Suspenso") || suspensoFilter == "1" || strings.EqualFold(suspensoFilter, "true") {
-            where = append(where, "p.suspenso = 1")
+            where = append(where, "(p.id_status_atual=5)/* TODO V2 */ = 1")
         } else {
-            where = append(where, "p.suspenso = 0")
+            where = append(where, "(p.id_status_atual=5)/* TODO V2 */ = 0")
         }
     }
     if dataDefSimplesIni != "" {
@@ -1128,7 +1136,7 @@ func AdminPlanilhaImport(c *gin.Context) {
             c.JSON(http.StatusBadRequest, gin.H{"error": "erro ao ler CSV"})
             return
         }
-        pidStr := get(row, "processo_id")
+        pidStr := get(row, "id_processo")
         if pidStr == "" {
             continue
         }
@@ -1199,9 +1207,9 @@ func AdminPlanilhaImport(c *gin.Context) {
         if etapa != "" || sub != "" || comentario != "" {
             var etapaAtual, subAtual string
             _ = queryRowGorm(tx, `
-                SELECT COALESCE(e.etapa,''), COALESCE(p.sub_etapa,'')
+                SELECT COALESCE(e.nome,''), COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual),'')
                 FROM FT_PROCESSOS p
-                JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo
+                JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
                 WHERE p.id_processo = ?`, pid).Scan(&etapaAtual, &subAtual)
 
             etapaNova := etapa
@@ -1215,19 +1223,20 @@ func AdminPlanilhaImport(c *gin.Context) {
 
             if etapa != "" || sub != "" {
                 var etapaID sql.NullInt64
-                _ = queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", strings.TrimSpace(etapaNova)).Scan(&etapaID)
+                _ = queryRowGorm(tx, "SELECT id_etapa FROM DM_ETAPAS WHERE nome = ?", strings.TrimSpace(etapaNova)).Scan(&etapaID)
                 if etapaID.Valid {
                     subID, _ := resolveSubEtapaIDGorm(tx, strings.TrimSpace(subNova))
                     var colID sql.NullInt64
                     var colNome sql.NullString
                     _ = queryRowGorm(tx, `
-                        SELECT k.id_coluna, k.nome_coluna
-                          FROM DM_ETAPAS_PROCESSO e
-                          JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-                         WHERE e.id_etapa_processo = ?`,
+                        SELECT
+                          CASE WHEN e.id_etapa=6 THEN 5 WHEN e.id_etapa IN (4,5) THEN 4 ELSE 1 END AS id_coluna,
+                          CASE WHEN e.id_etapa=6 THEN 'Concluídos' WHEN e.id_etapa IN (4,5) THEN 'Faturamento' ELSE 'Ativos' END AS nome_coluna
+                          FROM DM_ETAPAS e
+                         WHERE e.id_etapa = ?`,
                         etapaID.Int64,
                     ).Scan(&colID, &colNome)
-                    if _, err := execGorm(tx, `UPDATE FT_PROCESSOS SET id_etapa_processo = ?, sub_etapa = ?, id_sub_etapa_processo = ?, id_coluna = ?, nome_coluna = ?, ultima_atualizacao = NOW() WHERE id_processo = ?`,
+                    if _, err := execGorm(tx, `UPDATE FT_PROCESSOS SET id_etapa_atual /* TODO V2 */ = ?, sub_etapa = ?, id_status_atual /* TODO V2 */ = ?, id_coluna = ?, nome_coluna = ?, ultima_atualizacao = NOW() WHERE id_processo = ?`,
                         etapaID.Int64, subNova, nullIntToIface(subID), nullIntToIface(colID), func() interface{} { if colNome.Valid { return colNome.String }; return nil }(), pid); err != nil {
                         c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("falha atualizar processo %d: %v", pid, err)})
                         return
@@ -1238,11 +1247,21 @@ func AdminPlanilhaImport(c *gin.Context) {
             if comentario == "" {
                 comentario = "ImportaÃ§ão de planilha"
             }
-            statusNome := getStatusNomeByRequisicaoGorm(tx, int64(pid))
             if _, err := execGorm(tx, `
-                INSERT INTO FT_HISTORICO_MOVIMENTACOES (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR))`,
-                pid, userIDNull, statusNome, statusNome, etapaAtual, etapaNova, subNova, comentario); err != nil {
+                INSERT INTO FT_HISTORICO_MOVIMENTACOES
+                  (id_processo, id_usuario_gestor,
+                   id_etapa_anterior, id_etapa_nova,
+                   id_instancia_anterior, id_instancia_nova,
+                   id_status_anterior, id_status_novo,
+                   comentario, data_movimentacao, tipo_movimentacao)
+                SELECT ?, ?,
+                   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+                   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+                   p.id_instancia_atual, p.id_instancia_atual,
+                   p.id_status_atual, p.id_status_atual,
+                   ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'movimentacao'
+                  FROM FT_PROCESSOS p WHERE p.id_processo = ?`,
+                pid, userIDNull, etapaAtual, etapaNova, comentario, pid); err != nil {
                 c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("falha historico %d: %v", pid, err)})
                 return
             }

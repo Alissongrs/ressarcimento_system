@@ -107,33 +107,33 @@ WITH alvo AS (
     UNION ALL SELECT 'SMA', 'Em Conciliação - Aguardando retorno', 15
 ),
 hist AS (
-    SELECT hm.id_requisicao, MAX(hm.data_movimentacao) AS data_movimentacao
+    SELECT hm.id_processo, MAX(hm.data_movimentacao) AS data_movimentacao
     FROM FT_HISTORICO_MOVIMENTACOES hm
-    WHERE LOWER(TRIM(COALESCE(hm.sub_etapa, ''))) IN (
+    WHERE LOWER(TRIM(COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = hm.id_status_novo), ''))) IN (
         'aguardando retorno',
         'primeira reclamação - aguardando retorno',
         'em contestação - aguardando retorno',
         'em conciliação - aguardando retorno'
     )
-    GROUP BY hm.id_requisicao
+    GROUP BY hm.id_processo
 )
 SELECT
     p.id_processo,
     COALESCE(p.uc, '')             AS uc,
     COALESCE(p.cliente, '')        AS cliente,
     COALESCE(p.concessionaria, '') AS concessionaria,
-    e.etapa,
-    COALESCE(p.sub_etapa, '')      AS sub_etapa,
+    e.nome AS etapa,
+    (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual)      AS sub_etapa,
     a.prazo_dias,
     h.data_movimentacao            AS data_base
 FROM FT_PROCESSOS p
-JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 JOIN alvo a
-  ON LOWER(TRIM(e.etapa))              = LOWER(TRIM(a.etapa))    COLLATE utf8mb4_unicode_ci
- AND LOWER(TRIM(COALESCE(p.sub_etapa,''))) = LOWER(TRIM(a.sub_etapa)) COLLATE utf8mb4_unicode_ci
-JOIN hist h ON h.id_requisicao = p.id_processo
-WHERE COALESCE(p.suspenso, 0) = 0
-  AND LOWER(TRIM(COALESCE(p.sub_etapa, ''))) NOT LIKE 'suspenso%'
+  ON LOWER(TRIM(e.nome))              = LOWER(TRIM(a.etapa))    COLLATE utf8mb4_unicode_ci
+ AND LOWER(TRIM(COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual),''))) = LOWER(TRIM(a.sub_etapa)) COLLATE utf8mb4_unicode_ci
+JOIN hist h ON h.id_processo = p.id_processo
+WHERE COALESCE((p.id_status_atual=5)/* TODO V2 */, 0) = 0
+  AND LOWER(TRIM(COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual), ''))) NOT LIKE 'suspenso%'
   AND TIMESTAMPDIFF(HOUR, NOW(), DATE_ADD(h.data_movimentacao, INTERVAL a.prazo_dias DAY)) <= 24
 ORDER BY TIMESTAMPDIFF(SECOND, NOW(), DATE_ADD(h.data_movimentacao, INTERVAL a.prazo_dias DAY)) ASC
 LIMIT 100`
@@ -183,21 +183,21 @@ SELECT
     COALESCE(p.uc, '')             AS uc,
     COALESCE(p.cliente, '')        AS cliente,
     COALESCE(p.concessionaria, '') AS concessionaria,
-    COALESCE(e.etapa, '')          AS etapa,
-    COALESCE(p.sub_etapa, '')      AS sub_etapa,
+    COALESCE(e.nome, '')          AS etapa,
+    (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual)      AS sub_etapa,
     DATEDIFF(NOW(), ultima_mov.dt) AS dias_sem_mov,
     ultima_mov.dt                  AS ultima_movimentacao
 FROM FT_PROCESSOS p
-LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 JOIN (
-    SELECT id_requisicao, MAX(data_movimentacao) AS dt
+    SELECT id_processo, MAX(data_movimentacao) AS dt
     FROM FT_HISTORICO_MOVIMENTACOES
-    GROUP BY id_requisicao
-) ultima_mov ON ultima_mov.id_requisicao = p.id_processo
-WHERE COALESCE(p.suspenso, 0) = 0
-  AND COALESCE(p.id_coluna, 0) NOT IN (5, 6, 99)
-  AND LOWER(TRIM(COALESCE(e.etapa, ''))) NOT REGEXP 'indefer|improced|rejeit|descart'
-  AND LOWER(TRIM(COALESCE(p.sub_etapa, ''))) NOT REGEXP 'indefer|improced|rejeit|descart'
+    GROUP BY id_processo
+) ultima_mov ON ultima_mov.id_processo = p.id_processo
+WHERE COALESCE((p.id_status_atual=5)/* TODO V2 */, 0) = 0
+  AND COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, 0) NOT IN (5, 6, 99)
+  AND LOWER(TRIM(COALESCE(e.nome, ''))) NOT REGEXP 'indefer|improced|rejeit|descart'
+  AND LOWER(TRIM(COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual), ''))) NOT REGEXP 'indefer|improced|rejeit|descart'
   AND DATEDIFF(NOW(), ultima_mov.dt) >= ?
 ORDER BY dias_sem_mov DESC
 LIMIT 50`
@@ -241,20 +241,20 @@ SELECT
     COALESCE(p.uc, '')             AS uc,
     COALESCE(p.cliente, '')        AS cliente,
     COALESCE(p.concessionaria, '') AS concessionaria,
-    COALESCE(e.etapa, '')          AS etapa,
-    COALESCE(p.sub_etapa, '')      AS sub_etapa,
+    COALESCE(e.nome, '')          AS etapa,
+    (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual)      AS sub_etapa,
     DATEDIFF(NOW(), ultima_mov.dt) AS dias_aguardando,
     ultima_mov.dt                  AS ultima_movimentacao
 FROM FT_PROCESSOS p
-JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 JOIN (
-    SELECT id_requisicao, MAX(data_movimentacao) AS dt
+    SELECT id_processo, MAX(data_movimentacao) AS dt
     FROM FT_HISTORICO_MOVIMENTACOES
-    GROUP BY id_requisicao
-) ultima_mov ON ultima_mov.id_requisicao = p.id_processo
-WHERE COALESCE(p.suspenso, 0) = 0
-  AND LOWER(TRIM(e.etapa)) IN ('distribuidora','aneel','ouvidoria','sma')
-  AND LOWER(TRIM(COALESCE(p.sub_etapa,''))) LIKE '%aguardando%'
+    GROUP BY id_processo
+) ultima_mov ON ultima_mov.id_processo = p.id_processo
+WHERE COALESCE((p.id_status_atual=5)/* TODO V2 */, 0) = 0
+  AND LOWER(TRIM(e.nome)) IN ('distribuidora','aneel','ouvidoria','sma')
+  AND LOWER(TRIM(COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual),''))) LIKE '%aguardando%'
   AND DATEDIFF(NOW(), ultima_mov.dt) >= ?
 ORDER BY dias_aguardando DESC
 LIMIT 50`
@@ -301,13 +301,13 @@ SELECT
     COALESCE(p.uc, '')             AS uc,
     COALESCE(p.cliente, '')        AS cliente,
     COUNT(DISTINCT pm.mail_message_id) AS count_emails
-FROM process_mail_links pm
+FROM process_mail_links pm  /* schema legado: coluna é processo_id */
 JOIN FT_PROCESSOS p ON p.id_processo = pm.processo_id
 LEFT JOIN mail_messages mm ON mm.id = pm.mail_message_id
-LEFT JOIN mail_message_reads mr
+LEFT JOIN MAIL_MESSAGE_READS mr
        ON mr.graph_message_id = mm.graph_message_id
       AND mr.user_id = ?
-WHERE mr.id IS NULL
+WHERE mr.graph_message_id IS NULL
 GROUP BY pm.processo_id, p.uc, p.cliente
 ORDER BY count_emails DESC
 LIMIT 20`

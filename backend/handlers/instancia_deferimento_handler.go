@@ -8,7 +8,7 @@ import (
 )
 
 // ListInstanciasDeferimento devolve as instâncias possíveis para um deferimento
-// (Distribuidora, Ouvidoria, ANEEL, SMA), lendo direto de DM_INSTANCIA_DEFERIMENTO.
+// (Distribuidora, Ouvidoria, ANEEL, SMA), lendo direto de DM_INSTANCIAS.
 //
 // @Summary Listar instâncias de deferimento
 // @Tags    Filtros
@@ -23,7 +23,7 @@ func ListInstanciasDeferimento(c *gin.Context) {
 		return
 	}
 
-	rows, err := queryGorm(db, `SELECT id_instancia, nome FROM DM_INSTANCIA_DEFERIMENTO ORDER BY id_instancia`)
+	rows, err := queryGorm(db, `SELECT id_instancia, nome FROM DM_INSTANCIAS ORDER BY id_instancia`)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

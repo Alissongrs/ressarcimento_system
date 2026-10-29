@@ -7,13 +7,15 @@ export const getMailFolders = async () => {
   return data?.folders || [];
 };
 
-export const getMailMessages = async ({ folderId, q, unread, limit, offset }) => {
+export const getMailMessages = async ({ folderId, q, unread, limit, offset, from, to }) => {
   const params = {};
   if (folderId) params.folderId = folderId;
   if (q) params.q = q;
   if (unread !== undefined && unread !== null) params.unread = unread;
   if (limit) params.limit = limit;
   if (offset !== undefined && offset !== null) params.offset = offset;
+  if (from) params.from = from;
+  if (to) params.to = to;
   const { data } = await api.get('/mail/messages', { params });
   return data?.messages || [];
 };

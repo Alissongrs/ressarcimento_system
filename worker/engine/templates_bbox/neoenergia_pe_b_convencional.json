@@ -1,0 +1,23 @@
+{
+  "_meta": {
+    "distribuidora": "NEOENERGIA PE (CELPE)",
+    "grupo": "B",
+    "modalidade": "Convencional",
+    "fonte_calibracao": "_modelo_neoenergia_pe_b_358.pdf",
+    "data_calibracao": "2026-05-20",
+    "observacoes": "CELPE usa 'Conv. Monômia' como modalidade na linha de TIPO DE FORNECIMENTO."
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [0.10, 0.190, 0.16, 0.210, 0],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "_anchor": "B3 em 'CLASSIFICAÇÃO: B3 COMERCIAL'"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [0.70, 0.188, 0.95, 0.210, 0],
+      "regex": "(Mon.?mia|Verde|Azul|Convencional|Branca)",
+      "_anchor": "Conv. Monômia em TIPO DE FORNECIMENTO",
+      "_post_normalizar": "Monômia → Convencional"
+    }
+  }
+}

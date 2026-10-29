@@ -7,15 +7,15 @@ import { getMinhasRequisicoes } from '../services/requisicaoService';
 const normStatus = (s) => String(s || '').trim().toLowerCase();
 
 const STATUS_STYLE = {
-  'nova requisição':         { Icon: Clock,         color: 'text-amber-400',  bg: 'bg-amber-500/10',   border: 'border-amber-500/30' },
-  'pendente':                { Icon: Clock,         color: 'text-amber-400',  bg: 'bg-amber-500/10',   border: 'border-amber-500/30' },
-  'em análise':              { Icon: Clock,         color: 'text-blue-400',   bg: 'bg-blue-500/10',    border: 'border-blue-500/30' },
-  'em andamento':            { Icon: Clock,         color: 'text-blue-400',   bg: 'bg-blue-500/10',    border: 'border-blue-500/30' },
-  'aprovado':                { Icon: CheckCircle2,  color: 'text-green-400',  bg: 'bg-green-500/10',   border: 'border-green-500/30' },
-  'aprovada':                { Icon: CheckCircle2,  color: 'text-green-400',  bg: 'bg-green-500/10',   border: 'border-green-500/30' },
-  'concluído':               { Icon: CheckCircle2,  color: 'text-green-400',  bg: 'bg-green-500/10',   border: 'border-green-500/30' },
-  'rejeitado':               { Icon: AlertCircle,   color: 'text-red-400',    bg: 'bg-red-500/10',     border: 'border-red-500/30' },
-  'rejeitada':               { Icon: AlertCircle,   color: 'text-red-400',    bg: 'bg-red-500/10',     border: 'border-red-500/30' },
+  'nova requisição':         { Icon: Clock,         color: 'text-[var(--warning)]',  bg: 'bg-[color-mix(in_srgb,var(--warning)_10%,transparent)]',   border: 'border-[color-mix(in_srgb,var(--warning)_30%,transparent)]' },
+  'pendente':                { Icon: Clock,         color: 'text-[var(--warning)]',  bg: 'bg-[color-mix(in_srgb,var(--warning)_10%,transparent)]',   border: 'border-[color-mix(in_srgb,var(--warning)_30%,transparent)]' },
+  'em análise':              { Icon: Clock,         color: 'text-[var(--accent)]',   bg: 'bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]',    border: 'border-[color-mix(in_srgb,var(--accent)_30%,transparent)]' },
+  'em andamento':            { Icon: Clock,         color: 'text-[var(--accent)]',   bg: 'bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]',    border: 'border-[color-mix(in_srgb,var(--accent)_30%,transparent)]' },
+  'aprovado':                { Icon: CheckCircle2,  color: 'text-[var(--success)]',  bg: 'bg-[color-mix(in_srgb,var(--success)_10%,transparent)]',   border: 'border-[color-mix(in_srgb,var(--success)_30%,transparent)]' },
+  'aprovada':                { Icon: CheckCircle2,  color: 'text-[var(--success)]',  bg: 'bg-[color-mix(in_srgb,var(--success)_10%,transparent)]',   border: 'border-[color-mix(in_srgb,var(--success)_30%,transparent)]' },
+  'concluído':               { Icon: CheckCircle2,  color: 'text-[var(--success)]',  bg: 'bg-[color-mix(in_srgb,var(--success)_10%,transparent)]',   border: 'border-[color-mix(in_srgb,var(--success)_30%,transparent)]' },
+  'rejeitado':               { Icon: AlertCircle,   color: 'text-[var(--danger)]',   bg: 'bg-[color-mix(in_srgb,var(--danger)_10%,transparent)]',    border: 'border-[color-mix(in_srgb,var(--danger)_30%,transparent)]' },
+  'rejeitada':               { Icon: AlertCircle,   color: 'text-[var(--danger)]',   bg: 'bg-[color-mix(in_srgb,var(--danger)_10%,transparent)]',    border: 'border-[color-mix(in_srgb,var(--danger)_30%,transparent)]' },
 };
 
 const getStatusStyle = (status) => STATUS_STYLE[normStatus(status)] || {
@@ -96,7 +96,7 @@ const ChatRequisicao = () => {
   const firstName = String(user?.nome || '').split(' ')[0] || 'Solicitante';
 
   return (
-    <div className="max-w-6xl mx-auto p-6 text-[var(--fg)] space-y-6">
+    <div className="w-full p-4 md:p-6 text-[var(--fg)] space-y-6">
       {/* Hero — boas-vindas + CTA */}
       <div className="glass-card border border-[var(--border)] rounded-xl p-6 bg-gradient-to-br from-[var(--panel)] to-[var(--bg)]">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -128,7 +128,7 @@ const ChatRequisicao = () => {
           label="Em aberto"
           value={stats.pendente}
           Icon={Clock}
-          color="text-amber-400"
+          color="text-[var(--warning)]"
           onClick={() => setFiltroStatus('pendente')}
           active={filtroStatus === 'pendente'}
         />
@@ -136,7 +136,7 @@ const ChatRequisicao = () => {
           label="Em andamento"
           value={stats.andamento}
           Icon={Clock}
-          color="text-blue-400"
+          color="text-[var(--accent)]"
           onClick={() => setFiltroStatus('andamento')}
           active={filtroStatus === 'andamento'}
         />
@@ -144,7 +144,7 @@ const ChatRequisicao = () => {
           label="Aprovadas"
           value={stats.aprovado}
           Icon={CheckCircle2}
-          color="text-green-400"
+          color="text-[var(--success)]"
           onClick={() => setFiltroStatus('aprovado')}
           active={filtroStatus === 'aprovado'}
         />

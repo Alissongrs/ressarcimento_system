@@ -218,6 +218,7 @@ func ChecarAlertasPessoaisHoje() {
 		 WHERE a.para_todos = 0
 		   AND DATE(a.data_alerta) = CURDATE()
 		   AND a.email_enviado_em IS NULL
+		   AND COALESCE(a.hora_alerta,'') = ''  -- lembrete com hora: e-mail sai na hora (rotinas.DespacharLembretes)
 	`)
 	if err != nil {
 		log.Printf("[alertas_pessoal] erro ao buscar alertas do dia: %v", err)

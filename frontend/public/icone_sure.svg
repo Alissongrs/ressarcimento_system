@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="SURE">
+  <defs>
+    <linearGradient id="sureMark" x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5CC8FF"/>
+      <stop offset="1" stop-color="#2DD4BF"/>
+    </linearGradient>
+  </defs>
+  <rect x="7" y="7" width="50" height="50" rx="15" stroke="url(#sureMark)" stroke-width="3.5"/>
+  <path d="M34 11 L20 34 L28 34 L25 53 L44 28 L35 28 Z" fill="url(#sureMark)"/>
+</svg>

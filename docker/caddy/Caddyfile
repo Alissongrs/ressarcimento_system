@@ -1,18 +1,22 @@
 # Caddyfile — TLS terminator para o SURE
-# Em prod: substitua :80 pelo domínio real (ex: sure.app.br) e Caddy obtém cert Let's Encrypt automaticamente.
-# Em dev local: use :80 e acesse via http.
+#
+# Produção: defina CADDY_DOMAIN=sure.app.br (e opcional CADDY_EMAIL) no .env.
+#   → Caddy obtém e renova cert Let's Encrypt automaticamente e serve HTTPS (:443),
+#     redirecionando :80 → :443. Lembre de setar COOKIE_SECURE=true no backend.
+# Dev local: deixe CADDY_DOMAIN vazio → serve em :80 (HTTP puro).
+#
+# {$VAR:default} é resolvido pelo Caddy a partir das variáveis de ambiente do container.
 
 {
   # Desabilita telemetria
   admin off
+  email {$CADDY_EMAIL}
 }
 
-:80 {
-  # Proxy para o frontend nginx
-  reverse_proxy frontend:80
+{$CADDY_DOMAIN::80} {
+  # Proxy para o frontend nginx, encaminhando o IP real do cliente
+  # (necessário p/ rate-limit por IP e auditoria no backend).
+  reverse_proxy frontend:80 {
+    header_up X-Forwarded-For {remote_host}
+  }
 }
-
-# Para habilitar HTTPS em produção, substitua ":80" pelo domínio:
-# sure.app.br {
-#   reverse_proxy frontend:80
-# }

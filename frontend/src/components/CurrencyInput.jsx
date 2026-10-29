@@ -139,9 +139,9 @@ export function CurrencyInput({
   const inputClasses = `
     w-full px-3 py-2 pl-10
     border rounded-lg
-    focus:outline-none focus:ring-2 focus:ring-blue-500
+    focus:outline-none focus:ring-2 focus:ring-[var(--accent)]
     ${disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'}
-    ${error ? 'border-red-500' : 'border-gray-300'}
+    ${error ? 'border-[var(--danger)]' : 'border-gray-300'}
     ${className}
   `.trim();
 
@@ -153,7 +153,7 @@ export function CurrencyInput({
           className="block text-sm font-medium text-gray-700"
         >
           {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
+          {required && <span className="text-[var(--danger)] ml-1">*</span>}
         </label>
       )}
 
@@ -181,7 +181,7 @@ export function CurrencyInput({
       </div>
 
       {error && (
-        <p className="text-sm text-red-500 mt-1">{error}</p>
+        <p className="text-sm text-[var(--danger)] mt-1">{error}</p>
       )}
 
       {!error && (min !== undefined || max !== undefined) && (

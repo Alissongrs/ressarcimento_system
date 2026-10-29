@@ -53,14 +53,14 @@ export default function MentionInput({ value, onChange, onSave, onMencoesChange,
         onPaste={onPaste}
         placeholder="Digite seu comentário. Use @ para mencionar usuários"
         className={textareaClassName}
-        style={{ width: '100%', background: '#1f2937', color: '#fff', border: '1px solid #374151', borderRadius: 6, padding: 8, ...textareaStyle }}
+        style={{ width: '100%', background: 'var(--panel)', color: 'var(--fg)', border: '1px solid var(--border)', borderRadius: 6, padding: 8, ...textareaStyle }}
         ref={inputRef}
       />
       {sugestoes.length > 0 && (
-        <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', background: '#1f2937', color: '#e5e7eb', border: '1px solid #374151', borderRadius: 6, zIndex: 1000 }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', background: 'var(--panel)', color: 'var(--fg)', border: '1px solid var(--border)', borderRadius: 6, zIndex: 1000 }}>
           {sugestoes.map(u => (
             <div key={u.id} style={{ padding: 8, cursor: 'pointer' }} onClick={() => adicionar(u)}>
-              @{u.nome} <small style={{ color: '#9ca3af' }}>({u.email})</small>
+              @{u.nome} <small style={{ color: 'color-mix(in srgb, var(--fg) 55%, transparent)' }}>({u.email})</small>
             </div>
           ))}
         </div>
@@ -68,7 +68,7 @@ export default function MentionInput({ value, onChange, onSave, onMencoesChange,
       {Mencoes.length > 0 && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {Mencoes.map(m => <span key={m.id} style={{ background: '#eee', padding: '2px 6px', borderRadius: 4 }}>@{m.nome}</span>)}
+            {Mencoes.map(m => <span key={m.id} style={{ background: 'color-mix(in srgb, var(--fg) 12%, var(--card))', padding: '2px 6px', borderRadius: 4 }}>@{m.nome}</span>)}
           </div>
           <button onClick={salvar} style={{ fontSize: 12 }}>OK</button>
         </div>

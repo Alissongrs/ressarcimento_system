@@ -1,0 +1,21 @@
+{
+  "_meta": {
+    "distribuidora": "ENEL SP",
+    "grupo": "A",
+    "modalidade": "Verde",
+    "fonte_calibracao": "_modelo_enel_sp_a_3.pdf",
+    "data_calibracao": "2026-05-20"
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [0.175, 0.125, 0.21, 0.145, 0],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "_anchor": "A4 em 'A A4 COMÉRCIO'"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [0.33, 0.150, 0.40, 0.170, 0],
+      "regex": "(Verde|Azul|Convencional|Branca)",
+      "_anchor": "Verde após Trifásico"
+    }
+  }
+}

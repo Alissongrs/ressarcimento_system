@@ -17,11 +17,15 @@ import (
 
 	"ressarcimento-backend/auth"
 	"ressarcimento-backend/database"
+	_ "ressarcimento-backend/docs"
+	"ressarcimento-backend/handlers"
+	"ressarcimento-backend/protocolos"
 	"ressarcimento-backend/repositories"
+	"ressarcimento-backend/rotinas"
 	"ressarcimento-backend/routes"
 	"ressarcimento-backend/services"
 	"ressarcimento-backend/utils"
-	_ "ressarcimento-backend/docs"
+	"ressarcimento-backend/whatsapp"
 
 	"github.com/go-co-op/gocron"
 	"github.com/joho/godotenv"
@@ -60,6 +64,12 @@ func main() {
 	if database.GormDB_App == nil {
 		slog.Error("database.GormDB_App está nil")
 		os.Exit(1)
+	}
+
+	// Aquecedor do cache do motor F01-F05: mantém a Auditoria de Faturas rápida
+	// (evita o recálculo frio de ~20s sobre 177k faturas no 1º load / pós-expiração).
+	if sqlApp, dberr := database.GormDB_App.DB(); dberr == nil {
+		handlers.StartMotorCacheWarmer(sqlApp)
 	}
 
 	startScheduler()
@@ -145,20 +155,23 @@ func startScheduler() {
 	// Tarefa 5: Checar prazos de processos (a cada 1 hora)
 	s.Every(1).Hour().Do(services.ChecarPrazosProcessos)
 
+	// Tarefa 5a: Atualizar cache de sugestão de cobrança/SR dos processos vencidos (a cada 1 hora)
+	s.Every(1).Hour().Do(handlers.ProcessarCobrancasCache)
+
 	// Tarefa 5b: Enviar e-mail da equipe de ressarcimento quando alerta "para_todos" vence
 	s.Every(1).Day().At("08:00").Do(services.ChecarAlertasParaTodos)
 
 	// Tarefa 5c: Enviar e-mail para alertas pessoais (para_todos=0) que vencem hoje e ainda não foram enviados
 	s.Every(1).Day().At("08:05").Do(services.ChecarAlertasPessoaisHoje)
 
-    // Tarefa 6: Processar resumos pendentes (a cada 1 minuto)
-    s.Every(1).Minutes().Do(func(){
-        ctx := context.Background()
-        resRepo := repositories.NewResumoRepo(database.GormDB_App)
-        procRepo := repositories.NewProcessosRepo(database.GormDB_App)
-        srv := services.NewResumoService(resRepo, procRepo)
-        _ = srv.ProcessarResumos(ctx, 20)
-    })
+	// Tarefa 6: Processar resumos pendentes (a cada 1 minuto)
+	s.Every(1).Minutes().Do(func() {
+		ctx := context.Background()
+		resRepo := repositories.NewResumoRepo(database.GormDB_App)
+		procRepo := repositories.NewProcessosRepo(database.GormDB_App)
+		srv := services.NewResumoService(resRepo, procRepo)
+		_ = srv.ProcessarResumos(ctx, 20)
+	})
 
 	// Tarefa 7: Atualizar CSVs para modelos ML (a cada 1 hora)
 	// Gera dados atualizados para AdminPlanilha requisições e Ativos
@@ -167,6 +180,14 @@ func startScheduler() {
 	// Tarefa 8: Treinar Score de Progressão Model (a cada 1 hora)
 	// Atualiza automaticamente com dados mais recentes do banco
 	s.Every(1).Hour().Do(services.AtualizarScoreModelAsync)
+
+	// Tarefa 9: rotinas aprovadas (#rotina no chat) + e-mail dos lembretes com hora marcada (a cada 1 minuto)
+	s.Every(1).Minutes().Do(rotinas.RodarDevidas)
+
+	// Tarefa 10: protocolos ANEEL — lê e-mails da ANEEL, atualiza situação e cria tarefas (a cada 15 minutos)
+	s.Every(15).Minutes().Do(protocolos.RodarAgendado)
+	// WhatsApp da empresa: reabre a sessão vinculada por QR code (avisos das tarefas + monitor)
+	go whatsapp.Iniciar()
 
 	log.Println("Agendador de tarefas iniciado.")
 	s.StartAsync()

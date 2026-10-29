@@ -52,7 +52,7 @@ func EnqueueResumos(c *gin.Context) {
         if mode == "all" {
             // força pendente com hash atual
             hash, _ := repo.ComputeHistoricoHash(c.Request.Context(), pid)
-            _, _ = execGorm(database.GormDB_App, `INSERT INTO FT_RESUMOS_PROCESSO (processo_id, status, history_hash, updated_at)
+            _, _ = execGorm(database.GormDB_App, `INSERT INTO FT_RESUMOS_PROCESSO (id_processo, status, history_hash, updated_at)
                 VALUES (?, 'pending', ?, NOW())
                 ON DUPLICATE KEY UPDATE status='pending', history_hash=VALUES(history_hash), updated_at=NOW()`, pid, hash)
         } else {

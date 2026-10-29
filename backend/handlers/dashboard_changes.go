@@ -37,14 +37,14 @@ func MovimentacoesUltimas24h(c *gin.Context) {
 	rows, err := queryGorm(database.GormDB_App, `
         SELECT
           h.id_historico,
-          h.id_requisicao,
+          h.id_processo,
           h.id_usuario_gestor,
           COALESCE(u.nome_usuario, '') AS usuario_nome,
-          COALESCE(h.status_anterior, ''),
-          COALESCE(h.status_novo, ''),
-          COALESCE(h.etapa_anterior, ''),
-          COALESCE(h.etapa_nova, ''),
-          COALESCE(h.sub_etapa, ''),
+          COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_anterior), ''),
+          COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), ''),
+          COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior), ''),
+          COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova), ''),
+          COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), ''),
           COALESCE(h.tipo_movimentacao, ''),
           h.data_movimentacao,
           COALESCE(h.comentario, '')

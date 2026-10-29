@@ -50,7 +50,7 @@ func RefreshProcessoSummary(c *gin.Context) {
     if err != nil { c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()}); return }
     // even if not changed, mark pending to force regen on request
     if !changed {
-        _, _ = execGorm(database.GormDB_App, `UPDATE FT_RESUMOS_PROCESSO SET status='pending', updated_at=NOW() WHERE processo_id = ?`, pid)
+        _, _ = execGorm(database.GormDB_App, `UPDATE FT_RESUMOS_PROCESSO SET status='pending', updated_at=NOW() WHERE id_processo = ?`, pid)
     }
 
     // gerar imediatamente para evitar status "none"

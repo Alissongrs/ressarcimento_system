@@ -57,7 +57,7 @@ body {
 }
 .glass-select:focus {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .glass-select option {
   color: var(--fg) !important;
@@ -75,12 +75,182 @@ select,
 }
 select:focus {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 select option {
   color: var(--fg) !important;
   background-color: var(--panel) !important;
 }
+
+/* Card DOURADO — requisições criadas pelo usuário Alisson (id_usuario 1),
+   originadas da conferência de auditoria (parecer verificado no PDF).
+   Card INTEIRO dourado: fundo em gradiente ouro + textos recoloridos
+   (override das variáveis de cor p/ tons marrom-ouro legíveis) + brilho pulsante. */
+.req-card-ouro {
+  /* recolore os textos internos (que usam var(--fg)/--accent/--success) p/ marrom-ouro */
+  --fg: #4a3800;
+  --accent: #6b4e00;
+  --success: #4a3800;
+  --panel-border: #b8860b;
+  color: #4a3800 !important;
+  border-color: #a67c00 !important;
+  background: linear-gradient(135deg, #f9e7a8 0%, #ecca63 48%, #dcb445 100%) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #b8860b 60%, transparent),
+    0 0 16px 2px color-mix(in srgb, #e6c34c 55%, transparent),
+    var(--shadow-medium);
+  animation: reqOuroGlow 2.8s ease-in-out infinite;
+}
+/* separadores internos em tom ouro escuro */
+.req-card-ouro .border-t,
+.req-card-ouro [class*="border-["] { border-color: #c69a2e !important; }
+@keyframes reqOuroGlow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, #b8860b 55%, transparent),
+      0 0 12px 1px color-mix(in srgb, #e6c34c 40%, transparent),
+      var(--shadow-medium);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, #b8860b 85%, transparent),
+      0 0 26px 5px color-mix(in srgb, #f0d060 60%, transparent),
+      var(--shadow-elevated);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .req-card-ouro { animation: none; }
+}
+
+/* Card LARANJA METÁLICO — CANDIDATO (recuperação em aberto, mérito legal a confirmar).
+   Distingue dos VERDADEIRO (dourado). Card inteiro laranja metálico + brilho. */
+.req-card-laranja {
+  --fg: #4a2408;
+  --accent: #7a3708;
+  --success: #4a2408;
+  --panel-border: #b5651d;
+  color: #4a2408 !important;
+  border-color: #a2470a !important;
+  background: linear-gradient(135deg, #f7c98f 0%, #e8934a 48%, #d4762a 100%) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #a2470a 60%, transparent),
+    0 0 16px 2px color-mix(in srgb, #e8934a 55%, transparent),
+    var(--shadow-medium);
+  animation: reqLaranjaGlow 2.8s ease-in-out infinite;
+}
+.req-card-laranja .chips, .req-card-laranja [class*="border"] { border-color: #c06a2a !important; }
+@keyframes reqLaranjaGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, #a2470a 55%, transparent),
+      0 0 12px 1px color-mix(in srgb, #e8934a 40%, transparent), var(--shadow-medium);
+  }
+  50% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, #a2470a 85%, transparent),
+      0 0 26px 5px color-mix(in srgb, #f0a35a 60%, transparent), var(--shadow-elevated);
+  }
+}
+@media (prefers-reduced-motion: reduce) { .req-card-laranja { animation: none; } }
+
+/* Linha DOURADA na tabela de Auditados — apontamento VERDADEIRO (virou requisição).
+   Fundo dourado suave + FONTE dourada (alcança os spans internos), legível claro/escuro. */
+.aud-linha-ouro { background: color-mix(in srgb, #ecca63 15%, transparent) !important; }
+.aud-linha-ouro:hover { background: color-mix(in srgb, #ecca63 24%, transparent) !important; }
+.aud-linha-ouro > td { color: #8a6600 !important; font-weight: 600; }
+.aud-linha-ouro > td, .aud-linha-ouro > td * { color: #8a6600 !important; }
+.aud-linha-ouro > td:first-child { box-shadow: inset 4px 0 0 #b8860b; }
+@media (prefers-color-scheme: dark) {
+  .aud-linha-ouro { background: color-mix(in srgb, #ecca63 12%, transparent) !important; }
+  .aud-linha-ouro > td, .aud-linha-ouro > td * { color: #e6c34c !important; }
+}
+:root[data-theme="light"] .aud-linha-ouro { background: color-mix(in srgb, #ecca63 15%, transparent) !important; }
+:root[data-theme="light"] .aud-linha-ouro > td, :root[data-theme="light"] .aud-linha-ouro > td * { color: #8a6600 !important; }
+:root[data-theme="dark"]  .aud-linha-ouro { background: color-mix(in srgb, #ecca63 12%, transparent) !important; }
+:root[data-theme="dark"]  .aud-linha-ouro > td, :root[data-theme="dark"] .aud-linha-ouro > td * { color: #e6c34c !important; }
+
+/* Linha LARANJA na tabela de Auditados — candidato/rejeitado (mérito a confirmar). */
+.aud-linha-laranja { background: color-mix(in srgb, #e8934a 14%, transparent) !important; }
+.aud-linha-laranja:hover { background: color-mix(in srgb, #e8934a 22%, transparent) !important; }
+.aud-linha-laranja > td { color: #a2470a !important; font-weight: 600; }
+.aud-linha-laranja > td, .aud-linha-laranja > td * { color: #a2470a !important; }
+.aud-linha-laranja > td:first-child { box-shadow: inset 4px 0 0 #a2470a; }
+@media (prefers-color-scheme: dark) {
+  .aud-linha-laranja { background: color-mix(in srgb, #e8934a 12%, transparent) !important; }
+  .aud-linha-laranja > td, .aud-linha-laranja > td * { color: #f0965a !important; }
+}
+:root[data-theme="light"] .aud-linha-laranja > td, :root[data-theme="light"] .aud-linha-laranja > td * { color: #a2470a !important; }
+:root[data-theme="dark"]  .aud-linha-laranja { background: color-mix(in srgb, #e8934a 12%, transparent) !important; }
+:root[data-theme="dark"]  .aud-linha-laranja > td, :root[data-theme="dark"] .aud-linha-laranja > td * { color: #f0965a !important; }
+
+/* Linha AZUL na tabela de Auditados — DENTRO DA RESOLUCAO (regra 3 meses) / sem media — nao e apontamento. */
+.aud-linha-azul { background: color-mix(in srgb, #3b82f6 12%, transparent) !important; }
+.aud-linha-azul:hover { background: color-mix(in srgb, #3b82f6 20%, transparent) !important; }
+.aud-linha-azul > td { color: #1e5fa8 !important; font-weight: 600; }
+.aud-linha-azul > td, .aud-linha-azul > td * { color: #1e5fa8 !important; }
+.aud-linha-azul > td:first-child { box-shadow: inset 4px 0 0 #1e5fa8; }
+@media (prefers-color-scheme: dark) {
+  .aud-linha-azul { background: color-mix(in srgb, #3b82f6 14%, transparent) !important; }
+  .aud-linha-azul > td, .aud-linha-azul > td * { color: #6db3f2 !important; }
+}
+:root[data-theme="light"] .aud-linha-azul > td, :root[data-theme="light"] .aud-linha-azul > td * { color: #1e5fa8 !important; }
+:root[data-theme="dark"]  .aud-linha-azul { background: color-mix(in srgb, #3b82f6 14%, transparent) !important; }
+:root[data-theme="dark"]  .aud-linha-azul > td, :root[data-theme="dark"] .aud-linha-azul > td * { color: #6db3f2 !important; }
+
+/* Legenda das cores em Auditoria de Faturas (Auditados/Inconclusivos) */
+.aud-legenda { display:flex; flex-wrap:wrap; gap:8px 20px; align-items:center;
+  margin:0 0 10px; padding:8px 12px; border-radius:8px; font-size:12px; line-height:1.35;
+  background: var(--cpv2-surface-2, rgba(127,111,156,0.06));
+  border:1px solid var(--cpv2-border, rgba(127,111,156,0.25)); }
+.aud-legenda-item { display:inline-flex; align-items:center; gap:6px; }
+.aud-legenda-item b { font-weight:700; }
+.aud-legenda-neutra { opacity:0.75; }
+.aud-legenda-swatch { display:inline-flex; align-items:center; justify-content:center;
+  width:20px; height:16px; border-radius:3px; font-size:11px; font-weight:700; flex:0 0 auto; }
+.aud-sw-ouro   { background: color-mix(in srgb,#ecca63 40%,transparent); color:#8a6600; }
+.aud-sw-laranja{ background: color-mix(in srgb,#e8934a 40%,transparent); color:#a2470a; }
+.aud-sw-azul   { background: color-mix(in srgb,#3b82f6 32%,transparent); color:#1e5fa8; }
+.aud-sw-neutro { background: transparent; border:1px solid var(--cpv2-border, rgba(127,111,156,0.4)); }
+@media (prefers-color-scheme: dark) {
+  .aud-sw-ouro    { color:#e6c34c; }
+  .aud-sw-laranja { color:#f0965a; }
+  .aud-sw-azul    { color:#6db3f2; }
+}
+:root[data-theme="dark"] .aud-sw-ouro    { color:#e6c34c; }
+:root[data-theme="dark"] .aud-sw-laranja { color:#f0965a; }
+:root[data-theme="dark"] .aud-sw-azul    { color:#6db3f2; }
+:root[data-theme="light"] .aud-sw-ouro    { color:#8a6600; }
+:root[data-theme="light"] .aud-sw-laranja { color:#a2470a; }
+:root[data-theme="light"] .aud-sw-azul    { color:#1e5fa8; }
+
+/* Caixa DOURADA do parecer da conferencia no modal do analista (acima do grafico). */
+.modal-parecer-box { order: -3; margin-bottom: 10px; padding: 12px 14px; border-radius: 10px;
+  background: linear-gradient(135deg, color-mix(in srgb,#ecca63 32%,transparent), color-mix(in srgb,#dcb445 18%,transparent));
+  border: 1px solid color-mix(in srgb,#dcb445 60%,transparent);
+  box-shadow: inset 5px 0 0 #b8860b; }
+.modal-parecer-box .mp-head { font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+  display: flex; align-items: center; gap: 6px; margin-bottom: 5px; color: #8a6600; }
+.modal-parecer-box .mp-verd { font-size: 13px; font-weight: 900; color: #a67c00; }
+.modal-parecer-box .mp-body { font-size: 12.5px; line-height: 1.5; font-weight: 600; white-space: pre-wrap; color: #5c4a12; }
+@media (prefers-color-scheme: dark) {
+  .modal-parecer-box { background: linear-gradient(135deg, color-mix(in srgb,#ecca63 22%,transparent), color-mix(in srgb,#dcb445 11%,transparent)); }
+  .modal-parecer-box .mp-head, .modal-parecer-box .mp-verd { color: #e6c34c; }
+  .modal-parecer-box .mp-body { color: #f0dca0; }
+}
+:root[data-theme="dark"] .modal-parecer-box { background: linear-gradient(135deg, color-mix(in srgb,#ecca63 22%,transparent), color-mix(in srgb,#dcb445 11%,transparent)); }
+:root[data-theme="dark"] .modal-parecer-box .mp-head, :root[data-theme="dark"] .modal-parecer-box .mp-verd { color: #e6c34c; }
+:root[data-theme="dark"] .modal-parecer-box .mp-body { color: #f0dca0; }
+:root[data-theme="light"] .modal-parecer-box .mp-head, :root[data-theme="light"] .modal-parecer-box .mp-verd { color: #a67c00; }
+:root[data-theme="light"] .modal-parecer-box .mp-body { color: #5c4a12; }
+/* Variante LARANJA (candidato / recuperacao em aberto). */
+.modal-parecer-box.laranja { background: linear-gradient(135deg, color-mix(in srgb,#e8934a 28%,transparent), color-mix(in srgb,#d4762a 15%,transparent));
+  border-color: color-mix(in srgb,#d4762a 60%,transparent); box-shadow: inset 5px 0 0 #a2470a; }
+.modal-parecer-box.laranja .mp-head, .modal-parecer-box.laranja .mp-verd { color: #a2470a; }
+.modal-parecer-box.laranja .mp-body { color: #7a3a10; }
+@media (prefers-color-scheme: dark) {
+  .modal-parecer-box.laranja .mp-head, .modal-parecer-box.laranja .mp-verd { color: #f0965a; }
+  .modal-parecer-box.laranja .mp-body { color: #f2c39c; }
+}
+:root[data-theme="dark"] .modal-parecer-box.laranja .mp-head, :root[data-theme="dark"] .modal-parecer-box.laranja .mp-verd { color: #f0965a; }
+:root[data-theme="dark"] .modal-parecer-box.laranja .mp-body { color: #f2c39c; }
 
 /* Flowtory utilities */
 .gradient-primary { background: var(--gradient-primary); }
@@ -120,7 +290,7 @@ select option {
   height: 2px;
   width: 100%;
   overflow: hidden;
-  background: rgba(125, 125, 125, 0.12);
+  background: color-mix(in srgb, var(--border) 50%, transparent);
 }
 .mail-progress-track::before {
   content: '';

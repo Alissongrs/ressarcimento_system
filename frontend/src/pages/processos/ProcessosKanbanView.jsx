@@ -36,15 +36,17 @@ import {
 function StatusPill({ etapa, sub }) {
   const label = `${etapa || '-'}${sub ? ` · ${sub}` : ''}`;
   const k = norm(etapa);
-  let bg = '#64748b'; // slate
-  if (k.includes('distrib')) bg = '#3b82f6';
-  else if (k.includes('ouvid')) bg = '#10b981';
-  else if (k.includes('aneel')) bg = '#f59e0b';
+  let bg = 'color-mix(in srgb, var(--fg) 45%, var(--card))'; // neutro/default
+  if (k.includes('distrib')) bg = 'var(--accent)';
+  else if (k.includes('ouvid')) bg = 'var(--success)';
+  else if (k.includes('aneel')) bg = 'var(--warning)';
+  // sma/financeiro: sem cor semântica correspondente (não é danger/warning/success/accent) —
+  // mantidos como hex categórico só pra distinguir das demais etapas do Kanban.
   else if (k.includes('sma')) bg = '#a855f7';
   else if (k.includes('financeiro') || k.includes('enviado')) bg = '#0891b2';
-  else if (k.includes('repasse') || k.includes('fatur')) bg = '#f97316';
-  else if (k.includes('conclu')) bg = '#059669';
-  else if (k.includes('indefer')) bg = '#ef4444';
+  else if (k.includes('repasse') || k.includes('fatur')) bg = 'var(--accent-3)';
+  else if (k.includes('conclu')) bg = 'var(--success)';
+  else if (k.includes('indefer')) bg = 'var(--danger)';
   return (
     <span
       className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold leading-tight whitespace-nowrap"
@@ -66,7 +68,7 @@ function ScoreBar({ score }) {
     return <span className="text-[10px] opacity-40">—</span>;
   }
   const pct = Math.max(0, Math.min(100, Number(raw)));
-  const color = pct >= 70 ? '#10b981' : pct >= 40 ? '#f59e0b' : '#ef4444';
+  const color = pct >= 70 ? 'var(--success)' : pct >= 40 ? 'var(--warning)' : 'var(--danger)';
   return (
     <div className="w-full flex items-center gap-1.5">
       <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
@@ -85,9 +87,9 @@ function ScoreBar({ score }) {
 // KPI compacto pra strip secundária
 function KpiCompact({ label, value, accent }) {
   const accentColor =
-    accent === 'red' ? 'text-red-500' :
-    accent === 'amber' ? 'text-amber-500' :
-    accent === 'emerald' ? 'text-emerald-500' :
+    accent === 'red' ? 'text-[var(--danger)]' :
+    accent === 'amber' ? 'text-[var(--warning)]' :
+    accent === 'emerald' ? 'text-[var(--success)]' :
     'text-[var(--fg)]';
   return (
     <div className="rounded-md border panel-border bg-[var(--panel)]/40 px-3 py-2">
@@ -236,7 +238,7 @@ export default function ProcessosKanbanView({
               ) : null}
 
               {ativosMetricas.error ? (
-                <div className="text-xs text-red-400">{ativosMetricas.error}</div>
+                <div className="text-xs text-[var(--danger)]">{ativosMetricas.error}</div>
               ) : null}
 
               {/* HERO ROW — Meta de ressarcimento + Valor em carteira */}
@@ -636,8 +638,8 @@ export default function ProcessosKanbanView({
                   : null;
                 const diasSemColor =
                   diasSemNum == null ? 'opacity-50' :
-                  diasSemNum > 30 ? 'text-red-500 font-semibold' :
-                  diasSemNum > 14 ? 'text-amber-500 font-semibold' :
+                  diasSemNum > 30 ? 'text-[var(--danger)] font-semibold' :
+                  diasSemNum > 14 ? 'text-[var(--warning)] font-semibold' :
                   'opacity-80';
                 const hasDeferimento =
                   (header?.credito_simples && Number(header.credito_simples) > 0) ||
@@ -663,7 +665,7 @@ export default function ProcessosKanbanView({
                     key={row.pid}
                     type="button"
                     onClick={() => handleProcessCardOpen(row)}
-                    className={`grid w-full text-left text-sm hover:bg-[var(--hover)] transition-colors ${warnMissingSteps ? 'bg-red-500/10' : ''}`}
+                    className={`grid w-full text-left text-sm hover:bg-[var(--hover)] transition-colors ${warnMissingSteps ? 'bg-[var(--danger)]/10' : ''}`}
                     style={{ gridTemplateColumns: processColWidths.map((w) => `${w}px`).join(' ') }}
                   >
                     <div className="px-2 py-2 border-t panel-border truncate font-mono text-xs">#{row.pid}</div>

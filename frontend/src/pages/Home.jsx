@@ -6,6 +6,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import SureLogo from '../components/SureLogo.jsx';
+import { ehAprovador as isAprovador } from '../services/solicitacoesService';
 import {
   CalendarClock, Inbox, LayoutDashboard, Archive, ShieldCheck, TrendingUp,
   FilePlus, Mail, Sparkles, Workflow, Bot, BarChart3, History,
@@ -59,6 +61,9 @@ export default function Home() {
   const isAdmin = role === 'admin';
   const userName = user?.nome_usuario || user?.nome || '';
 
+  // Aprovar solicitações é exclusivo do aprovador designado (Alisson) — gate pelo e-mail.
+  const ehAprovador = isAprovador(user);
+
   const horaSaudacao = (() => {
     const h = new Date().getHours();
     if (h < 12) return 'Bom dia';
@@ -67,17 +72,22 @@ export default function Home() {
   })();
 
   // Atalhos baseados em permissão (gestor não tem Histórico/Métricas/Editor)
+  // Nota: cores abaixo funcionam como paleta categórica p/ diferenciar atalhos visualmente.
+  // Só as que têm equivalente semântico direto no tema (amber/blue/green/red) foram convertidas
+  // pra var(); as demais (roxo, cyan, laranja, slate) não têm var equivalente e ficam hex fixo
+  // para não colidir/colapsar com outras entradas da lista.
   const quickLinks = [
-    { to: '/prazos', icon: CalendarClock, label: 'Prazos', hint: 'Cobranças e vencimentos', accent: '#f59e0b' },
-    { to: '/processos', icon: LayoutDashboard, label: 'Controle de Processos', hint: 'Kanban e fluxo', accent: '#3b82f6' },
-    { to: '/Requisicoes', icon: Inbox, label: 'Requisições', hint: 'Triagem e novas', accent: '#10b981' },
+    { to: '/prazos', icon: CalendarClock, label: 'Prazos', hint: 'Cobranças e vencimentos', accent: 'var(--warning)' },
+    { to: '/processos', icon: LayoutDashboard, label: 'Controle de Processos', hint: 'Kanban e fluxo', accent: 'var(--accent)' },
+    { to: '/Requisicoes', icon: Inbox, label: 'Requisições', hint: 'Triagem e novas', accent: 'var(--success)' },
     { to: '/novo', icon: FilePlus, label: 'Nova Requisição', hint: 'Criar pedido', accent: '#8b5cf6' },
     { to: '/backlog', icon: Archive, label: 'Backlog', hint: 'Processos parados', accent: '#06b6d4' },
-    { to: '/auditoria', icon: ShieldCheck, label: 'Auditoria', hint: 'Logs e validações', accent: '#ef4444' },
-    { to: '/analise-desvio', icon: TrendingUp, label: 'Análise de Desvio', hint: 'KWh e ponta', accent: '#f97316' },
+    { to: '/auditoria', icon: ShieldCheck, label: 'Processos (gestão)', hint: 'Gestão de processos', accent: 'var(--danger)' },
+    { to: '/analise-desvio', icon: TrendingUp, label: 'Auditoria de Faturas', hint: 'KWh e ponta', accent: '#f97316' },
+    { to: '/claro', icon: Zap, label: 'Faturas Claro', hint: 'Consulta (627k · Drive)', accent: '#e11d48' },
     { to: '/caixa-de-email', icon: Mail, label: 'Caixa de Email', hint: 'Mensagens recebidas', accent: '#0891b2' },
     isAdmin && { to: '/dashboard', icon: BarChart3, label: 'Métricas', hint: 'Relatórios completos', accent: '#a855f7' },
-    isAdmin && { to: '/historico', icon: History, label: 'Histórico', hint: 'Movimentações globais', accent: '#64748b' },
+    isAdmin && { to: '/historico', icon: History, label: 'Histórico', hint: 'Movimentações globais', accent: 'color-mix(in srgb, var(--fg) 45%, transparent)' },
   ].filter(Boolean);
 
   const features = [
@@ -85,19 +95,19 @@ export default function Home() {
       icon: Bot,
       title: 'Análise inteligente',
       text: 'IA própria analisa faturas, identifica irregularidades F01-F05 com motor SQL determinístico e GPT-5.4 para decisão final.',
-      accent: '#3b82f6',
+      accent: 'var(--accent)',
     },
     {
       icon: Workflow,
       title: 'Fluxo end-to-end',
       text: 'Da requisição inicial até o caixa: Ativos → Deferidos → Fluxo → Faturamento → Concluídos. Tudo rastreável.',
-      accent: '#10b981',
+      accent: 'var(--success)',
     },
     {
       icon: Activity,
       title: 'Visão operacional',
       text: 'Kanban com SLA, alertas de vencimento, painel de saúde com travados +30 dias e backlog em tempo real.',
-      accent: '#f59e0b',
+      accent: 'var(--warning)',
     },
     {
       icon: Target,
@@ -114,7 +124,7 @@ export default function Home() {
         className="absolute inset-0 -z-10 opacity-50 pointer-events-none"
         style={{
           background:
-            'radial-gradient(900px 360px at top left, var(--accent) 0%, transparent 60%), radial-gradient(700px 280px at bottom right, #4f46e5 0%, transparent 60%)',
+            'radial-gradient(900px 360px at top left, var(--accent) 0%, transparent 60%), radial-gradient(700px 280px at bottom right, var(--accent-2) 0%, transparent 60%)',
         }}
       />
 
@@ -122,11 +132,7 @@ export default function Home() {
         {/* Hero */}
         <section className="text-center space-y-4 pt-4">
           <div className="flex justify-center">
-            <img
-              src="/logo_sure.png"
-              alt="SURE — Sistema Unificado de Ressarcimento"
-              style={{ width: 200, height: 'auto', display: 'block' }}
-            />
+            <SureLogo size={60} wordSize={46} color="var(--fg)" gap={16} />
           </div>
 
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border panel-border bg-[var(--panel)]/60 text-xs">
@@ -160,6 +166,16 @@ export default function Home() {
               <FilePlus size={16} />
               Nova Requisição
             </button>
+            {ehAprovador && (
+              <button
+                type="button"
+                onClick={() => navigate('/solicitacoes')}
+                className="px-5 py-2.5 rounded-lg border-2 panel-border bg-[var(--panel)] hover:bg-[var(--hover)] transition-colors text-sm font-semibold inline-flex items-center gap-2"
+              >
+                <Inbox size={16} />
+                Solicitações ao sistema
+              </button>
+            )}
           </div>
         </section>
 

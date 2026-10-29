@@ -18,7 +18,7 @@ export default function Donut({ data, rows, size = 180, hole = 0.6, centerLabel 
   const total = useMemo(() => items.reduce((acc, r) => acc + (Number(r.value) || 0), 0), [items]);
 
   const bg = useMemo(() => {
-    if (!total || items.length === 0) return "conic-gradient(#4b5563 0 100%)";
+    if (!total || items.length === 0) return "conic-gradient(var(--border) 0 100%)";
     let acc = 0;
     const stops = items.map((r) => {
       const pctFrom = (acc / total) * 100;
@@ -69,15 +69,19 @@ export default function Donut({ data, rows, size = 180, hole = 0.6, centerLabel 
 }
 
 function pickColor(i) {
+  // Paleta categórica: fatias vão além das 6 cores semânticas do tema,
+  // então as 2 últimas ficam com tons literais sóbrios (combinam com a
+  // paleta SAP) só para diferenciar categorias extras — não há variável
+  // semântica pra "categoria arbitrária nº 7/8".
   const palette = [
-    "hsl(var(--accent))",
-    "hsl(var(--success))",
-    "hsl(var(--warning))",
-    "hsl(var(--destructive))",
-    "hsl(var(--primary))",
-    "hsl(var(--secondary))",
-    "#8b5cf6", // fallback violet
-    "#14b8a6", // fallback teal
+    "var(--accent)",
+    "var(--success)",
+    "var(--warning)",
+    "var(--danger)",
+    "var(--accent-2)",
+    "var(--accent-3)",
+    "#7c6f9c", // categoria extra: violeta acinzentado
+    "#4d8f86", // categoria extra: verde-azulado acinzentado
   ];
   return palette[i % palette.length];
 }

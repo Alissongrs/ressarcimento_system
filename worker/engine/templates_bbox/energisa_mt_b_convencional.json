@@ -1,0 +1,23 @@
+{
+  "_meta": {
+    "distribuidora": "ENERGISA MT",
+    "grupo": "B",
+    "modalidade": "Convencional",
+    "fonte_calibracao": "_modelo_energisa_mt_b_12669.pdf",
+    "data_calibracao": "2026-05-20",
+    "observacoes": "Energisa usa MTC-CONVENCIONAL. Modalidade extraída do shorthand MTC."
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [0.285, 0.146, 0.310, 0.160, 0],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "_anchor": "B3 em 'MTC-CONVENCIONAL BAIXA TENSÃO / B3'"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [0.0, 0.140, 0.6, 0.165, 0],
+      "regex": "(MT[VACB][-—]?(?:CONVENCIONAL|VERDE|AZUL|BRANCA)?|Verde|Azul|Convencional|Branca)",
+      "_anchor": "MTC-CONVENCIONAL na linha de classificação",
+      "_post_normalizar": "MTV→Verde MTA→Azul MTC→Convencional MTB→Branca"
+    }
+  }
+}

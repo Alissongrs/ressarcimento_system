@@ -22,6 +22,7 @@ type alertaDTO struct {
 	DataCriacao time.Time  `json:"data_criacao"`
 	DataAlerta  *time.Time `json:"data_alerta,omitempty"`
 	ParaTodos   bool       `json:"para_todos"`
+	HoraAlerta  string     `json:"hora_alerta,omitempty"` // lembrete com hora (HH:MM) — e-mail sai na hora
 }
 
 // GET /api/alertas?overdue=1&unread=1
@@ -70,7 +71,7 @@ func GetAlertas(c *gin.Context) {
 
 	q := `
 		SELECT id_alerta, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta,
-		       COALESCE(para_todos, 0)
+		       COALESCE(para_todos, 0), COALESCE(hora_alerta, '')
 		  FROM FT_ALERTAS
 		 WHERE ` + strings.Join(where, " AND ") + `
 		 ORDER BY
@@ -94,8 +95,9 @@ func GetAlertas(c *gin.Context) {
 			criacao     time.Time
 			dtA         sql.NullTime
 			paraTodos   sql.NullInt64
+			hora        string
 		)
-		if err := rows.Scan(&id, &procID, &msg, &lido, &ack, &criacao, &dtA, &paraTodos); err != nil {
+		if err := rows.Scan(&id, &procID, &msg, &lido, &ack, &criacao, &dtA, &paraTodos, &hora); err != nil {
 			continue
 		}
 		item := alertaDTO{
@@ -105,6 +107,7 @@ func GetAlertas(c *gin.Context) {
 			Ack:         ack.Bool,
 			DataCriacao: criacao,
 			ParaTodos:   paraTodos.Int64 == 1,
+			HoraAlerta:  hora,
 		}
 		if procID.Valid {
 			v := procID.Int64
@@ -176,7 +179,7 @@ func CreateAlerta(c *gin.Context) {
 	}
 	sse.BroadcastUser(userID, sse.Event{
 		Type:    "alerta_novo",
-		Payload: gin.H{"processo_id": body.ProcID},
+		Payload: gin.H{"id_processo": body.ProcID},
 	})
 	notifyUnread(userID)
 

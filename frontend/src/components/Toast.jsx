@@ -13,7 +13,7 @@ export default function Toast({ open, type = 'info', message = '', onClose, time
 
   if (!visible || !message) return null;
 
-  const bg = type === 'success' ? '#16a34a' : type === 'error' ? '#dc2626' : '#2563eb';
+  const bg = type === 'success' ? 'var(--success)' : type === 'error' ? 'var(--danger)' : 'var(--accent)';
 
   const posCls =
     position === 'center'

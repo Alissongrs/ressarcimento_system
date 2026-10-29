@@ -95,7 +95,7 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 			COALESCE(r.uc, ''),
 			COALESCE(r.cliente, ''),
 			COALESCE(r.concessionaria, ''),
-			COALESCE(s.status, ''),
+			COALESCE(s.nome, ''),
 			COALESCE(r.descricao_irregularidade, ''),
 			COALESCE(r.periodos_irregularidade, ''),
 			COALESCE(r.link_fatura, ''),
@@ -104,12 +104,12 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 			COALESCE(r.endereco_completo, ''),
 			COALESCE(ti.nome, ''),
 			COALESCE(sti.nome, ''),
-			COALESCE(e.etapa, ''),
-			COALESCE(p.sub_etapa, '')
+			COALESCE(e.nome, ''),
+			COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual), '')
 		FROM FT_REQUISICOES r
-		LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+		LEFT JOIN DM_STATUS_PROCESSO s /* TODO V2 */ ON r.id_status = s.id_status
 		LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 		LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo = r.id_tipo_irregularidade
 		LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo = r.id_subtipo_irregularidade
 		WHERE r.id_requisicao = ?
@@ -140,12 +140,12 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 	}
 	rows, _ := s.DBRepo.DB.WithContext(ctx).Raw(`
 		SELECT DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') as d,
-			   COALESCE(h.etapa_nova,''),
-			   COALESCE(h.sub_etapa,''),
+			   COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''),
+			   COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),''),
 			   COALESCE(h.comentario,''),
 			   COALESCE(h.tipo_movimentacao,'')
 		FROM FT_HISTORICO_MOVIMENTACOES h
-		WHERE h.id_requisicao = ?
+		WHERE h.id_processo = ?
 		ORDER BY h.data_movimentacao DESC
 		LIMIT 20`, processoID).Rows()
 	defer func() {
@@ -161,7 +161,7 @@ func (s *ResumoService) buildPrompt(ctx context.Context, processoID int64) (syst
 	}
 
 	payload := map[string]any{
-		"processo_id": processoID,
+		"id_processo": processoID,
 		"identificacao": map[string]any{
 			"uc":             uc,
 			"cliente":        cliente,
@@ -298,7 +298,7 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 				COALESCE(r.uc, ''),
 				COALESCE(r.cliente, ''),
 				COALESCE(r.concessionaria, ''),
-				COALESCE(s.status, ''),
+				COALESCE(s.nome, ''),
 				COALESCE(r.descricao_irregularidade, ''),
 				COALESCE(r.periodos_irregularidade, ''),
 				COALESCE(r.link_fatura, ''),
@@ -307,12 +307,12 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 				COALESCE(r.endereco_completo, ''),
 				COALESCE(ti.nome, ''),
 				COALESCE(sti.nome, ''),
-				COALESCE(e.etapa, ''),
-				COALESCE(p.sub_etapa, '')
+				COALESCE(e.nome, ''),
+				COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual), '')
 			FROM FT_REQUISICOES r
-			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+			LEFT JOIN DM_STATUS_PROCESSO s /* TODO V2 */ ON r.id_status = s.id_status
 			LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
-			LEFT JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo
+			LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 			LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo = r.id_tipo_irregularidade
 			LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo = r.id_subtipo_irregularidade
 			WHERE r.id_requisicao = ?
@@ -332,8 +332,8 @@ func (s *ResumoService) buildBatchPrompt(ctx context.Context, ids []int64) (syst
 			&etapaAtual,
 			&subEtapaAtual,
 		)
-		rows, _ := s.DBRepo.DB.WithContext(ctx).Raw(`SELECT DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') as d, COALESCE(h.etapa_nova,''), COALESCE(h.sub_etapa,''), COALESCE(h.comentario,''), COALESCE(h.tipo_movimentacao,'')
-          FROM FT_HISTORICO_MOVIMENTACOES h WHERE h.id_requisicao = ? ORDER BY h.data_movimentacao DESC LIMIT 20`, pid).Rows()
+		rows, _ := s.DBRepo.DB.WithContext(ctx).Raw(`SELECT DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') as d, COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''), COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),''), COALESCE(h.comentario,''), COALESCE(h.tipo_movimentacao,'')
+          FROM FT_HISTORICO_MOVIMENTACOES h WHERE h.id_processo = ? ORDER BY h.data_movimentacao DESC LIMIT 20`, pid).Rows()
 		arr := make([]hist, 0, 20)
 		for rows != nil && rows.Next() {
 			var it hist

@@ -21,7 +21,7 @@ import (
 // ProcessarV2Handler — dispara o pdf_pipeline_v2 (reprocessar_v2.py) para 1 ID.
 // Calcula score de confiança, chama gpt-4.1-mini revisor (se necessário),
 // popula as 34 colunas v19 (parcela_art323_*, compensação, regime_norma,
-// encargos_extras, etc) e registra divergências em EXTRACAO_DIVERGENCIAS.
+// encargos_extras, etc).
 //
 // POST /api/v1/faturas/:id/processar-v2
 //

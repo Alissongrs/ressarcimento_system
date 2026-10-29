@@ -1,5 +1,5 @@
 ﻿// src/App.jsx — clean, UTF-8, routes and menus fixed
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, lazy, Suspense } from 'react';
 import {
   BrowserRouter as Router,
   Routes,
@@ -12,7 +12,6 @@ import {
 
 import { useAuth } from './context/AuthContext.jsx';
 import { ThemeProvider } from './context/ThemeContext.jsx';
-import ThemeSwitcher from './components/ThemeSwitcher.jsx';
 import './theme.css';
 
 import {
@@ -37,12 +36,16 @@ import {
   TrendingUp,
   Settings2,
   CalendarDays,
+  Sparkles,
+  Repeat,
+  Landmark,
+  MessageCircle,
 } from 'lucide-react';
 
 import FeedbackModal from './components/FeedbackModal.jsx';
 import Toast from './components/Toast.jsx';
 import WelcomeBriefingModal, { shouldShowWelcomeModal } from './components/WelcomeBriefingModal.jsx';
-import HomePage from './pages/Home.jsx';
+const HomePage = lazy(() => import('./pages/Home.jsx'));
 import CommandPaletteHost from './components/CommandPaletteHost.jsx';
 import PageContainer from './components/PageContainer.jsx';
 
@@ -50,29 +53,44 @@ import PageContainer from './components/PageContainer.jsx';
 import AlertasVencimentoModal from './components/AlertasVencimentoModal.jsx';
 import AlertCalendarModal from './components/AlertCalendarModal.jsx';
 import AlertTicker from './components/AlertTicker.jsx';
+import AvisosBell from './components/AvisosBell.jsx';
 import GlobalNewProcessNotifier from './components/GlobalNewProcessNotifier.jsx';
 import FloatingEmailComposer from './components/FloatingEmailComposer.jsx';
+import { SureMark } from './components/SureLogo.jsx';
 import GlobalChatWidget from './components/GlobalChatWidget.jsx';
+import InformativoModal from './components/InformativoModal.jsx';
 import { EmailComposeProvider } from './context/EmailComposeContext.jsx';
 
 // Pages
 import Login from './pages/LoginPage.jsx';
 import Register from './pages/Register.jsx';
-import GestaoRequisicoes from './pages/GestaoRequisicoes.jsx';
-import ControleProcessos from './pages/ControleProcessos.jsx';
-import Relatorios from './pages/Relatorios.jsx';
-import CaixaDeEmail from './pages/CaixaDeEmail.jsx';
-import AnaliseDesvio from './pages/AnaliseDesvio.jsx';
-import Auditoria from './pages/Auditoria.jsx';
-import HomeGestorAdmin from './pages/HomeGestorAdmin.jsx';
-import Requisicoes from './pages/Requisicoes.jsx';
-import Historico from './pages/HistoricoFixed.jsx';
-import AdminFeedbacks from './pages/AdminFeedbacks.jsx';
-import AdminPrazos from './pages/AdminPrazos.jsx';
-import AdminEditor from './pages/AdminEditor.jsx';
-import Backlog from './pages/Backlog.jsx';
-import RequisicaoForm from './pages/RequisicaoForm.jsx';
-import ChatRequisicao from './pages/ChatRequisicao.jsx';
+// Páginas pesadas em lazy — cada uma vira um chunk separado, carregado sob demanda.
+// Corta o bundle inicial (recharts/xlsx/etc só baixam quando a página é aberta).
+const GestaoRequisicoes = lazy(() => import('./pages/GestaoRequisicoes.jsx'));
+const ControleProcessosV2 = lazy(() => import('./pages/ControleProcessosV2.jsx'));
+const ProcessoDetalhePage = lazy(() => import('./pages/ProcessoDetalhePage.jsx'));
+const Relatorios = lazy(() => import('./pages/Relatorios.jsx'));
+const CaixaDeEmail = lazy(() => import('./pages/CaixaDeEmail.jsx'));
+const AnaliseDesvio = lazy(() => import('./pages/AnaliseDesvio.jsx'));
+const Regras = lazy(() => import('./pages/Regras.jsx'));
+const Auditoria = lazy(() => import('./pages/Auditoria.jsx'));
+const HomeGestorAdmin = lazy(() => import('./pages/HomeGestorAdmin.jsx'));
+const Solicitacoes = lazy(() => import('./pages/Solicitacoes.jsx'));
+const Prazos = lazy(() => import('./pages/Prazos.jsx'));
+const Requisicoes = lazy(() => import('./pages/Requisicoes.jsx'));
+const Historico = lazy(() => import('./pages/HistoricoFixed.jsx'));
+const AdminFeedbacks = lazy(() => import('./pages/AdminFeedbacks.jsx'));
+const AdminRotinas = lazy(() => import('./pages/AdminRotinas.jsx'));
+const ProtocolosAneel = lazy(() => import('./pages/ProtocolosAneel.jsx'));
+const WhatsappEmpresa = lazy(() => import('./pages/WhatsappEmpresa.jsx'));
+// AdminEditor aposentado (removido do menu) — rota /admin/editor redireciona p/ Home
+const Backlog = lazy(() => import('./pages/Backlog.jsx'));
+const MinhaConta = lazy(() => import('./pages/MinhaConta.jsx'));
+const RequisicaoForm = lazy(() => import('./pages/RequisicaoForm.jsx'));
+const ChatRequisicao = lazy(() => import('./pages/ChatRequisicao.jsx'));
+const AssistentePage = lazy(() => import('./pages/AssistentePage.jsx'));
+const OcrLote = lazy(() => import('./pages/OcrLote.jsx'));
+const ConsultaClaro = lazy(() => import('./pages/ConsultaClaro.jsx'));
 
 // Alerts SSE
 import { getUnreadCount, connectAlertasSSE } from './services/alertaService.js';
@@ -109,7 +127,7 @@ function MailLinkMinimizedBar({ visible, onRestore }) {
     <button
       type="button"
       onClick={onRestore}
-      className="fixed left-4 bottom-4 z-50 bg-[var(--panel)]/90 border border-amber-400/70 shadow-lg rounded-xl px-4 py-3 flex items-center gap-3"
+      className="fixed left-4 bottom-4 z-50 bg-[var(--panel)]/90 border border-[color-mix(in_srgb,var(--warning)_70%,transparent)] shadow-lg rounded-xl px-4 py-3 flex items-center gap-3"
       title="Continuar anexar ao processo"
     >
       <div className="h-9 w-9 rounded-lg bg-[var(--muted)]/30 flex items-center justify-center border panel-border">
@@ -132,13 +150,22 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
     { to: '/Requisicoes', label: 'Requisições', Icon: Inbox },
     { to: '/processos', label: 'Controle de Processos', Icon: LayoutDashboard },
     { to: '/backlog', label: 'Backlog', Icon: Archive },
-    { to: '/auditoria', label: 'Auditoria', Icon: ShieldCheck },
-    { to: '/analise-desvio', label: 'Análise de Desvio', Icon: TrendingUp },
+    { to: '/auditoria', label: 'Processos (gestão)', Icon: ShieldCheck },
+    { to: '/analise-desvio', label: 'Auditoria de Faturas', Icon: TrendingUp },
+    { to: '/regras', label: 'Regras', Icon: Settings2 },
     { to: '/dashboard', label: 'Métricas', Icon: BarChart3, adminOnly: true },
     { to: '/historico', label: 'Histórico', Icon: History, adminOnly: true },
+    { to: '/rotinas', label: 'Rotinas', Icon: Repeat },
+    { to: '/protocolos-aneel', label: 'Protocolos ANEEL', Icon: Landmark },
+    { to: '/whatsapp', label: 'WhatsApp', Icon: MessageCircle },
   ];
-  const adminItems = [{ to: '/admin/editor', label: 'Editor', Icon: FilePenLine }];
-  const items = role === 'admin' ? baseItems.concat(adminItems) : baseItems.filter((i) => !i.adminOnly);
+  const adminItems = []; // Admin Editor removido do menu (feature aposentada)
+  // Solicitante: menu enxuto — só o Assistente (ele consulta tudo pelo chat e
+  // repassa ao cliente). Os itens de gestão ficam ocultos.
+  const solicitanteItems = [{ to: '/', label: 'Assistente', Icon: Sparkles }];
+  const items = role === 'solicitante'
+    ? solicitanteItems
+    : role === 'admin' ? baseItems.concat(adminItems) : baseItems.filter((i) => !i.adminOnly);
   const visibleItems = items.slice(0, 8);
   const moreItems = items.slice(8);
 
@@ -152,15 +179,12 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
           title="Ir para a tela inicial"
           style={{
             background: 'transparent', border: 'none', cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', gap: 6, padding: 0,
+            display: 'inline-flex', alignItems: 'center', gap: 8, padding: 0, color: 'var(--fg)',
           }}
         >
-          <img
-            src="/icone_sure.png"
-            alt="SURE"
-            style={{ width: 32, height: 32, objectFit: 'contain', display: 'block' }}
-          />
-          <span style={{ fontWeight: 700, letterSpacing: '0.5px' }}>SURE</span>
+          {/* marca vetorial embutida (antes era /icone_sure.svg, que não ia no build e quebrava) */}
+          <SureMark size={28} glow={false} />
+          <span style={{ fontFamily: "'Space Grotesk', 'Inter', sans-serif", fontWeight: 700, letterSpacing: '0.14em', lineHeight: 1 }}>SURE</span>
         </button>
         <nav className="top-nav-links">
           <div className="top-nav-links-scroll">
@@ -212,6 +236,7 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
           )}
         </nav>
         <div className="top-nav-actions">
+          {role !== 'solicitante' && <AvisosBell />}
           {(role === 'admin' || role === 'gestor') && (
             <>
               <button
@@ -245,7 +270,7 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
 }
 
 function App() {
-  const { user, logout, sessionExpired, clearSessionExpired, remainingSeconds } = useAuth();
+  const { user, logout, sessionExpired, clearSessionExpired, remainingSeconds, sessionWarning } = useAuth();
   const role = String(user?.tipo_conta || '').trim().toLowerCase();
   const isSolicitante = role === 'solicitante';
   const solicitanteAllowed = (key) => {
@@ -253,7 +278,7 @@ function App() {
     return allowed.has(key);
   };
   const solicitanteClass = (key) =>
-    isSolicitante && solicitanteAllowed(key) ? 'text-orange-400' : '';
+    isSolicitante && solicitanteAllowed(key) ? 'text-[var(--accent-3)]' : '';
 
   const formatRemaining = (sec) => {
     if (sec == null) return '';
@@ -272,14 +297,10 @@ function App() {
   const [openFeedback, setOpenFeedback] = useState(false);
   const [toast, setToast] = useState({ open: false, type: 'info', text: '', position: 'bottom-right' });
 
-  // Welcome briefing modal — só pra gestores, 1x por sessão
+  // Welcome briefing modal — DESATIVADO a pedido (não exibir no login).
+  // Componente/import mantidos p/ reativar depois: restaurar o setWelcomeOpen(true) abaixo.
   const [welcomeOpen, setWelcomeOpen] = useState(false);
-  useEffect(() => {
-    if (user && shouldShowWelcomeModal(user)) {
-      setWelcomeOpen(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, user?.tipo_conta]);
+  // (gatilho removido — antes abria via shouldShowWelcomeModal(user) no login do gestor)
 
   // Mail polling
   const [mailUnread, setMailUnread] = useState(0);
@@ -328,8 +349,13 @@ function App() {
 
     es.addEventListener('alerta_novo', (ev) => {
       setUnread((u) => (Number.isFinite(u) ? u + 1 : 1));
+      window.dispatchEvent(new Event('avisos:changed'));
       try {
         const data = JSON.parse(ev.data || '{}');
+        if (data?.payload?.aviso) {
+          setToast({ open: true, type: 'info', text: data.payload.mensagem || 'Novo aviso' });
+          return;
+        }
         const uc = data?.payload?.uc || data?.uc;
         const cliente = fixMojibake(data?.payload?.cliente || data?.cliente);
         const msg =
@@ -364,7 +390,10 @@ function App() {
       } catch {}
     });
 
-    es.addEventListener('alerta_lido', async () => setUnread(await getUnreadCount()));
+    es.addEventListener('alerta_lido', async () => {
+      window.dispatchEvent(new Event('avisos:changed'));
+      setUnread(await getUnreadCount());
+    });
 
     // Canal unificado do backend para eventos de alerta (payload JSON possui {type, payload})
     es.addEventListener('alerta', (ev) => {
@@ -378,6 +407,11 @@ function App() {
           }
           case 'alerta_novo': {
             setUnread((u) => (Number.isFinite(u) ? u + 1 : 1));
+            window.dispatchEvent(new Event('avisos:changed'));
+            if (data?.payload?.aviso) {
+              setToast({ open: true, type: 'info', text: data.payload.mensagem || 'Novo aviso' });
+              break;
+            }
             const uc = data?.payload?.uc;
             const cliente = fixMojibake(data?.payload?.cliente);
             const msg =
@@ -388,6 +422,7 @@ function App() {
             break;
           }
           case 'alerta_lido': {
+            window.dispatchEvent(new Event('avisos:changed'));
             (async () => setUnread(await getUnreadCount()))();
             break;
           }
@@ -535,7 +570,7 @@ function App() {
         </button>
         <div className="mb-6 px-2 flex flex-col items-center">
           <img
-            src="/icone_sure.png"
+            src="/icone_sure.svg"
             alt="SURE — Sistema Unificado de Ressarcimento"
             className="sidebar-brand-logo"
             style={{ width: '40px', height: '40px', objectFit: 'contain', flexShrink: 0 }}
@@ -635,10 +670,10 @@ function App() {
                   : 'hover:bg-[var(--menu-hover)]'
               }`
             }
-            title="Auditoria"
+            title="Processos (gestão)"
           >
             <ShieldCheck className="w-5 h-5" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('auditoria')}`}>Auditoria</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('auditoria')}`}>Processos (gestão)</span>
           </NavLink>
 
           <NavLink
@@ -650,10 +685,10 @@ function App() {
                   : 'hover:bg-[var(--menu-hover)]'
               }`
             }
-            title="Análise de Desvio"
+            title="Auditoria de Faturas"
           >
             <TrendingUp className="w-5 h-5" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('analise')}`}>Análise de Desvio</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('analise')}`}>Auditoria de Faturas</span>
           </NavLink>
 
           {role === 'admin' && (
@@ -670,6 +705,57 @@ function App() {
             >
               <History className="sidebar-icon" strokeWidth={1.25} />
               <span className={`text-sm font-medium sidebar-label ${solicitanteClass('historico')}`}>Histórico</span>
+            </NavLink>
+          )}
+
+          {role !== 'solicitante' && (
+            <NavLink
+              to="/rotinas"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="Rotinas"
+            >
+              <Repeat className="sidebar-icon" strokeWidth={1.25} />
+              <span className="text-sm font-medium sidebar-label">Rotinas</span>
+            </NavLink>
+          )}
+
+          {role !== 'solicitante' && (
+            <NavLink
+              to="/protocolos-aneel"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="Protocolos ANEEL"
+            >
+              <Landmark className="sidebar-icon" strokeWidth={1.25} />
+              <span className="text-sm font-medium sidebar-label">Protocolos ANEEL</span>
+            </NavLink>
+          )}
+
+          {role !== 'solicitante' && (
+            <NavLink
+              to="/whatsapp"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="WhatsApp"
+            >
+              <MessageCircle className="sidebar-icon" strokeWidth={1.25} />
+              <span className="text-sm font-medium sidebar-label">WhatsApp</span>
             </NavLink>
           )}
 
@@ -690,22 +776,6 @@ function App() {
             </NavLink>
           )}
 
-          {role === 'admin' && (
-            <NavLink
-              to="/admin/editor"
-              className={({ isActive }) =>
-                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
-                  isActive
-                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
-                    : 'hover:bg-[var(--menu-hover)]'
-                }`
-              }
-              title="Editor (Admin)"
-            >
-              <Settings2 className="sidebar-icon" strokeWidth={1.6} />
-              <span className="text-sm font-medium sidebar-label">Editor</span>
-            </NavLink>
-          )}
         </nav>
 
         <div className="mt-auto space-y-2">
@@ -752,7 +822,7 @@ function App() {
         </button>
         <div className="mb-6 px-2 flex flex-col items-center">
           <img
-            src="/icone_sure.png"
+            src="/icone_sure.svg"
             alt="SURE — Sistema Unificado de Ressarcimento"
             className="sidebar-brand-logo"
             style={{ width: '40px', height: '40px', objectFit: 'contain', flexShrink: 0 }}
@@ -855,6 +925,57 @@ function App() {
             </NavLink>
           )}
 
+          {role !== 'solicitante' && (
+            <NavLink
+              to="/rotinas"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="Rotinas"
+            >
+              <Repeat className="sidebar-icon" strokeWidth={1.25} />
+              <span className="text-sm font-medium sidebar-label">Rotinas</span>
+            </NavLink>
+          )}
+
+          {role !== 'solicitante' && (
+            <NavLink
+              to="/protocolos-aneel"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="Protocolos ANEEL"
+            >
+              <Landmark className="sidebar-icon" strokeWidth={1.25} />
+              <span className="text-sm font-medium sidebar-label">Protocolos ANEEL</span>
+            </NavLink>
+          )}
+
+          {role !== 'solicitante' && (
+            <NavLink
+              to="/whatsapp"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="WhatsApp"
+            >
+              <MessageCircle className="sidebar-icon" strokeWidth={1.25} />
+              <span className="text-sm font-medium sidebar-label">WhatsApp</span>
+            </NavLink>
+          )}
+
           {role === 'admin' && (
             <NavLink
               to="/dashboard"
@@ -881,10 +1002,10 @@ function App() {
                   : 'hover:bg-[var(--menu-hover)]'
               }`
             }
-            title="Auditoria"
+            title="Processos (gestão)"
           >
             <ShieldCheck className="sidebar-icon shrink-0" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('auditoria')}`}>Auditoria</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('auditoria')}`}>Processos (gestão)</span>
           </NavLink>
 
           <NavLink
@@ -896,10 +1017,10 @@ function App() {
                   : 'hover:bg-[var(--menu-hover)]'
               }`
             }
-            title="Análise de Desvio"
+            title="Auditoria de Faturas"
           >
             <TrendingUp className="sidebar-icon shrink-0" strokeWidth={1.25} />
-            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('analise')}`}>Análise de Desvio</span>
+            <span className={`text-sm font-medium sidebar-label ${solicitanteClass('analise')}`}>Auditoria de Faturas</span>
           </NavLink>
         </nav>
 
@@ -946,6 +1067,7 @@ function App() {
           <main className="flex-1 min-w-0 pt-16">
             <PageContainer>
               <MailLinkMinimizedBarHost />
+              <Suspense fallback={<div style={{ padding: 32, fontSize: 13, opacity: 0.6 }}>Carregando…</div>}>
               <Routes>
                 {!user && (
                   <>
@@ -963,21 +1085,35 @@ function App() {
                         role === 'gestor' || role === 'admin' ? (
                           <HomePage />
                         ) : (
-                          <ChatRequisicao />
+                          <AssistentePage />
                         )
                       }
                     />
-                    <Route path="/prazos" element={<HomeGestorAdmin />} />
+                    <Route path="/prazos" element={<Prazos />} />
+                    <Route path="/solicitacoes" element={<Solicitacoes />} />
                     <Route path="/backlog" element={<Backlog />} />
                     <Route path="/novo" element={<RequisicaoForm />} />
+                    <Route path="/conta" element={<MinhaConta />} />
 
                     {role === 'gestor' || role === 'admin' ? (
                       <>
                         <Route path="/Requisicoes" element={<Requisicoes />} />
                         <Route path="/gestao" element={<GestaoRequisicoes />} />
-                        <Route path="/processos" element={<ControleProcessos />} />
+                        {/* Controle de Processos — banco refatorado (db_ressarcimento_v2). */}
+                        {/* /controle-processos-v2 mantida como alias durante transição. */}
+                        <Route path="/processos" element={<ControleProcessosV2 />} />
+                        <Route path="/processos/:id" element={<ProcessoDetalhePage />} />
+                        <Route path="/controle-processos-v2" element={<ControleProcessosV2 />} />
+                        <Route path="/controle-processos-v2/:id" element={<ProcessoDetalhePage />} />
                         <Route path="/analise-desvio" element={<AnaliseDesvio />} />
+                        <Route path="/ocr-lote" element={<OcrLote />} />
+                        <Route path="/analise-desvio/:id" element={<AnaliseDesvio />} />
+                        <Route path="/regras" element={<Regras />} />
+                        <Route path="/claro" element={<ConsultaClaro />} />
                         <Route path="/caixa-de-email" element={<CaixaDeEmail />} />
+                        <Route path="/rotinas" element={<AdminRotinas />} />
+                        <Route path="/protocolos-aneel" element={<ProtocolosAneel />} />
+                        <Route path="/whatsapp" element={<WhatsappEmpresa />} />
 
                         {role === 'admin' ? (
                           <>
@@ -987,8 +1123,8 @@ function App() {
                             <Route path="/adminfeedbacks" element={<AdminFeedbacks />} />
                             {/* Alias to maintain compatibility */}
                             <Route path="/admin/feedbacks" element={<AdminFeedbacks />} />
-                            <Route path="/admin/prazos" element={<AdminPrazos />} />
-                            <Route path="/admin/editor" element={<AdminEditor />} />
+                            {/* Admin Editor aposentado — redireciona p/ Home */}
+                            <Route path="/admin/editor" element={<Navigate to="/" replace />} />
                             <Route path="/admin/planilha" element={<Navigate to="/processos" replace />} />
                           </>
                         ) : (
@@ -1006,6 +1142,7 @@ function App() {
                         <Route path="/processos" element={<Navigate to="/" replace />} />
                         <Route path="/processos/:id" element={<Navigate to="/" replace />} />
                         <Route path="/analise-desvio" element={<Navigate to="/" replace />} />
+                        <Route path="/analise-desvio/:id" element={<Navigate to="/" replace />} />
                         <Route path="/caixa-de-email" element={<Navigate to="/" replace />} />
                       </>
                     )}
@@ -1016,6 +1153,7 @@ function App() {
                   </>
                 )}
               </Routes>
+              </Suspense>
             </PageContainer>
 
             {/* Modal de boas-vindas (gestor only) */}
@@ -1049,7 +1187,6 @@ function App() {
         </div>
 
         {/* Global Modals */}
-        <ThemeSwitcher />
         <GlobalNewProcessNotifier />
         <AlertasVencimentoModal
           open={openGestorVenc}
@@ -1062,15 +1199,58 @@ function App() {
         <CommandPaletteHost />
         <FloatingEmailComposer />
         {user && <GlobalChatWidget />}
+        {user && <InformativoModal user={user} />}
+
+        {/* Aviso prévio de expiração: aparece quando faltam <= 120s. Toast no canto inferior direito. */}
+        {user && sessionWarning && !sessionExpired && (
+          <div
+            className="fixed bottom-4 right-4 z-[9999] flex items-start gap-3 px-4 py-3 shadow-lg border"
+            style={{
+              background: 'color-mix(in srgb, var(--warning) 12%, var(--card))',
+              color: 'var(--fg)',
+              borderColor: 'var(--warning)',
+              borderRadius: 10,
+              maxWidth: 360,
+              fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            }}
+            role="alert"
+          >
+            <div style={{ fontSize: 20, lineHeight: 1 }}>⏱</div>
+            <div style={{ flex: 1, fontSize: 13 }}>
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>
+                Sua sessão expira em {formatRemaining(remainingSeconds)}
+              </div>
+              <div style={{ opacity: 0.85, marginBottom: 8 }}>
+                Salve qualquer alteração pendente e faça login novamente pra continuar.
+              </div>
+              <button
+                type="button"
+                onClick={logout}
+                style={{
+                  background: 'var(--warning)',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '5px 10px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Sair e fazer login
+              </button>
+            </div>
+          </div>
+        )}
 
         {sessionExpired && (
           <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <div
               className="w-full max-w-md border"
               style={{
-                background: '#f6f6f6',
-                color: '#111',
-                borderColor: '#9a9a9a',
+                background: 'var(--card)',
+                color: 'var(--fg)',
+                borderColor: 'var(--border)',
                 borderRadius: 6,
                 boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
                 fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif',
@@ -1079,9 +1259,9 @@ function App() {
               <div
                 style={{
                   padding: '10px 12px',
-                  borderBottom: '1px solid #c9c9c9',
+                  borderBottom: '1px solid var(--border)',
                   fontWeight: 600,
-                  background: 'linear-gradient(#ffffff, #eaeaea)',
+                  background: 'linear-gradient(var(--card), var(--panel))',
                 }}
               >
                 Sessão expirada
@@ -1095,8 +1275,8 @@ function App() {
                   display: 'flex',
                   justifyContent: 'flex-end',
                   gap: 8,
-                  borderTop: '1px solid #c9c9c9',
-                  background: '#ededed',
+                  borderTop: '1px solid var(--border)',
+                  background: 'var(--panel)',
                 }}
               >
                 <button
@@ -1108,9 +1288,9 @@ function App() {
                   style={{
                     minWidth: 88,
                     padding: '6px 14px',
-                    border: '1px solid #0a5bd7',
+                    border: '1px solid var(--accent)',
                     borderRadius: 4,
-                    background: 'linear-gradient(#5aa0ff, #2f6edc)',
+                    background: 'var(--gradient-primary)',
                     color: '#fff',
                     cursor: 'pointer',
                     fontSize: 13,

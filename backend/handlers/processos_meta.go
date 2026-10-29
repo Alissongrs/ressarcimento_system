@@ -71,18 +71,18 @@ func GetProcessosCardsMeta(c *gin.Context) {
 	// Último histórico por id
 	ultMap := make(map[int64]UltMovDTO, len(ids))
 	qUlt := `
-        SELECT h.id_requisicao,
+        SELECT h.id_processo,
                DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao,
                COALESCE(h.comentario, '') AS comentario,
                COALESCE(u.nome_usuario, 'Sistema') AS usuario
           FROM FT_HISTORICO_MOVIMENTACOES h
           LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
           JOIN (
-                SELECT id_requisicao, MAX(data_movimentacao) AS max_dt
+                SELECT id_processo, MAX(data_movimentacao) AS max_dt
                   FROM FT_HISTORICO_MOVIMENTACOES
-                 WHERE id_requisicao IN (` + inClause + `)
-                 GROUP BY id_requisicao
-               ) m ON m.id_requisicao = h.id_requisicao AND h.data_movimentacao = m.max_dt`
+                 WHERE id_processo IN (` + inClause + `)
+                 GROUP BY id_processo
+               ) m ON m.id_processo = h.id_processo AND h.data_movimentacao = m.max_dt`
 	if rows, err := queryGorm(db, qUlt, args...); err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -96,7 +96,7 @@ func GetProcessosCardsMeta(c *gin.Context) {
 
 	// Contagem de anexos por id
 	anexMap := make(map[int64]int, len(ids))
-	qAn := `SELECT id_requisicao, COUNT(*) FROM FT_ANEXOS WHERE id_requisicao IN (` + inClause + `) GROUP BY id_requisicao`
+	qAn := `SELECT id_processo, COUNT(*) FROM FT_ANEXOS WHERE id_processo IN (` + inClause + `) GROUP BY id_processo`
 	if rows, err := queryGorm(db, qAn, args...); err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -112,9 +112,8 @@ func GetProcessosCardsMeta(c *gin.Context) {
 	indefer := make(map[int64]bool, len(ids))
 	qInd := `
         SELECT p.id_processo,
-               CASE WHEN LOWER(COALESCE(e.etapa,'')) REGEXP 'indefer|improced' THEN 1 ELSE 0 END AS indeferido
+               CASE WHEN p.id_aprovacao_atual = 2 THEN 1 ELSE 0 END AS indeferido
           FROM FT_PROCESSOS p
-          JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
          WHERE p.id_processo IN (` + inClause + `)`
 	if rows, err := queryGorm(db, qInd, args...); err == nil {
 		defer rows.Close()

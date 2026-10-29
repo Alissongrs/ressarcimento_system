@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notificação de tarefa</title>
+<style>
+  :root { --bg:#f3f4f6; --card:#fff; --fg:#111827; --muted:#6b7280; --border:#e5e7eb; --accent:#2563eb; --danger:#dc2626; --wa:#e7fdd8; --wabg:#efeae2; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg:#0f172a; --card:#1e293b; --fg:#e5e7eb; --muted:#94a3b8; --border:#334155; --accent:#60a5fa; --danger:#f87171; --wa:#144d37; --wabg:#0b141a; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { padding:24px 16px; display:grid; gap:24px; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); align-items:start; }
+  header { padding:24px 16px 0; }
+  h1 { margin:0 0 4px; font-size:20px; }
+  header p { margin:0; color:var(--muted); }
+  h2 { margin:0 0 4px; font-size:15px; }
+  .quem { margin:0 0 12px; color:var(--muted); font-size:13px; }
+  .painel { background:var(--card); border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,.18); overflow:hidden; }
+  .abas { display:flex; gap:4px; padding:8px 8px 0; border-bottom:1px solid var(--border); }
+  .aba { padding:8px 12px; font-weight:600; font-size:13px; opacity:.65; border-bottom:2px solid transparent; }
+  .aba.on { opacity:1; border-color:var(--accent); }
+  .item { display:flex; gap:12px; align-items:flex-start; padding:12px 16px; border-bottom:1px solid var(--border); }
+  .item.novo { background:color-mix(in srgb, var(--danger) 7%, transparent); }
+  .bola { width:8px; height:8px; border-radius:50%; background:var(--danger); margin-top:6px; flex:none; }
+  .bola.lido { background:transparent; }
+  .txt { flex:1; min-width:0; }
+  .msg { display:block; font-weight:600; }
+  .msg.lido { font-weight:400; opacity:.7; }
+  .meta { display:block; font-size:12px; color:var(--muted); margin-top:2px; }
+  .btn { flex:none; background:var(--accent); color:#fff; border:0; border-radius:6px; padding:4px 12px; font-size:12px; font-weight:600; }
+  .h { display:block; padding:12px 16px; border-bottom:1px solid var(--border); }
+  .h .tit { display:block; font-weight:500; }
+  .para { display:block; font-weight:700; color:var(--accent); margin-top:4px; }
+  .para.sem { color:var(--danger); }
+  .wa { background:var(--wabg); padding:16px; border-radius:12px; border:1px solid var(--border); display:grid; gap:10px; }
+  .bal { background:var(--wa); padding:8px 10px; border-radius:8px; max-width:92%; box-shadow:0 1px 1px rgba(0,0,0,.12); }
+  .bal small { display:block; text-align:right; color:var(--muted); font-size:11px; }
+  .nota { grid-column:1/-1; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px 16px; color:var(--muted); font-size:13px; }
+  .nota b { color:var(--fg); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Como a notificação de tarefa deve aparecer</h1>
+  <p>Exemplo com a tarefa 29 de hoje: protocolo 010.666.81326-18 (processo #18434), direcionada ao Paulo Passos.</p>
+</header>
+<main>
+
+  <section>
+    <h2>1. Meus avisos — só de quem recebeu (Paulo)</h2>
+    <p class="quem">Só o Paulo vê. Bolinha vermelha até ele apertar "Ciente".</p>
+    <div class="painel">
+      <div class="abas"><span class="aba on">Meus avisos (11)</span><span class="aba">Histórico de protocolos</span></div>
+      <div class="item novo">
+        <span class="bola"></span>
+        <span class="txt">
+          <span class="msg">Nova tarefa para você: Protocolo ANEEL 010.666.81326-18 concluído pela ANEEL (processo #18434)</span>
+          <span class="meta">29/10/2026 10:41</span>
+        </span>
+        <button class="btn">Ciente</button>
+      </div>
+      <div class="item novo">
+        <span class="bola"></span>
+        <span class="txt">
+          <span class="msg">Nova tarefa para você: Protocolo ANEEL 010.666.80726-15 concluído pela ANEEL (processo #18405)</span>
+          <span class="meta">29/10/2026 10:41</span>
+        </span>
+        <button class="btn">Ciente</button>
+      </div>
+      <div class="item">
+        <span class="bola lido"></span>
+        <span class="txt">
+          <span class="msg lido">Nova tarefa para você: Protocolo ANEEL 010.666.71326-73 concluído pela ANEEL (processo #18409)</span>
+          <span class="meta">29/10/2026 10:41 · Ciente em 29/10/2026 11:05</span>
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Histórico de protocolos — é o que abre ao clicar no sininho</h2>
+    <p class="quem">Todos veem. Visão do Paulo: "Ciente" só aparece para quem recebeu; tarefa sem responsável tem "Assumir".</p>
+    <div class="painel">
+      <div class="abas"><span class="aba">Meus avisos (11)</span><span class="aba on">Histórico de protocolos</span></div>
+      <div class="item novo">
+        <span class="txt">
+          <span class="msg" style="font-weight:500">Protocolo ANEEL 010.666.81326-18 concluído pela ANEEL</span>
+          <span class="para">Para você (Paulo Passos)</span>
+          <span class="meta">Processo #18434 · Aberta</span>
+          <span class="meta">29/10/2026 10:41</span>
+        </span>
+        <button class="btn">Ciente</button>
+      </div>
+      <div class="item">
+        <span class="txt">
+          <span class="msg" style="font-weight:500">Protocolo ANEEL 010.666.80726-15 concluído pela ANEEL</span>
+          <span class="para">Para você (Paulo Passos)</span>
+          <span class="meta">Processo #18405 · Aberta · Ciente em 29/10/2026 11:05</span>
+          <span class="meta">29/10/2026 10:41</span>
+        </span>
+      </div>
+      <div class="item">
+        <span class="txt">
+          <span class="msg" style="font-weight:500">Protocolo ANEEL 010.666.70126-02 concluído pela ANEEL</span>
+          <span class="para">Para Eliane Fátima de Araújo</span>
+          <span class="meta">Processo #18390 · Aberta</span>
+          <span class="meta">29/10/2026 09:15 · tarefa de outra pessoa: sem botão para o Paulo</span>
+        </span>
+      </div>
+      <div class="item">
+        <span class="txt">
+          <span class="msg" style="font-weight:500">Protocolo ANEEL 010.661.82626-82 concluído pela ANEEL</span>
+          <span class="para sem">Sem responsável</span>
+          <span class="meta">Aberta</span>
+          <span class="meta">quem apertar "Assumir" vira o responsável</span>
+        </span>
+        <button class="btn" style="background:var(--danger)">Assumir</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Grupo do WhatsApp da equipe</h2>
+    <p class="quem">Depois que o grupo for escolhido na tela /whatsapp.</p>
+    <div class="wa">
+      <div class="bal">Protocolo ANEEL 010.666.81326-18 concluído pela ANEEL (processo #18434) — para <b>Paulo Passos</b><small>10:41</small></div>
+      <div class="bal">Tarefa direcionada para <b>Paulo Passos</b>: Protocolo ANEEL 010.661.82626-82 concluído pela ANEEL<small>11:20</small></div>
+      <div class="bal">Tarefa assumida por <b>Paulo Passos</b>: Protocolo ANEEL 010.661.82626-82 concluído pela ANEEL<small>11:32</small></div>
+    </div>
+  </section>
+
+  <div class="nota">
+    <b>Por que hoje o nome não aparece:</b> a versão no ar ainda é a antiga. O servidor já devolve o nome do responsável,
+    mas a tela que mostra o nome em destaque só entra no próximo deploy do frontend.
+  </div>
+</main>
+</body>
+</html>

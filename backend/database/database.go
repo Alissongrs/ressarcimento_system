@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,10 @@ import (
 var (
 	DB_App      *sql.DB
 	DB_Consulta *sql.DB
+	// DB_V2 aponta para o banco refatorado (db_ressarcimento_v2, MySQL 8 em Docker).
+	// Usado apenas pelos endpoints /api/v2/... (Controle de Processos versão nova).
+	// Permanece nil quando DB_APP_URL não está definido — handlers v2 retornam 503.
+	DB_V2 *sql.DB
 )
 
 func init() {
@@ -74,6 +79,14 @@ func InitDBs() {
 	appTLS := strings.TrimSpace(os.Getenv("DB_APP_TLS"))
 	consultaTLS := strings.TrimSpace(os.Getenv("DB_CONSULTA_TLS"))
 
+	timeZone := strings.TrimSpace(os.Getenv("DB_TIMEZONE"))
+	if timeZone == "" {
+		timeZone = "-03:00" // default para evitar depender de time zone tables
+	}
+	// time_zone vai NA DSN p/ que TODA conexão do pool nasça em -03:00 (senão só uma
+	// recebe o SET e as demais usam o default do RDS = UTC → carimbos 3h adiantados).
+	tzParam := "&time_zone=" + url.QueryEscape("'"+timeZone+"'")
+
 	// Monta DSNs garantindo UTF-8 e timezone local
 	buildDSN := func(base, tlsMode string) string {
 		if base == "" {
@@ -83,7 +96,7 @@ func InitDBs() {
 		if strings.Contains(base, "?") {
 			sep = "&"
 		}
-		dsn := fmt.Sprintf("%s%sparseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=Local", base, sep)
+		dsn := fmt.Sprintf("%s%sparseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=Local%s", base, sep, tzParam)
 		if tlsMode != "" && tlsMode != "false" {
 			dsn += "&tls=" + tlsMode
 		}
@@ -91,11 +104,6 @@ func InitDBs() {
 	}
 	connStrApp := buildDSN(os.Getenv("DB_APP_URL"), appTLS)
 	connStrConsulta := buildDSN(os.Getenv("DB_CONSULTA_URL"), consultaTLS)
-
-	timeZone := strings.TrimSpace(os.Getenv("DB_TIMEZONE"))
-	if timeZone == "" {
-		timeZone = "-03:00" // default para evitar depender de time zone tables
-	}
 
 	var err error
 
@@ -114,6 +122,30 @@ func InitDBs() {
 	// Alinha collation/names na sessão para evitar mix de collations, com fallback
 	ensureSessionCollation(DB_App)
 	log.Println("Conexão com o Banco da Aplicação estabelecida com sucesso!")
+
+    // ── DB_V2 (banco refatorado para UI v2) ─────────────────────────────
+    v2TLS := strings.TrimSpace(os.Getenv("DB_APP_TLS"))
+    connStrV2 := buildDSN(os.Getenv("DB_APP_URL"), v2TLS)
+    if strings.TrimSpace(connStrV2) == "" {
+        log.Println("Aviso: DB_APP_URL vazio — endpoints /api/v2 retornarão 503")
+        DB_V2 = nil
+    } else {
+        DB_V2, err = sql.Open("mysql", connStrV2)
+        if err != nil {
+            log.Printf("Aviso: falha ao ABRIR conexão DB_V2: %v (endpoints /api/v2 ficarão indisponíveis)", err)
+            DB_V2 = nil
+        } else if err = DB_V2.Ping(); err != nil {
+            log.Printf("Aviso: falha ao CONECTAR no DB_V2: %v (endpoints /api/v2 ficarão indisponíveis)", err)
+            _ = DB_V2.Close()
+            DB_V2 = nil
+        } else {
+            if _, err := DB_V2.Exec("SET time_zone = '" + timeZone + "'"); err != nil {
+                _, _ = DB_V2.Exec("SET time_zone = '-03:00'")
+            }
+            ensureSessionCollation(DB_V2)
+            log.Println("Conexão com o Banco V2 (db_ressarcimento_v2) estabelecida com sucesso!")
+        }
+    }
 
     if strings.TrimSpace(connStrConsulta) == "" {
         log.Println("Aviso: DB_CONSULTA_URL vazio — recursos de consulta serão desabilitados")

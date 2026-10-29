@@ -1,0 +1,78 @@
+{
+  "documento": "DANF3EA4A - Família ELEKTRO + COPEL (template comum)",
+  "_status": "Validado em Elektro MS (id 28402), Elektro SP (id 12257) e COPEL PR (id 11371). MESMO template DANF3EA4A V1.0x.",
+  "_descoberta": "Elektro (MS+SP) e Copel usam o MESMO software de geração de NF3E — daí o template ser idêntico exceto por razão social, CNPJ, IE, UF, ICMS.",
+  "_herda_de": "elektro_ms_extraction_map.json",
+
+  "distribuidoras": {
+    "ELEKTRO_MS_TRES_LAGOAS": {
+      "razao_social_implicita": "Elektro Redes MS (subsidiária Neoenergia)",
+      "cnpj_emissor": "02.328.280/0002-78",
+      "ie_emissor": "283041269",
+      "endereco_emissor": "R Baldomero Leituga, 2032 - Jd Primavera",
+      "cep_emissor": "79610-270", "cidade_uf_emissor": "Tres Lagoas (Ms) - MS",
+      "uf": "MS", "icms_pct": 17,
+      "url_chave_acesso": "https://nf3e.sefaz.ms.gov.br/ws/NF3eConsulta?wsdl",
+      "_volume": "6", "_status": "VALIDADO (id 28402)"
+    },
+    "ELEKTRO_SP_FERNANDOPOLIS": {
+      "razao_social_implicita": "Elektro Redes SA (subsidiária Neoenergia)",
+      "cnpj_emissor": "02.328.280/0001-97",
+      "ie_emissor": "244868522118",
+      "endereco_emissor": "R Ary Antenor de Souza, 321 - Jd Nova America",
+      "cep_emissor": "13053-024", "cidade_uf_emissor": "Campinas - SP",
+      "uf": "SP", "icms_pct": 18,
+      "url_chave_acesso": "https://nf3e.svrs.rs.gov.br/ws/nf3eConsulta/nf3eConsulta.asmx",
+      "_volume": "954+39+15", "_status": "VALIDADO (id 12257)",
+      "_itens_adicionais_vs_MS": [
+        "DEMANDA DE DISTRIBUICAO TUSD ISENTA ICMS",
+        "SUBSIDIO TARIFARIO DEM ISENTA TUSD",
+        "SUBSIDIO TARIFARIO LIQDO DEM ISENTA",
+        "COBRANCA DE AJUSTE DE FATURAMENTO"
+      ]
+    },
+    "COPEL_DISTRIBUICAO_PR": {
+      "razao_social": "Copel Distribuição S.A.",
+      "cnpj_emissor": "04.368.898/0001-06",
+      "ie_emissor": "9023307399",
+      "endereco_emissor": "R Jose Izidoro Biazetto, 158 - Bloco A - Mossungue",
+      "cep_emissor": "81200-240", "cidade_uf_emissor": "Curitiba - PR",
+      "uf": "PR", "icms_pct": 19,
+      "url_chave_acesso": "https://nf3e.fazenda.pr.gov.br/nf3e/NF3eConsulta?wsdl",
+      "_volume": "888+5", "_status": "VALIDADO (id 11371)",
+      "_diferencas_vs_elektro": [
+        "Razão social aparece EXPLÍCITA: 'Copel Distribuição S.A.'",
+        "chave_acesso COM espaços (4-4-4...) — diferente do Elektro que tem misto",
+        "ICMS 19% (PR)",
+        "Item adicional: 'ENERGIA ELETRICA ACL-COM ICMS ST P TE' / 'ENERGIA ELETRICA ACL-COM ICMS ST FP TE' (em MWh, não kWh)",
+        "Item adicional: 'DEDUCAO ENERGIA ELETRICA ACL-SEM ICMS'",
+        "Tem 'CONT ILUMIN PUBLICA MUNICIPIO' (em vez de 'COBRANCA ILUM PUBLICA PARA A PREFEITURA')",
+        "Bloco 'EXTRATO DE FATURAMENTO - CLIENTE LIVRE - TARIFA HORARIA VERDE' com info técnica adicional"
+      ]
+    }
+  },
+
+  "_caracteristicas_universais_familia_DANF3EA4A": {
+    "footer_template_marker": "DANF3EA4A (V1.0x) — aparece no fim de cada página",
+    "estrutura_itens_fatura": "Itens listados em sequência, valores numéricos em colunas verticais separadas (decoração mais que tabular)",
+    "leituras_medicao_decimal": "PONTO (5.06) em vez de vírgula — armadilha de parser",
+    "postos_horarios_codigo": "PT (Ponta) / FP (Fora Ponta) / TP (Todos Postos)",
+    "grandezas_contratadas_formato": "Demanda Ponta/F.Ponta/Energia P/Energia FP/Res Cap P/Res Cap FP/Montante em Todos os Períodos",
+    "banco_debito_auto": "Itaú 341 ag 0018 (universal cliente Via Varejo)",
+    "tributos_format": "ICMS PIS COFINS com alíquota em formato '17%' literal",
+    "subsidio_tarifario": "Par bruto/líquido (líquido é negativo) — manter sinal"
+  },
+
+  "_overrides_para_copel_especifico": {
+    "tabela_itens_fatura.descricoes_adicionais_Copel": [
+      "ENERGIA ELET CONSUMO PTA (kWh)",
+      "ENERGIA ELET CONSUMO F PTA (kWh)",
+      "ENERGIA REAT EXCED TE PONTA / F PONTA (kWh)",
+      "ENERGIA ELETRICA ACL-COM ICMS ST P TE / FP TE (MWh!)",
+      "DEDUCAO ENERGIA ELETRICA ACL-SEM ICMS",
+      "CONT ILUMIN PUBLICA MUNICIPIO"
+    ]
+  },
+
+  "_volume_coberto_total": "~1.907 faturas (Elektro SP é o maior)"
+}

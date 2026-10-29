@@ -73,6 +73,7 @@ func AuthOrQueryToken() gin.HandlerFunc {
 
 		c.Set("userID", claims.UserID)
 		c.Set("userName", userName)
+		c.Set("userEmail", strings.TrimSpace(claims.Email))
 		c.Set("userTipoConta", userTipo)
 		c.Set("role", role)
 		c.Set("isAdmin", role == "admin")

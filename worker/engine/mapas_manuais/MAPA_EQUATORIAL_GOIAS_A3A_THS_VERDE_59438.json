@@ -1,0 +1,174 @@
+{
+  "_meta": {
+    "id_fonte": 59438,
+    "uid_fonte": "144022120221101",
+    "arquivo_origem": "14_4022_1B2.pdf",
+    "distribuidora": "Equatorial Goiás",
+    "razao_social_distribuidora": "CELG Distribuição S.A. - CELG-D",
+    "marca_grupo": "Equatorial Energia",
+    "tipo_documento": "DANF3E/NF3e",
+    "subgrupo_modalidade": "A3-A / Comercial Normal THS Verde",
+    "classe": "Comercial",
+    "tipo_fornecimento": "Trifásico",
+    "tem_gd": false,
+    "tem_horario_reservado": true,
+    "tem_demanda_contratada": true,
+    "ano_referencia": "2022",
+    "criado_por": "usuario_manual_gpt_externo",
+    "criado_em": "2026-05-24",
+    "template_id": "equatorial_goias_danf3e_a3a_comercial_ths_verde_horario_reservado_demanda_contratada_baixa_pagamento_3paginas",
+    "uso": "Gold-standard layout Equatorial GO A3-A THS Verde 2022. Patterns atuais do extrair_itens_equatorial calibrados pra layout 2024+ não cobrem este (com horário reservado HR, demanda contratada de 100kW, multa/juros). Reprovou no validador score 56 com só 2 itens capturados."
+  },
+  "diagnostico_layout": {
+    "paginas_pdf": 3,
+    "pagina_1": "Cobrança principal: cabeçalho, cliente, instalação/UC, NF3e, leituras, itens, tributos, medição, histórico, canhoto sem linha digitável",
+    "pagina_2": "Informativo/postal, canais de atendimento, QR Code conta por e-mail",
+    "pagina_3": "Baixa/pagamento (registro de pagamento da fatura)",
+    "problema_principal_ocr": "Text layer da pág 1 aparece com BLOCOS DUPLICADOS e fora da ordem visual. Faturas têm consumo ponta + fora ponta + horário reservado (HR). Demanda contratada de 100 kW NÃO é a demanda medida 39,3108 kW. Fator implícito 2,5% de perda. UC 4220024130 NÃO é boleto/PIX/linha digitável.",
+    "estrategia_recomendada": [
+      "Criar template próprio para Equatorial Goiás A3-A THS Verde",
+      "Usar pág 1 como fonte financeira principal",
+      "Usar pág 2 só como informativo/postal",
+      "Usar pág 3 só para status/baixa de pagamento",
+      "Deduplicar blocos repetidos do text layer da pág 1",
+      "Reconstruir tabela de itens por ROI/posição (não regex linear)",
+      "Aplicar fator implícito 2,5% nas validações de medição",
+      "Não tratar UC 4220024130 como linha digitável/boleto/PIX",
+      "Não substituir demanda contratada de 100 kW pela medida"
+    ]
+  },
+  "assinatura_template": {
+    "marcadores": [
+      "Equatorial Energia",
+      "CELG Distribuição S.A. - CELG-D",
+      "DOCUMENTO AUXILIAR DA NOTA FISCAL DE ENERGIA ELÉTRICA ELETRÔNICA",
+      "A A3-A COMERCIAL OU SERVIÇOS E OUTRAS ATIVIDADES",
+      "COMERCIAL NORMAL THS_VERDE",
+      "CONSUMO FP",
+      "CONSUMO HR",
+      "CONSUMO P",
+      "PARCELA TE HR",
+      "UFER FP",
+      "DEMANDA - kW 100",
+      "Se você ainda não tem débito automático, cadastre-se"
+    ]
+  },
+  "campos_extraidos": {
+    "cliente": {
+      "nome": "JOSE RICARDO REZEK",
+      "cpf": "410.061.518-34",
+      "endereco_uc": "FAZENDA 3 COMPANHEIROS, N. 0, - FABRICA DE RACÃO",
+      "bairro_zona": "ZONA RURAL",
+      "cidade": "DOVERLANDIA",
+      "uf": "GO",
+      "cep": "75855000"
+    },
+    "distribuidora": {
+      "marca": "Equatorial Energia",
+      "razao_social": "CELG Distribuição S.A. - CELG-D",
+      "cnpj": "01.543.032/0001-04",
+      "ie": "10.549.420",
+      "endereco": "Rua 2, Qd. A-37, nº 505 - Jardim Goiás, Goiânia/GO, CEP 74805-180"
+    },
+    "identificadores": {
+      "instalacao_uc": "4220024130",
+      "numero_cliente": "1680214",
+      "medidor_principal": "10517162-0"
+    },
+    "classificacao": {
+      "grupo": "A",
+      "subgrupo": "A3-A",
+      "classe": "Comercial",
+      "modalidade": "Comercial Normal THS Verde",
+      "tipo_fornecimento": "Trifásico",
+      "tem_horario_reservado": true,
+      "demanda_contratada_kw": 100
+    },
+    "nota_fiscal": {
+      "numero_nf": "35984302",
+      "serie": "0",
+      "data_emissao": "25/11/2022 13:26",
+      "chave_acesso": "52221101543032000104660000359843021032531393",
+      "chave_valida_mod11": true,
+      "protocolo": "3522200032328116 - 25/11/2022 às 13:27:40",
+      "cfop": "5253",
+      "natureza_cfop": "Venda de energia elétrica para estabelecimento comercial",
+      "url_consulta": "https://dfe-portal.svrs.rs.gov.br/NF3e/consulta"
+    },
+    "vencimento_valor": {
+      "mes_ref": "NOV/2022",
+      "vencimento": "05/12/2022",
+      "total_a_pagar": "3.520,45",
+      "tem_boleto": false,
+      "tem_pix": false
+    },
+    "periodo_leitura": {
+      "anterior": "01/10/2022",
+      "atual": "01/11/2022",
+      "dias": 31,
+      "proxima": "01/12/2022"
+    },
+    "tributos": {
+      "pis_pasep": {"base": "2.858,98", "aliquota_pct": "0,9627", "valor": "27,52"},
+      "icms":      {"base": "3.444,53", "aliquota_pct": "17",     "valor": "585,57"},
+      "cofins":    {"base": "2.858,98", "aliquota_pct": "4,4344", "valor": "126,77"}
+    },
+    "itens_fatura": [
+      {"descricao": "CONSUMO FP",       "unidade": "kWh",   "quantidade": "1.070,10", "valor": "152,11"},
+      {"descricao": "CONSUMO HR",       "unidade": "kWh",   "quantidade": "2,46",     "valor": "0,34"},
+      {"descricao": "CONSUMO P",        "unidade": "kWh",   "quantidade": "1,42",     "valor": "2,61"},
+      {"descricao": "DEMANDA",          "unidade": "kW",    "quantidade": "100,00",   "valor": "2.884,55"},
+      {"descricao": "JUROS MORATÓRIA",  "valor": "1,24"},
+      {"descricao": "MULTA - 10/2022",  "valor": "74,68"},
+      {"descricao": "PARCELA TE FP",    "unidade": "kWh",   "quantidade": "1.070,10", "valor": "385,04"},
+      {"descricao": "PARCELA TE HR",    "unidade": "kWh",   "quantidade": "2,46",     "valor": "0,88"},
+      {"descricao": "PARCELA TE P",     "unidade": "kWh",   "quantidade": "1,42",     "valor": "0,82"},
+      {"descricao": "UFER FP",          "unidade": "kVArh", "quantidade": "47,97",    "valor": "18,14"},
+      {"descricao": "UFER P",           "unidade": "kVArh", "quantidade": "0,12",     "valor": "0,04"}
+    ],
+    "demanda": {
+      "demanda_contratada_faturada_kw": "100,00",
+      "demanda_medida_maxima_kw": "39,3108",
+      "observacao": "Demanda faturada é a CONTRATADA (100kW), não a medida (39,3108kW)"
+    },
+    "baixa_pagamento_pagina_3": {
+      "data_baixa": "06/12/2022",
+      "motivo": "PAGAMENTO",
+      "valor_pago": "3.520,45"
+    }
+  },
+  "validacoes": {
+    "soma_itens_bate_total": true,
+    "calculo_total": "152,11 + 0,34 + 2,61 + 2.884,55 + 1,24 + 74,68 + 385,04 + 0,88 + 0,82 + 18,14 + 0,04 = 3.520,45",
+    "pis_cofins_total": "27,52 + 126,77 = 154,29",
+    "perda_2_5_quantidades": [
+      "(210046 - 209176) * 1,2 * 1,025 = 1.070,10 kWh (fora ponta)",
+      "(880 - 878) * 1,2 * 1,025 = 2,46 kWh (reservado)",
+      "(36685 - 36646) * 1,2 * 1,025 = 47,97 kVArh (UFER fora ponta)"
+    ],
+    "chave_44_digitos": true,
+    "nao_tem_boleto_pix": true
+  },
+  "regex_sugeridos": {
+    "item_consumo": "(CONSUMO\\s+(?:FP|HR|P)|PARCELA\\s+TE\\s+(?:FP|HR|P)|UFER\\s+(?:FP|P)|DEMANDA)\\s+(\\d{1,3}(?:\\.\\d{3})*,\\d{2})\\s+(?:kWh|kW|kVArh)\\s+([\\d.,]+)\\s+([\\d.,]+)",
+    "multa_juros": "(JUROS\\s+MORAT[ÓO]RIA|MULTA\\s*-?\\s*\\d{2}/\\d{4})\\.?\\s+([\\d.,]+)",
+    "tributos": "(PIS/PASEP|ICMS|COFINS)\\s+([\\d.,]+)\\s+([\\d.,]+)%\\s+([\\d.,]+)",
+    "baixa_pagamento": "(\\d{2}/\\d{2}/\\d{4})\\s+PAGAMENTO\\s+PAGAMENTO\\s+(\\d{2}/\\d{2}/\\d{4})\\s+R\\$\\s*([\\d.,]+)"
+  },
+  "guardrails": [
+    "Não usar template B3 simples — esta é Grupo A/A3-A THS Verde",
+    "Não usar template CPFL, Enel, Neoenergia, Copel, Light, Celesc ou Elektro",
+    "Não duplicar cobrança por causa dos blocos repetidos do text layer",
+    "Não usar pág 2 para sobrescrever cobrança (informativa/postal)",
+    "Não usar pág 3 para recalcular fatura (baixa/pagamento)",
+    "Não confundir UC 4220024130 com boleto/PIX/linha digitável",
+    "Não tratar aviso 'cadastre-se no débito automático' como débito ativo",
+    "Não criar PIX (QR Code é fiscal NF3e)",
+    "Não criar boleto (não há linha digitável)",
+    "Não trocar demanda faturada 100kW pela medida 39,3108kW",
+    "Aplicar fator 2,5% nas validações antes de sinalizar divergência",
+    "Preservar CONSUMO HR e PARCELA TE HR (horário reservado)",
+    "Não somar PIS/COFINS como itens separados — já embutidos",
+    "Não confundir NF3e fiscal 35984302 com canhoto 2022109376019"
+  ]
+}

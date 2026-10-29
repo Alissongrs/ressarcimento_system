@@ -13,12 +13,14 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"ressarcimento-backend/database"
+	"ressarcimento-backend/repositories"
 	"ressarcimento-backend/services"
 
 	"github.com/gin-gonic/gin"
@@ -120,6 +122,7 @@ type MailMessageSummary struct {
 	InternetMessageID string `json:"internet_message_id"`
 	ThreadID          string `json:"thread_id"`
 	LinkedProcessID   *int64 `json:"linked_processo_id,omitempty"`
+	ArchivedLocal     bool   `json:"archived_local,omitempty"`
 }
 
 type MailMessageDetail struct {
@@ -247,16 +250,45 @@ func MailMessages(c *gin.Context) {
 			offset = n
 		}
 	}
+	// Filtro por data (ISO 8601 UTC): ?from=2026-06-23T03:00:00Z&to=2026-06-24T03:00:00Z
+	from := strings.TrimSpace(c.Query("from"))
+	to := strings.TrimSpace(c.Query("to"))
+	// O Graph quer ISO 8601 (from/to). As queries no NOSSO banco (cache + cópia local)
+	// precisam do formato datetime do MySQL ('YYYY-MM-DD HH:MM:SS') — o 'T...Z' não é
+	// parseado de forma confiável e derrubava a injeção da cópia local quando havia filtro.
+	fromSQL := sqlDateTimeFromISO(from)
+	toSQL := sqlDateTimeFromISO(to)
+
 	// Sempre busca do Graph API (dados frescos); DB cache apenas como fallback se Graph falhar
 	var msgs []services.GraphMessage
 	var err error
-	msgs, err = services.ListMailMessages(folderID, q, unread, limit, offset)
+	msgs, err = services.ListMailMessages(folderID, q, unread, limit, offset, from, to)
 	if err != nil && strings.TrimSpace(q) == "" {
-		msgs, err = listMailMessagesCached(database.GormDB_App, folderID, q, limit, offset)
+		msgs, err = listMailMessagesCached(database.GormDB_App, folderID, q, limit, offset, fromSQL, toSQL)
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// (a) Recuperação de "cópia local": e-mails vinculados a um processo que sumiram
+	// do mailbox (o Graph não os devolve mais) reaparecem a partir do nosso cache,
+	// marcados como archived_local. Só na 1ª página (offset 0) pra não duplicar na paginação.
+	archivedSet := map[string]bool{}
+	if offset == 0 {
+		seen := make(map[string]bool, len(msgs))
+		for _, m := range msgs {
+			if m.ID != "" {
+				seen[m.ID] = true
+			}
+		}
+		if extras, exErr := listArchivedLinkedCached(database.GormDB_App, folderID, q, fromSQL, toSQL, seen); exErr == nil && len(extras) > 0 {
+			for _, e := range extras {
+				archivedSet[e.ID] = true
+			}
+			msgs = append(msgs, extras...)
+			sort.SliceStable(msgs, func(i, j int) bool { return msgs[i].ReceivedAt > msgs[j].ReceivedAt })
+		}
 	}
 
 	linked := lookupLinkedProcessIDs(msgs)
@@ -284,6 +316,9 @@ func MailMessages(c *gin.Context) {
 		}
 		if pid, ok := linked[m.ID]; ok {
 			item.LinkedProcessID = &pid
+		}
+		if archivedSet[m.ID] {
+			item.ArchivedLocal = true
 		}
 		out = append(out, item)
 	}
@@ -315,6 +350,18 @@ func MailMessageByID(c *gin.Context) {
 	}
 	msg, err := services.GetMailMessage(id)
 	if err != nil {
+		// Fallback "cópia local": mensagem saiu do mailbox real, mas temos cópia
+		// no cache + corpo salvo em FT_EMAILS_PROCESSO. Serve a partir do banco.
+		if detail, ok := getArchivedMailDetail(id); ok {
+			userID, _ := getMailUserIDFromContext(c)
+			detail.IsReadLocal = isMailReadLocal(userID, id)
+			detail.ReadBy = lookupMailReadUsers([]services.GraphMessage{{ID: id}})[id]
+			if pid, ok := findProcessByGraphMessageID(id); ok {
+				detail.LinkedProcessID = &pid
+			}
+			c.JSON(http.StatusOK, detail)
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -925,6 +972,37 @@ func MailMessageLinkProcess(c *gin.Context) {
 		return
 	}
 
+	// Espelha o e-mail recebido em FT_EMAILS_PROCESSO (tabela que a ABA de e-mails lê) —
+	// sem isto, o e-mail anexado só ia pro histórico e não aparecia na aba. Dedup por
+	// (processo, de, assunto). Best-effort: falha aqui não aborta o vínculo.
+	{
+		deEmail := strings.TrimSpace(msg.FromEmail)
+		if deEmail == "" {
+			deEmail = "(desconhecido)"
+		}
+		paraEmail := strings.Join(msg.To, "; ")
+		if strings.TrimSpace(paraEmail) == "" {
+			paraEmail = "(ver caixa de e-mail)"
+		}
+		assuntoEmail := msg.Subject
+		if r := []rune(assuntoEmail); len(r) > 255 {
+			assuntoEmail = string(r[:255])
+		}
+		_, _ = execGorm(tx, `
+INSERT INTO FT_EMAILS_PROCESSO
+  (id_processo, id_usuario_remetente, de_email, para_email, assunto, corpo, tipo, data_envio)
+SELECT ?, NULL, ?, ?, ?, ?, 'recebido', ?
+  FROM DUAL
+ WHERE NOT EXISTS (
+   SELECT 1 FROM FT_EMAILS_PROCESSO e
+    WHERE e.id_processo = ? AND e.tipo = 'recebido'
+      AND e.de_email COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+      AND COALESCE(e.assunto,'') COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+ )`,
+			body.ProcessoID, deEmail, paraEmail, assuntoEmail, msg.BodyContent, msg.ReceivedAt,
+			body.ProcessoID, deEmail, assuntoEmail)
+	}
+
 	// Auto-link: vincula toda a conversa (thread) ao mesmo processo
 	if strings.TrimSpace(msg.ConversationID) != "" {
 		if err := linkThreadMailsTx(tx, body.ProcessoID, msg.ConversationID, createdBy, "auto-link thread"); err != nil {
@@ -1104,27 +1182,26 @@ SELECT
   COALESCE(r.uc,'')             AS uc,
   COALESCE(r.cnpj,'')           AS cnpj,
   COALESCE(r.concessionaria,'') AS concessionaria,
-  COALESCE(e.etapa,'')          AS etapa_atual,
-  COALESCE(kc.nome_coluna,'')   AS coluna_kanban,
-  COALESCE(h.etapa_nova,'')     AS ultima_etapa,
-  COALESCE(h.sub_etapa,'')      AS ultima_sub_etapa,
+  COALESCE(e.nome,'')           AS etapa_atual,
+  CASE WHEN p.id_aprovacao_atual=2 THEN 'Indeferidos' WHEN p.id_status_atual=5 THEN 'Suspensos' WHEN p.id_etapa_atual=6 THEN 'Concluídos' WHEN p.id_etapa_atual IN (4,5) THEN 'Faturamento' WHEN p.id_aprovacao_atual=1 THEN 'Deferidos' ELSE 'Ativos' END AS coluna_kanban,
+  COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),'')     AS ultima_etapa,
+  COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),'')      AS ultima_sub_etapa,
   ''                            AS status_analise,
   COALESCE(DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s'), '') AS data_ultima_mov,
   ''                            AS prioridade,
-  COALESCE(p.suspenso,0)        AS suspenso
+  COALESCE((p.id_status_atual=5),0)        AS suspenso
 FROM FT_PROCESSOS p
 JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-LEFT JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban
+LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 LEFT JOIN (
-  SELECT h1.id_requisicao, h1.etapa_nova, h1.sub_etapa, h1.data_movimentacao
+  SELECT h1.id_processo, h1.id_etapa_nova, h1.id_status_novo, h1.data_movimentacao
   FROM FT_HISTORICO_MOVIMENTACOES h1
   JOIN (
-    SELECT id_requisicao, MAX(id_historico) AS max_id
+    SELECT id_processo, MAX(id_historico) AS max_id
     FROM FT_HISTORICO_MOVIMENTACOES
-    GROUP BY id_requisicao
-  ) h2 ON h2.id_requisicao = h1.id_requisicao AND h2.max_id = h1.id_historico
-) h ON h.id_requisicao = p.id_processo
+    GROUP BY id_processo
+  ) h2 ON h2.id_processo = h1.id_processo AND h2.max_id = h1.id_historico
+) h ON h.id_processo = p.id_processo
 WHERE (r.cliente LIKE ? OR r.uc LIKE ? OR r.cnpj LIKE ? OR r.concessionaria LIKE ? OR p.id_processo = ?)
 ORDER BY p.id_processo DESC
 LIMIT ?`
@@ -1195,8 +1272,8 @@ func lookupLinkedProcessIDs(msgs []services.GraphMessage) map[string]int64 {
 		args = append(args, id)
 	}
 	rows, err := queryGorm(database.GormDB_App, `
-		SELECT pm.processo_id, m.graph_message_id
-		FROM process_mail_links pm
+		SELECT pm.processo_id AS id_processo, m.graph_message_id
+		FROM process_mail_links pm  /* schema legado: coluna é processo_id, não id_processo */
 		JOIN mail_messages m ON m.id = pm.mail_message_id
 		WHERE m.graph_message_id IN (`+placeholders+`)`, args...)
 	if err != nil {
@@ -1256,7 +1333,7 @@ func upsertMailMessages(msgs []services.GraphMessage) error {
 	return nil
 }
 
-func listMailMessagesCached(db *gorm.DB, folderID, q string, limit, offset int) ([]services.GraphMessage, error) {
+func listMailMessagesCached(db *gorm.DB, folderID, q string, limit, offset int, from, to string) ([]services.GraphMessage, error) {
 	if db == nil || strings.TrimSpace(folderID) == "" {
 		return nil, fmt.Errorf("cache indisponível")
 	}
@@ -1272,6 +1349,14 @@ func listMailMessagesCached(db *gorm.DB, folderID, q string, limit, offset int) 
 		like := "%" + q + "%"
 		where += " AND (subject LIKE ? OR from_email LIKE ? OR from_name LIKE ? OR snippet LIKE ?)"
 		args = append(args, like, like, like, like)
+	}
+	if s := strings.TrimSpace(from); s != "" {
+		where += " AND received_at >= ?"
+		args = append(args, s)
+	}
+	if s := strings.TrimSpace(to); s != "" {
+		where += " AND received_at < ?"
+		args = append(args, s)
 	}
 	args = append(args, limit, offset)
 	rows, err := queryGorm(db, `
@@ -1339,6 +1424,168 @@ func listMailMessagesCached(db *gorm.DB, folderID, q string, limit, offset int) 
 		})
 	}
 	return out, nil
+}
+
+// listArchivedLinkedCached devolve, do nosso cache, os e-mails da pasta que estão
+// vinculados a um processo (process_mail_links) mas NÃO vieram do Graph (exclude),
+// respeitando os filtros de texto (q) e data (from/to). Usado para "recuperar" na
+// Caixa e-mails que sumiram do mailbox real. Limitado a 200 por segurança.
+// sqlDateTimeFromISO converte "2026-06-23T03:00:00.000Z" (ISO 8601) para o formato
+// datetime do MySQL "2026-06-23 03:00:00" (UTC). Retorna "" se vazio; a string
+// original se não conseguir parsear (defensivo).
+func sqlDateTimeFromISO(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05Z", "2006-01-02T15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC().Format("2006-01-02 15:04:05")
+		}
+	}
+	return s
+}
+
+func listArchivedLinkedCached(db *gorm.DB, folderID, q, from, to string, exclude map[string]bool) ([]services.GraphMessage, error) {
+	if db == nil || strings.TrimSpace(folderID) == "" {
+		return nil, fmt.Errorf("cache indisponível")
+	}
+	where := `WHERE mm.folder_id = ?
+	            AND EXISTS (SELECT 1 FROM process_mail_links pm WHERE pm.mail_message_id = mm.id)`
+	args := []any{folderID}
+	if strings.TrimSpace(q) != "" {
+		like := "%" + q + "%"
+		where += " AND (mm.subject LIKE ? OR mm.from_email LIKE ? OR mm.from_name LIKE ? OR mm.snippet LIKE ?)"
+		args = append(args, like, like, like, like)
+	}
+	if s := strings.TrimSpace(from); s != "" {
+		where += " AND mm.received_at >= ?"
+		args = append(args, s)
+	}
+	if s := strings.TrimSpace(to); s != "" {
+		where += " AND mm.received_at < ?"
+		args = append(args, s)
+	}
+	rows, err := queryGorm(db, `
+		SELECT mm.graph_message_id, mm.internet_message_id, mm.subject, mm.from_email, mm.from_name,
+		       mm.to_json, mm.cc_json, mm.received_at, mm.snippet, mm.has_attachments, mm.thread_id, mm.folder_id
+		  FROM mail_messages mm
+		`+where+`
+		 ORDER BY mm.received_at DESC
+		 LIMIT 200`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]services.GraphMessage, 0, 32)
+	for rows.Next() {
+		var (
+			graphID, internetID, subject, fromEmail, fromName, toJSON, ccJSON, snippet, threadID, folder sql.NullString
+			receivedAt sql.NullTime
+			hasAttach  sql.NullInt64
+		)
+		if err := rows.Scan(&graphID, &internetID, &subject, &fromEmail, &fromName,
+			&toJSON, &ccJSON, &receivedAt, &snippet, &hasAttach, &threadID, &folder); err != nil {
+			continue
+		}
+		if graphID.String == "" || (exclude != nil && exclude[graphID.String]) {
+			continue
+		}
+		var toList, ccList []string
+		if toJSON.Valid && toJSON.String != "" {
+			_ = json.Unmarshal([]byte(toJSON.String), &toList)
+		}
+		if ccJSON.Valid && ccJSON.String != "" {
+			_ = json.Unmarshal([]byte(ccJSON.String), &ccList)
+		}
+		out = append(out, services.GraphMessage{
+			ID:                graphID.String,
+			InternetMessageID: internetID.String,
+			ConversationID:    threadID.String,
+			Subject:           subject.String,
+			FromEmail:         fromEmail.String,
+			FromName:          fromName.String,
+			To:                toList,
+			Cc:                ccList,
+			ReceivedAt: func() string {
+				if receivedAt.Valid {
+					return receivedAt.Time.Format("2006-01-02T15:04:05Z")
+				}
+				return ""
+			}(),
+			BodyPreview:    snippet.String,
+			HasAttachments: hasAttach.Valid && hasAttach.Int64 == 1,
+			FolderID:       folder.String,
+		})
+	}
+	return out, nil
+}
+
+// getArchivedMailDetail monta o detalhe de um e-mail a partir do nosso banco
+// (cache mail_messages + corpo em FT_EMAILS_PROCESSO), para quando o Graph não
+// devolve mais a mensagem (foi movida/excluída no mailbox real).
+func getArchivedMailDetail(graphID string) (*MailMessageDetail, bool) {
+	db := database.GormDB_App
+	if db == nil || strings.TrimSpace(graphID) == "" {
+		return nil, false
+	}
+	var (
+		internetID, subject, fromEmail, fromName, toJSON, ccJSON, snippet, threadID, folder sql.NullString
+		receivedAt sql.NullTime
+		hasAttach  sql.NullInt64
+	)
+	err := queryRowGorm(db, `
+		SELECT internet_message_id, subject, from_email, from_name, to_json, cc_json,
+		       received_at, snippet, has_attachments, thread_id, folder_id
+		  FROM mail_messages WHERE graph_message_id = ? LIMIT 1`, graphID).
+		Scan(&internetID, &subject, &fromEmail, &fromName, &toJSON, &ccJSON,
+			&receivedAt, &snippet, &hasAttach, &threadID, &folder)
+	if err != nil {
+		return nil, false
+	}
+	var toList, ccList []string
+	if toJSON.Valid && toJSON.String != "" {
+		_ = json.Unmarshal([]byte(toJSON.String), &toList)
+	}
+	if ccJSON.Valid && ccJSON.String != "" {
+		_ = json.Unmarshal([]byte(ccJSON.String), &ccList)
+	}
+	receivedStr := ""
+	if receivedAt.Valid {
+		receivedStr = receivedAt.Time.Format("2006-01-02T15:04:05Z")
+	}
+	// Corpo salvo em FT_EMAILS_PROCESSO (casa por assunto + remetente, data mais próxima).
+	var corpo sql.NullString
+	_ = queryRowGorm(db, `
+		SELECT corpo FROM FT_EMAILS_PROCESSO
+		 WHERE assunto COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+		   AND de_email COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+		 ORDER BY ABS(TIMESTAMPDIFF(SECOND, data_envio, ?)) ASC
+		 LIMIT 1`, subject.String, fromEmail.String, receivedStr).Scan(&corpo)
+	bodyContent := corpo.String
+	if strings.TrimSpace(bodyContent) == "" {
+		bodyContent = snippet.String // sem corpo salvo, ao menos a prévia
+	}
+	detail := &MailMessageDetail{
+		MailMessageSummary: MailMessageSummary{
+			ID:                graphID,
+			Subject:           subject.String,
+			FromEmail:         fromEmail.String,
+			FromName:          fromName.String,
+			To:                toList,
+			Cc:                ccList,
+			ReceivedAt:        receivedStr,
+			Snippet:           snippet.String,
+			HasAttachments:    hasAttach.Valid && hasAttach.Int64 == 1,
+			FolderID:          folder.String,
+			InternetMessageID: internetID.String,
+			ThreadID:          threadID.String,
+			ArchivedLocal:     true,
+		},
+		BodyType:    "html",
+		BodyContent: bodyContent,
+	}
+	return detail, true
 }
 
 func upsertMailMessageTx(tx *gorm.DB, msg *services.GraphMessageDetail) (int64, error) {
@@ -1416,19 +1663,16 @@ func upsertMailMessageTx(tx *gorm.DB, msg *services.GraphMessageDetail) (int64, 
 	if err := queryRowGorm(tx, `SELECT id FROM mail_messages WHERE graph_message_id = ?`, graphID).Scan(&id); err != nil {
 		return 0, err
 	}
-	if threadID != "" {
-		if pid, ok := findProcessByThreadIDTx(tx, threadID); ok {
-			if !hasProcessMailLinkTx(tx, pid, id) {
-				_ = linkProcessMailTx(tx, pid, id, 0, "auto-link thread")
-				_, _ = registerProcessHistory(tx, pid, 0, "Resposta de e-mail vinculada automaticamente", graphID)
-			}
-		}
-	}
+	// Vínculo automático na ENTRADA do e-mail — só com prova no próprio e-mail (protocolo do
+	// histórico/requisição > nº do processo > UC com rótulo), e só se apontar para UM processo.
+	// Desligados em 21/10/2026 (pedido do Alisson): "auto-link thread" (conversa/assunto genérico
+	// propagava vínculo errado) e "auto-link uc" (qualquer token de 5+ caracteres virava UC).
+	_ = threadID
 	if !hasAnyLinkForMailTx(tx, id) {
 		text := strings.TrimSpace(msg.Subject + " " + msg.BodyPreview)
-		if pid, ok := findProcessByUCTx(tx, text); ok {
-			_ = linkProcessMailTx(tx, pid, id, 0, "auto-link uc")
-			_, _ = registerProcessHistory(tx, pid, 0, "E-mail vinculado automaticamente por UC", graphID)
+		if pid, motivo, ok := repositories.FindProcessByEvidencia(tx, text); ok {
+			_ = linkProcessMailTx(tx, pid, id, 0, "auto-link "+motivo)
+			_, _ = registerProcessHistory(tx, pid, 0, "E-mail vinculado automaticamente ("+motivo+" citado no e-mail)", graphID)
 		}
 	}
 	return id, nil
@@ -1606,8 +1850,8 @@ func findProcessByGraphMessageID(graphID string) (int64, bool) {
 	}
 	var pid sql.NullInt64
 	if err := queryRowGorm(database.GormDB_App, `
-		SELECT pm.processo_id
-		FROM process_mail_links pm
+		SELECT pm.processo_id AS id_processo
+		FROM process_mail_links pm  /* schema legado: coluna é processo_id, não id_processo */
 		JOIN mail_messages m ON m.id = pm.mail_message_id
 		WHERE m.graph_message_id = ?
 		ORDER BY pm.id DESC
@@ -1659,9 +1903,9 @@ func buildProcessHistoryContext(processoID int64, limit int) string {
 	}
 	rows, err := queryGorm(database.GormDB_App, `
 		SELECT DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_mov,
-		       COALESCE(h.etapa_nova,''), COALESCE(h.sub_etapa,''), COALESCE(h.comentario,'')
+		       COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''), COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),''), COALESCE(h.comentario,'')
 		FROM FT_HISTORICO_MOVIMENTACOES h
-		WHERE h.id_requisicao = ?
+		WHERE h.id_processo = ?
 		ORDER BY h.data_movimentacao DESC
 		LIMIT ?`, processoID, limit)
 	if err != nil {
@@ -1712,8 +1956,8 @@ func findProcessByThreadIDTx(tx *gorm.DB, threadID string) (int64, bool) {
 	}
 	var pid sql.NullInt64
 	if err := queryRowGorm(tx, `
-		SELECT pm.processo_id
-		FROM process_mail_links pm
+		SELECT pm.processo_id AS id_processo
+		FROM process_mail_links pm  /* schema legado: coluna é processo_id, não id_processo */
 		JOIN mail_messages m ON m.id = pm.mail_message_id
 		WHERE m.thread_id = ?
 		ORDER BY pm.id DESC
@@ -1750,7 +1994,6 @@ func linkThreadMailsTx(tx *gorm.DB, processoID int64, threadID string, createdBy
 
 var htmlBreakRe = regexp.MustCompile(`(?i)<\s*(br|/p|/div)\s*>`)
 var htmlTagRe = regexp.MustCompile(`(?s)<[^>]+>`)
-var ucTokenRe = regexp.MustCompile(`[A-Za-z0-9-]{5,}`)
 
 func appendMailSignature(body string) string {
 	raw := strings.TrimSpace(body)
@@ -1777,95 +2020,6 @@ func hasAnyLinkForMailTx(tx *gorm.DB, mailID int64) bool {
 		return false
 	}
 	return count > 0
-}
-
-func findProcessByUCTx(tx *gorm.DB, text string) (int64, bool) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return 0, false
-	}
-	raw := ucTokenRe.FindAllString(text, -1)
-	if len(raw) == 0 {
-		return 0, false
-	}
-	tokens := make([]string, 0, len(raw))
-	tokensNoHyphen := make([]string, 0, len(raw))
-	seen := map[string]struct{}{}
-	seenNo := map[string]struct{}{}
-	for _, t := range raw {
-		low := strings.ToLower(strings.TrimSpace(t))
-		if low == "" {
-			continue
-		}
-		if _, ok := seen[low]; !ok {
-			seen[low] = struct{}{}
-			tokens = append(tokens, low)
-		}
-		no := strings.ReplaceAll(low, "-", "")
-		if no != "" {
-			if _, ok := seenNo[no]; !ok {
-				seenNo[no] = struct{}{}
-				tokensNoHyphen = append(tokensNoHyphen, no)
-			}
-		}
-	}
-	if len(tokens) == 0 && len(tokensNoHyphen) == 0 {
-		return 0, false
-	}
-
-	candidates := make(map[int64]struct{})
-
-	if len(tokens) > 0 {
-		ph := strings.Repeat("?,", len(tokens))
-		ph = strings.TrimSuffix(ph, ",")
-		args := make([]any, 0, len(tokens))
-		for _, t := range tokens {
-			args = append(args, t)
-		}
-		rows, err := queryGorm(tx, `
-			SELECT r.id_requisicao
-			FROM FT_REQUISICOES r
-			WHERE LOWER(r.uc) IN (`+ph+`)`, args...)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var pid int64
-				if err := rows.Scan(&pid); err == nil && pid > 0 {
-					candidates[pid] = struct{}{}
-				}
-			}
-		}
-	}
-
-	if len(tokensNoHyphen) > 0 {
-		ph := strings.Repeat("?,", len(tokensNoHyphen))
-		ph = strings.TrimSuffix(ph, ",")
-		args := make([]any, 0, len(tokensNoHyphen))
-		for _, t := range tokensNoHyphen {
-			args = append(args, t)
-		}
-		rows, err := queryGorm(tx, `
-			SELECT r.id_requisicao
-			FROM FT_REQUISICOES r
-			WHERE REPLACE(LOWER(r.uc), '-', '') IN (`+ph+`)`, args...)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var pid int64
-				if err := rows.Scan(&pid); err == nil && pid > 0 {
-					candidates[pid] = struct{}{}
-				}
-			}
-		}
-	}
-
-	if len(candidates) != 1 {
-		return 0, false
-	}
-	for pid := range candidates {
-		return pid, true
-	}
-	return 0, false
 }
 
 func htmlToText(input string) string {
@@ -1954,9 +2108,9 @@ func attachBodyPDFToProcess(tx *gorm.DB, processoID int64, mailID int64, msg *se
 	}
 	filename := fmt.Sprintf("email-%d.pdf", mailID)
 	pseudoPath := buildAnexoPath(int(processoID), 0, filename)
-	if _, err := execGorm(tx, 
+	if _, err := execGorm(tx,
 		`INSERT INTO FT_ANEXOS
-		  (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
+		  (id_processo, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
 		  VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
 		processoID, filename, pseudoPath, "sistema", "application/pdf", len(data), data,
 	); err != nil {
@@ -2011,9 +2165,9 @@ func attachMailFilesToProcess(tx *gorm.DB, processoID int64, mailID int64, graph
 			ct = "application/octet-stream"
 		}
 		pseudoPath := buildAnexoPath(int(processoID), 0, name)
-		if _, err := execGorm(tx, 
+		if _, err := execGorm(tx,
 			`INSERT INTO FT_ANEXOS
-			  (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
+			  (id_processo, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
 			  VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
 			processoID, name, pseudoPath, "sistema", ct, len(data), data,
 		); err != nil {
@@ -2039,6 +2193,9 @@ func mailAttachmentExists(tx *gorm.DB, mailID int64, sha string) (bool, error) {
 	return count > 0, nil
 }
 
+// registerProcessHistory — grava no histórico um evento de "e-mail anexado ao processo".
+// V2: usa colunas FK (id_etapa_*, id_status_*, id_instancia_*, id_aprovacao_*) em vez das antigas textuais.
+// Como é evento neutro (anexação de e-mail, sem mudança de estado), os campos *_anterior/*_nova ficam NULL.
 func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note string, mailGraphMessageID string, emailBody ...string) (int64, error) {
 	body := ""
 	if len(emailBody) > 0 {
@@ -2057,22 +2214,6 @@ func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note st
 			comentario = comentario + ": " + strings.TrimSpace(note)
 		}
 	}
-	var etapaAtual, subAtual sql.NullString
-	_ = queryRowGorm(tx, `
-        SELECT e.etapa, p.sub_etapa
-          FROM FT_PROCESSOS p
-          JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-         WHERE p.id_processo = ?`, processoID).Scan(&etapaAtual, &subAtual)
-
-	etapaTxt := strings.TrimSpace(etapaAtual.String)
-	if etapaTxt == "" {
-		etapaTxt = "Distribuidora"
-	}
-	subTxt := strings.TrimSpace(subAtual.String)
-	statusNome := strings.TrimSpace(getStatusNomeByRequisicaoGorm(tx, int64(processoID)))
-	if statusNome == "" {
-		statusNome = "Em andamento"
-	}
 
 	var userVal any
 	if userID > 0 {
@@ -2083,12 +2224,15 @@ func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note st
 
 	res, err := execGorm(tx, `
         INSERT INTO FT_HISTORICO_MOVIMENTACOES
-        (id_requisicao, id_usuario_gestor,
-         status_anterior, status_novo,
-         etapa_anterior, etapa_nova, sub_etapa,
+        (id_processo, id_usuario_gestor,
+         id_etapa_anterior, id_etapa_nova,
+         id_instancia_anterior, id_instancia_nova,
+         id_status_anterior, id_status_novo,
+         id_aprovacao_anterior, id_aprovacao_nova,
          comentario, data_movimentacao, tipo_movimentacao, mail_graph_message_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		processoID, userVal, statusNome, statusNome, etapaTxt, etapaTxt, subTxt, comentario, time.Now(), "EMAIL", strings.TrimSpace(mailGraphMessageID),
+        VALUES (?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?)`,
+		processoID, userVal,
+		comentario, time.Now(), "EMAIL", strings.TrimSpace(mailGraphMessageID),
 	)
 	if err != nil {
 		return 0, err
@@ -2099,95 +2243,55 @@ func registerProcessHistory(tx *gorm.DB, processoID int64, userID int64, note st
 	return id, nil
 }
 
+// registerEmailMoveHistory — "anexa e-mail + move processo de etapa" numa só ação.
+// TODO V2: a parte de "mover de etapa" via nome-string (DM_KANBAN_COLUNAS, sub_etapa texto)
+// foi removida no V2. Aqui só registramos a anexação do e-mail no histórico — a movimentação
+// formal (etapa/status/aprovação) precisa ser feita pelo TabHistorico/MovimentarModal.
+// Os parâmetros `etapa`, `sub` e `moveComentario` continuam aceitos pra compat de chamada,
+// mas só viram texto no comentário do histórico.
 func registerEmailMoveHistory(tx *gorm.DB, processoID int64, userID int64, note string, etapa string, sub string, moveComentario string, mailGraphMessageID string, emailBody ...string) (int64, error) {
-	novaEtapa := strings.TrimSpace(etapa)
-	novaSub := strings.TrimSpace(sub)
-	if novaEtapa == "" || novaSub == "" {
-		return 0, fmt.Errorf("etapa/sub-etapa obrigatórias")
-	}
-
-	var etapaAnterior, subAnterior sql.NullString
-	if err := queryRowGorm(tx, `
-        SELECT e.etapa, p.sub_etapa
-          FROM FT_PROCESSOS p
-          JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-         WHERE p.id_processo = ?`, processoID).Scan(&etapaAnterior, &subAnterior); err != nil {
-		return 0, err
-	}
-
-	var etapaID int64
-	if err := queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ? LIMIT 1", novaEtapa).Scan(&etapaID); err != nil {
-		return 0, fmt.Errorf("etapa inválida: %s", novaEtapa)
-	}
-
-	subID, _ := resolveSubEtapaIDGorm(tx, novaSub)
-	var colID sql.NullInt64
-	var colNome sql.NullString
-	_ = queryRowGorm(tx, `
-		SELECT k.id_coluna, k.nome_coluna
-		  FROM DM_ETAPAS_PROCESSO e
-		  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-		 WHERE e.id_etapa_processo = ?`,
-		etapaID,
-	).Scan(&colID, &colNome)
-	if _, err := execGorm(tx, 
-		`UPDATE FT_PROCESSOS
-         SET id_etapa_processo = ?, sub_etapa = ?, id_sub_etapa_processo = ?, id_coluna = ?, nome_coluna = ?, suspenso = 0, ultima_atualizacao = NOW()
-         WHERE id_processo = ?`,
-		etapaID, novaSub, nullIntToIface(subID), nullIntToIface(colID), func() interface{} { if colNome.Valid { return colNome.String }; return nil }(), processoID,
-	); err != nil {
-		return 0, err
-	}
-
-	statusNome := strings.TrimSpace(getStatusNomeByRequisicaoGorm(tx, int64(processoID)))
-	if statusNome == "" {
-		statusNome = "Em andamento"
-	}
-
 	body := ""
 	if len(emailBody) > 0 {
 		body = strings.TrimSpace(emailBody[0])
 	}
-	var comentario string
+	prefix := ""
+	if strings.TrimSpace(note) != "" {
+		prefix += "<p><em>" + strings.TrimSpace(note) + "</em></p>"
+	}
+	if strings.TrimSpace(etapa) != "" || strings.TrimSpace(sub) != "" {
+		prefix += "<p><em>Solicitação de movimentação para " + strings.TrimSpace(etapa) +
+			" / " + strings.TrimSpace(sub) + " (registrar manualmente via Movimentar)</em></p>"
+	}
+	if strings.TrimSpace(moveComentario) != "" {
+		prefix += "<p><em>" + strings.TrimSpace(moveComentario) + "</em></p>"
+	}
+	comentario := prefix
 	if body != "" {
-		prefix := ""
-		if strings.TrimSpace(note) != "" {
-			prefix += "<p><em>" + strings.TrimSpace(note) + "</em></p>"
-		}
-		if strings.TrimSpace(moveComentario) != "" {
-			prefix += "<p><em>" + strings.TrimSpace(moveComentario) + "</em></p>"
-		}
-		comentario = prefix + body
-	} else {
+		comentario += body
+	} else if prefix == "" {
 		comentario = "E-mail anexado ao processo"
-		if strings.TrimSpace(note) != "" {
-			comentario = comentario + ": " + strings.TrimSpace(note)
-		}
-		if strings.TrimSpace(moveComentario) != "" {
-			comentario = comentario + " | " + strings.TrimSpace(moveComentario)
-		}
 	}
 
 	var userVal any
 	if userID > 0 {
 		userVal = userID
-	} else {
-		userVal = nil
 	}
 
 	res, err := execGorm(tx, `
         INSERT INTO FT_HISTORICO_MOVIMENTACOES
-        (id_requisicao, id_usuario_gestor,
-         status_anterior, status_novo,
-         etapa_anterior, etapa_nova, sub_etapa,
+        (id_processo, id_usuario_gestor,
+         id_etapa_anterior, id_etapa_nova,
+         id_instancia_anterior, id_instancia_nova,
+         id_status_anterior, id_status_novo,
+         id_aprovacao_anterior, id_aprovacao_nova,
          comentario, data_movimentacao, tipo_movimentacao, mail_graph_message_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		processoID, userVal, statusNome, statusNome, etapaAnterior.String, novaEtapa, novaSub, comentario, time.Now(), "EMAIL", strings.TrimSpace(mailGraphMessageID),
+        VALUES (?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?)`,
+		processoID, userVal,
+		comentario, time.Now(), "EMAIL", strings.TrimSpace(mailGraphMessageID),
 	)
 	if err != nil {
 		return 0, err
 	}
-	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
 	_ = SincronizarStatusProcesso(tx, int(processoID))
 	id, _ := res.LastInsertId()
 	return id, nil

@@ -1,4 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import DOMPurify from 'dompurify';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
@@ -28,6 +29,7 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  Calendar,
 } from 'lucide-react';
 import {
   downloadMailAttachment,
@@ -145,7 +147,8 @@ const initials = (nameOrEmail = '') => {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 };
 
-// Paleta determinística para avatares — tons coordenados com tema escuro
+// Paleta determinística para avatares — 8 tons categóricos p/ diferenciar remetentes;
+// mantidos literais (não var()) para preservar a distinção visual entre eles
 const AVATAR_PALETTE = [
   { bg: 'bg-blue-500/30', ring: 'ring-blue-400/40', text: 'text-blue-100' },
   { bg: 'bg-emerald-500/30', ring: 'ring-emerald-400/40', text: 'text-emerald-100' },
@@ -203,6 +206,7 @@ const formatFileSize = (bytes) => {
 };
 
 // Mapeia extensão/MIME → tom + label para card de anexo
+// Paleta categórica por tipo de arquivo (mantida literal p/ preservar distinção visual entre tipos)
 const attachmentMetaFor = (att) => {
   const name = String(att?.name || '').toLowerCase();
   const ct = String(att?.content_type || '').toLowerCase();
@@ -322,13 +326,13 @@ const MAPA_COLUNAS_PARA_ETAPAS = {
 const Chip = ({ children, tone = 'neutral', className = '', forceTextBlack = false }) => {
   const toneCls =
     tone === 'info'
-      ? 'bg-blue-500/15 text-blue-200 border-blue-500/20'
+      ? 'bg-[var(--accent)]/15 text-[var(--accent)] border-[var(--accent)]/20'
       : tone === 'success'
-      ? 'bg-emerald-500/15 text-emerald-200 border-emerald-500/20'
+      ? 'bg-[var(--success)]/15 text-[var(--success)] border-[var(--success)]/20'
       : tone === 'warn'
-      ? 'bg-amber-500/15 text-amber-200 border-amber-500/20'
+      ? 'bg-[var(--warning)]/15 text-[var(--warning)] border-[var(--warning)]/20'
       : tone === 'danger'
-      ? 'bg-rose-500/15 text-rose-200 border-rose-500/20'
+      ? 'bg-[var(--danger)]/15 text-[var(--danger)] border-[var(--danger)]/20'
       : 'bg-[var(--muted)]/25 text-[var(--fg)] border-[var(--border)]/40';
 
   const style = forceTextBlack ? { color: '#000' } : undefined;
@@ -383,7 +387,7 @@ const Resizer = ({ onPointerDown }) => (
     style={{ touchAction: 'none' }}
     className={cx(
       'w-2 cursor-col-resize select-none',
-      'bg-transparent hover:bg-blue-500/15 active:bg-blue-500/25'
+      'bg-transparent hover:bg-[var(--accent)]/15 active:bg-[var(--accent)]/25'
     )}
   />
 );
@@ -481,11 +485,11 @@ const ComposeModal = ({ open, minimized, onMinimize, onClose, onSend, seed }) =>
         {/* ── Header gradient ── */}
         <div
           className="flex items-center justify-between px-5 py-3 flex-shrink-0 select-none"
-          style={{ background: 'linear-gradient(135deg, #1e3a5f, #0f2340)' }}
+          style={{ background: 'var(--gradient-primary)' }}
         >
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
-              <Send size={15} className="text-blue-300" />
+            <div className="w-8 h-8 rounded-lg bg-[var(--accent)]/20 flex items-center justify-center">
+              <Send size={15} className="text-[var(--accent-2)]" />
             </div>
             <div>
               <div className="text-white text-sm font-semibold">Novo e-mail</div>
@@ -587,7 +591,7 @@ const ComposeModal = ({ open, minimized, onMinimize, onClose, onSend, seed }) =>
         {/* ── Rodapé ── */}
         <div
           className="flex items-center justify-between gap-2 px-4 py-2.5 border-t flex-shrink-0"
-          style={{ borderColor: 'var(--border)', background: 'var(--panel-bg, rgba(255,255,255,0.03))' }}
+          style={{ borderColor: 'var(--border)', background: 'var(--panel)' }}
         >
           <div className="flex items-center gap-2">
             <input
@@ -613,7 +617,7 @@ const ComposeModal = ({ open, minimized, onMinimize, onClose, onSend, seed }) =>
             onClick={handleSendClick}
             disabled={sending || !to.trim()}
             className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-50 transition-all"
-            style={{ backgroundColor: '#1d4ed8' }}
+            style={{ backgroundColor: 'var(--accent)' }}
           >
             {sending ? (
               <>
@@ -722,7 +726,7 @@ const MailAIModal = ({ open, loading, result, error, onClose, onUseDraft }) => {
 
         {loading && <div className="text-sm opacity-70">Analisando...</div>}
         {error && !loading && (
-          <div className="text-sm text-rose-300">{error}</div>
+          <div className="text-sm text-[var(--danger)]">{error}</div>
         )}
         {!loading && !error && (
           <div className="space-y-4">
@@ -882,11 +886,10 @@ const LinkProcessModal = ({
   const [attachAttachments, setAttachAttachments] = useState(true);
   const [moveToLinked, setMoveToLinked] = useState(false);
   const [note, setNote] = useState('');
-  const [moveEnabled, setMoveEnabled] = useState(true);
   const [moveColuna, setMoveColuna] = useState('');
   const [moveEtapa, setMoveEtapa] = useState('');
   const [moveSub, setMoveSub] = useState('');
-  const [moveComentario, setMoveComentario] = useState('');
+  // Preview de histórico inline do processo selecionado (separado da movimentação removida)
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyItems, setHistoryItems] = useState([]);
@@ -901,15 +904,9 @@ const LinkProcessModal = ({
     setAttachAttachments(true);
     setMoveToLinked(false);
     setNote('');
-    setMoveEnabled(true);
     setMoveColuna('');
     setMoveEtapa('');
     setMoveSub('');
-    setMoveComentario('');
-    setHistoryOpen(false);
-    setHistoryLoading(false);
-    setHistoryItems([]);
-    setHistoryPid(null);
   }, [open]);
 
   useEffect(() => {
@@ -944,10 +941,8 @@ const LinkProcessModal = ({
 
   if (!open || minimized) return null;
 
-  const etapaSelecionada =
-    moveEtapa || MAPA_COLUNAS_PARA_ETAPAS[moveColuna] || moveColuna || '';
-  const moveRequiredOk = !!(moveColuna && etapaSelecionada && moveSub);
-  const subList = etapaSubMap?.[etapaSelecionada] || [];
+  // moveEtapa/Coluna/Sub mantidos no state pra (futura) telemetria — não usados na UI V2.
+  void moveEtapa; void moveColuna; void moveSub; void etapaSubMap;
   const openHistory = async (pid) => {
     if (!pid) return;
     setHistoryPid(pid);
@@ -1107,103 +1102,13 @@ const LinkProcessModal = ({
             onChange={(e) => setNote(e.target.value)}
           />
 
-          <div className="border-t panel-border pt-3 space-y-2">
-            <div className="text-sm font-semibold">Movimenta??o obrigat?ria</div>
-            <div className="text-xs opacity-70">Informe coluna, etapa e sub-etapa para concluir o vínculo.</div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {!moveRequiredOk && (
-                  <div className="sm:col-span-2 text-xs text-amber-200 bg-amber-500/15 border border-amber-500/30 rounded-lg px-2 py-1">
-                    Preencha coluna, etapa e sub-etapa para movimentar o processo.
-                  </div>
-                )}
-                <div>
-                  <div className="text-xs opacity-70 mb-1 flex items-center gap-1">
-                    Coluna do Kanban
-                    {moveEnabled && !moveColuna && <AlertTriangle className="h-3 w-3 text-red-400" />}
-                  </div>
-                  <select
-                    className={cx(
-                      'input-themed w-full',
-                      moveEnabled && !moveColuna && 'border-red-400/40 focus:ring-red-400/40'
-                    )}
-                    value={moveColuna}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setMoveColuna(next);
-                      setMoveEtapa(MAPA_COLUNAS_PARA_ETAPAS[next] || '');
-                      setMoveSub('');
-                    }}
-                    required
-                  >
-                    <option value="">Selecione...</option>
-                    {KANBAN_COLUNAS.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <div className="text-xs opacity-70 mb-1 flex items-center gap-1">
-                    Etapa
-                    {moveEnabled && !etapaSelecionada && <AlertTriangle className="h-3 w-3 text-red-400" />}
-                  </div>
-                  <select
-                    className={cx(
-                      'input-themed w-full',
-                      moveEnabled && !etapaSelecionada && 'border-red-400/40 focus:ring-red-400/40'
-                    )}
-                    value={moveEtapa}
-                    onChange={(e) => {
-                      setMoveEtapa(e.target.value);
-                      setMoveSub('');
-                    }}
-                    required
-                  >
-                    <option value="">Selecione...</option>
-                    {Object.keys(etapaSubMap || {}).map((e) => (
-                      <option key={e} value={e}>
-                        {e}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <div className="text-xs opacity-70 mb-1 flex items-center gap-1">
-                    Sub-etapa
-                    {moveEnabled && !moveSub && <AlertTriangle className="h-3 w-3 text-red-400" />}
-                  </div>
-                  <select
-                    className={cx(
-                      'input-themed w-full',
-                      moveEnabled && !moveSub && 'border-red-400/40 focus:ring-red-400/40'
-                    )}
-                    value={moveSub}
-                    onChange={(e) => setMoveSub(e.target.value)}
-                    disabled={!etapaSelecionada}
-                    required
-                  >
-                    <option value="">{etapaSelecionada ? 'Selecione a sub-etapa' : 'Selecione coluna/etapa'}</option>
-                    {subList.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <div className="text-xs opacity-70 mb-1">Comentário de movimenta??o</div>
-                  <input
-                    className="input-themed w-full"
-                    value={moveComentario}
-                    onChange={(e) => setMoveComentario(e.target.value)}
-                    placeholder="Comentário para histórico"
-                  />
-                </div>
-              </div>
+          {/*
+            TODO V2: movimentação por email DESLIGADA — o V2 movimenta processo só
+            via TabHistorico/MovimentarModal (FK Instância/Etapa/Status). Anexar email
+            agora apenas vincula + opcionalmente anexa PDF/anexos + grava nota no histórico.
+          */}
+          <div className="text-xs opacity-60 italic border-t panel-border pt-2">
+            Para movimentar a etapa/status do processo, use a aba "Histórico" do drawer no Controle de Processos.
           </div>
         </div>
 
@@ -1213,22 +1118,16 @@ const LinkProcessModal = ({
           </button>
           <button
             className="btn-themed"
-            disabled={!selected || loading || (moveEnabled && !moveRequiredOk)}
+            disabled={!selected || loading}
             onClick={() =>
-            onConfirm({
-              processoId: selected?.id_processo,
-              attachBodyPdf,
-              attachAttachments,
-              moveToLinkedFolderId: moveToLinked ? linkedFolderId : '',
-              note,
-              moveProcess: moveEnabled,
-              move: {
-                coluna: moveColuna,
-                etapa: moveEtapa,
-                sub: moveSub,
-                comentario: moveComentario,
-              },
-            })
+              onConfirm({
+                processoId: selected?.id_processo,
+                attachBodyPdf,
+                attachAttachments,
+                moveToLinkedFolderId: moveToLinked ? linkedFolderId : '',
+                note,
+                moveProcess: false, // V2: anexar não move
+              })
             }
             type="button"
           >
@@ -1248,6 +1147,15 @@ const CaixaDeEmail = () => {
   const targetMessageId = useMemo(() => {
     try {
       return new URLSearchParams(location.search).get('messageId') || '';
+    } catch {
+      return '';
+    }
+  }, [location.search]);
+  // Busca pré-preenchida via ?q= (fallback do link "Abrir na Caixa de E-mails"
+  // quando não temos o graph_message_id da mensagem).
+  const targetQuery = useMemo(() => {
+    try {
+      return new URLSearchParams(location.search).get('q') || '';
     } catch {
       return '';
     }
@@ -1274,8 +1182,40 @@ const CaixaDeEmail = () => {
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [inlineImagesEnabled, setInlineImagesEnabled] = useState(false);
 
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(targetQuery);
   const [onlyUnread, setOnlyUnread] = useState(false);
+  // Filtro por data (calendário). Datas locais (YYYY-MM-DD); convertidas p/ ISO UTC no dateRange.
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const dateBtnRef = useRef(null);
+  const [datePos, setDatePos] = useState({ top: 0, left: 0 });
+  const POPOVER_W = 256; // w-64
+  const toggleDatePicker = () => {
+    // Calcula a posição ANTES de abrir (lê o estado atual, ainda fechado).
+    if (!datePickerOpen && dateBtnRef.current) {
+      const r = dateBtnRef.current.getBoundingClientRect();
+      setDatePos({
+        top: r.bottom + 4,
+        left: Math.max(8, Math.min(r.right - POPOVER_W, window.innerWidth - POPOVER_W - 8)),
+      });
+    }
+    setDatePickerOpen((v) => !v);
+  };
+  const dateRange = useMemo(() => {
+    // Uma só data preenchida ⇒ filtra aquele dia. Ambas ⇒ intervalo [de, até].
+    const f = dateFrom || dateTo;
+    const t = dateTo || dateFrom;
+    const toIso = (d, endExclusive) => {
+      if (!d) return '';
+      const dt = new Date(`${d}T00:00:00`); // meia-noite local
+      if (Number.isNaN(dt.getTime())) return '';
+      if (endExclusive) dt.setDate(dt.getDate() + 1); // fim do dia (exclusivo)
+      return dt.toISOString();
+    };
+    return { from: toIso(f, false), to: toIso(t, true) };
+  }, [dateFrom, dateTo]);
+  const dateFilterActive = !!(dateRange.from || dateRange.to);
 
   const [toast, setToast] = useState({ open: false, type: 'success', message: '' });
   const [composeOpen, setComposeOpen] = useState(false);
@@ -1546,12 +1486,12 @@ const CaixaDeEmail = () => {
   useEffect(() => {
     setMessagesOffset(0);
     setHasMoreMessages(true);
-  }, [activeFolder?.id, search, onlyUnread]);
+  }, [activeFolder?.id, search, onlyUnread, dateRange.from, dateRange.to]);
 
   // LOAD MESSAGES — useQuery substitui useEffect manual, mantém lista visível em refetch
   const messagesQueryKey = useMemo(
-    () => ['mail-messages', activeFolder?.id || null, search || '', !!onlyUnread],
-    [activeFolder?.id, search, onlyUnread]
+    () => ['mail-messages', activeFolder?.id || null, search || '', !!onlyUnread, dateRange.from, dateRange.to],
+    [activeFolder?.id, search, onlyUnread, dateRange.from, dateRange.to]
   );
 
   const messagesQuery = useQuery({
@@ -1562,6 +1502,8 @@ const CaixaDeEmail = () => {
       unread: undefined,
       limit: REQUEST_PAGE_SIZE,
       offset: 0,
+      from: dateRange.from || undefined,
+      to: dateRange.to || undefined,
     }),
     enabled: !!activeFolder?.id,
     refetchInterval: POLL_MS,
@@ -1802,7 +1744,7 @@ const CaixaDeEmail = () => {
     return rows;
   }, [messages, onlyUnread, hasAttachmentFilter, linkedFilter, last7Filter]);
 
-  const hasActiveFilters = onlyUnread || hasAttachmentFilter || linkedFilter || last7Filter || !!search;
+  const hasActiveFilters = onlyUnread || hasAttachmentFilter || linkedFilter || last7Filter || !!search || dateFilterActive;
 
   const markAsReadMutation = useMutation({
     mutationFn: (msg) => setMailReadLocal(msg.id),
@@ -1954,6 +1896,8 @@ const CaixaDeEmail = () => {
         unread: undefined,
         limit: REQUEST_PAGE_SIZE,
         offset: nextOffset,
+        from: dateRange.from || undefined,
+        to: dateRange.to || undefined,
       });
       setMessages((prev) => {
         const seen = new Set();
@@ -1970,7 +1914,7 @@ const CaixaDeEmail = () => {
     } finally {
       setLoadingMore(false);
     }
-  }, [activeFolder?.id, hasMoreMessages, loadingMore, messagesOffset, onlyUnread, search]);
+  }, [activeFolder?.id, hasMoreMessages, loadingMore, messagesOffset, onlyUnread, search, dateRange.from, dateRange.to]);
 
   // thread key: prefer thread_id, fallback subject normalized
   const getThreadKey = useCallback((m) => {
@@ -1990,6 +1934,7 @@ const CaixaDeEmail = () => {
         unreadCount: m.is_read_local ? 0 : 1,
         hasAttachments: !!m.has_attachments,
         linkedProcessId: m.linked_processo_id || null,
+        archivedLocal: !!m.archived_local,
       }));
     }
 
@@ -2023,6 +1968,7 @@ const CaixaDeEmail = () => {
         unreadCount,
         hasAttachments,
         linkedProcessId,
+        archivedLocal: items.some((x) => x.archived_local),
         readBy,
       });
     }
@@ -2456,7 +2402,7 @@ const CaixaDeEmail = () => {
                 >
                   <Icon size={14} className="shrink-0 opacity-70" />
                   <div className="min-w-0 flex-1 text-[13px] truncate">{meta.label}</div>
-                  {isActive && <div className="h-1.5 w-1.5 rounded-full bg-emerald-400/80 shrink-0" />}
+                  {isActive && <div className="h-1.5 w-1.5 rounded-full bg-[var(--success)]/80 shrink-0" />}
                 </button>
               );
             })}
@@ -2523,19 +2469,110 @@ const CaixaDeEmail = () => {
                   )}
                 </div>
 
+                <button
+                  ref={dateBtnRef}
+                  type="button"
+                  title="Filtrar por data"
+                  onClick={toggleDatePicker}
+                  className={cx(
+                    'inline-flex items-center justify-center rounded-md border w-9 h-9 shrink-0 transition',
+                    dateFilterActive
+                      ? 'bg-[var(--accent)]/20 text-[var(--accent)] border-[var(--accent)]/50'
+                      : 'bg-[var(--panel)]/25 border-[var(--border)]/40 hover:bg-[var(--panel)]/45'
+                  )}
+                >
+                  <Calendar size={16} />
+                </button>
+
                 <IconBtn title="Atualizar" onClick={() => messagesQuery.refetch()}>
                   <RefreshCw size={16} />
                 </IconBtn>
               </div>
 
+              {datePickerOpen &&
+                createPortal(
+                  <>
+                    {/* backdrop invisível — fecha ao clicar fora */}
+                    <div
+                      className="fixed inset-0 z-[998]"
+                      onClick={() => setDatePickerOpen(false)}
+                    />
+                    <div
+                      className="fixed z-[999] w-64 rounded-lg border panel-border bg-[var(--panel)] shadow-2xl p-3 space-y-2"
+                      style={{ top: datePos.top, left: datePos.left }}
+                    >
+                      <div className="text-[11px] font-semibold opacity-80 flex items-center gap-1.5">
+                        <Calendar size={12} /> Filtrar por data
+                      </div>
+                      <label className="block text-[11px] opacity-70">
+                        De
+                        <input
+                          type="date"
+                          value={dateFrom}
+                          max={dateTo || undefined}
+                          onChange={(e) => setDateFrom(e.target.value)}
+                          className="input-themed w-full mt-0.5"
+                        />
+                      </label>
+                      <label className="block text-[11px] opacity-70">
+                        Até
+                        <input
+                          type="date"
+                          value={dateTo}
+                          min={dateFrom || undefined}
+                          onChange={(e) => setDateTo(e.target.value)}
+                          className="input-themed w-full mt-0.5"
+                        />
+                      </label>
+                      <div className="text-[10px] opacity-60 leading-tight">
+                        Preencha só uma data para filtrar um único dia.
+                      </div>
+                      <div className="flex items-center justify-between pt-1">
+                        <button
+                          type="button"
+                          className="text-[11px] opacity-70 hover:opacity-100 underline"
+                          onClick={() => { setDateFrom(''); setDateTo(''); }}
+                        >
+                          Limpar
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-outline text-[11px] px-2.5 py-1"
+                          onClick={() => setDatePickerOpen(false)}
+                        >
+                          Fechar
+                        </button>
+                      </div>
+                    </div>
+                  </>,
+                  document.body,
+                )}
+
               {/* Chips de filtro (V8) */}
               <div className="flex flex-wrap items-center gap-1.5">
+                {dateFilterActive && (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] bg-[var(--accent)]/20 text-[var(--accent)] border-[var(--accent)]/40"
+                    onClick={() => { setDateFrom(''); setDateTo(''); }}
+                    title="Remover filtro de data"
+                  >
+                    <Calendar size={12} />
+                    {(() => {
+                      const br = (d) => (d ? d.split('-').reverse().join('/') : '');
+                      const f = dateFrom || dateTo;
+                      const t = dateTo || dateFrom;
+                      return f === t ? br(f) : `${br(f)} – ${br(t)}`;
+                    })()}
+                    <X size={12} />
+                  </button>
+                )}
                 <button
                   type="button"
                   className={cx(
                     'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] transition',
                     onlyUnread
-                      ? 'bg-blue-500/20 text-blue-200 border-blue-500/40'
+                      ? 'bg-[var(--accent)]/20 text-[var(--accent)] border-[var(--accent)]/40'
                       : 'bg-[var(--panel)]/25 border-[var(--border)]/40 hover:bg-[var(--panel)]/45'
                   )}
                   onClick={() => setOnlyUnread((v) => !v)}
@@ -2548,7 +2585,7 @@ const CaixaDeEmail = () => {
                   className={cx(
                     'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] transition',
                     hasAttachmentFilter
-                      ? 'bg-amber-500/20 text-amber-200 border-amber-500/40'
+                      ? 'bg-[var(--warning)]/20 text-[var(--warning)] border-[var(--warning)]/40'
                       : 'bg-[var(--panel)]/25 border-[var(--border)]/40 hover:bg-[var(--panel)]/45'
                   )}
                   onClick={() => setHasAttachmentFilter((v) => !v)}
@@ -2561,7 +2598,7 @@ const CaixaDeEmail = () => {
                   className={cx(
                     'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] transition',
                     linkedFilter
-                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40'
+                      ? 'bg-[var(--success)]/20 text-[var(--success)] border-[var(--success)]/40'
                       : 'bg-[var(--panel)]/25 border-[var(--border)]/40 hover:bg-[var(--panel)]/45'
                   )}
                   onClick={() => setLinkedFilter((v) => !v)}
@@ -2601,7 +2638,7 @@ const CaixaDeEmail = () => {
                     className={cx(
                       'inline-flex items-center gap-1.5 px-2 py-1 rounded-full border transition',
                       groupByThread
-                        ? 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30'
+                        ? 'bg-[var(--success)]/15 text-[var(--success)] border-[var(--success)]/30'
                         : 'bg-[var(--panel)]/25 border-[var(--border)]/40 hover:bg-[var(--panel)]/40'
                     )}
                     onClick={() => setGroupByThread((v) => !v)}
@@ -2789,9 +2826,19 @@ const CaixaDeEmail = () => {
                             )}
 
                             <div className={cx('flex flex-wrap items-center gap-1.5', isCompact ? 'mt-1' : 'mt-2')}>
+                              {/* Cópia local: e-mail que saiu do mailbox e é servido do nosso banco */}
+                              {g.archivedLocal && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[var(--warning)]/20 text-[var(--warning)] border border-[var(--warning)]/30 text-[10px] font-semibold"
+                                  title="Este e-mail não está mais no mailbox; exibido a partir da cópia salva no sistema"
+                                >
+                                  <Archive size={10} />
+                                  cópia local
+                                </span>
+                              )}
                               {/* V5: badge prominente para vinculados */}
                               {g.linkedProcessId && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-200 border border-emerald-500/30 text-[10px] font-semibold">
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[var(--success)]/20 text-[var(--success)] border border-[var(--success)]/30 text-[10px] font-semibold">
                                   <Link2 size={10} />
                                   #{g.linkedProcessId}
                                 </span>
@@ -2860,7 +2907,7 @@ const CaixaDeEmail = () => {
                                 handleMove(deletedFolderId);
                               }}
                               title="Excluir"
-                              className="h-7 w-7 rounded-md hover:bg-rose-500/20 hover:text-rose-200 flex items-center justify-center"
+                              className="h-7 w-7 rounded-md hover:bg-[var(--danger)]/20 hover:text-[var(--danger)] flex items-center justify-center"
                             >
                               <Trash2 size={13} />
                             </button>
@@ -3143,8 +3190,8 @@ const CaixaDeEmail = () => {
           style={{ borderColor: 'var(--border)', background: 'var(--panel)' }}
           title="Expandir novo e-mail"
         >
-          <div className="w-8 h-8 rounded-lg bg-blue-600/20 flex items-center justify-center">
-            <Send size={14} className="text-blue-400" />
+          <div className="w-8 h-8 rounded-lg bg-[var(--accent)]/20 flex items-center justify-center">
+            <Send size={14} className="text-[var(--accent)]" />
           </div>
           <div className="text-left">
             <div className="text-xs font-semibold">Novo e-mail</div>

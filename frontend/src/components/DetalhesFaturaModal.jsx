@@ -5,6 +5,16 @@ import {
 } from 'recharts';
 import apiClient from '../services/apiClient';
 
+// Teto robusto do eixo Y: quando um mês é outlier (> 4× a mediana, ex.: misparse de consumo),
+// capa o eixo em ~4× a mediana pra as barras normais não sumirem. Retorna [0, cap] ou null (auto).
+function robustKwhDomain(vals) {
+  const vs = (vals || []).map(Number).filter((v) => v > 0).sort((a, b) => a - b);
+  if (vs.length < 3) return null;
+  const med = vs[Math.floor(vs.length / 2)];
+  const max = vs[vs.length - 1];
+  return (med > 0 && max > med * 4) ? [0, Math.ceil(med * 4)] : null;
+}
+
 export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReprocessar }) {
   const [loading, setLoading] = useState(false);
   const [analiseData, setAnaliseData] = useState(null);
@@ -99,7 +109,7 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
               </div>
               <div>
                 <div className="text-xs opacity-60">Valor</div>
-                <div className="font-semibold text-green-600">R$ {parseFloat(fatura.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                <div className="font-semibold text-[var(--success)]">R$ {parseFloat(fatura.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
               </div>
               <div>
                 <div className="text-xs opacity-60">Concessionária</div>
@@ -116,7 +126,7 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold">Série Histórica de Consumo</h3>
                 {mediaConsumo > 0 && (
-                  <span className="text-xs text-amber-400">
+                  <span className="text-xs text-[var(--warning)]">
                     média: {mediaConsumo.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kWh
                   </span>
                 )}
@@ -124,30 +134,32 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
               {consumoData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={280}>
                   <ComposedChart data={consumoData} margin={{ top: 5, right: 40, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="color-mix(in srgb, var(--fg) 8%, transparent)" />
                     <XAxis dataKey="mes" tick={{ fontSize: 10 }} />
                     <YAxis tick={{ fontSize: 10 }}
-                      tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} />
+                      tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
+                      domain={robustKwhDomain(consumoData.map((d) => d.consumo)) || undefined}
+                      allowDataOverflow={robustKwhDomain(consumoData.map((d) => d.consumo)) != null} />
                     <Tooltip
                       formatter={(v, name) => [
                         `${Number(v).toLocaleString('pt-BR')} kWh`,
                         name,
                       ]}
-                      contentStyle={{ backgroundColor: '#0d1a2e', border: '1px solid #1e3a5f', borderRadius: 4 }}
+                      contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: 4 }}
                     />
                     {mediaConsumo > 0 && (
-                      <ReferenceLine y={mediaConsumo} stroke="#f59e0b" strokeDasharray="4 2" strokeWidth={1.5}
-                        label={{ value: 'média', fill: '#f59e0b', fontSize: 10, position: 'insideRight' }} />
+                      <ReferenceLine y={mediaConsumo} stroke="var(--warning)" strokeDasharray="4 2" strokeWidth={1.5}
+                        label={{ value: 'média', fill: 'var(--warning)', fontSize: 10, position: 'insideRight' }} />
                     )}
                     <Bar dataKey="consumo" name="Consumo (kWh)" radius={[3,3,0,0]}>
                       {consumoData.map((d, i) => {
-                        let fill = d.tipo === 'auditado' ? '#6366f1' : '#3b82f6';
-                        if (d.anomalia) fill = '#ef4444';
+                        let fill = d.tipo === 'auditado' ? 'var(--accent-2)' : 'var(--accent)';
+                        if (d.anomalia) fill = 'var(--danger)';
                         else if (mediaConsumo > 0) {
                           const dev = (d.consumo - mediaConsumo) / mediaConsumo;
-                          if (dev > 1.0 || dev < -0.9) fill = '#ef4444';
-                          else if (dev > 0.5 || dev < -0.5) fill = '#f97316';
-                          else if (d.tipo === 'auditado') fill = '#6366f1';
+                          if (dev > 1.0 || dev < -0.9) fill = 'var(--danger)';
+                          else if (dev > 0.5 || dev < -0.5) fill = 'var(--warning)';
+                          else if (d.tipo === 'auditado') fill = 'var(--accent-2)';
                         }
                         return <Cell key={i} fill={fill} />;
                       })}
@@ -160,10 +172,10 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
                 </div>
               )}
               <div className="flex gap-4 mt-2 text-[10px] opacity-60">
-                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-blue-500 mr-1"/>histórico</span>
-                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-indigo-500 mr-1"/>mês auditado</span>
-                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-orange-500 mr-1"/>desvio &gt;50%</span>
-                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500 mr-1"/>anomalia/desvio &gt;100%</span>
+                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-[var(--accent)] mr-1"/>histórico</span>
+                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-[var(--accent-2)] mr-1"/>mês auditado</span>
+                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-[var(--warning)] mr-1"/>desvio &gt;50%</span>
+                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-[var(--danger)] mr-1"/>anomalia/desvio &gt;100%</span>
               </div>
             </div>
 
@@ -174,7 +186,7 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
                 {fichas4_1.length > 0 ? (
                   fichas4_1.map(ficha => (
                     <div key={ficha} className="flex items-center gap-2 p-2 bg-[var(--bg)] rounded">
-                      <span className="text-green-500">✓</span>
+                      <span className="text-[var(--success)]">✓</span>
                       <span className="font-semibold">{ficha}</span>
                       <span className="text-xs opacity-60 ml-auto">Confirmado pelo modelo inicial</span>
                     </div>
@@ -193,9 +205,9 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
                 <div className="bg-[var(--bg)] p-3 rounded border border-[var(--border)]">
                   <div className="text-xs opacity-60 mb-1">Decisão Final</div>
                   <div className={`font-bold text-lg ${
-                    resultado.decisao_final === 'CONFIRMADO' ? 'text-green-500' :
-                    resultado.decisao_final === 'REFUTADO' ? 'text-red-500' :
-                    'text-yellow-500'
+                    resultado.decisao_final === 'CONFIRMADO' ? 'text-[var(--success)]' :
+                    resultado.decisao_final === 'REFUTADO' ? 'text-[var(--danger)]' :
+                    'text-[var(--warning)]'
                   }`}>
                     {resultado.decisao_final || 'N/A'}
                   </div>
@@ -208,12 +220,12 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
 
                 <div className="bg-[var(--bg)] p-3 rounded border border-[var(--border)]">
                   <div className="text-xs opacity-60 mb-1">Ressarcimento</div>
-                  <div className="font-bold text-lg text-green-600">{resultado.percentual_ressarcimento || 0}%</div>
+                  <div className="font-bold text-lg text-[var(--success)]">{resultado.percentual_ressarcimento || 0}%</div>
                 </div>
 
                 <div className="bg-[var(--bg)] p-3 rounded border border-[var(--border)]">
                   <div className="text-xs opacity-60 mb-1">Valor Estimado</div>
-                  <div className="font-bold text-lg text-green-600">
+                  <div className="font-bold text-lg text-[var(--success)]">
                     R$ {((fatura.valor || 0) * (resultado.percentual_ressarcimento || 0) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </div>
                 </div>
@@ -234,7 +246,7 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
 
                 <div>
                   <div className="text-sm font-semibold mb-2">Recomendação</div>
-                  <div className="text-sm bg-[var(--bg)] p-3 rounded border border-[var(--border)] italic text-blue-400">
+                  <div className="text-sm bg-[var(--bg)] p-3 rounded border border-[var(--border)] italic text-[var(--accent)]">
                     {resultado.recomendacao || 'Nenhuma recomendação'}
                   </div>
                 </div>
@@ -254,21 +266,21 @@ export default function DetalhesFaturaModal({ fatura, isOpen, onClose, onReproce
                 disabled={reprocessing}
                 className={`px-4 py-2 rounded font-semibold transition ${
                   reprocessing
-                    ? 'bg-gray-500 opacity-50 cursor-not-allowed'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    ? 'bg-[var(--border)] opacity-50 cursor-not-allowed'
+                    : 'bg-[var(--accent)] hover:bg-[color-mix(in_srgb,var(--accent)_85%,black)] text-white'
                 }`}
               >
                 {reprocessing ? 'Reprocessando...' : 'Reprocessar com IA'}
               </button>
               <button
                 onClick={() => {}}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-semibold transition"
+                className="px-4 py-2 bg-[var(--success)] hover:bg-[color-mix(in_srgb,var(--success)_85%,black)] text-white rounded font-semibold transition"
               >
                 Aprovar
               </button>
               <button
                 onClick={() => {}}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-semibold transition"
+                className="px-4 py-2 bg-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_85%,black)] text-white rounded font-semibold transition"
               >
                 Rejeitar
               </button>

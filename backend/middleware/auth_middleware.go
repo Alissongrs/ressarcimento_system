@@ -66,6 +66,7 @@ func buildAuth(allowQueryAlways bool) gin.HandlerFunc {
 		// 5) Injeta no contexto (fallback: userTipoConta herda role quando vazio)
 		c.Set("userID", claims.UserID)
 		c.Set("userName", userName)
+		c.Set("userEmail", strings.TrimSpace(claims.Email))
 		userTipo := strings.TrimSpace(claims.TipoConta)
 		if userTipo == "" {
 			userTipo = role

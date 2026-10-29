@@ -3157,10 +3157,27 @@ PROCEDIMENTO:
 
    SE avg_3_post >= consumo_atual:
      → O consumo continuou no mesmo patamar ou acima após o mês analisado.
-     → Não se trata de anomalia — houve mudança real de padrão de consumo.
-     → ❌ CANCELAR F02. Zerar valor_f02.
-     → Registrar: "F02 cancelado — meses posteriores (avg=[X] kWh) iguais ou
-        acima do consumo atual ([Y] kWh); possível mudança real de carga."
+
+     ⚠️ EXCEÇÃO — SALTO MASSIVO QUE "VIROU O NOVO PADRÃO" (dif_pct >= +300%):
+        Um salto de mais de 4× sobre a média histórica — sobretudo em
+        B1/residencial e baixa tensão — NÃO é mudança de carga típica, mesmo que
+        o consumo permaneça alto depois. É forte indício de:
+          • sub-registro/represamento anterior que passou a ser faturado de uma
+            vez (consumo acumulado — Art. 323 REN 1000/2021);
+          • troca de medidor ou correção de leitura embutida no ciclo.
+        O fato de ter "virado o padrão do cliente" é justamente o sinal de que o
+        patamar anterior estava artificialmente baixo. NESSE CASO:
+          → ✅ MANTER F02 CONFIRMADO (não cancelar). O excesso do mês sobre a
+             média histórica é ressarcível ("F02 acumulado").
+          → Registrar: "Salto massivo (dif_pct=[X]%) que se tornou o novo patamar
+             — F02 MANTIDO: patamar anterior sub-registrado/represado, não mudança
+             de carga legítima."
+
+     SENÃO (dif_pct < +300% e avg_3_post >= consumo_atual):
+       → Não se trata de anomalia — houve mudança real de padrão de consumo.
+       → ❌ CANCELAR F02. Zerar valor_f02.
+       → Registrar: "F02 cancelado — meses posteriores (avg=[X] kWh) iguais ou
+          acima do consumo atual ([Y] kWh); mudança real de carga (salto moderado)."
 
 5. SE meses_posteriores_json estiver vazio ou não disponível:
      → NÃO confirmar F02 com confiança alta.
@@ -3271,6 +3288,22 @@ preço_kwh deve ser obtido conforme PASSO B e SEMPRE ter a origem declarada:
   • Fallback total:
       exibir: preço_kwh = Total_Fatura / kWh_total (fallback — sem créditos)
   • Não encontrado → registrar “não encontrado na fatura” e não monetizar F02
+
+================================================================================
+VARREDURA DO HISTÓRICO — APONTAMENTOS POR DESVIO (≥ +100% DA MÉDIA)
+================================================================================
+
+Antes de decidir, VARRA todo o histórico mensal disponível (12 meses anteriores +
+mês atual + meses posteriores, se houver) e identifique TODOS os meses cujo consumo
+esteja ≥ +100% acima da média histórica (isto é, kWh do mês ≥ 2× a média). Esses
+meses são os APONTAMENTOS de desvio. Regras:
+  • Limiar de apontamento: desvio ≥ +100% sobre a média (2× a média). Abaixo disso,
+    NÃO é apontamento por desvio.
+  • Liste os meses apontados e o respectivo desvio % na "Análise do Gráfico de Consumo".
+  • Se o mês analisado (o da fatura) for um desses apontamentos, ele sustenta F02
+    (aplicar a regra de meses posteriores e a exceção de salto massivo acima).
+  • "Novo patamar do cliente" NÃO zera o apontamento quando o salto é massivo
+    (ver exceção dif_pct ≥ +300% na regra de meses posteriores).
 
 ================================================================================
 SAÍDA OBRIGATÓRIA — CÁLCULO F02
@@ -3904,6 +3937,10 @@ REGRAS OBRIGATÓRIAS — DESCRIÇÃO DO FATURAMENTO
 Fichas Confirmadas: [N] ([lista: F01, F02, ...])
 Prioridade: [Crítico | Alto | Médio | Baixo]
 Causa Raiz: [1 frase direta]
+Análise do Gráfico de Consumo: [interpretar o histórico mensal em 1-2 frases —
+  ex.: "consumo estável em ~X kWh"; ou "o consumo passou a operar dentro de uma
+  NOVA média do cliente (~X kWh, antes ~Y kWh)"; ou "pico(s) isolado(s) em MM/AAAA".
+  SEMPRE citar os meses com consumo ≥ +100% acima da média histórica (apontamentos).]
 
 ---ESTIMATIVA DE RESSARCIMENTO---
 Tese Regulatória: [fundamento legal e irregularidade em 1-2 frases]

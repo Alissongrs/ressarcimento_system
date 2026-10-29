@@ -1,0 +1,21 @@
+{
+  "_meta": {
+    "distribuidora": "COPEL",
+    "grupo": "B",
+    "modalidade": "Convencional",
+    "fonte_calibracao": "_modelo_copel_b_11349.pdf",
+    "data_calibracao": "2026-05-20"
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [0.030, 0.124, 0.060, 0.140, 0],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "_anchor": "B3 no início da linha 'B3 Comercial, Servicos...'"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [0.67, 0.685, 0.77, 0.705, 0],
+      "regex": "(VERDE|AZUL|CONVENCIONAL|BRANCA)",
+      "_anchor": "CONVENCIONAL na seção tarifária"
+    }
+  }
+}

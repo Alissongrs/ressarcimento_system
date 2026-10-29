@@ -48,6 +48,7 @@ type RelatoriosMetricasResp struct {
 	TaxaSucessoConcs       []map[string]interface{} `json:"taxa_sucesso_concessionarias,omitempty"`
 	// Novos indicadores
 	TaxaSucessoGeral          float64                  `json:"taxa_sucesso_geral"`
+	DeferidosTotal            int64                    `json:"deferidos_total"`
 	TaxaSucessoPorTipo        []map[string]interface{} `json:"taxa_sucesso_por_tipo,omitempty"`
 	TicketMedio               float64                  `json:"ticket_medio"`
 	TaxaAneelPct              float64                  `json:"taxa_aneel_pct"`
@@ -380,8 +381,10 @@ func computeMetricas(ctx context.Context, repo *repositories.DashboardRepo, f re
 	}
 
 	if pc := out.ProcessosCounts; pc != nil {
-		total := pc["ativos"] + pc["deferidos"] + pc["fluxo_ressarcimento"] + pc["faturamento"] + pc["concluidos"]
+		// sucesso = deferidos ÷ processos já decididos (deferidos + indeferidos); em andamento não entra
 		avanc := pc["deferidos"] + pc["fluxo_ressarcimento"] + pc["faturamento"] + pc["concluidos"]
+		total := avanc + pc["indeferidos"]
+		out.DeferidosTotal = avanc
 		if total > 0 {
 			out.TaxaSucessoGeral = float64(avanc) / float64(total) * 100
 		}

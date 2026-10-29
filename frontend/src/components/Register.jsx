@@ -91,7 +91,7 @@ const Register = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-transparent p-4">
-      <Card className="w-full max-w-md bg-black/20 backdrop-blur-sm border border-blue-800 text-gray-300">
+      <Card className="w-full max-w-md bg-black/20 backdrop-blur-sm border border-[var(--accent)] text-gray-300">
         <CardHeader className="text-center relative">
             <Button
               variant="ghost"
@@ -110,18 +110,18 @@ const Register = () => {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {errors.api && <p className="text-sm text-red-400 text-center bg-red-900/50 p-2 rounded">{errors.api}</p>}
+            {errors.api && <p className="text-sm text-[var(--danger)] text-center p-2 rounded" style={{ backgroundColor: 'color-mix(in srgb, var(--danger) 50%, transparent)' }}>{errors.api}</p>}
             
             <div className="space-y-2">
               <Label htmlFor="name" className="text-gray-300">Nome Completo</Label>
               <Input id="name" name="name" type="text" placeholder="Seu nome completo" value={formData.name} onChange={handleChange} required className="bg-gray-800 border-gray-600 text-white"/>
-              {errors.name && <p className="text-sm text-red-400">{errors.name}</p>}
+              {errors.name && <p className="text-sm text-[var(--danger)]">{errors.name}</p>}
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="email" className="text-gray-300">Email</Label>
               <Input id="email" name="email" type="email" placeholder="seu.email@empresa.com" value={formData.email} onChange={handleChange} required className="bg-gray-800 border-gray-600 text-white"/>
-              {errors.email && <p className="text-sm text-red-400">{errors.email}</p>}
+              {errors.email && <p className="text-sm text-[var(--danger)]">{errors.email}</p>}
             </div>
 
             <div className="space-y-2">
@@ -141,7 +141,7 @@ const Register = () => {
                   </option>
                 ))}
               </select>
-              {errors.departamenão && <p className="text-sm text-red-400">{errors.departamenão}</p>}
+              {errors.departamenão && <p className="text-sm text-[var(--danger)]">{errors.departamenão}</p>}
             </div>
             
             <div className="space-y-2">
@@ -152,7 +152,7 @@ const Register = () => {
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
               </div>
-              {errors.password && <p className="text-sm text-red-400">{errors.password}</p>}
+              {errors.password && <p className="text-sm text-[var(--danger)]">{errors.password}</p>}
             </div>
 
             <div className="space-y-2">
@@ -163,10 +163,10 @@ const Register = () => {
                   {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
               </div>
-              {errors.confirmPassword && <p className="text-sm text-red-400">{errors.confirmPassword}</p>}
+              {errors.confirmPassword && <p className="text-sm text-[var(--danger)]">{errors.confirmPassword}</p>}
             </div>
 
-            <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white" disabled={isLoading}>
+            <Button type="submit" className="w-full bg-[var(--accent)] hover:bg-[color-mix(in_srgb,var(--accent)_85%,black)] text-white" disabled={isLoading}>
               {isLoading ? 'Cadastranão...' : 'Cadastrar'}
             </Button>
           </form>

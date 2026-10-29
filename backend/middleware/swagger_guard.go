@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"net"
 	"net/http"
 	"strings"
 
@@ -19,10 +18,15 @@ var privateRanges = []string{
 }
 
 // SwaggerGuard permite acesso ao Swagger apenas para IPs privados ou admins autenticados.
+//
+// P2-9: usa c.ClientIP() do gin (que respeita SetTrustedProxies e, portanto, o IP REAL
+// do cliente) em vez de ler X-Forwarded-For cru — que era spoofável (bastava enviar
+// "X-Forwarded-For: 10.0.0.1" para se passar por IP interno e liberar o Swagger).
+// Com trusted proxies configurados e o Caddy sobrescrevendo o XFF na borda, o IP não
+// é mais forjável pelo cliente externo.
 func SwaggerGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ip := clientIP(c)
-		if isPrivateIP(ip) {
+		if isPrivateIP(c.ClientIP()) {
 			c.Next()
 			return
 		}
@@ -42,7 +46,7 @@ func SwaggerGuard() gin.HandlerFunc {
 			claims := &auth.Claims{}
 			tok, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
 				return auth.JwtKey, nil
-			})
+			}, jwt.WithValidMethods([]string{"HS256"}))
 			if err == nil && tok.Valid && strings.ToLower(claims.Role) == "admin" {
 				c.Next()
 				return
@@ -53,21 +57,6 @@ func SwaggerGuard() gin.HandlerFunc {
 			"error": "Swagger disponível apenas para IPs internos ou admins autenticados",
 		})
 	}
-}
-
-func clientIP(c *gin.Context) string {
-	if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
-	}
-	if xri := c.GetHeader("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
-	if err != nil {
-		return c.Request.RemoteAddr
-	}
-	return host
 }
 
 func isPrivateIP(ip string) bool {

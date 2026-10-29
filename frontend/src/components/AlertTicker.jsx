@@ -40,10 +40,10 @@ export default function AlertTicker() {
   return (
     <div
       className="border-b px-4 py-2 overflow-hidden"
-      style={{ background: 'linear-gradient(90deg, rgba(220,38,38,0.08), rgba(245,158,11,0.08))', borderColor: 'var(--border)' }}
+      style={{ background: 'linear-gradient(90deg, color-mix(in srgb, var(--danger) 8%, transparent), color-mix(in srgb, var(--warning) 8%, transparent))', borderColor: 'var(--border)' }}
     >
       <div className="flex items-center gap-3 min-w-0">
-        <div className="inline-flex items-center gap-2 text-xs font-semibold text-red-500 shrink-0">
+        <div className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--danger)] shrink-0">
           <AlertTriangle size={14} />
           Prazos e alertas
         </div>
@@ -54,7 +54,7 @@ export default function AlertTicker() {
           >
             {marqueeItems.map((item, index) => (
               <div key={`${item.id_alerta ?? item.id}-${index}`} className="inline-flex items-center gap-2 text-xs opacity-80">
-                <CalendarClock size={13} className="text-amber-500" />
+                <CalendarClock size={13} className="text-[var(--warning)]" />
                 <span>
                   {item.id_processo ? `PROC-${String(item.id_processo).padStart(3, '0')} · ` : ''}
                   {item.mensagem}

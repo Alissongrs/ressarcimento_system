@@ -1,0 +1,23 @@
+{
+  "_meta": {
+    "distribuidora": "ELEKTRO SP",
+    "grupo": "B",
+    "modalidade": "Convencional",
+    "fonte_calibracao": "_modelo_elektro_sp_b_11329.pdf",
+    "data_calibracao": "2026-05-20",
+    "observacoes": "ELEKTRO SP B não imprime subgrupo literal. Default B3 (válido para todos B Convencional). Validar manualmente se aparecer B1/B2/B4."
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [0.0, 0.0, 1.0, 0.4, 0],
+      "regex": "\\b(B[1-4])\\b",
+      "default": "B3",
+      "_anchor": "B3 default (Elektro não imprime); bbox tenta achar nos primeiros 40% da página"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [0.77, 0.210, 0.88, 0.230, 0],
+      "regex": "(VERDE|AZUL|CONVENCIONAL|BRANCA)",
+      "_anchor": "CONVENCIONAL / TRIFASICO"
+    }
+  }
+}

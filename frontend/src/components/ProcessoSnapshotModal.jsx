@@ -360,26 +360,26 @@ export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onS
             <div
               className={`p-4 rounded-lg flex items-start gap-3 ${
                 message.type === 'error'
-                  ? 'bg-red-50 border border-red-200'
+                  ? 'bg-[color-mix(in_srgb,var(--danger)_10%,var(--card))] border border-[color-mix(in_srgb,var(--danger)_30%,var(--card))]'
                   : message.type === 'success'
-                  ? 'bg-green-50 border border-green-200'
-                  : 'bg-blue-50 border border-blue-200'
+                  ? 'bg-[color-mix(in_srgb,var(--success)_10%,var(--card))] border border-[color-mix(in_srgb,var(--success)_30%,var(--card))]'
+                  : 'bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))] border border-[color-mix(in_srgb,var(--accent)_30%,var(--card))]'
               }`}
             >
               {message.type === 'success' && (
-                <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />
+                <CheckCircle className="text-[var(--success)] flex-shrink-0 mt-0.5" size={20} />
               )}
               {message.type === 'error' && (
-                <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={20} />
+                <AlertCircle className="text-[var(--danger)] flex-shrink-0 mt-0.5" size={20} />
               )}
               <div>
                 <p
                   className={`font-medium ${
                     message.type === 'error'
-                      ? 'text-red-900'
+                      ? 'text-[var(--danger)]'
                       : message.type === 'success'
-                      ? 'text-green-900'
-                      : 'text-blue-900'
+                      ? 'text-[var(--success)]'
+                      : 'text-[var(--accent)]'
                   }`}
                 >
                   {message.text}
@@ -390,11 +390,11 @@ export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onS
 
           {/* Errors */}
           {errors.length > 0 && (
-            <div className="p-4 rounded-lg bg-red-50 border border-red-200">
-              <p className="font-medium text-red-900 mb-2">Erros de validação:</p>
+            <div className="p-4 rounded-lg bg-[color-mix(in_srgb,var(--danger)_10%,var(--card))] border border-[color-mix(in_srgb,var(--danger)_30%,var(--card))]">
+              <p className="font-medium text-[var(--danger)] mb-2">Erros de validação:</p>
               <ul className="list-disc list-inside space-y-1">
                 {errors.map((error, idx) => (
-                  <li key={`error-${idx}`} className="text-red-700 text-sm">
+                  <li key={`error-${idx}`} className="text-[var(--danger)] text-sm">
                     {error}
                   </li>
                 ))}
@@ -712,13 +712,13 @@ export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onS
                         const path = String(a.url || a.caminho_arquivo || '').trim();
                         const href = path.startsWith('http') ? path : path ? `/${path.replace(/^\/+/, '')}` : '';
                         return (
-                          <div key={`${a.id ?? 'anexo'}-${idx}`} className="flex items-center justify-between text-sm border border-gray-200 rounded p-2">
+                          <div key={`${a.id ?? 'anexo'}-${idx}`} className="flex items-center justify-between text-sm border border-[var(--border)] rounded p-2">
                             <div>
                               <div className="font-medium">{a.nome_arquivo}</div>
                               <div className="text-xs opacity-70">{a.data_upload || ''}</div>
                             </div>
                             {href ? (
-                              <a className="text-blue-600 underline" href={withAuthToken(href)} target="_blank" rel="noreferrer">
+                              <a className="text-[var(--accent)] underline" href={withAuthToken(href)} target="_blank" rel="noreferrer">
                                 Abrir
                               </a>
                             ) : (
@@ -741,7 +741,7 @@ export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onS
                   ) : (
                     <div className="space-y-2">
                       {faturas.map((f) => (
-                        <div key={`fatura-${f.id || f.mes_ref || Math.random()}`} className="flex items-center justify-between text-sm border border-gray-200 rounded p-2">
+                        <div key={`fatura-${f.id || f.mes_ref || Math.random()}`} className="flex items-center justify-between text-sm border border-[var(--border)] rounded p-2">
                           <div>
                             <div className="font-medium">{f.mes_ref || f.mesRef || 'Sem mês'}</div>
                             <div className="text-xs opacity-70">
@@ -749,7 +749,7 @@ export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onS
                             </div>
                           </div>
                           {f.link ? (
-                            <a className="text-blue-600 underline" href={f.link} target="_blank" rel="noreferrer">
+                            <a className="text-[var(--accent)] underline" href={f.link} target="_blank" rel="noreferrer">
                               Abrir
                             </a>
                           ) : (
@@ -770,10 +770,10 @@ export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onS
                     <div
                       className={`p-3 rounded border ${
                         histMessage.type === 'error'
-                          ? 'bg-red-50 border-red-200 text-red-800'
+                          ? 'bg-[color-mix(in_srgb,var(--danger)_10%,var(--card))] border-[color-mix(in_srgb,var(--danger)_30%,var(--card))] text-[var(--danger)]'
                           : histMessage.type === 'success'
-                          ? 'bg-green-50 border-green-200 text-green-800'
-                          : 'bg-blue-50 border-blue-200 text-blue-800'
+                          ? 'bg-[color-mix(in_srgb,var(--success)_10%,var(--card))] border-[color-mix(in_srgb,var(--success)_30%,var(--card))] text-[var(--success)]'
+                          : 'bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))] border-[color-mix(in_srgb,var(--accent)_30%,var(--card))] text-[var(--accent)]'
                       }`}
                     >
                       {histMessage.text}
@@ -855,8 +855,8 @@ export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onS
 
               {/* Info sobre mudanças */}
               {hasChanges && (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-sm text-blue-900">
+                <div className="p-4 bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))] border border-[color-mix(in_srgb,var(--accent)_30%,var(--card))] rounded-lg">
+                  <p className="text-sm text-[var(--accent)]">
                     <strong>{Object.keys(changedFields).length}</strong> campo(s) alterado(s)
                   </p>
                 </div>
@@ -866,18 +866,18 @@ export default function ProcessoSnapshotModal({ isOpen, onClose, idProcesso, onS
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 bg-white border-t p-6 flex justify-end gap-3">
+        <div className="sticky bottom-0 bg-[var(--card)] border-t border-[var(--border)] p-6 flex justify-end gap-3">
           <button
             onClick={handleReset}
             disabled={!hasChanges || saving || loading}
-            className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 border border-[var(--border)] rounded hover:bg-[var(--panel)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Descartar Mudanças
           </button>
           <button
             onClick={onClose}
             disabled={saving}
-            className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 border border-[var(--border)] rounded hover:bg-[var(--panel)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Fechar
           </button>
@@ -913,7 +913,7 @@ function InputField({
     <div className="flex flex-col gap-2">
       <label className="font-medium text-sm">
         {label}
-        {changed && <span className="ml-2 text-blue-600 font-bold">●</span>}
+        {changed && <span className="ml-2 text-[var(--accent)] font-bold">●</span>}
       </label>
       <input
         type={type}
@@ -924,10 +924,10 @@ function InputField({
         step={step}
         className={`px-3 py-2 border rounded ${
           disabled
-            ? 'bg-gray-100 cursor-not-allowed'
-            : 'bg-white hover:border-gray-400'
+            ? 'bg-[color-mix(in_srgb,var(--fg)_8%,var(--card))] cursor-not-allowed'
+            : 'bg-[var(--card)] hover:border-[color-mix(in_srgb,var(--fg)_35%,var(--border))]'
         } ${
-          changed ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+          changed ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))]' : 'border-[var(--border)]'
         }`}
       />
     </div>
@@ -947,7 +947,7 @@ function TextAreaField({
     <div className="flex flex-col gap-2 md:col-span-2">
       <label className="font-medium text-sm">
         {label}
-        {changed && <span className="ml-2 text-blue-600 font-bold">●</span>}
+        {changed && <span className="ml-2 text-[var(--accent)] font-bold">●</span>}
       </label>
       <textarea
         value={value || ''}
@@ -957,10 +957,10 @@ function TextAreaField({
         rows={rows}
         className={`px-3 py-2 border rounded ${
           disabled
-            ? 'bg-gray-100 cursor-not-allowed'
-            : 'bg-white hover:border-gray-400'
+            ? 'bg-[color-mix(in_srgb,var(--fg)_8%,var(--card))] cursor-not-allowed'
+            : 'bg-[var(--card)] hover:border-[color-mix(in_srgb,var(--fg)_35%,var(--border))]'
         } ${
-          changed ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+          changed ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))]' : 'border-[var(--border)]'
         }`}
       />
     </div>
@@ -979,7 +979,7 @@ function CheckboxField({ label, checked, onChange, disabled, changed }) {
       />
       <label className="font-medium text-sm cursor-pointer">
         {label}
-        {changed && <span className="ml-2 text-blue-600 font-bold">●</span>}
+        {changed && <span className="ml-2 text-[var(--accent)] font-bold">●</span>}
       </label>
     </div>
   );
@@ -997,7 +997,7 @@ function SelectField({
     <div className="flex flex-col gap-2">
       <label className="font-medium text-sm">
         {label}
-        {changed && <span className="ml-2 text-blue-600 font-bold">●</span>}
+        {changed && <span className="ml-2 text-[var(--accent)] font-bold">●</span>}
       </label>
       <select
         value={value || ''}
@@ -1005,10 +1005,10 @@ function SelectField({
         disabled={disabled}
         className={`px-3 py-2 border rounded ${
           disabled
-            ? 'bg-gray-100 cursor-not-allowed'
-            : 'bg-white hover:border-gray-400'
+            ? 'bg-[color-mix(in_srgb,var(--fg)_8%,var(--card))] cursor-not-allowed'
+            : 'bg-[var(--card)] hover:border-[color-mix(in_srgb,var(--fg)_35%,var(--border))]'
         } ${
-          changed ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+          changed ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))]' : 'border-[var(--border)]'
         }`}
       >
         {options.map((opt) => (

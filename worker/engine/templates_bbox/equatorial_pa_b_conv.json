@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "distribuidora": "equatorial_pa_b_conv",
+    "fonte_calibracao": "equatorial_pa_b_conv_11755.pdf",
+    "data_calibracao": "2026-05-20",
+    "auto_gerado": true
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [
+        0.18,
+        0.074,
+        0.211,
+        0.09,
+        0
+      ],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "default": "B3",
+      "_anchor": "B1"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [
+        0.354,
+        0.081,
+        0.461,
+        0.097,
+        0
+      ],
+      "regex": "(Verde|Azul|Convencional|Branca|Mon[óo]?mia|MT[VACB])",
+      "default": null,
+      "_anchor": "CONVENCIONAL"
+    }
+  }
+}

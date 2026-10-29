@@ -1,0 +1,33 @@
+{
+  "_meta": {
+    "distribuidora": "cpfl_paulista_a_verde",
+    "fonte_calibracao": "cpfl_paulista_a_verde_13199.pdf",
+    "data_calibracao": "2026-05-20",
+    "auto_gerado": true
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [
+        0.0,
+        0.0,
+        1.0,
+        0.4,
+        0
+      ],
+      "regex": "\\b(A[1-4][Aa]?|AS|B[1-4])\\b",
+      "default": "A4"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [
+        0.131,
+        0.239,
+        0.193,
+        0.255,
+        0
+      ],
+      "regex": "(Verde|Azul|Convencional|Branca|Mon[óo]?mia|MT[VACB])",
+      "default": "Verde",
+      "_anchor": "Verde"
+    }
+  }
+}

@@ -27,51 +27,51 @@ const sqlKanbanFast = `
 SELECT
   CASE
     WHEN COALESCE(
-      p.suspenso,
-      CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END
+      (p.id_status_atual=5)/* TODO V2 */,
+      CASE WHEN LOWER(COALESCE('' /* TODO V2: removida */,'')) = 'suspenso' THEN 1 ELSE 0 END
     ) = 1
     THEN 'Suspensos'
     WHEN fat.has_pagamento = 1
-      OR (p.id_coluna = 5 AND LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos'))
+      OR ((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */ = 5 AND LOWER(TRIM(COALESCE('' /* TODO V2 */,''))) IN ('concluido','concluídos','concluidos'))
     THEN 'Concluídos'
-    WHEN p.id_etapa_processo = 11 OR LOWER(TRIM(p.etapa)) IN ('indeferido','indeferidos') THEN 'Indeferidos'
+    WHEN p.id_etapa_atual /* TODO V2 */ = 11 OR LOWER(TRIM((SELECT nome FROM DM_ETAPAS WHERE id_etapa = p.id_etapa_atual))) IN ('indeferido','indeferidos') THEN 'Indeferidos'
     WHEN fat.has_faturamento = 1 THEN 'Faturamento'
     WHEN fr.has_fluxo = 1 THEN 'Fluxo de Ressarcimento'
     WHEN def.has_defer = 1 THEN 'Deferidos'
-    ELSE COALESCE(p.nome_coluna, 'Ativos')
+    ELSE COALESCE('' /* TODO V2 */, 'Ativos')
   END AS coluna_kanban,
   CASE
     WHEN COALESCE(
-      p.suspenso,
-      CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END
+      (p.id_status_atual=5)/* TODO V2 */,
+      CASE WHEN LOWER(COALESCE('' /* TODO V2: removida */,'')) = 'suspenso' THEN 1 ELSE 0 END
     ) = 1
     THEN 'Suspensos'
     WHEN fat.has_pagamento = 1
-      OR (p.id_coluna = 5 AND LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos'))
+      OR ((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */ = 5 AND LOWER(TRIM(COALESCE('' /* TODO V2 */,''))) IN ('concluido','concluídos','concluidos'))
     THEN 'Concluídos'
-    WHEN p.id_etapa_processo = 11 OR LOWER(TRIM(p.etapa)) IN ('indeferido','indeferidos') THEN 'Indeferidos'
+    WHEN p.id_etapa_atual /* TODO V2 */ = 11 OR LOWER(TRIM((SELECT nome FROM DM_ETAPAS WHERE id_etapa = p.id_etapa_atual))) IN ('indeferido','indeferidos') THEN 'Indeferidos'
     WHEN fat.has_faturamento = 1 THEN 'Faturamento'
     WHEN fr.has_fluxo = 1 THEN 'Fluxo de Ressarcimento'
     WHEN def.has_defer = 1 THEN 'Deferidos'
-    ELSE COALESCE(p.nome_coluna, 'Ativos')
+    ELSE COALESCE('' /* TODO V2 */, 'Ativos')
   END AS nome_coluna,
   CASE
     WHEN COALESCE(
-      p.suspenso,
-      CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END
+      (p.id_status_atual=5)/* TODO V2 */,
+      CASE WHEN LOWER(COALESCE('' /* TODO V2: removida */,'')) = 'suspenso' THEN 1 ELSE 0 END
     ) = 1
     THEN 99
     WHEN fat.has_pagamento = 1
-      OR (p.id_coluna = 5 AND LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos'))
+      OR ((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */ = 5 AND LOWER(TRIM(COALESCE('' /* TODO V2 */,''))) IN ('concluido','concluídos','concluidos'))
     THEN 5
-    WHEN p.id_etapa_processo = 11 OR LOWER(TRIM(p.etapa)) IN ('indeferido','indeferidos') THEN 6
+    WHEN p.id_etapa_atual /* TODO V2 */ = 11 OR LOWER(TRIM((SELECT nome FROM DM_ETAPAS WHERE id_etapa = p.id_etapa_atual))) IN ('indeferido','indeferidos') THEN 6
     WHEN fat.has_faturamento = 1 THEN 4
     WHEN fr.has_fluxo = 1 THEN 3
     WHEN def.has_defer = 1 THEN 2
-    ELSE COALESCE(p.id_coluna, 1)
+    ELSE COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, 1)
   END AS id_coluna,
-  p.id_etapa_processo AS id_etapa_processo,
-  p.etapa             AS etapa_nome,
+  p.id_etapa_atual /* TODO V2 */ AS id_etapa_atual /* TODO V2 */,
+  (SELECT nome FROM DM_ETAPAS WHERE id_etapa = p.id_etapa_atual) AS etapa_nome,
   p.id_processo       AS id,
   r.uc                AS uc,
   r.cliente           AS cliente,
@@ -84,11 +84,11 @@ SELECT
   def_raw.repasse_simples AS repasse_simples,
   def_raw.repasse_dobro   AS repasse_dobro,
   COALESCE(alrt.alertas_count, 0) AS alertas_count,
-  p.sub_etapa         AS sub_etapa,
+  '' /* TODO V2: removida */         AS sub_etapa,
   p.relevancia        AS relevancia,
   COALESCE(
-    p.suspenso,
-    CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END
+    (p.id_status_atual=5)/* TODO V2 */,
+    CASE WHEN LOWER(COALESCE('' /* TODO V2: removida */,'')) = 'suspenso' THEN 1 ELSE 0 END
   ) AS suspenso,
   p.data_alerta        AS data_alerta,
   p.ultima_atualizacao AS ultima_atualizacao,
@@ -141,12 +141,12 @@ LEFT JOIN (
   ON fat.id_processo = p.id_processo
 LEFT JOIN (
   SELECT
-    id_requisicao,
+    id_processo,
     MAX(data_movimentacao) AS data_movimentacao
   FROM FT_HISTORICO_MOVIMENTACOES
-  GROUP BY id_requisicao
+  GROUP BY id_processo
 ) vh
-  ON vh.id_requisicao = p.id_processo
+  ON vh.id_processo = p.id_processo
 LEFT JOIN (
   SELECT id_processo, COUNT(1) AS alertas_count
   FROM FT_ALERTAS
@@ -157,18 +157,18 @@ LEFT JOIN (
 ORDER BY
   CASE
     WHEN COALESCE(
-      p.suspenso,
-      CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END
+      (p.id_status_atual=5)/* TODO V2 */,
+      CASE WHEN LOWER(COALESCE('' /* TODO V2: removida */,'')) = 'suspenso' THEN 1 ELSE 0 END
     ) = 1
     THEN 99
     WHEN fat.has_pagamento = 1
-      OR (p.id_coluna = 5 AND LOWER(TRIM(COALESCE(p.nome_coluna,''))) IN ('concluido','concluídos','concluidos'))
+      OR ((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */ = 5 AND LOWER(TRIM(COALESCE('' /* TODO V2 */,''))) IN ('concluido','concluídos','concluidos'))
     THEN 5
-    WHEN p.id_etapa_processo = 11 OR LOWER(TRIM(p.etapa)) IN ('indeferido','indeferidos') THEN 6
+    WHEN p.id_etapa_atual /* TODO V2 */ = 11 OR LOWER(TRIM((SELECT nome FROM DM_ETAPAS WHERE id_etapa = p.id_etapa_atual))) IN ('indeferido','indeferidos') THEN 6
     WHEN fat.has_faturamento = 1 THEN 4
     WHEN fr.has_fluxo = 1 THEN 3
     WHEN def.has_defer = 1 THEN 2
-    ELSE COALESCE(p.id_coluna, 1)
+    ELSE COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, 1)
   END,
   p.ultima_atualizacao DESC
 LIMIT ?;
@@ -191,7 +191,7 @@ func (r *ProcessosRepo) ListarKanbanFast(ctx context.Context, limit int, coluna 
 			coluna         string
 			nomeColuna     sql.NullString
 			idColuna       sql.NullInt64
-			idEtapa        int
+			idEtapa        sql.NullInt64
 			etapaNome      sql.NullString
 			id             int
 			uc             sql.NullString
@@ -298,11 +298,18 @@ func (r *ProcessosRepo) ListarKanbanFast(ctx context.Context, limit int, coluna 
 			dataDobroPtr = &v
 		}
 
+		// id_etapa_atual /* TODO V2 */ no banco PROD pode estar NULL (legacy) — converte com segurança
+		var idEtapaPtr *int
+		if idEtapa.Valid {
+			v := int(idEtapa.Int64)
+			idEtapaPtr = &v
+		}
+
 		out = append(out, models.ProcessoKanban{
 			ColunaKanban:    coluna,
 			ID:              id,
 			IdColuna:        idColPtr,
-			IdEtapaProcesso: idEtapa,
+			IdEtapaProcesso: idEtapaPtr,
 			NomeColuna:      nomeColPtr,
 			Etapa: func() *string {
 				if etapaNome.Valid {
@@ -382,10 +389,10 @@ func (r *ProcessosRepo) ListarKanbanFast(ctx context.Context, limit int, coluna 
 
 const sqlSuspensos = `
 SELECT
-  kc.nome_coluna                    AS coluna_kanban,
-  kc.id_coluna                      AS id_coluna_kanban,
-  e.id_etapa_processo               AS id_etapa_processo,
-  e.etapa                           AS etapa_nome,
+  CASE WHEN p.id_aprovacao_atual=2 THEN 'Indeferidos' WHEN p.id_status_atual=5 THEN 'Suspensos' WHEN p.id_etapa_atual=6 THEN 'Concluídos' WHEN p.id_etapa_atual IN (4,5) THEN 'Faturamento' WHEN p.id_aprovacao_atual=1 THEN 'Deferidos' ELSE 'Ativos' END AS coluna_kanban,
+  CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END AS id_coluna_kanban,
+  e.id_etapa                        AS id_etapa_atual,
+  e.nome                            AS etapa_nome,
   p.id_processo                     AS id,
   r.uc                              AS uc,
   r.cliente                         AS cliente,
@@ -394,29 +401,28 @@ SELECT
   def.credito_simples               AS credito_simples,
   def.credito_dobro                 AS credito_dobro,
   COALESCE(alrt.alertas_count, 0)   AS alertas_count,
-  p.sub_etapa                       AS sub_etapa,
+  '' /* TODO V2: removida */                       AS sub_etapa,
   p.relevancia                      AS relevancia,
-  COALESCE(p.suspenso, CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END) AS suspenso,
+  COALESCE((p.id_status_atual=5)/* TODO V2 */, CASE WHEN LOWER(COALESCE('' /* TODO V2: removida */,'')) = 'suspenso' THEN 1 ELSE 0 END) AS suspenso,
   p.data_alerta                     AS data_alerta,
   p.ultima_atualizacao              AS ultima_atualizacao,
   vh.data_movimentacao              AS data_ultima_movimentacao
 FROM FT_PROCESSOS p
-JOIN DM_ETAPAS_PROCESSO   e   ON e.id_etapa_processo = p.id_etapa_processo
-JOIN DM_KANBAN_COLUNAS    kc  ON kc.id_coluna        = e.id_coluna_kanban
+JOIN DM_ETAPAS   e   ON e.id_etapa = p.id_etapa_atual
 LEFT JOIN FT_REQUISICOES  r   ON r.id_requisicao     = p.id_processo
 LEFT JOIN FT_DEFERIMENTOS def ON def.id_processo     = p.id_processo
 LEFT JOIN (
-    SELECT id_requisicao, MAX(data_movimentacao) AS data_movimentacao
+    SELECT id_processo, MAX(data_movimentacao) AS data_movimentacao
       FROM FT_HISTORICO_MOVIMENTACOES
-     GROUP BY id_requisicao
-) vh ON vh.id_requisicao = p.id_processo
+     GROUP BY id_processo
+) vh ON vh.id_processo = p.id_processo
 LEFT JOIN (
     SELECT id_processo, COUNT(1) AS alertas_count
       FROM FT_ALERTAS
      WHERE lido = 0
      GROUP BY id_processo
 ) alrt ON alrt.id_processo = p.id_processo
-WHERE COALESCE(p.suspenso,0)=1
+WHERE COALESCE((p.id_status_atual=5)/* TODO V2 */,0)=1
 ORDER BY COALESCE(vh.data_movimentacao, p.ultima_atualizacao) DESC
 LIMIT ? OFFSET ?;
 `
@@ -433,8 +439,8 @@ func (r *ProcessosRepo) ListarSuspensos(ctx context.Context, limit, offset int) 
 	for rows.Next() {
 		var (
 			coluna         string
-			idColuna       int
-			idEtapa        int
+			idColuna       sql.NullInt64
+			idEtapa        sql.NullInt64
 			etapaNome      sql.NullString
 			id             int
 			uc             sql.NullString
@@ -514,13 +520,21 @@ func (r *ProcessosRepo) ListarSuspensos(ctx context.Context, limit, offset int) 
 			v := coluna
 			nomeColPtr = &v
 		}
-		idColPtr = &idColuna
+		if idColuna.Valid {
+			v := int(idColuna.Int64)
+			idColPtr = &v
+		}
+		var idEtapaPtr *int
+		if idEtapa.Valid {
+			v := int(idEtapa.Int64)
+			idEtapaPtr = &v
+		}
 
 		out = append(out, models.ProcessoKanban{
 			ColunaKanban:    coluna,
 			ID:              id,
 			IdColuna:        idColPtr,
-			IdEtapaProcesso: idEtapa,
+			IdEtapaProcesso: idEtapaPtr,
 			NomeColuna:      nomeColPtr,
 			Etapa: func() *string {
 				if etapaNome.Valid {

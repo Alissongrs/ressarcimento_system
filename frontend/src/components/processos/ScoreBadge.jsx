@@ -9,15 +9,15 @@ const ScoreBadge = memo(function ScoreBadge({ score }) {
   if (score === undefined || score === null) return <span className="text-xs opacity-40">-</span>;
 
   if (score?.erro) {
-    return <span className="text-[9px] text-red-500 opacity-40">erro</span>;
+    return <span className="text-[9px] text-[var(--danger)] opacity-40">erro</span>;
   }
 
   const percentage = typeof score === 'number' ? score : score?.percentual || score?.percentage || 0;
   const displayPercent = Math.round(percentage);
 
-  let bgColor = 'bg-gray-300 text-gray-600'; // default/low
-  if (displayPercent >= 70) bgColor = 'bg-green-500 text-white'; // high
-  else if (displayPercent >= 40) bgColor = 'bg-yellow-500 text-white'; // medium
+  let bgColor = 'bg-[color-mix(in_srgb,var(--fg)_25%,var(--card))] text-[color-mix(in_srgb,var(--fg)_65%,transparent)]'; // default/low
+  if (displayPercent >= 70) bgColor = 'bg-[var(--success)] text-white'; // high
+  else if (displayPercent >= 40) bgColor = 'bg-[var(--warning)] text-white'; // medium
 
   return (
     <div

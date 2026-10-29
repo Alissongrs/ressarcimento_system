@@ -311,16 +311,28 @@ export const getFaturamento = async (processoId) => {
   return data;
 };
 
-export const movimentarProcesso = (id, data) => {
-  const url = withAuthToken(`/processos/${id}/movimentar`);
-  if (typeof FormData !== 'undefined' && data instanceof FormData) {
-    return api.post(url, data);
-  }
-  return api.post(url, data);
+// ⭐ Sinaliza mudança de instância/etapa/status de um processo. Telas dependentes
+// (ex.: página Prazos) escutam 'processo:atualizado' e refazem o fetch.
+const _notifyProcessoAtualizado = (id) => {
+  try {
+    window.dispatchEvent(
+      new CustomEvent('processo:atualizado', { detail: { id: Number(id) } }),
+    );
+  } catch { /* ambiente sem window */ }
 };
 
-export const descartarProcesso = (id, payload) =>
-  api.post(`/processos/${id}/descartar`, payload);
+export const movimentarProcesso = (id, data) => {
+  const url = withAuthToken(`/processos/${id}/movimentar`);
+  const p = api.post(url, data);
+  p.then(() => _notifyProcessoAtualizado(id)).catch(() => {});
+  return p;
+};
+
+export const descartarProcesso = (id, payload) => {
+  const p = api.post(`/processos/${id}/descartar`, payload);
+  p.then(() => _notifyProcessoAtualizado(id)).catch(() => {});
+  return p;
+};
 export const excluirProcesso = (id) => api.delete(`/processos/${id}`);
 
 // ======================= Fluxo & Faturamento =======================
@@ -450,12 +462,7 @@ export const getEmailsByProcessoID = async (processoId) =>
 export const marcarEmailProcessoLido = async (processoId, emailId) =>
   (await api.post(`/processos/${processoId}/emails/${emailId}/read`)).data;
 
-// ======================= Tags =======================
-export const getAllTags = async () => (await api.get('/tags')).data;
-export const createTag = async (nome, cor) =>
-  (await api.post('/tags', { nome, cor })).data;
-export const updateProcessoTags = (processoId, tagIds) =>
-  api.put(`/processos/${processoId}/tags`, tagIds);
+// Tags de processo removidas (feature descontinuada).
 
 // ======================= Dashboard =======================
 export const getDashboardStats = async (filters = {}) => {
@@ -488,10 +495,16 @@ export const getMovimentacoesPeriodo = async (ini, fim) => {
   return data;
 };
 
-export const suspenderProcesso = async (id, comentario = '') =>
-  (await api.post(`/processos/${id}/suspender`, { comentario })).data;
-export const retomarProcesso = async (id, comentario = '') =>
-  (await api.post(`/processos/${id}/retomar`, { comentario })).data;
+export const suspenderProcesso = async (id, comentario = '') => {
+  const r = (await api.post(`/processos/${id}/suspender`, { comentario })).data;
+  _notifyProcessoAtualizado(id);
+  return r;
+};
+export const retomarProcesso = async (id, comentario = '') => {
+  const r = (await api.post(`/processos/${id}/retomar`, { comentario })).data;
+  _notifyProcessoAtualizado(id);
+  return r;
+};
 
 // ======================= Historico =======================
 export const getUltimoHistorico = async (id) => {

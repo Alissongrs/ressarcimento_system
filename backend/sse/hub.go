@@ -8,7 +8,7 @@ import (
 
 type Event struct {
 	Type       string      `json:"type"`
-	ProcessoID int         `json:"processo_id"`
+	ProcessoID int         `json:"id_processo"`
 	Payload    interface{} `json:"payload,omitempty"`
 	Ts         time.Time   `json:"ts"`
 }

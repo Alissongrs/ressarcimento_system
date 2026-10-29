@@ -1,0 +1,87 @@
+.cpv2-msf {
+  position: relative;
+  display: inline-block;
+}
+.cpv2-msf__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: var(--cpv2-surface);
+  border: 1px solid var(--cpv2-border);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--cpv2-text);
+  min-width: 140px;
+  max-width: 240px;
+}
+.cpv2-msf__btn:hover {
+  border-color: var(--cpv2-brand);
+}
+.cpv2-msf__btn.is-active {
+  border-color: var(--cpv2-brand);
+  background: var(--cpv2-brand-soft);
+  color: var(--cpv2-brand);
+}
+.cpv2-msf__lbl {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cpv2-msf__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--cpv2-brand);
+  color: #fff;
+  cursor: pointer;
+}
+.cpv2-msf__clear:hover {
+  background: var(--cpv2-danger);
+}
+.cpv2-msf__chev {
+  opacity: 0.6;
+}
+.cpv2-msf__pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  min-width: 200px;
+  max-width: 320px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--cpv2-surface);
+  border: 1px solid var(--cpv2-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px -8px rgba(20, 30, 60, 0.18);
+  padding: 6px 0;
+}
+.cpv2-msf__opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
+}
+.cpv2-msf__opt:hover {
+  background: var(--cpv2-brand-soft);
+}
+.cpv2-msf__opt input[type='checkbox'] {
+  accent-color: var(--cpv2-brand);
+  cursor: pointer;
+}
+.cpv2-msf__empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--cpv2-text-muted);
+  text-align: center;
+}

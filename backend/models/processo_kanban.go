@@ -7,7 +7,7 @@ type ProcessoKanban struct {
 	ColunaKanban           string     `db:"coluna_kanban"            json:"-"` // usado só para agrupar no handler
 	ID                     int        `db:"id"                       json:"id"`
 	IdColuna               *int       `db:"id_coluna"               json:"id_coluna,omitempty"`
-	IdEtapaProcesso        int        `db:"id_etapa_processo"        json:"id_etapa_processo"`
+	IdEtapaProcesso        *int       `db:"id_etapa_atual"           json:"id_etapa_atual,omitempty"`
 	NomeColuna             *string    `db:"nome_coluna"             json:"nome_coluna,omitempty"`
 	Etapa                  *string    `db:"etapa_nome"               json:"etapa,omitempty"`
 	UC                     *string    `db:"uc"                       json:"uc,omitempty"`
@@ -34,7 +34,7 @@ type ProcessoKanban struct {
 type ProcessoKanbanDTO struct {
 	ID                     int        `json:"id"`
 	IdColuna               *int       `json:"id_coluna,omitempty"`
-	IdEtapaProcesso        int        `json:"id_etapa_processo"`
+	IdEtapaProcesso        *int       `json:"id_etapa_atual,omitempty"`
 	NomeColuna             *string    `json:"nome_coluna,omitempty"`
 	Etapa                  *string    `json:"etapa,omitempty"`
 	UC                     *string    `json:"uc,omitempty"`

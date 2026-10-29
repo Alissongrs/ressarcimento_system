@@ -1,0 +1,187 @@
+{
+  "_meta": {
+    "descricao": "Extracoes manuais com valores reais por fatura (gold truth). Usar pra validar output vision (vision_origens.jsonl).",
+    "convencao": "chave = nome do arquivo PDF; valor = extracao completa hierarquica",
+    "criado_em": "2026-05-14",
+    "como_usar": "Rodar validar_vs_gold_truth.py apos vision terminar — compara campo-a-campo e flagga mismatches."
+  },
+  "4_2660_43B.pdf": {
+    "distribuidora": {
+      "razao_social": "ENERGISA SUL-SUDESTE - DISTRIBUIDORA DE ENERGIA S.A.",
+      "cnpj": "07.282.377/0001-20",
+      "ie": "562.408.684.115",
+      "endereco": "Rod Assis Chateaubriand S/N, KM 455 - Bairro: Vila Maria",
+      "cep": "19053-680"
+    },
+    "cliente": {
+      "razao_social": "VIA VAREJO SA",
+      "endereco": "RUA SMITH DE VASCONCELOS, 349",
+      "cep": "19814010",
+      "cnpj": "3X.XXX.XXX/XXX5-08",
+      "ie": "189XXXXXX",
+      "tipo_via": "SEGUNDA VIA"
+    },
+    "instalacao": {
+      "matricula": "0009334648-2025-10-8",
+      "codigo_cliente": "9/9334648-4",
+      "codigo_instalacao": "W9010120811",
+      "roteiro": "030 - 2001 - 010 - 0371",
+      "dom_ent": "9334648",
+      "dom_banc": "00341 00018 00000000511337"
+    },
+    "nota_fiscal": {
+      "numero": "000.046.164",
+      "serie": "002",
+      "data_emissao": "09/10/2025",
+      "data_apresentacao": "14/10/2025",
+      "referencia": ["Outubro", "2025"],
+      "chave_acesso": "35251007282377000120660020000461641036044616",
+      "protocolo": ["3352500005294257", "09/10/2025 17:43:37"],
+      "url_consulta": "https://dfe-portal.svrs.rs.gov.br/nf3e/consulta"
+    },
+    "pagamento": {
+      "vencimento": "17/11/2025",
+      "valor_total": 4557.45,
+      "banco": "0341"
+    },
+    "leitura": {
+      "anterior": "31/08/2025",
+      "atual": "30/09/2025",
+      "dias": 30,
+      "proxima": "31/10/2025"
+    },
+    "ligacao": {
+      "tipo": "TRIFASICO",
+      "classificacao": "MVF-MOD. TARIF. VERDE F. I. / A4 COMERCIAL /",
+      "tensao_nominal": 11400.0,
+      "tensao_min": 10602.0,
+      "tensao_max": 11970.0
+    },
+    "demanda_contratada": {
+      "ponta_kw": 0.0,
+      "fora_ponta_kw": 115.0,
+      "tusdg_kw": 0.0
+    },
+    "totais_itens": {
+      "valor": 4557.45,
+      "pis_cofins": 239.32,
+      "base_icms": 5315.92,
+      "icms": 956.86
+    },
+    "tributos": {
+      "pis":    {"base_calculo": 5119.99, "aliquota_pct": 0.8338, "valor": 42.68},
+      "cofins": {"base_calculo": 5119.99, "aliquota_pct": 3.8407, "valor": 196.64},
+      "icms":   {"base_calculo": 5315.92, "aliquota_pct": 18.0,   "valor": 956.86}
+    },
+    "medicao": [
+      {"medidor": "W9010120811", "posto": "Ponta",      "const_medidor": 0, "leitura_atual": 568.049999, "k": 1, "consumo_kwh": 568.049999},
+      {"medidor": "W9010120811", "posto": "Fora Ponta", "const_medidor": 0, "leitura_atual": 9352.56,    "k": 1, "consumo_kwh": 9352.56}
+    ],
+    "composicao": {
+      "Servico de distribuicao":         {"valor": 637.5,   "pct": 13.98},
+      "Compra de energia":               {"valor": 1546.89, "pct": 33.94},
+      "Servico de transmissao":          {"valor": 281.55,  "pct": 6.18},
+      "Encargos setoriais":              {"valor": 755.4,   "pct": 16.58},
+      "Impostos diretos e encargos":     {"valor": 1336.11, "pct": 29.32},
+      "Outros servicos":                 {"valor": 0.0,     "pct": 0.0},
+      "Total":                           {"valor": 4557.45, "pct": 100.0}
+    },
+    "reajuste_tarifario": {"pct": 19.05, "data": "12/07/25"},
+    "qualidade": {
+      "DIC":   {"mensal": 5.0, "apurado": 0.0, "trimestral": 0.0, "anual": 0.0},
+      "FIC":   {"mensal": 3.0, "apurado": 0.0, "trimestral": 0.0, "anual": 0.0},
+      "DMIC":  {"mensal": 5.0, "apurado": 0.0, "trimestral": null, "anual": null},
+      "DICRI": {"mensal": 8.0, "apurado": null, "trimestral": null, "anual": null},
+      "conjunto": "ASSIS I", "referencia": "08/2025", "tensao_contr": 11400.0
+    }
+  },
+  "ENERGISAMR-Fat-Matricula-0000759637-09-2025_3.pdf": {
+    "distribuidora": {
+      "razao_social": "ENERGISA MINAS RIO - DISTRIBUIDORA DE ENERGIA S.A.",
+      "cnpj": "19.527.639/0001-58",
+      "ie": "153.056023-0000",
+      "endereco": "Av Manoel Inacio Peixoto, 1200 - Distrito Industrial",
+      "cep": "36771-000"
+    },
+    "cliente": {
+      "razao_social": "VIA VAREJO S A",
+      "endereco": "RUA ANTONIO WELERSON, 17",
+      "cep": "36900000",
+      "cnpj": "3X.XXX.XXX/XXX7-33",
+      "ie": "002XXXXXX",
+      "tipo_via": "PRIMEIRA VIA"
+    },
+    "instalacao": {
+      "matricula": "0000759637-2025-09-8",
+      "codigo_cliente": "1/759637-2",
+      "codigo_instalacao": "C9011798075",
+      "roteiro": "041 - 0102 - 000 - 0600",
+      "dom_ent": null,
+      "dom_banc": "00341 00018 00000000511337"
+    },
+    "nota_fiscal": {
+      "numero": "005.361.041",
+      "serie": "002",
+      "data_emissao": "10/09/2025",
+      "data_apresentacao": null,
+      "referencia": ["Setembro", "2025"],
+      "chave_acesso": "31250919527639000158660020053610411088016554",
+      "protocolo": ["1312500330684084", "10/09/2025 15:52:39"],
+      "url_consulta": "https://portalsped.fazenda.mg.gov.br/portalnf3e"
+    },
+    "pagamento": {
+      "vencimento": "24/09/2025",
+      "valor_total": 3584.31,
+      "banco": "0341"
+    },
+    "leitura": {
+      "anterior": "31/07/2025",
+      "atual": "31/08/2025",
+      "dias": 31,
+      "proxima": "30/09/2025"
+    },
+    "ligacao": {
+      "tipo": "TRIFASICO",
+      "classificacao": "MVF-MOD. TARIF. VERDE F I / A4 COMERCIAL /",
+      "tensao_nominal": 11.2,
+      "tensao_min": 11.2,
+      "tensao_max": 11.6
+    },
+    "demanda_contratada": {
+      "ponta_kw": null,
+      "fora_ponta_kw": 80.0,
+      "tusdg_kw": null
+    },
+    "totais_itens": {
+      "valor": 3584.31,
+      "pis_cofins": 240.04,
+      "base_icms": 3884.38,
+      "icms": 699.19
+    },
+    "tributos": {
+      "pis":    {"base_calculo": 4593.76, "aliquota_pct": 0.9321, "valor": 42.82},
+      "cofins": {"base_calculo": 4593.76, "aliquota_pct": 4.2932, "valor": 197.22},
+      "icms":   {"base_calculo": 3884.38, "aliquota_pct": 18.0,   "valor": 699.19}
+    },
+    "medicao": [
+      {"medidor": "C9011798075", "posto": "Ponta",      "const_medidor": 0, "leitura_atual": 551.970996,  "k": 1, "consumo_kwh": 565.770271},
+      {"medidor": "C9011798075", "posto": "Fora Ponta", "const_medidor": 0, "leitura_atual": 5093.532516, "k": 1, "consumo_kwh": 5220.870829}
+    ],
+    "composicao": {
+      "Servico de distribuicao":     {"valor": 579.2,   "pct": 16.16},
+      "Compra de energia":           {"valor": 1257.65, "pct": 35.09},
+      "Servico de transmissao":      {"valor": 125.28,  "pct": 3.5},
+      "Encargos setoriais":          {"valor": 615.55,  "pct": 17.17},
+      "Impostos diretos e encargos": {"valor": 1006.63, "pct": 28.08},
+      "Outros servicos":             {"valor": 0.0,     "pct": 0.0}
+    },
+    "reajuste_tarifario": {"pct": 3.61, "data": "22/06/2025"},
+    "qualidade": {
+      "DIC":   {"mensal": 5.0, "apurado": 0.55, "trimestral": 999.0, "anual": 999.0},
+      "FIC":   {"mensal": 4.0, "apurado": 1.0,  "trimestral": 999.0, "anual": 999.0},
+      "DMIC":  {"mensal": 5.0, "apurado": 0.55, "trimestral": null, "anual": null},
+      "DICRI": {"mensal": 8.0, "apurado": null, "trimestral": null, "anual": null},
+      "conjunto": "MANHUACU 1", "referencia": "07/2025", "tensao_contr": 11.2
+    }
+  }
+}

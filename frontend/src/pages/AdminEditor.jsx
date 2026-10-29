@@ -24,7 +24,7 @@ import { confirmAction } from '../utils/confirm.js';
 import './admin-editor.css';
 
 // Toast substituído por modal centralizado nesta tela
-import ControleProcessos from './ControleProcessos.jsx';
+import ControleProcessos from './ControleProcessosV2.jsx';
 
 export default function AdminEditor() {
   const { user } = useAuth();
@@ -250,7 +250,7 @@ const normalizeDateInput = (s) => {
         {disparandoAlertas ? '⟳ Disparando...' : '🔔 Disparar Alertas'}
       </button>
       {alertasMsg && (
-        <span style={{ fontSize: 12, color: alertasMsg.startsWith('✓') ? '#10b981' : '#ef4444' }}>
+        <span style={{ fontSize: 12, color: alertasMsg.startsWith('✓') ? 'var(--success)' : 'var(--danger)' }}>
           {alertasMsg}
         </span>
       )}
@@ -676,7 +676,7 @@ const normalizeDateInput = (s) => {
           >
             <h1 className="text-xl font-extrabold tracking-tight">Editor de Processo (Admin)</h1>
             <div className="flex items-center gap-2">
-              <button className="px-4 py-2 bg-green-600 text-white rounded" onClick={save} disabled={saving}>
+              <button className="px-4 py-2 bg-[var(--success)] text-white rounded" onClick={save} disabled={saving}>
                 {saving ? 'Salvando...' : 'Salvar'}
               </button>
               <button
@@ -774,7 +774,7 @@ const normalizeDateInput = (s) => {
               <label htmlFor="novo">Criar novo processo</label>
             </div>
             <button
-              className="px-3 py-2 bg-blue-600 text-white rounded"
+              className="px-3 py-2 bg-[var(--accent)] text-white rounded"
               onClick={loadById}
               disabled={
                 criarNovo || (!String(processoId || '').trim() && !String((ucBusca || req?.uc || '')).trim())
@@ -1353,11 +1353,11 @@ const normalizeDateInput = (s) => {
                     >
                       <div className="w-36 text-sm">{r.uc}</div>
                       <div className="flex-1 text-sm">
-                        {r.status === 'ok' && <span className="text-green-600">ID: {r.selectedId}</span>}
-                        {r.status === 'miss' && <span className="text-red-600">{r.msg}</span>}
+                        {r.status === 'ok' && <span className="text-[var(--success)]">ID: {r.selectedId}</span>}
+                        {r.status === 'miss' && <span className="text-[var(--danger)]">{r.msg}</span>}
                         {r.status === 'dup' && (
                           <div className="flex items-center gap-2">
-                            <span className="text-amber-600">{r.msg}</span>
+                            <span className="text-[var(--warning)]">{r.msg}</span>
                             <select
                               className="input-themed text-xs p-1"
                                 value={r.selectedId || ''}
@@ -1392,7 +1392,7 @@ const normalizeDateInput = (s) => {
                 Cancelar
               </button>
               <button
-                className="px-3 py-2 bg-green-600 text-white rounded"
+                className="px-3 py-2 bg-[var(--success)] text-white rounded"
                 disabled={bulkApplying || bulkResolvido.length === 0}
                 onClick={async () => {
                   try {

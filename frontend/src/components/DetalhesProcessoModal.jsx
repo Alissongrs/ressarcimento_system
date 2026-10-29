@@ -152,7 +152,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
     };
 
     return (
-        <div className="border-t border-blue-800/50 pt-4 animate-fade-in">
+        <div className="border-t border-[color-mix(in_srgb,var(--accent)_50%,transparent)] pt-4 animate-fade-in">
             <div className="flex justify-between items-center mb-4">
                 <h3 className="font-semibold text-[var(--fg)] text-sm">FLUXO DE RESSARCIMENTO (CONCILIAÇÃO)</h3>
                 <div className="flex gap-2">
@@ -178,13 +178,13 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
                 {itens.map((item, index) => (
                     <div key={index} className="sap-card p-4">
                         <div className="flex justify-between items-center mb-3">
-                            <span className="text-xs font-semibold text-gray-400">
+                            <span className="text-xs font-semibold text-[color-mix(in_srgb,var(--fg)_55%,transparent)]">
                                 Devolução #{index + 1}
                             </span>
                             {itens.length > 1 && (
                                 <button
                                     onClick={() => removerItem(index)}
-                                    className="text-red-400 hover:text-red-300 transition-colors"
+                                    className="text-[var(--danger)] hover:text-[color-mix(in_srgb,var(--danger)_70%,white)] transition-colors"
                                     title="Remover esta devolução"
                                 >
                                     <MinusCircle size={14} />
@@ -205,7 +205,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
                                             value={forma}
                                             checked={item.forma_devolucao === forma}
                                             onChange={(e) => handleItemChange(index, 'forma_devolucao', e.target.value)}
-                                            className="text-blue-600 focus:ring-blue-500"
+                                            className="text-[var(--accent)] focus:ring-[var(--accent)]"
                                         />
                                         {forma}
                                     </label>
@@ -256,7 +256,7 @@ const ModuloFluxoRessarcimento = ({ processoId, onUpdate }) => {
 
             {itens.length > 1 && (
                 <div className="mt-4 p-3 panel-bg-50 rounded-lg">
-                    <div className="text-xs text-gray-400">
+                    <div className="text-xs text-[color-mix(in_srgb,var(--fg)_55%,transparent)]">
                         <strong>Resumo:</strong> {itens.length} devolução(ões) • Valor total: R$ {itens.reduce((total, item) => total + (parseFloat(item.valor) || 0), 0).toFixed(2)}
                     </div>
                 </div>
@@ -694,18 +694,23 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
         }
     };
 
+    // Paleta categórica dos badges de etapa: reaproveita as variáveis semânticas do
+    // tema (accent/accent-2/accent-3/success/danger/warning) em vez de roxo/teal/
+    // cinza saturado fora da paleta SAP. Onde o Tailwind original usava dois tons
+    // da mesma cor pra diferenciar estágios (ex.: red-600 vs red-700), a
+    // diferenciação é preservada via color-mix sobre a mesma variável semântica.
     const getEtapaColor = (etapaName) => {
         const colors = {
             'Distribuidora': 'bg-[var(--accent)]',
-            'Ouvidoria': 'bg-purple-600',
-            'ANEEL': 'bg-red-600',
-            'SMA': 'bg-success',
-            'Pendente': 'bg-yellow-600',
-            'Em Conciliação': 'bg-orange-600',
-            'Em Contestação': 'bg-red-700',
-            'Enviado ao Financeiro': 'bg-indigo-600',
-            'RessarcimeNão': 'bg-teal-600',
-            'Concluído': 'bg-gray-600',
+            'Ouvidoria': 'bg-[var(--accent-2)]',
+            'ANEEL': 'bg-[var(--danger)]',
+            'SMA': 'bg-[var(--success)]',
+            'Pendente': 'bg-[var(--warning)]',
+            'Em Conciliação': 'bg-[var(--accent-3)]',
+            'Em Contestação': 'bg-[color-mix(in_srgb,var(--danger)_80%,black)]',
+            'Enviado ao Financeiro': 'bg-[color-mix(in_srgb,var(--accent)_70%,black)]',
+            'RessarcimeNão': 'bg-[color-mix(in_srgb,var(--accent-2)_65%,var(--success))]',
+            'Concluído': 'bg-[var(--success)]',
             'Indeferido': 'bg-[var(--card)]'
         };
         return colors[etapaName] || '0';
@@ -727,15 +732,15 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
             if (s.startsWith('conclu')) s = 'concluido';
             const map = {
                 'distribuidora': 'bg-[var(--accent)]',
-                'ouvidoria': 'bg-purple-600',
-                'aneel': 'bg-red-600',
-                'sma': 'bg-success',
-                'pendente': 'bg-yellow-600',
-                'em conciliacao': 'bg-orange-600',
-                'em contestacao': 'bg-red-700',
-                'Enviado ao Financeiro': 'bg-indigo-600',
-                'faturamento': 'bg-teal-600',
-                'concluido': 'bg-gray-600',
+                'ouvidoria': 'bg-[var(--accent-2)]',
+                'aneel': 'bg-[var(--danger)]',
+                'sma': 'bg-[var(--success)]',
+                'pendente': 'bg-[var(--warning)]',
+                'em conciliacao': 'bg-[var(--accent-3)]',
+                'em contestacao': 'bg-[color-mix(in_srgb,var(--danger)_80%,black)]',
+                'Enviado ao Financeiro': 'bg-[color-mix(in_srgb,var(--accent)_70%,black)]',
+                'faturamento': 'bg-[color-mix(in_srgb,var(--accent-2)_65%,var(--success))]',
+                'concluido': 'bg-[var(--success)]',
                 'indeferido': 'bg-[var(--card)]',
             };
             return map[s] || '0';
@@ -757,7 +762,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                             {extrairTextoSeguro(processo?.etapa)}
                         </span>
                         {extrairTextoSeguro(processo?.sub_etapa) && (
-                            <span className="px-2 py-1 bg-gray-700 rounded text-xs text-gray-300">
+                            <span className="px-2 py-1 bg-[color-mix(in_srgb,var(--fg)_15%,var(--card))] rounded text-xs text-[var(--fg)]">
                                 {extrairTextoSeguro(processo.sub_etapa)}
                             </span>
                         )}
@@ -772,13 +777,13 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
 
                 {/* Error Banner */}
                 {error && (
-                    <div className="bg-yellow-900/50 border-l-4 border-yellow-500 p-4 mx-6 mt-4 rounded">
+                    <div className="bg-[color-mix(in_srgb,var(--warning)_12%,var(--card))] border-l-4 border-[var(--warning)] p-4 mx-6 mt-4 rounded">
                         <div className="flex items-center">
-                            <AlertTriangle className="text-yellow-500 mr-2" size={16} />
-                            <p className="text-yellow-200 text-sm">{error}</p>
+                            <AlertTriangle className="text-[var(--warning)] mr-2" size={16} />
+                            <p className="text-[var(--fg)] text-sm">{error}</p>
                             <button
                                 onClick={() => setError(null)}
-                                className="ml-auto text-yellow-400 hover:text-yellow-300"
+                                className="ml-auto text-[var(--warning)] hover:text-[color-mix(in_srgb,var(--warning)_70%,white)]"
                             >
                                 <X size={14} />
                             </button>
@@ -837,7 +842,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                         }
                                     </select>
                                     {etapa && etapasDisponiveis.find(e => e.nome === etapa)?.descricao && (
-                                        <p className="text-xs text-gray-400 mt-1">
+                                        <p className="text-xs text-[color-mix(in_srgb,var(--fg)_55%,transparent)] mt-1">
                                             {etapasDisponiveis.find(e => e.nome === etapa).descricao}
                                         </p>
                                     )}
@@ -897,13 +902,13 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                 </div>
 
                                 <div className="flex items-center">
-                                    <label className="flex items-center gap-3 text-sm font-semibold text-gray-300 cursor-pointer">
+                                    <label className="flex items-center gap-3 text-sm font-semibold text-[color-mix(in_srgb,var(--fg)_70%,transparent)] cursor-pointer">
                                         <Star className="w-4 h-4" />
                                         <input
                                             type="checkbox"
                                             checked={relevancia}
                                             onChange={(e) => setRelevancia(e.target.checked)}
-                                            className="w-4 h-4 text-yellow-600 bg-[var(--card)] border-[var(--border)] rounded focus:ring-yellow-500"
+                                            className="w-4 h-4 text-[var(--warning)] bg-[var(--card)] border-[var(--border)] rounded focus:ring-[var(--warning)]"
                                         />
                                         Processo Relevante
                                     </label>
@@ -919,6 +924,14 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                         {dadosDeferimento.data_procedencia && <div>Data Procedência: {String(dadosDeferimento.data_procedencia)}</div>}
                                         {dadosDeferimento.credito_simples != null && <div>Crédito Simples: {String(dadosDeferimento.credito_simples)}</div>}
                                         {dadosDeferimento.credito_dobro != null && <div>Crédito em Dobro: {String(dadosDeferimento.credito_dobro)}</div>}
+                                        {(dadosDeferimento.credito_simples != null || dadosDeferimento.credito_dobro != null) && (
+                                            <div className="md:col-span-2 mt-1 pt-2 border-t border-[var(--border)] font-semibold text-[var(--success)]">
+                                                Total do crédito (simples + dobro): R$ {(
+                                                    (parseFloat(dadosDeferimento.credito_simples) || 0) +
+                                                    (parseFloat(dadosDeferimento.credito_dobro) || 0)
+                                                ).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -984,7 +997,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                     placeholder="Descreva as ações realizadas ou observações importantes..."
 
                                 />
-                <div className="mt-2 text-[12px] font-medium text-gray-300">Canais de Comunicação</div>
+                <div className="mt-2 text-[12px] font-medium text-[color-mix(in_srgb,var(--fg)_70%,transparent)]">Canais de Comunicação</div>
                 <div className="mt-1 flex flex-wrap gap-2 text-[12px]">
                                     {[
                                         { id: 'whatsapp', label: 'WhatsApp' },
@@ -1038,16 +1051,16 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                             {anexos.map((arquivo, index) => (
                                                 <div key={index} className="flex items-center justify-between p-3 bg-[var(--card)] rounded-lg">
                                                     <div className="flex items-center gap-3">
-                                                        <Paperclip size={16} className="text-gray-400" />
+                                                        <Paperclip size={16} className="text-[color-mix(in_srgb,var(--fg)_55%,transparent)]" />
                                                         <div>
                                                             <p className="text-sm text-[var(--fg)]">{arquivo.name}</p>
-                                                            <p className="text-xs text-gray-400">{formatFileSize(arquivo.size)}</p>
+                                                            <p className="text-xs text-[color-mix(in_srgb,var(--fg)_55%,transparent)]">{formatFileSize(arquivo.size)}</p>
                                                         </div>
                                                     </div>
                                                     <button
                                                         type="button"
                                                         onClick={() => removeAnexo(index)}
-                                                        className="text-red-400 hover:text-red-300 transition-colors"
+                                                        className="text-[var(--danger)] hover:text-[color-mix(in_srgb,var(--danger)_70%,white)] transition-colors"
                                                     >
                                                         <X size={16} />
                                                     </button>
@@ -1059,11 +1072,11 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                             </div>
 
                             {/* Botões de Ação */}
-                            <div className="flex gap-3 pt-4 border-t border-gray-700">
+                            <div className="flex gap-3 pt-4 border-t border-[var(--border)]">
                                 <button
                                     type="submit"
                                     disabled={loading || !etapa}
-                                    className="flex items-center gap-2 px-6 py-3 bg-[var(--accent)] hover:opacity-90 disabled:bg-gray-600 text-[var(--fg)] rounded-lg transition-colors"
+                                    className="flex items-center gap-2 px-6 py-3 bg-[var(--accent)] hover:opacity-90 disabled:bg-[var(--border)] text-[var(--fg)] rounded-lg transition-colors"
                                 >
                                     {loading ? (
                                         <>
@@ -1081,7 +1094,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                 <button
                                     type="button"
                                     onClick={() => setShowConfirmDiscard(true)}
-                                    className="flex items-center gap-2 px-6 py-3 bg-yellow-600 hover:bg-yellow-700 text-[var(--fg)] rounded-lg transition-colors"
+                                    className="flex items-center gap-2 px-6 py-3 bg-[var(--warning)] hover:bg-[color-mix(in_srgb,var(--warning)_85%,black)] text-[var(--fg)] rounded-lg transition-colors"
                                 >
                                     <AlertTriangle size={16} />
                                     Descartar
@@ -1090,7 +1103,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                 <button
                                     type="button"
                                     onClick={() => setShowConfirmDelete(true)}
-                                    className="flex items-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-[var(--fg)] rounded-lg transition-colors"
+                                    className="flex items-center gap-2 px-6 py-3 bg-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_85%,black)] text-[var(--fg)] rounded-lg transition-colors"
                                 >
                                     <Trash2 size={16} />
                                     Excluir
@@ -1104,7 +1117,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                             carregarSubEtapas(etapa);
                                         }
                                     }}
-                                    className="flex items-center gap-2 px-4 py-3 bg-gray-600 hover:bg-gray-700 text-[var(--fg)] rounded-lg transition-colors"
+                                    className="flex items-center gap-2 px-4 py-3 bg-[var(--border)] hover:bg-[color-mix(in_srgb,var(--border)_80%,black)] text-[var(--fg)] rounded-lg transition-colors"
                                     title="Recarregar etapas e sub-etapas"
                                 >
                                     <RefreshCw size={16} />
@@ -1115,7 +1128,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                     </div>
 
                     {/* Right Panel - Histórico */}
-                    <div className="w-1/3 bg-[var(--card)] border-l border-gray-700 flex flex-col">
+                    <div className="w-1/3 bg-[var(--card)] border-l border-[var(--border)] flex flex-col">
                         <div className="p-4 border-b panel-border">
                             <h3 className="font-semibold text-[var(--fg)] flex items-center gap-2">
                                 <Clock size={16} />
@@ -1125,7 +1138,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
 
                         {roadmap.items.length > 0 && (
                             <div className="px-4 pt-4">
-                                <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                                <div className="text-[11px] uppercase tracking-wide text-[color-mix(in_srgb,var(--fg)_55%,transparent)] font-semibold">
                                     Roadmap do processo
                                 </div>
                                 <div className="mt-3 space-y-3">
@@ -1135,14 +1148,14 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                             <div key={step.key} className="flex items-start gap-3">
                                                 <div className="flex flex-col items-center">
                                                     <div
-                                                        className={`h-3 w-3 rounded-full ${isCurrent ? 'bg-[var(--accent)]' : 'bg-gray-500'}`}
+                                                        className={`h-3 w-3 rounded-full ${isCurrent ? 'bg-[var(--accent)]' : 'bg-[color-mix(in_srgb,var(--fg)_40%,transparent)]'}`}
                                                     />
                                                     {idx < roadmap.items.length - 1 && (
-                                                        <div className="w-px flex-1 bg-gray-700 mt-1" />
+                                                        <div className="w-px flex-1 bg-[var(--border)] mt-1" />
                                                     )}
                                                 </div>
                                                 <div className="min-w-0">
-                                                    <div className={`text-sm ${isCurrent ? 'font-semibold text-[var(--fg)]' : 'text-gray-300'}`}>
+                                                    <div className={`text-sm ${isCurrent ? 'font-semibold text-[var(--fg)]' : 'text-[color-mix(in_srgb,var(--fg)_70%,transparent)]'}`}>
                                                         {step.etapa}
                                                     </div>
                                                     {step.sub && (
@@ -1166,12 +1179,12 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                         <div className="flex-1 overflow-y-auto p-4">
                             {loadingHistorico ? (
                                 <div className="flex items-center justify-center py-8">
-                                    <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                                    <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
                                 </div>
                             ) : historico.length > 0 ? (
                                 <div className="space-y-4">
                                     {historico.map((item, index) => (
-                                        <div key={index} className="border-l-2 border-blue-500 pl-4 pb-4">
+                                        <div key={index} className="border-l-2 border-[var(--accent)] pl-4 pb-4">
                                             <div className="flex items-center gap-2 mb-2">
                                                 <span className={`px-2 py-1 rounded text-xs font-medium text-[var(--fg)] ${(() => {
                                                     const etapaRaw = extrairTextoSeguro(item.etapa_nova || item.etapa_destino || item.etapa || '');
@@ -1199,7 +1212,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                                     })()}
                                                 </span>
                                             </div>
-                                            <p className="text-sm text-gray-300 mb-2">
+                                            <p className="text-sm text-[color-mix(in_srgb,var(--fg)_70%,transparent)] mb-2">
                                                 {extrairTextoSeguro(item.comentario) || 'Sem comentário'}
                                             </p>
                                             <div className="text-xs opacity-70">
@@ -1225,10 +1238,10 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                 <div className="fixed inset-0 glass-card flex items-center justify-center z-60">
                     <div className="glass-card rounded-lg p-6 w-full max-w-md">
                         <h3 className="text-lg font-bold text-[var(--fg)] mb-4 flex items-center gap-2">
-                            <AlertTriangle className="text-yellow-500" size={20} />
+                            <AlertTriangle className="text-[var(--warning)]" size={20} />
                             Confirmar Descarte
                         </h3>
-                        <p className="text-gray-300 mb-4">
+                        <p className="text-[color-mix(in_srgb,var(--fg)_70%,transparent)] mb-4">
                             Tem certeza que deseja descartar este processo? Esta ação no pode serádesfeita.
                         </p>
                         <div className="mb-4">
@@ -1248,7 +1261,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                             <button
                                 onClick={handleDescarte}
                                 disabled={loading || !comentarioDescarte.trim()}
-                                className="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 text-[var(--fg)] rounded-lg transition-colors"
+                                className="flex-1 px-4 py-2 bg-[var(--warning)] hover:bg-[color-mix(in_srgb,var(--warning)_85%,black)] disabled:bg-[var(--border)] text-[var(--fg)] rounded-lg transition-colors"
                             >
                                 {loading ? 'Descartando...' : 'Confirmar Descarte'}
                             </button>
@@ -1257,7 +1270,7 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                                     setShowConfirmDiscard(false);
                                     setComentarioDescarte('');
                                 }}
-                                className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-[var(--fg)] rounded-lg transition-colors"
+                                className="flex-1 px-4 py-2 bg-[var(--border)] hover:bg-[color-mix(in_srgb,var(--border)_80%,black)] text-[var(--fg)] rounded-lg transition-colors"
                             >
                                 Cancelar
                             </button>
@@ -1271,24 +1284,24 @@ const DetalhesProcessoModal = ({ isOpen, onClose, processo, onUpdate, onEditTags
                 <div className="fixed inset-0 glass-card flex items-center justify-center z-60">
                     <div className="glass-card rounded-lg p-6 w-full max-w-md">
                         <h3 className="text-lg font-bold text-[var(--fg)] mb-4 flex items-center gap-2">
-                            <Trash2 className="text-red-500" size={20} />
+                            <Trash2 className="text-[var(--danger)]" size={20} />
                             Confirmar Exclusão
                         </h3>
-                        <p className="text-gray-300 mb-6">
-                            Tem certeza que deseja excluir permanentemente este processo? 
-                            <strong className="text-red-400"> Esta ação no pode serádesfeita.</strong>
+                        <p className="text-[color-mix(in_srgb,var(--fg)_70%,transparent)] mb-6">
+                            Tem certeza que deseja excluir permanentemente este processo?
+                            <strong className="text-[var(--danger)]"> Esta ação no pode serádesfeita.</strong>
                         </p>
                         <div className="flex gap-3">
                             <button
                                 onClick={handleExclusao}
                                 disabled={loading}
-                                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-[var(--fg)] rounded-lg transition-colors"
+                                className="flex-1 px-4 py-2 bg-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_85%,black)] disabled:bg-[var(--border)] text-[var(--fg)] rounded-lg transition-colors"
                             >
                                 {loading ? 'Excluindo...' : 'Confirmar Exclusão'}
                             </button>
                             <button
                                 onClick={() => setShowConfirmDelete(false)}
-                                className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-[var(--fg)] rounded-lg transition-colors"
+                                className="flex-1 px-4 py-2 bg-[var(--border)] hover:bg-[color-mix(in_srgb,var(--border)_80%,black)] text-[var(--fg)] rounded-lg transition-colors"
                             >
                                 Cancelar
                             </button>

@@ -923,12 +923,12 @@ export default function ProcessoDrawer({
                                           </button>
                                           {extState?.data && (() => {
                                             const d = extState.data;
-                                            const tipoColors = { deferido: '#22c55e', indeferido: '#ef4444', em_analise: '#f59e0b', solicita_documentos: '#3b82f6', outros: '#6b7280' };
+                                            const tipoColors = { deferido: 'var(--success)', indeferido: 'var(--danger)', em_analise: 'var(--warning)', solicita_documentos: 'var(--accent)', outros: 'color-mix(in srgb, var(--fg) 55%, transparent)' };
                                             const tipoLabels = { deferido: 'Deferido', indeferido: 'Indeferido', em_analise: 'Em Análise', solicita_documentos: 'Solicita Documentos', outros: 'Outros' };
                                             const color = tipoColors[d.tipo_resposta] || tipoColors.outros;
                                             const label = tipoLabels[d.tipo_resposta] || d.tipo_resposta;
                                             return (
-                                              <div style={{ border: `1px solid ${color}40`, borderRadius: 8, padding: '8px 10px', background: `${color}10`, fontSize: 11 }}>
+                                              <div style={{ border: `1px solid color-mix(in srgb, ${color} 40%, transparent)`, borderRadius: 8, padding: '8px 10px', background: `color-mix(in srgb, ${color} 10%, var(--card))`, fontSize: 11 }}>
                                                 <div style={{ fontWeight: 700, color, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
                                                   <Sparkles size={10} /> {label}
                                                 </div>
@@ -1052,13 +1052,13 @@ export default function ProcessoDrawer({
                       const rawPct = header?.score_percentual ?? scoreData?.[pid]?.percentual ?? null;
                       const pct = rawPct != null ? Math.round(Number(rawPct)) : null;
                       const labelColor =
-                        pct === null ? 'text-gray-400' :
-                        pct >= 70 ? 'text-green-500' :
-                        pct >= 40 ? 'text-yellow-500' : 'text-red-400';
+                        pct === null ? 'text-[color-mix(in_srgb,var(--fg)_55%,transparent)]' :
+                        pct >= 70 ? 'text-[var(--success)]' :
+                        pct >= 40 ? 'text-[var(--warning)]' : 'text-[var(--danger)]';
                       const barColor =
-                        pct === null ? 'bg-gray-300' :
-                        pct >= 70 ? 'bg-green-500' :
-                        pct >= 40 ? 'bg-yellow-500' : 'bg-red-400';
+                        pct === null ? 'bg-[color-mix(in_srgb,var(--fg)_25%,var(--card))]' :
+                        pct >= 70 ? 'bg-[var(--success)]' :
+                        pct >= 40 ? 'bg-[var(--warning)]' : 'bg-[var(--danger)]';
 
                       return (
                         <div className="flex flex-col gap-4 pt-1">

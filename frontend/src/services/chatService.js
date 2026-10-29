@@ -21,19 +21,7 @@ export const learnChatFiles = async ({ message, files }) => {
   return resp.data;
 };
 
-export const sendChatFeedback = async ({ question, answer, rating, comment, sources, model }) => {
-  const payload = {
-    question,
-    answer,
-    rating,
-    comment,
-    sources,
-    model,
-    prompt_version: 'v1',
-  };
-  const resp = await api.post('/chat/feedback', payload);
-  return resp.data;
-};
+// Feedback do chat (endpoint /chat/feedback) removido.
 
 export const listChatSessions = async () => {
   const resp = await api.get('/chat/sessions');

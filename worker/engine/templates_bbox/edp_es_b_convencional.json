@@ -1,0 +1,33 @@
+{
+  "_meta": {
+    "distribuidora": "edp_es_b_convencional",
+    "fonte_calibracao": "edp_es_b_convencional_11381.pdf",
+    "data_calibracao": "2026-05-20",
+    "auto_gerado": true
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [
+        0.0,
+        0.0,
+        1.0,
+        0.4,
+        0
+      ],
+      "regex": "\\b(A[1-4][Aa]?|AS|B[1-4])\\b",
+      "default": "B3"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [
+        0.134,
+        0.145,
+        0.242,
+        0.161,
+        0
+      ],
+      "regex": "(Verde|Azul|Convencional|Branca|Mon[óo]?mia|MT[VACB])",
+      "default": "Convencional",
+      "_anchor": "CONVENCIONAL"
+    }
+  }
+}

@@ -26,10 +26,10 @@ const CardDeferimento = ({ deferimento, onEdit }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-base">
         <p><strong>Status da Análise:</strong> <span className="font-normal">{deferimento.status_analise || 'N/A'}</span></p>
         <p><strong>Data da Procedência:</strong> <span className="font-normal">{formatarData(deferimento.data_procedencia)}</span></p>
-        <p><strong>Crédito Simples:</strong> <span className="font-normal text-green-700">{formatarValor(deferimento.credito_simples)}</span></p>
-        <p><strong>Crédito em Dobro:</strong> <span className="font-normal text-green-700">{formatarValor(deferimento.credito_dobro)}</span></p>
+        <p><strong>Crédito Simples:</strong> <span className="font-normal text-[var(--success)]">{formatarValor(deferimento.credito_simples)}</span></p>
+        <p><strong>Crédito em Dobro:</strong> <span className="font-normal text-[var(--success)]">{formatarValor(deferimento.credito_dobro)}</span></p>
       </div>
-      <button onClick={onEdit} className="mt-6 px-4 py-2 bg-gray-600 text-[var(--fg)] font-bold rounded-lg hover:bg-gray-700 transition-colors">
+      <button onClick={onEdit} className="mt-6 px-4 py-2 bg-[color-mix(in_srgb,var(--fg)_70%,transparent)] text-[var(--fg)] font-bold rounded-lg hover:bg-[color-mix(in_srgb,var(--fg)_85%,transparent)] transition-colors">
         Editar Deferimento
       </button>
     </div>

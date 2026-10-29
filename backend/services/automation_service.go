@@ -20,6 +20,16 @@ func SendEmail(to, subject, body string) error {
 	return SendEmailDetailed(to, "", "", subject, body)
 }
 
+// MailSendConfigured diz se existe algum transporte de envio pronto (Graph OU SMTP).
+// Usado para ligar/desligar o login por link mágico.
+func MailSendConfigured() bool {
+	if graphEnabled() {
+		return true
+	}
+	return os.Getenv("SMTP_HOST") != "" && os.Getenv("SMTP_PORT") != "" &&
+		os.Getenv("SMTP_USER") != "" && os.Getenv("SMTP_PASS") != ""
+}
+
 // SendEmailDetailed envia e-mail com To/CC/BCC.
 func SendEmailDetailed(to, cc, bcc, subject, body string) error {
 	return SendEmailDetailedWithAttachments(to, cc, bcc, subject, body, nil)
@@ -111,10 +121,10 @@ func EnviarEmailMovimentacoesDiarias() {
 	query := `
         SELECT
             h.id_historico,
-            h.id_requisicao,
+            h.id_processo,
             COALESCE(u.nome_usuario, 'Sistema') AS nome_usuario,
-            COALESCE(h.status_anterior, '') AS status_anterior,
-            COALESCE(h.status_novo, '')    AS status_novo,
+            COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_anterior), '') AS status_anterior,
+            COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), '')    AS status_novo,
             COALESCE(h.comentario, '')     AS comentario,
             h.data_movimentacao
         FROM FT_HISTORICO_MOVIMENTACOES h
@@ -247,10 +257,10 @@ func EnviarInformativoSemanal() {
 	// Processos deferidos na semana
 	var deferidos int
 	_ = db.QueryRow(`
-		SELECT COUNT(DISTINCT h.id_requisicao)
+		SELECT COUNT(DISTINCT h.id_processo)
 		  FROM FT_HISTORICO_MOVIMENTACOES h
 		 WHERE h.data_movimentacao >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-		   AND (LOWER(h.etapa_nova) LIKE '%deferido%' OR LOWER(h.status_novo) LIKE '%deferido%')`).Scan(&deferidos)
+		   AND (LOWER((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova)) LIKE '%deferido%' OR LOWER((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo)) LIKE '%deferido%')`).Scan(&deferidos)
 	metricas = append(metricas, semanalRow{"Deferidos (7 dias)", fmt.Sprintf("%d", deferidos)})
 
 	// Processos em backlog (sem movimentação há mais de 30 dias)
@@ -258,10 +268,9 @@ func EnviarInformativoSemanal() {
 	_ = db.QueryRow(`
 		SELECT COUNT(1)
 		  FROM FT_PROCESSOS p
-		  JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-		  LEFT JOIN VW_ULTIMO_HISTORICO vh ON vh.id_requisicao = p.id_processo
-		 WHERE p.suspenso = 0
-		   AND LOWER(e.etapa) NOT IN ('concluídos','concluidos','indeferidos','rejeitados','suspensos')
+		  LEFT JOIN DM_STATUS_PROCESSO s ON s.id_status = p.id_status_atual
+		  LEFT JOIN VW_ULTIMO_HISTORICO vh ON vh.id_processo = p.id_processo
+		 WHERE COALESCE(s.nome,'') NOT IN ('Encerrado','Suspenso','Cancelado')
 		   AND COALESCE(vh.data_movimentacao, p.ultima_atualizacao) < DATE_SUB(NOW(), INTERVAL 30 DAY)`).Scan(&backlog30)
 	metricas = append(metricas, semanalRow{"Sem movimentação > 30 dias", fmt.Sprintf("%d", backlog30)})
 
@@ -270,9 +279,8 @@ func EnviarInformativoSemanal() {
 	_ = db.QueryRow(`
 		SELECT COUNT(1)
 		  FROM FT_PROCESSOS p
-		  JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-		 WHERE p.suspenso = 0
-		   AND LOWER(e.etapa) NOT IN ('concluídos','concluidos','indeferidos','rejeitados','suspensos')`).Scan(&ativos)
+		  LEFT JOIN DM_STATUS_PROCESSO s ON s.id_status = p.id_status_atual
+		 WHERE COALESCE(s.nome,'') NOT IN ('Encerrado','Suspenso','Cancelado')`).Scan(&ativos)
 	metricas = append(metricas, semanalRow{"Processos ativos", fmt.Sprintf("%d", ativos)})
 
 	// Top-3 distribuidoras por volume de movimentação na semana
@@ -284,7 +292,7 @@ func EnviarInformativoSemanal() {
 	rows, err := db.Query(`
 		SELECT COALESCE(r.distribuidora, r.empresa, 'N/A') AS distribuidora, COUNT(*) AS total
 		  FROM FT_HISTORICO_MOVIMENTACOES h
-		  JOIN FT_REQUISICOES r ON r.id_requisicao = h.id_requisicao
+		  JOIN FT_REQUISICOES r ON r.id_requisicao = h.id_processo
 		 WHERE h.data_movimentacao >= DATE_SUB(NOW(), INTERVAL 7 DAY)
 		 GROUP BY distribuidora
 		 ORDER BY total DESC
@@ -390,25 +398,21 @@ func VerificarPendenciasDeFluxo() {
 
 	// etapa \"Enviado ao Financeiro\" no seu dicionário de etapas
 	var etapaFluxoID int
-	err := getAppDB().QueryRow("SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = 'Enviado ao Financeiro'").Scan(&etapaFluxoID)
+	err := getAppDB().QueryRow("SELECT id_etapa FROM DM_ETAPAS WHERE nome = 'Enviado ao Financeiro'").Scan(&etapaFluxoID)
 	if err != nil {
 		log.Printf("Erro ao buscar ID da etapa 'Enviado ao Financeiro': %v", err)
 		return
 	}
 
-	// Processos nessa etapa que não têm registros em fluxo de ressarcimento ou faturamento
+	// Prazos configuráveis por etapa/kanban (DM_PRAZOS_*) foram removidos.
+	// Sem fonte de prazo configurável, esta checagem não gera alertas.
 	query := `
         SELECT p.id_processo,
                p.id_responsavel,
-               TIMESTAMPDIFF(HOUR, NOW(), DATE_ADD(COALESCE(vh.data_movimentacao, p.ultima_atualizacao), INTERVAL COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) DAY)) AS horas_restantes,
-               DATE_ADD(COALESCE(vh.data_movimentacao, p.ultima_atualizacao), INTERVAL COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) DAY) AS deadline_dt
+               NULL AS horas_restantes,
+               NULL AS deadline_dt
           FROM FT_PROCESSOS p
-          JOIN DM_ETAPAS_PROCESSO e  ON e.id_etapa_processo = p.id_etapa_processo
-     LEFT JOIN DM_PRAZOS_ETAPA pe    ON pe.id_etapa_processo = e.id_etapa_processo AND pe.sub_etapa IS NULL
-     LEFT JOIN DM_PRAZOS_ETAPA pe_sub ON pe_sub.id_etapa_processo = e.id_etapa_processo AND pe_sub.sub_etapa = p.sub_etapa
-     LEFT JOIN DM_PRAZOS_KANBAN pk   ON pk.id_coluna_kanban = e.id_coluna_kanban
-     LEFT JOIN VW_ULTIMO_HISTORICO vh ON vh.id_requisicao = p.id_processo
-         WHERE COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) IS NOT NULL;
+         WHERE 1 = 0;
     `
 	rows, err := getAppDB().Query(query)
 	if err != nil {
@@ -471,20 +475,20 @@ func ChecarPrazosRequisicoes() {
         SELECT r.id_requisicao, r.id_usuario,
                TIMESTAMPDIFF(HOUR, NOW(),
                  DATE_ADD(r.data_mudanca_status,
-        INTERVAL CASE WHEN s.status = 'Nova RequisiÃ§ão' THEN 5
-                                        WHEN s.status IN ('Em Análise','Em Analise') THEN 10
+        INTERVAL CASE WHEN s.nome = 'Nova RequisiÃ§ão' THEN 5
+                                        WHEN s.nome IN ('Em Análise','Em Analise') THEN 10
                                         ELSE 0 END DAY)) AS horas_restantes,
                DATE_ADD(r.data_mudanca_status,
-        INTERVAL CASE WHEN s.status = 'Nova RequisiÃ§ão' THEN 5
-                                        WHEN s.status IN ('Em Análise','Em Analise') THEN 10
+        INTERVAL CASE WHEN s.nome = 'Nova RequisiÃ§ão' THEN 5
+                                        WHEN s.nome IN ('Em Análise','Em Analise') THEN 10
                                         ELSE 0 END DAY) AS deadline_dt
           FROM FT_REQUISICOES r
-          LEFT JOIN DM_STATUS s ON s.id_status = r.id_status
-        WHERE s.status IN ('Nova RequisiÃ§ão','Em Análise','Em Analise')
+          LEFT JOIN DM_STATUS_PROCESSO s /* TODO V2 */ ON s.id_status = r.id_status
+        WHERE s.nome IN ('Nova RequisiÃ§ão','Em Análise','Em Analise')
            AND TIMESTAMPDIFF(HOUR, NOW(),
                  DATE_ADD(r.data_mudanca_status,
-        INTERVAL CASE WHEN s.status = 'Nova RequisiÃ§ão' THEN 5
-                                        WHEN s.status IN ('Em Análise','Em Analise') THEN 10
+        INTERVAL CASE WHEN s.nome = 'Nova RequisiÃ§ão' THEN 5
+                                        WHEN s.nome IN ('Em Análise','Em Analise') THEN 10
                                         ELSE 0 END DAY)) BETWEEN 0 AND 24;
     `
 	rows, err := getAppDB().Query(q)
@@ -522,64 +526,25 @@ func ChecarPrazosRequisicoes() {
 	}
 }
 
-// ChecarPrazosProcessos cria alertas quando faltar <=24h para vencer o prazo do processo
+// ChecarPrazosProcessos cria alertas para processos vencidos em "Em elaboração" (status 2)
+// e "Aguardando retorno" (status 3), com prazo calculado por instância (dias úteis para
+// Distribuidora/Ouvidoria, dias corridos para ANEEL/SMA — ver prazos_service.go).
 func ChecarPrazosProcessos() {
-	log.Println("Executando tarefa: Checar prazos de Processos (<=24h/vencidos)...")
+	log.Println("Executando tarefa: Checar prazos de Processos (Em elaboração + Aguardando retorno)...")
 	if getAppDB() == nil {
 		return
 	}
-	query := `
-        SELECT p.id_processo,
-               p.id_responsavel,
-               TIMESTAMPDIFF(HOUR, NOW(), DATE_ADD(COALESCE(vh.data_movimentacao, p.ultima_atualizacao), INTERVAL COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) DAY)) AS horas_restantes,
-               DATE_ADD(COALESCE(vh.data_movimentacao, p.ultima_atualizacao), INTERVAL COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) DAY) AS deadline_dt
-          FROM FT_PROCESSOS p
-          JOIN DM_ETAPAS_PROCESSO e  ON e.id_etapa_processo = p.id_etapa_processo
-     LEFT JOIN DM_PRAZOS_ETAPA pe    ON pe.id_etapa_processo = e.id_etapa_processo AND pe.sub_etapa IS NULL
-     LEFT JOIN DM_PRAZOS_ETAPA pe_sub ON pe_sub.id_etapa_processo = e.id_etapa_processo AND pe_sub.sub_etapa COLLATE utf8mb4_unicode_ci = p.sub_etapa COLLATE utf8mb4_unicode_ci
-     LEFT JOIN DM_PRAZOS_KANBAN pk   ON pk.id_coluna_kanban = e.id_coluna_kanban
-     LEFT JOIN VW_ULTIMO_HISTORICO vh ON vh.id_requisicao = p.id_processo
-         WHERE COALESCE(pe_sub.prazo_dias, pe.prazo_dias, pk.prazo_dias) IS NOT NULL;
-    `
-	rows, err := getAppDB().Query(query)
+	processos, err := CalcularProcessosComPrazo([]int{2, 3})
 	if err != nil {
-		log.Printf("Erro ao checar prazos de processos: %v", err)
+		log.Printf("Erro ao calcular prazos de processos: %v", err)
 		return
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var procID int
-		var userID sql.NullInt64
-		var horas sql.NullInt64
-		var deadline sql.NullTime
-		if err := rows.Scan(&procID, &userID, &horas, &deadline); err != nil {
-			continue
-		}
-		if !userID.Valid || !horas.Valid || !deadline.Valid {
-			continue
-		}
-		if horas.Int64 > 24 {
-			continue
-		}
-		var exists int
-		_ = getAppDB().QueryRow(
-			"SELECT COUNT(1) FROM FT_ALERTAS WHERE id_processo=? AND lido=0 AND mensagem LIKE ?",
-			procID, "%Prazo do processo%",
-		).Scan(&exists)
-		if exists > 0 {
-			continue
-		}
-		msg := ""
-		if horas.Int64 >= 0 {
-			msg = fmt.Sprintf("Prazo do processo #%d vence em %d hora(s).", procID, horas.Int64)
-		} else {
-			msg = fmt.Sprintf("Prazo do processo #%d vencido.", procID)
-		}
-		if _, err := getAppDB().Exec(
-			"INSERT INTO FT_ALERTAS (id_usuario, id_processo, mensagem, lido, acknowledged, data_criacao, data_alerta) VALUES (?, ?, ?, 0, 0, NOW(), DATE(?))",
-			userID.Int64, procID, msg, deadline.Time,
-		); err != nil {
-			log.Printf("Erro ao inserir alerta de prazo para processo %d: %v", procID, err)
-		}
+	criados, err := CriarAlertasDePrazoVencido(processos)
+	if err != nil {
+		log.Printf("Erro ao criar alertas de prazo de processos: %v", err)
+		return
+	}
+	if criados > 0 {
+		log.Printf("ChecarPrazosProcessos: %d alerta(s) de prazo vencido criado(s).", criados)
 	}
 }

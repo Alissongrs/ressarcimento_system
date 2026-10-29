@@ -1,0 +1,206 @@
+/* Barra de progressão do deferimento do mês — modesta, cabe no header. */
+.mdb {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.mdb--loading {
+  width: 190px;
+  height: 26px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.mdb-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  border: 1px solid #dfe6ee;
+  border-radius: 7px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  color: #334;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.mdb-trigger:hover {
+  border-color: #b9c7d6;
+  box-shadow: 0 1px 4px rgba(31, 78, 121, 0.08);
+}
+.mdb-trigger__ico { color: #1f4e79; flex: none; }
+.mdb-trigger__label { color: #556; white-space: nowrap; }
+.mdb-trigger__pct { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* trilho + preenchimento */
+.mdb-track {
+  width: 80px;
+  height: 6px;
+  border-radius: 4px;
+  background: #eef2f6;
+  overflow: hidden;
+  flex: none;
+}
+.mdb-track--sm { width: 64px; height: 5px; }
+.mdb-fill { height: 100%; border-radius: 4px; transition: width 0.35s ease; }
+.mdb-fill--ok   { background: #2e7d32; }
+.mdb-fill--warn { background: #e8a219; }
+.mdb-fill--low  { background: #4c86c6; }
+
+.mdb-pct--ok   { color: #2e7d32; }
+.mdb-pct--warn { color: #b7791f; }
+.mdb-pct--low  { color: #1f4e79; }
+
+/* popover */
+.mdb-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  width: 320px;
+  background: #fff;
+  border: 1px solid #dbe3ec;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(20, 40, 70, 0.16);
+  padding: 12px 13px;
+}
+.mdb-pop__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.mdb-pop__title { font-size: 12.5px; font-weight: 700; color: #1f4e79; }
+.mdb-icon {
+  border: none; background: transparent; cursor: pointer;
+  color: #7a8aa0; padding: 3px; border-radius: 5px; line-height: 0;
+}
+.mdb-icon:hover { background: #eef3f8; color: #1f4e79; }
+
+.mdb-row { margin: 6px 0 10px; }
+.mdb-row--big .mdb-track { width: 100%; height: 8px; }
+.mdb-row__meta {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 5px; font-size: 12px; color: #223;
+  font-variant-numeric: tabular-nums;
+}
+.mdb-muted { color: #8a97a6; }
+.mdb-badge {
+  margin-left: auto; font-weight: 700; font-size: 11.5px;
+  padding: 1px 6px; border-radius: 20px; background: #f2f5f8;
+}
+
+.mdb-sec {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px;
+  color: #94a2b3; font-weight: 700; margin: 10px 0 4px;
+}
+
+/* histórico */
+.mdb-hist { display: flex; flex-direction: column; gap: 5px; max-height: 260px; overflow-y: auto; }
+.mdb-hrow {
+  display: grid; grid-template-columns: 52px 1fr 26px auto 34px;
+  align-items: center; gap: 8px; font-size: 11.5px; color: #334;
+  font-variant-numeric: tabular-nums;
+}
+.mdb-hmes { color: #667; text-transform: capitalize; display: inline-flex; align-items: center; gap: 1px; }
+.mdb-hqtd { text-align: right; color: #8a97a6; font-weight: 600; }
+.mdb-hval { text-align: right; color: #445; }
+.mdb-hpct { text-align: right; font-weight: 700; }
+
+/* seletor de ano + ações do cabeçalho */
+.mdb-head__actions { display: inline-flex; align-items: center; gap: 4px; }
+.mdb-year {
+  border: 1px solid #cfd9e4; border-radius: 6px; padding: 2px 6px;
+  font-size: 12px; color: #223; background: #fff; cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.mdb-year:focus { outline: none; border-color: #1f4e79; }
+
+/* sub-linha (qtd processos) e linha clicável */
+.mdb-row__sub {
+  display: flex; align-items: center; gap: 3px;
+  margin-top: 4px; font-size: 11px; color: #8a97a6;
+}
+.mdb-clk {
+  width: 100%; text-align: left; border: none; background: transparent;
+  cursor: pointer; border-radius: 7px; padding: 6px; margin: 2px 0;
+  transition: background 0.12s;
+}
+.mdb-clk:hover { background: #f1f6fb; }
+.mdb-clk.is-open { background: #eaf2fb; }
+.mdb-chev { color: #9aa7b5; transition: transform 0.15s; flex: none; }
+.mdb-clk.is-open .mdb-chev { transform: rotate(90deg); }
+
+/* painel de empresas */
+.mdb-emp {
+  margin: 2px 0 8px; padding: 6px 8px;
+  background: #f6f9fc; border: 1px solid #e6edf4; border-radius: 8px;
+  display: flex; flex-direction: column; gap: 3px;
+  max-height: 200px; overflow-y: auto;
+}
+.mdb-emp--msg {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: #8a97a6;
+}
+.mdb-emprow {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 8px;
+  align-items: center; font-size: 11.5px; color: #334;
+  font-variant-numeric: tabular-nums;
+}
+.mdb-empnome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mdb-empqtd { color: #8a97a6; white-space: nowrap; }
+.mdb-empval { text-align: right; color: #1f4e79; font-weight: 600; white-space: nowrap; }
+.mdb-emprow--tot {
+  margin-top: 3px; padding-top: 5px; border-top: 1px dashed #d7e1ec;
+  font-weight: 700; color: #223;
+}
+.mdb-emprow--tot .mdb-empnome { color: #556; }
+.mdb-spin { animation: mdbspin 0.9s linear infinite; }
+@keyframes mdbspin { to { transform: rotate(360deg); } }
+
+/* edição */
+.mdb-edit { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 4px; }
+.mdb-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #667; }
+.mdb-field input {
+  border: 1px solid #cfd9e4; border-radius: 6px; padding: 6px 8px;
+  font-size: 13px; color: #223; font-variant-numeric: tabular-nums;
+}
+.mdb-field input:focus { outline: none; border-color: #1f4e79; box-shadow: 0 0 0 2px rgba(31,78,121,0.12); }
+.mdb-edit__actions { display: flex; gap: 8px; margin-top: 2px; }
+.mdb-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid #cfd9e4; background: #fff; color: #445;
+  border-radius: 6px; padding: 6px 11px; font-size: 12px; cursor: pointer;
+}
+.mdb-btn:hover { background: #f4f7fa; }
+.mdb-btn--ok { background: #1f4e79; border-color: #1f4e79; color: #fff; }
+.mdb-btn--ok:hover { background: #1a4268; }
+.mdb-btn--ok:disabled { opacity: 0.6; cursor: default; }
+
+.mdb-foot {
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid #eef2f6;
+  font-size: 10px; color: #9aa7b5;
+}
+
+.mdb-hint {
+  margin: 3px 0 2px; font-size: 10px; line-height: 1.35; color: #9aa7b5;
+}
+
+@media (prefers-color-scheme: dark) {
+  .mdb-trigger { background: #1b2530; border-color: #2c3a49; color: #cdd7e1; }
+  .mdb-trigger__label { color: #9fb0c2; }
+  .mdb-track { background: #2a3642; }
+  .mdb-pop { background: #1b2530; border-color: #2c3a49; }
+  .mdb-pop__title { color: #7fb0e6; }
+  .mdb-field input { background: #12191f; border-color: #33414f; color: #e5ecf3; }
+  .mdb-badge { background: #24303c; }
+  .mdb-foot { border-top-color: #26313d; }
+  .mdb-year { background: #12191f; border-color: #33414f; color: #e5ecf3; }
+  .mdb-clk:hover { background: #222f3b; }
+  .mdb-clk.is-open { background: #263546; }
+  .mdb-emp { background: #141d25; border-color: #2a3642; }
+  .mdb-emprow { color: #cdd7e1; }
+  .mdb-empval { color: #7fb0e6; }
+  .mdb-emprow--tot { border-top-color: #33414f; color: #e5ecf3; }
+  .mdb-emprow--tot .mdb-empnome { color: #9fb0c2; }
+}

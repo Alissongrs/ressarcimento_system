@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Crontab do SURE (host da VPS). Instale com:  crontab worker/crontab.sure
+# Ajuste o PATH para conter o diretório do 'claude' e do 'node'.
+# Se os scripts usam caminhos diferentes, exporte as variáveis SURE_* antes (ou
+# edite os defaults nos próprios .sh).
+# ─────────────────────────────────────────────────────────────────────────────
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/ressarcimento/.local/bin
+SHELL=/bin/bash
+
+W=/opt/ressarcimento/ressarcimento_system/worker
+
+# 1) Worker Tier-2 (relatórios/consultas) — a cada 3 min, só dispara se há fila
+*/3 * * * *  $W/run_worker.sh >/dev/null 2>&1
+
+# 0) Executor das solicitações do chat (#sistema) aprovadas — a cada minuto, dentro do
+#    container do backend (movimentar, editar campo, repasse, histórico, relatórios)
+* * * * *    $W/run_executor.sh >/dev/null 2>&1
+
+# 0b) Tarefas conhecidas pedidas pelo chat (ex.: "@sistema rode o agua_sync … empresas …") — a cada minuto
+* * * * *    $W/run_jobs.sh >/dev/null 2>&1
+
+# 1b) Testes de regras (botão "Testar" da página /regras) — a cada minuto, só dispara se há fila
+* * * * *    $W/run_testes_regras.sh >/dev/null 2>&1
+
+# 1c) Títulos das conversas do chat refinados pela IA (claude -p, em lote) — a cada 5 min
+*/5 * * * *  cd /opt/ressarcimento/ressarcimento_system && python3 $W/titular_conversas.py >/dev/null 2>&1
+
+# 1d) Upload dos anexos dos pedidos pro Google Drive (rclone) + link público — a cada 5 min
+*/5 * * * *  cd /opt/ressarcimento/ressarcimento_system && python3 $W/drive_sync_anexos.py >/dev/null 2>&1
+
+# 2) Backup DIÁRIO — 03:00, retém 6 dias (o 7º sobrescreve o mais antigo)
+0 3 * * *    $W/backup_sistema.sh rotativo >/dev/null 2>&1
+
+# 3) Backup semanal — sextas, 03:00
+0 3 * * 5    $W/backup_sistema.sh semanal >/dev/null 2>&1
+
+# 4) pdf_pipeline (extração em lote) — segunda e quinta, 02:00  (faz backup antes)
+0 2 * * 1,4  $W/job_pdf_pipeline.sh >/dev/null 2>&1
+
+# 5) Faturas de água (diff + insere novas) — terça e quinta, 02:00
+#    OBS: quinta às 02:00 coincide com o pdf_pipeline; se quiser evitar disputa,
+#    mude esta para "30 2 * * 2,4".
+0 2 * * 2,4  $W/job_agua.sh >/dev/null 2>&1
+
+# 6) Aplicar Regras "passadas ao banco" — todo dia 00:00  (precisa CRON_TOKEN no backend/.env)
+0 0 * * *    $W/job_regras.sh >/dev/null 2>&1

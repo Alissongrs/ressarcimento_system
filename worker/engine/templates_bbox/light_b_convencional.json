@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "distribuidora": "LIGHT",
+    "grupo": "B",
+    "modalidade": "Convencional",
+    "fonte_calibracao": "_modelo_light_b_12465.pdf",
+    "data_calibracao": "2026-05-20",
+    "observacoes": "Varia entre 'B3' explícito e 'BT' (Baixa Tensão = B3 default). Default cobre variantes."
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [0.07, 0.085, 0.45, 0.130, 0],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "default": "B3",
+      "_anchor": "Subgrupo B3 explícito ou default B3 se BT/sem"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [0.07, 0.585, 0.40, 0.615, 0],
+      "regex": "(Verde|Azul|Convencional|Branca)",
+      "default": "Convencional",
+      "_anchor": "Convencional na seção tarifária ou default"
+    }
+  }
+}

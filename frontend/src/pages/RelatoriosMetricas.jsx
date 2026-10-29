@@ -4,13 +4,16 @@ import {
   RefreshCcw, TrendingUp, Wallet, Award, Clock, Users,
   BarChart2, CheckCircle2, ArrowUpRight, X,
   Activity, AlertTriangle, Target, Zap, DollarSign, Filter,
-  Sparkles,
+  Sparkles, Landmark,
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
   CartesianGrid, BarChart, Bar, PieChart, Pie, Cell, Legend, AreaChart, Area,
 } from 'recharts';
 import { getRelatoriosMetricas, getKanbanComposicao } from '../services/relatoriosService.js';
+import api from '../services/api';
+import TempoRespostaProtocolos from '../components/TempoRespostaProtocolos.jsx';
+import { fmtDuracao } from '../utils/duracao.js';
 import { getConcessionariasParaFiltro } from '../services/requisicaoService.js';
 
 /* ── helpers ── */
@@ -19,11 +22,20 @@ const fmt    = (n) => safeNum(n).toLocaleString('pt-BR');
 const fmtR$  = (n) => safeNum(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
 const fmtMM  = (n) => { const v = safeNum(n); return v >= 1e6 ? `R$ ${(v / 1e6).toFixed(2)}MM` : fmtR$(v); };
 const pct    = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+// rótulo da semana ISO no formato do backend ('2026-W44'), deslocada em dias a partir de hoje
+// (semanas sem requisição não vêm na lista; comparar as duas últimas da lista pulava semanas)
+const semanaISO = (desloc = 0) => {
+  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + desloc);
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const jan4 = new Date(d.getFullYear(), 0, 4);
+  const sem = 1 + Math.round(((d - jan4) / 86400000 - 3 + ((jan4.getDay() + 6) % 7)) / 7);
+  return `${d.getFullYear()}-W${String(sem).padStart(2, '0')}`;
+};
 
 const PROCESSOS_CARDS = [
   { label: 'Ativos', key: 'ativos' },
   { label: 'Deferidos', key: 'deferidos' },
-  { label: 'Fluxo', key: 'fluxo_ressarcimento' },
+  { label: 'Repasse', key: 'fluxo_ressarcimento' },
   { label: 'Faturamento', key: 'faturamento' },
   { label: 'Concluídos', key: 'concluidos' },
   { label: 'Indeferidos', key: 'indeferidos' },
@@ -69,7 +81,8 @@ const METRICAS_GUIA = {
   ],
 };
 
-const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316'];
+/* categorical chart palette — no semantic equivalent (danger/warning/success/accent), retoned muted to fit sober SAP palette */
+const PIE_COLORS = ['#4d7ea8', '#4f9d67', '#c99a3e', '#b5534a', '#8577ad', '#4a9098', '#c9793e'];
 const hasPositive = (arr, key = 'total') => Array.isArray(arr) && arr.some((x) => safeNum(x?.[key]) > 0);
 
 /* ── sub-components ── */
@@ -132,7 +145,7 @@ function Sparkline({ data, color = 'var(--accent)', height = 36 }) {
 
 /* KPI hero — versão grande para os indicadores principais */
 function KpiHeroCard({ icon: Icon, label, value, sub, accentColor = 'var(--accent)', sparkData, delta }) {
-  const deltaColor = delta == null ? null : delta >= 0 ? '#10b981' : '#ef4444';
+  const deltaColor = delta == null ? null : delta >= 0 ? 'var(--success)' : 'var(--danger)';
   return (
     <div style={{
       background: 'var(--card)', border: '2px solid var(--border)', borderRadius: 14,
@@ -260,9 +273,9 @@ function ConversionFunnel({ stages }) {
 function HealthIndicator({ icon: Icon, label, value, severity, hint }) {
   const sev = severity || 'neutral';
   const colors = {
-    ok: { bg: 'rgba(16,185,129,0.10)', fg: '#10b981', border: 'rgba(16,185,129,0.35)' },
-    warn: { bg: 'rgba(245,158,11,0.10)', fg: '#f59e0b', border: 'rgba(245,158,11,0.35)' },
-    crit: { bg: 'rgba(239,68,68,0.10)', fg: '#ef4444', border: 'rgba(239,68,68,0.35)' },
+    ok: { bg: 'color-mix(in srgb, var(--success) 10%, transparent)', fg: 'var(--success)', border: 'color-mix(in srgb, var(--success) 35%, transparent)' },
+    warn: { bg: 'color-mix(in srgb, var(--warning) 10%, transparent)', fg: 'var(--warning)', border: 'color-mix(in srgb, var(--warning) 35%, transparent)' },
+    crit: { bg: 'color-mix(in srgb, var(--danger) 10%, transparent)', fg: 'var(--danger)', border: 'color-mix(in srgb, var(--danger) 35%, transparent)' },
     neutral: { bg: 'var(--panel)', fg: 'var(--fg)', border: 'var(--border)' },
   };
   const c = colors[sev];
@@ -353,6 +366,10 @@ export default function RelatoriosMetricas({ globalFilters }) {
   const [kanbanCounts, setKanbanCounts] = useState(null);
   const [kanbanLoading, setKanbanLoading] = useState(false);
   const [kanbanSelected, setKanbanSelected] = useState(() => new Set(PROCESSOS_CARDS.map((p) => p.key)));
+  const [tempoResp, setTempoResp] = useState(null);
+  const [tempoRespErro, setTempoRespErro] = useState('');
+  // seção de protocolos ANEEL: só Alisson, Luana e Eduardo (o servidor decide e responde 403 para os demais)
+  const [tempoRespSemAcesso, setTempoRespSemAcesso] = useState(false);
 
   const load = async (opts = {}) => {
     try {
@@ -366,6 +383,13 @@ export default function RelatoriosMetricas({ globalFilters }) {
       });
       setData(res || null);
       setUpdatedAt(new Date());
+      // tempo de resposta aos protocolos ANEEL (seção no fim da página) — falha aqui não derruba o resto
+      api.get('/relatorios/tempo-resposta-protocolos')
+        .then(({ data: tr }) => { setTempoResp(tr || null); setTempoRespErro(''); setTempoRespSemAcesso(false); })
+        .catch((e) => {
+          if (e?.response?.status === 403) { setTempoRespSemAcesso(true); return; }
+          setTempoRespErro(e?.response?.data?.error || 'Falha ao calcular o tempo de resposta aos protocolos.');
+        });
     } catch (e) {
       setError(e?.message || 'Falha ao carregar métricas.');
     } finally {
@@ -415,7 +439,6 @@ export default function RelatoriosMetricas({ globalFilters }) {
   const valorTotal      = safeNum(data?.valor_total_ressarcimento);
   const carteiraValor   = safeNum(data?.carteira_valor ?? data?.valor_em_carteira);
   const carteiraProcs   = safeNum(data?.carteira_processos ?? data?.processos_em_carteira);
-  const deferidosN      = safeNum(processosCounts?.deferidos);
   const totalProcedente = safeNum(creditos.total_procedente);
   const onTime          = safeNum(sla30d.on_time);
   const late            = safeNum(sla30d.late);
@@ -466,6 +489,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
   const taxaSucesso           = data?.taxa_sucesso_concessionarias || [];
   const taxaSucessoGeral      = safeNum(data?.taxa_sucesso_geral);
+  const deferidosTotal        = safeNum(data?.deferidos_total);
   const taxaSucessoPorTipo    = data?.taxa_sucesso_por_tipo || [];
   const ticketMedioReal       = safeNum(data?.ticket_medio);
   const taxaAneelPct          = safeNum(data?.taxa_aneel_pct);
@@ -507,6 +531,8 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
   const VIEW_TABS = [
     { key: 'todos',        label: 'Todos' },
+    { key: 'estrategico',  label: 'Estratégico' },
+    { key: 'tatico',       label: 'Tático' },
     { key: 'operacional',  label: 'Operacional' },
   ];
 
@@ -532,7 +558,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
           <button
             onClick={() => load({ globalFilters })}
             disabled={loading}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, border: '1px solid var(--border)', background: loading ? 'var(--panel)' : 'linear-gradient(135deg,#1d4ed8,#3b82f6)', color: loading ? 'var(--fg)' : '#fff', cursor: loading ? 'not-allowed' : 'pointer' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, border: '1px solid var(--border)', background: loading ? 'var(--panel)' : 'var(--gradient-primary)', color: loading ? 'var(--fg)' : '#fff', cursor: loading ? 'not-allowed' : 'pointer' }}
           >
             <RefreshCcw size={13} className={loading ? 'animate-spin' : ''} />
             {loading ? 'Atualizando...' : 'Atualizar'}
@@ -590,7 +616,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
         }
         if (taxaSucessoGeral > 0) {
           summary.push({
-            text: <>Taxa de sucesso geral: <b>{taxaSucessoGeral.toFixed(1)}%</b> ({fmt(deferidosN)} deferidos).</>,
+            text: <>Taxa de sucesso geral: <b>{taxaSucessoGeral.toFixed(1)}%</b> ({fmt(deferidosTotal)} deferidos).</>,
           });
         }
         return summary.length > 0 ? <ExecutiveSummary items={summary} /> : null;
@@ -606,7 +632,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
               label="Carteira em aberto"
               value={fmtMM(carteiraValor)}
               sub={`${fmt(carteiraProcs)} processos ativos`}
-              accentColor="#3b82f6"
+              accentColor="var(--accent)"
               sparkData={sparkData}
             />
             <KpiHeroCard
@@ -614,7 +640,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
               label="Receita em caixa"
               value={fmtMM(safeNum(resultadosRess.caixa))}
               sub={`Concluídos · gerado ${fmtMM(safeNum(resultadosRess.gerado))}`}
-              accentColor="#10b981"
+              accentColor="var(--success)"
               sparkData={sparkData}
             />
           </div>
@@ -623,11 +649,12 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
       {/* ── KPI strip secundário (cards menores) ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
-        <KpiCard icon={TrendingUp}   label="Ticket médio"       value={fmtMM(ticketMedio)}       sub={`${fmt(totalProcessos)} processos`} accentColor="#0ea5e9" />
-        <KpiCard icon={Award}        label="% Sucesso geral"    value={`${taxaSucessoGeral.toFixed(1)}%`} sub={`${fmt(deferidosN)} deferidos`} accentColor="#f59e0b" />
-        <KpiCard icon={CheckCircle2} label="SLA (7 dias)"       value={`${onTimePct}%`}          sub={`no prazo — ${fmt(late)} atrasados`} accentColor={onTimePct >= 80 ? '#10b981' : onTimePct >= 60 ? '#f59e0b' : '#ef4444'} />
-        <KpiCard icon={Clock}        label="Backlog"            value={fmt(backlogCount)}         sub="+60 dias sem movimentação"        accentColor={backlogCount > 50 ? '#ef4444' : backlogCount > 20 ? '#f59e0b' : '#10b981'} />
-        <KpiCard icon={Users}        label="Taxa Aneel"         value={`${taxaAneelPct.toFixed(1)}%`} sub="processos que foram à Aneel" accentColor="#8b5cf6" />
+        <KpiCard icon={TrendingUp}   label="Ticket médio"       value={fmtMM(ticketMedio)}       sub={`${fmt(totalProcessos)} processos`} accentColor="var(--accent)" />
+        <KpiCard icon={Award}        label="% Sucesso geral"    value={`${taxaSucessoGeral.toFixed(1)}%`} sub={`${fmt(deferidosTotal)} deferidos de ${fmt(deferidosTotal + safeNum(processosCounts.indeferidos))} decididos`} accentColor="var(--warning)" />
+        <KpiCard icon={CheckCircle2} label={`SLA (até ${sla30d.limite_dias || 7} dias)`} value={`${onTimePct}%`} sub={`intervalos entre movimentações da equipe — ${fmt(late)} acima do limite`} accentColor={onTimePct >= 80 ? 'var(--success)' : onTimePct >= 60 ? 'var(--warning)' : 'var(--danger)'} />
+        <KpiCard icon={Clock}        label="Backlog"            value={fmt(backlogCount)}         sub="+60 dias sem movimentação da equipe" accentColor={backlogCount > 50 ? 'var(--danger)' : backlogCount > 20 ? 'var(--warning)' : 'var(--success)'} />
+        <KpiCard icon={Users}        label="Taxa Aneel"         value={`${taxaAneelPct.toFixed(1)}%`} sub="processos que foram à instância ANEEL" accentColor="#8577ad" />
+        <KpiCard icon={Landmark}     label="Resposta à ANEEL"   value={fmtDuracao(tempoResp?.resumo?.resposta?.depois?.mediana_h)} sub={`tempo típico até atualizar · antes ${fmtDuracao(tempoResp?.resumo?.resposta?.antes?.mediana_h)}`} accentColor="var(--accent)" />
       </div>
 
       {/* ── Funil de conversão + Painel de saúde ── */}
@@ -635,17 +662,17 @@ export default function RelatoriosMetricas({ globalFilters }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16 }}>
           <SectionCard
             title="Funil de conversão"
-            subtitle="Jornada Ativos → Caixa com taxa de avanço entre etapas"
+            subtitle="Jornada Ativos → Deferidos → Faturamento → Repasse → Caixa"
             icon={Target}
-            accent="#3b82f6"
+            accent="var(--accent)"
           >
             <ConversionFunnel
               stages={[
-                { label: 'Ativos',     count: safeNum(processosCounts.ativos),     value: null,                                  color: '#3b82f6', hint: 'Em andamento' },
-                { label: 'Deferidos',  count: safeNum(processosCounts.deferidos),  value: safeNum(creditos.simples_total) + safeNum(creditos.dobro_total), color: '#8b5cf6', hint: 'Aprovação técnica' },
-                { label: 'Fluxo',      count: safeNum(processosCounts.fluxo_ressarcimento), value: null,                          color: '#06b6d4', hint: 'Devolução em andamento' },
-                { label: 'Faturamento',count: safeNum(processosCounts.faturamento),value: safeNum(resultadosRess.faturado),       color: '#f59e0b', hint: 'NF emitida' },
-                { label: 'Caixa',      count: safeNum(processosCounts.concluidos), value: safeNum(resultadosRess.caixa),          color: '#10b981', hint: 'Recebido' },
+                { label: 'Ativos',     count: safeNum(processosCounts.ativos),     value: null,                                  color: 'var(--accent)', hint: 'Em andamento' },
+                { label: 'Deferidos',  count: safeNum(processosCounts.deferidos),  value: safeNum(creditos.simples_total) + safeNum(creditos.dobro_total), color: '#8577ad', hint: 'Aprovação técnica' },
+                { label: 'Faturamento',count: safeNum(processosCounts.faturamento),value: safeNum(resultadosRess.faturado),       color: 'var(--warning)', hint: 'NF emitida' },
+                { label: 'Repasse',    count: safeNum(processosCounts.fluxo_ressarcimento), value: null,                          color: '#4a9098', hint: 'Devolução ao cliente' },
+                { label: 'Caixa',      count: safeNum(processosCounts.concluidos), value: safeNum(resultadosRess.caixa),          color: 'var(--success)', hint: 'Recebido' },
               ]}
             />
           </SectionCard>
@@ -654,7 +681,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
             title="Painel de saúde"
             subtitle="Indicadores que demandam atenção operacional"
             icon={Activity}
-            accent="#ef4444"
+            accent="var(--danger)"
           >
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {(() => {
@@ -695,8 +722,9 @@ export default function RelatoriosMetricas({ globalFilters }) {
                 );
               })()}
               {(() => {
-                const cur = throughputSemChart[throughputSemChart.length - 1]?.total || 0;
-                const prev = throughputSemChart[throughputSemChart.length - 2]?.total || 0;
+                const porSemana = new Map(throughputSemChart.map((r) => [r.label, r.total]));
+                const cur = porSemana.get(semanaISO(0)) || 0;
+                const prev = porSemana.get(semanaISO(-7)) || 0;
                 const delta = prev > 0 ? ((cur - prev) / prev) * 100 : null;
                 const sev = delta == null ? 'neutral' : delta > 0 ? 'ok' : delta < -20 ? 'crit' : 'warn';
                 return (
@@ -715,12 +743,12 @@ export default function RelatoriosMetricas({ globalFilters }) {
       )}
 
       {/* ── Estratégicos: Resultados Ressarcimento ── */}
-      {show('estrategico') && <SectionCard title="Resultados Ressarcimento" subtitle="Gerado (deferidos+) / Faturado (aba Faturamento) / Caixa (Concluídos)" icon={DollarSign} accent="#10b981">
+      {show('estrategico') && <SectionCard title="Resultados Ressarcimento" subtitle="Gerado (deferidos+) / Faturado (etapa Faturamento) / Caixa (Concluídos)" icon={DollarSign} accent="var(--success)">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
           {[
-            { label: 'Gerado', value: safeNum(resultadosRess.gerado),   color: '#3b82f6', hint: 'Todos os processos que saíram de Ativos' },
-            { label: 'Faturado', value: safeNum(resultadosRess.faturado), color: '#f59e0b', hint: 'Processos em Faturamento' },
-            { label: 'Caixa', value: safeNum(resultadosRess.caixa),    color: '#10b981', hint: 'Processos Concluídos' },
+            { label: 'Gerado', value: safeNum(resultadosRess.gerado),   color: 'var(--accent)', hint: 'Todos os processos que saíram de Ativos' },
+            { label: 'Faturado', value: safeNum(resultadosRess.faturado), color: 'var(--warning)', hint: 'Processos na etapa Faturamento' },
+            { label: 'Caixa', value: safeNum(resultadosRess.caixa),    color: 'var(--success)', hint: 'Processos Concluídos' },
           ].map((item) => (
             <div key={item.label} style={{ padding: '16px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--panel)', textAlign: 'center' }}>
               <div style={{ width: '100%', height: 3, borderRadius: 3, background: item.color, marginBottom: 12 }} />
@@ -736,7 +764,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
       {show('estrategico', 'tatico') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
         {/* Kanban pie */}
-        <SectionCard title="Composição Kanban" subtitle="Distribuição dos processos por coluna" icon={BarChart2} accent="#3b82f6">
+        <SectionCard title="Composição Kanban" subtitle="Distribuição dos processos por coluna" icon={BarChart2} accent="var(--accent)">
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div style={{ height: 260 }}>
               {kanbanSelected.size > 0 && hasPositive(kanbanPercentData, 'total') ? (
@@ -784,7 +812,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
         </SectionCard>
 
         {/* Status pie */}
-        <SectionCard title="Status das Requisições" subtitle="Distribuição por status de triagem" icon={Filter} accent="#8b5cf6">
+        <SectionCard title="Status das Requisições" subtitle="Distribuição por status de triagem" icon={Filter} accent="#8577ad">
           <div style={{ height: 260 }}>
             {hasPositive(statusChart, 'total') ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -804,7 +832,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
       </div>}
 
       {/* ── Tendência 30d ── */}
-      {show('tatico', 'operacional') && <SectionCard title="Tendência de movimentações (30 dias)" subtitle="Volume diário de movimentações registradas" icon={Activity} accent="#3b82f6">
+      {show('tatico', 'operacional') && <SectionCard title="Tendência de movimentações (30 dias)" subtitle="Movimentações feitas pela equipe por dia (sem e-mails anexados automaticamente nem usuário sistema)" icon={Activity} accent="var(--accent)">
         <div style={{ height: 200 }}>
           {tendenciaChart.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
@@ -813,7 +841,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
                 <XAxis dataKey="dia" tick={axisStyle} minTickGap={20} />
                 <YAxis tick={axisStyle} />
                 <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v) => fmt(v)} />
-                <Line type="monotone" dataKey="total" stroke="#3b82f6" strokeWidth={2.5} dot={false} />
+                <Line type="monotone" dataKey="total" stroke="var(--accent)" strokeWidth={2.5} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           ) : <EmptyChart title="Sem dados (Tendência)" />}
@@ -822,7 +850,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
       {/* ── Throughput semana + mês ── */}
       {show('tatico', 'operacional') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <SectionCard title="Throughput Semanal" subtitle="Novas requisições por semana" icon={TrendingUp} accent="#3b82f6">
+        <SectionCard title="Throughput Semanal" subtitle="Novas requisições por semana" icon={TrendingUp} accent="var(--accent)">
           <div style={{ height: 200 }}>
             {hasPositive(throughputSemChart, 'total') ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -831,14 +859,14 @@ export default function RelatoriosMetricas({ globalFilters }) {
                   <XAxis dataKey="label" tick={axisStyle} angle={-30} height={40} interval={0} />
                   <YAxis tick={axisStyle} />
                   <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v) => fmt(v)} />
-                  <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="total" fill="var(--accent)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : <EmptyChart title="Sem dados" />}
           </div>
         </SectionCard>
 
-        <SectionCard title="Throughput Mensal" subtitle="Novas requisições por mês" icon={TrendingUp} accent="#10b981">
+        <SectionCard title="Throughput Mensal" subtitle="Novas requisições por mês" icon={TrendingUp} accent="var(--success)">
           <div style={{ height: 200 }}>
             {hasPositive(throughputMesChart, 'total') ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -847,7 +875,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
                   <XAxis dataKey="label" tick={axisStyle} angle={-30} height={40} interval={0} />
                   <YAxis tick={axisStyle} />
                   <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v) => fmt(v)} />
-                  <Bar dataKey="total" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="total" fill="var(--success)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : <EmptyChart title="Sem dados" />}
@@ -859,7 +887,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
       {show('tatico') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
 
         {/* SLA */}
-        <SectionCard title="SLA" subtitle={`Últimos ${sla30d.limite_dias || 7} dias`} icon={CheckCircle2} accent={onTimePct >= 80 ? '#10b981' : onTimePct >= 60 ? '#f59e0b' : '#ef4444'}>
+        <SectionCard title="SLA" subtitle={`Últimos 30 dias · intervalo entre movimentações da equipe até ${sla30d.limite_dias || 7} dias`} icon={CheckCircle2} accent={onTimePct >= 80 ? 'var(--success)' : onTimePct >= 60 ? 'var(--warning)' : 'var(--danger)'}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 36, fontWeight: 800, color: onTimePct >= 80 ? 'var(--success)' : onTimePct >= 60 ? 'var(--warning)' : 'var(--danger)' }}>
@@ -878,12 +906,12 @@ export default function RelatoriosMetricas({ globalFilters }) {
         </SectionCard>
 
         {/* Aging */}
-        <SectionCard title="Aging (sem movimentação)" subtitle="Excluindo concluídos, indeferidos e suspensos" icon={Clock} accent="#f59e0b">
+        <SectionCard title="Aging (sem movimentação)" subtitle="Dias desde a última movimentação da equipe · sem concluídos, indeferidos e suspensos" icon={Clock} accent="var(--warning)">
           {[
-            { label: '0 – 7 dias',   value: safeNum(agingBuckets['0_7']),    color: '#10b981' },
-            { label: '8 – 15 dias',  value: safeNum(agingBuckets['8_15']),   color: '#f59e0b' },
-            { label: '16 – 30 dias', value: safeNum(agingBuckets['16_30']),  color: '#f97316' },
-            { label: '31+ dias',     value: safeNum(agingBuckets['31_mais']), color: '#ef4444' },
+            { label: '0 – 7 dias',   value: safeNum(agingBuckets['0_7']),    color: 'var(--success)' },
+            { label: '8 – 15 dias',  value: safeNum(agingBuckets['8_15']),   color: 'var(--warning)' },
+            { label: '16 – 30 dias', value: safeNum(agingBuckets['16_30']),  color: 'var(--accent-3)' },
+            { label: '31+ dias',     value: safeNum(agingBuckets['31_mais']), color: 'var(--danger)' },
           ].map((b) => {
             const total = safeNum(agingBuckets['0_7']) + safeNum(agingBuckets['8_15']) + safeNum(agingBuckets['16_30']) + safeNum(agingBuckets['31_mais']);
             const w = total ? (b.value / total) * 100 : 0;
@@ -902,7 +930,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
         </SectionCard>
 
         {/* Créditos */}
-        <SectionCard title="Composição de Créditos" subtitle="Simples vs Dobro" icon={Wallet} accent="#06b6d4">
+        <SectionCard title="Composição de Créditos" subtitle="Simples vs Dobro" icon={Wallet} accent="#4a9098">
           <div style={{ height: 160 }}>
             {hasPositive(creditosChart, 'total') ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -930,41 +958,41 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
       {/* ── Top Concessionárias + Clientes ── */}
       {show('estrategico') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <SectionCard title="Top Concessionárias" subtitle="Por valor estimado de ressarcimento" icon={Award} accent="#3b82f6">
+        <SectionCard title="Top Concessionárias" subtitle="Por valor estimado de ressarcimento" icon={Award} accent="var(--accent)">
           {topConcs.length > 0 ? topConcs.slice(0, 8).map((r, i) => (
-            <HBarRow key={r.label} rank={i + 1} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxTopConc} color="#3b82f6" />
+            <HBarRow key={r.label} rank={i + 1} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxTopConc} color="var(--accent)" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
         </SectionCard>
 
-        <SectionCard title="Top Clientes" subtitle="Por valor estimado de ressarcimento" icon={Award} accent="#10b981">
+        <SectionCard title="Top Clientes" subtitle="Por valor estimado de ressarcimento" icon={Award} accent="var(--success)">
           {topClientes.length > 0 ? topClientes.slice(0, 8).map((r, i) => (
-            <HBarRow key={r.label} rank={i + 1} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxTopCli} color="#10b981" />
+            <HBarRow key={r.label} rank={i + 1} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxTopCli} color="var(--success)" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
         </SectionCard>
       </div>}
 
       {/* ── Tempo médio etapa + WIP gestores ── */}
       {show('operacional') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <SectionCard title="Tempo médio por etapa" subtitle="Dias em cada etapa (dwell time)" icon={Clock} accent="#f59e0b">
+        <SectionCard title="Tempo médio por etapa" subtitle="Dias da entrada na etapa até a próxima troca (ou até hoje, se ainda está nela)" icon={Clock} accent="var(--warning)">
           {tempoMedio.length > 0 ? tempoMedio.slice(0, 10).map((r) => (
-            <HBarRow key={r.etapa} label={r.etapa} value={safeNum(r.dias)} displayValue={`${safeNum(r.dias).toFixed(1)}d`} maxValue={maxTempo} color="#f59e0b" />
+            <HBarRow key={r.etapa} label={r.etapa} value={safeNum(r.dias)} displayValue={`${safeNum(r.dias).toFixed(1)}d`} maxValue={maxTempo} color="var(--warning)" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
         </SectionCard>
 
-        <SectionCard title="WIP por Gestor" subtitle="Processos ativos em andamento por responsável" icon={Users} accent="#8b5cf6">
+        <SectionCard title="WIP por Gestor" subtitle="Processos em andamento por responsável (sem encerrados e sem usuário sistema)" icon={Users} accent="#8577ad">
           {wipGestores.length > 0 ? wipGestores.slice(0, 10).map((r) => (
-            <HBarRow key={r.label} label={r.label} value={safeNum(r.total)} displayValue={fmt(r.total)} maxValue={maxWip} color="#8b5cf6" />
+            <HBarRow key={r.label} label={r.label} value={safeNum(r.total)} displayValue={fmt(r.total)} maxValue={maxWip} color="#8577ad" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados</div>}
         </SectionCard>
       </div>}
 
       {/* ── Taxa de sucesso por concessionária ── */}
       {show('tatico') && taxaSucesso.length > 0 && (
-        <SectionCard title="Taxa de Sucesso por Concessionária" subtitle="% de processos deferidos (mín. 2 processos concluídos)">
+        <SectionCard title="Taxa de Sucesso por Concessionária" subtitle="Deferidos ÷ decididos (deferidos + indeferidos) · concessionárias com mais processos decididos (mín. 5)">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
             {taxaSucesso.map((r) => {
               const taxa = safeNum(r.taxa_pct);
-              const color = taxa >= 70 ? '#10b981' : taxa >= 40 ? '#f59e0b' : '#ef4444';
+              const color = taxa >= 70 ? 'var(--success)' : taxa >= 40 ? 'var(--warning)' : 'var(--danger)';
               return (
                 <div key={r.label} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--panel)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -988,10 +1016,10 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
       {/* ── % Sucesso por tipo + Resultados clientes ── */}
       {show('estrategico', 'tatico') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <SectionCard title="% Sucesso por Tipo de Irregularidade" subtitle="Processos que avançaram além de Ativos por tipo">
+        <SectionCard title="% Sucesso por Tipo de Irregularidade" subtitle="Deferidos ÷ decididos (deferidos + indeferidos), por tipo">
           {taxaSucessoPorTipo.length > 0 ? taxaSucessoPorTipo.map((r) => {
             const taxa = safeNum(r.taxa_pct);
-            const color = taxa >= 70 ? '#10b981' : taxa >= 40 ? '#f59e0b' : '#ef4444';
+            const color = taxa >= 70 ? 'var(--success)' : taxa >= 40 ? 'var(--warning)' : 'var(--danger)';
             return (
               <div key={r.label} style={{ marginBottom: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
@@ -1020,7 +1048,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
                   </span>
                 </div>
                 <div style={{ height: 4, borderRadius: 3, background: 'var(--border)' }}>
-                  <div style={{ height: '100%', borderRadius: 3, width: `${(total / maxCli) * 100}%`, background: '#3b82f6', transition: 'width 400ms' }} />
+                  <div style={{ height: '100%', borderRadius: 3, width: `${(total / maxCli) * 100}%`, background: 'var(--accent)', transition: 'width 400ms' }} />
                 </div>
               </div>
             );
@@ -1030,7 +1058,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
       {/* ── % Sucesso 1ª análise ── */}
       {show('tatico', 'operacional') && sucess1aAnalisePct > 0 && (
-        <SectionCard title="% Sucesso na Primeira Análise" subtitle="Processos deferidos sem passar por etapa além da Distribuidora">
+        <SectionCard title="% Sucesso na Primeira Análise" subtitle="Deferidos que nunca saíram da instância Distribuidora (sem Ouvidoria, ANEEL ou SMA)">
           <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
             <div style={{ textAlign: 'center', flexShrink: 0 }}>
               <div style={{ fontSize: 40, fontWeight: 800, color: sucess1aAnalisePct >= 50 ? 'var(--success)' : sucess1aAnalisePct >= 30 ? 'var(--warning)' : 'var(--danger)' }}>
@@ -1043,7 +1071,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
                 <div style={{ height: '100%', borderRadius: 6, width: `${Math.min(100, sucess1aAnalisePct)}%`, background: sucess1aAnalisePct >= 50 ? 'var(--success)' : sucess1aAnalisePct >= 30 ? 'var(--warning)' : 'var(--danger)', transition: 'width 500ms ease' }} />
               </div>
               <div style={{ fontSize: 12, opacity: 0.55, marginTop: 8 }}>
-                Processos aprovados apenas na etapa Distribuidora, sem necessidade de escalonamento
+                Processos deferidos direto na Distribuidora, sem precisar escalonar
               </div>
             </div>
           </div>
@@ -1061,7 +1089,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
                   <XAxis dataKey="label" tick={axisStyle} />
                   <YAxis tick={axisStyle} />
                   <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v) => fmt(v)} />
-                  <Bar dataKey="total" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="total" fill="#4a9098" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : <EmptyChart title="Sem dados (Histograma)" />}
@@ -1087,7 +1115,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
       {/* ── Tempo conclusão por conc + Repasse ── */}
       {show('tatico', 'operacional') && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <SectionCard title="Tempo médio de conclusão" subtitle="Dias até encerramento por concessionária">
+        <SectionCard title="Tempo médio de conclusão" subtitle="Dias da requisição até o Encerramento · só deferidos, requisições desde 2024">
           <div style={{ height: 220 }}>
             {hasPositive(tempoConcChart, 'dias') ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -1096,7 +1124,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
                   <XAxis type="number" tick={axisStyle} />
                   <YAxis type="category" dataKey="label" tick={axisStyle} width={80} />
                   <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v) => `${safeNum(v).toFixed(1)} dias`} />
-                  <Bar dataKey="dias" fill="#f97316" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="dias" fill="var(--accent-3)" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : <EmptyChart title="Sem dados (Conclusão por concessionária)" />}
@@ -1105,10 +1133,15 @@ export default function RelatoriosMetricas({ globalFilters }) {
 
         <SectionCard title="Repasse por Concessionária" subtitle={`Total: ${fmtMM(repasseTotal)}`}>
           {repasseConcs.length > 0 ? repasseConcs.slice(0, 8).map((r) => (
-            <HBarRow key={r.label} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxRepasse} color="#06b6d4" />
+            <HBarRow key={r.label} label={r.label} value={safeNum(r.total)} displayValue={fmtMM(r.total)} maxValue={maxRepasse} color="#4a9098" />
           )) : <div style={{ fontSize: 12, opacity: 0.5 }}>Sem dados de repasse no período.</div>}
         </SectionCard>
       </div>}
+
+      {/* ── Tempo de resposta aos protocolos ANEEL ── */}
+      {show('operacional', 'tatico') && !tempoRespSemAcesso && (
+        <TempoRespostaProtocolos dados={tempoResp} carregando={loading} erro={tempoRespErro} />
+      )}
 
       {/* warnings */}
       {Array.isArray(data?.warnings) && data.warnings.length > 0 && (
@@ -1129,7 +1162,7 @@ export default function RelatoriosMetricas({ globalFilters }) {
             </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
               {[{ key: 'estrategicos', label: 'Estratégicos' }, { key: 'taticos', label: 'Táticos' }, { key: 'operacionais', label: 'Operacionais' }].map((t) => (
-                <button key={t.key} onClick={() => setMetricsTab(t.key)} style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid', borderColor: metricsTab === t.key ? 'var(--accent)' : 'var(--border)', background: metricsTab === t.key ? 'rgba(59,130,246,0.12)' : 'transparent', color: metricsTab === t.key ? 'var(--accent)' : 'var(--fg)' }}>
+                <button key={t.key} onClick={() => setMetricsTab(t.key)} style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: '1px solid', borderColor: metricsTab === t.key ? 'var(--accent)' : 'var(--border)', background: metricsTab === t.key ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent', color: metricsTab === t.key ? 'var(--accent)' : 'var(--fg)' }}>
                   {t.label}
                 </button>
               ))}

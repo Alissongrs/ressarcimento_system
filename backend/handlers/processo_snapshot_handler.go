@@ -329,10 +329,10 @@ func getProcessoSnapshotFromOriginal(idProcesso int) (map[string]interface{}, er
 			COALESCE(p.uc, r.uc, '')                    AS uc,
 			COALESCE(p.cliente, r.cliente, '')          AS cliente,
 			COALESCE(p.concessionaria, r.concessionaria, '') AS concessionaria,
-			COALESCE(e.etapa, '')                       AS etapa_nome,
-			COALESCE(p.sub_etapa, '')                   AS sub_etapa,
+			COALESCE(e.nome, '')                        AS etapa_nome,
+			COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual), '') AS sub_etapa,
 			COALESCE(p.suspenso, 0)                     AS suspenso,
-			COALESCE(p.suspenso_motivo, '')             AS suspenso_motivo,
+			''                                          AS suspenso_motivo,
 			COALESCE(d.credito_simples, 0)              AS credito_simples,
 			COALESCE(DATE_FORMAT(d.data_procedencia, '%Y-%m-%d'), '') AS data_simples,
 			COALESCE(d.credito_dobro, 0)                AS credito_dobro,
@@ -350,7 +350,7 @@ func getProcessoSnapshotFromOriginal(idProcesso int) (map[string]interface{}, er
 			COALESCE(f.valor, 0)                        AS valor_nf
 		FROM FT_PROCESSOS p
 		LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 		LEFT JOIN FT_DEFERIMENTOS d ON d.id_processo = COALESCE(p.id_processo, r.id_requisicao)
 		LEFT JOIN (
 			SELECT x.id_processo, x.forma_devolucao, x.valor, x.data_devolucao, x.data_envio_financeiro, x.created_at
@@ -420,10 +420,10 @@ func getProcessoSnapshotFromOriginal(idProcesso int) (map[string]interface{}, er
 					COALESCE(r.uc, '')                         AS uc,
 					COALESCE(r.cliente, '')                    AS cliente,
 					COALESCE(r.concessionaria, '')             AS concessionaria,
-					COALESCE(e.etapa, '')                      AS etapa_nome,
-					COALESCE(p.sub_etapa, '')                  AS sub_etapa,
+					COALESCE(e.nome, '')                       AS etapa_nome,
+					COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual), '') AS sub_etapa,
 					COALESCE(p.suspenso, 0)                    AS suspenso,
-					COALESCE(p.suspenso_motivo, '')            AS suspenso_motivo,
+					''                                         AS suspenso_motivo,
 					COALESCE(d.credito_simples, 0)             AS credito_simples,
 					COALESCE(DATE_FORMAT(d.data_procedencia, '%Y-%m-%d'), '') AS data_simples,
 					COALESCE(d.credito_dobro, 0)               AS credito_dobro,
@@ -441,7 +441,7 @@ func getProcessoSnapshotFromOriginal(idProcesso int) (map[string]interface{}, er
 					COALESCE(f.valor, 0)                       AS valor_nf
 				FROM FT_REQUISICOES r
 				LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
-				LEFT JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo
+				LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 				LEFT JOIN FT_DEFERIMENTOS d ON d.id_processo = r.id_requisicao
 				LEFT JOIN (
 					SELECT x.id_processo, x.forma_devolucao, x.valor, x.data_devolucao, x.data_envio_financeiro, x.created_at
@@ -479,7 +479,7 @@ func getProcessoSnapshotFromOriginal(idProcesso int) (map[string]interface{}, er
 					COALESCE(r.cliente, '') AS cliente,
 					COALESCE(r.concessionaria, '') AS concessionaria,
 					COALESCE(p.suspenso, 0) AS suspenso,
-					COALESCE(p.suspenso_motivo, '') AS suspenso_motivo
+					'' AS suspenso_motivo
 				FROM FT_REQUISICOES r
 				LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
 				WHERE r.id_requisicao = ?

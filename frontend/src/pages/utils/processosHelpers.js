@@ -657,7 +657,10 @@ export const rowLastTs = (row) => {
     return ts > max ? ts : max;
   }, 0);
 
-  return Math.max(headerTs, histTs);
+  // Prioriza o timestamp derivado do histórico de etapas (movimentação real).
+  // data_ultima_movimentacao do header é atualizado em qualquer alteração de processo
+  // — ele só serve de fallback quando não há histórico.
+  return histTs || headerTs;
 };
 
 // =======================

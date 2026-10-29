@@ -41,7 +41,7 @@ export function EditSnapshotButton({ idProcesso, onSuccess, className = '', size
     <button
       onClick={() => openModal(idProcesso)}
       title="Editar dados do snapshot"
-      className={`inline-flex items-center gap-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors ${sizeClasses[size]} ${className}`}
+      className={`inline-flex items-center gap-2 bg-[var(--accent)] text-white rounded hover:bg-[color-mix(in_srgb,var(--accent)_85%,black)] transition-colors ${sizeClasses[size]} ${className}`}
     >
       <Edit3 size={16} />
       <span>Editar Snapshot</span>
@@ -73,12 +73,12 @@ export function SnapshotInfoSection({ processoData, onEditClick }) {
   }
 
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+    <div className="bg-[color-mix(in_srgb,var(--accent)_10%,var(--card))] border border-[color-mix(in_srgb,var(--accent)_30%,var(--card))] rounded-lg p-4 mb-4">
       <div className="flex justify-between items-start mb-3">
-        <h3 className="font-bold text-blue-900">Informações do Snapshot</h3>
+        <h3 className="font-bold text-[var(--accent)]">Informações do Snapshot</h3>
         <button
           onClick={() => onEditClick(processoData.id_processo)}
-          className="text-blue-600 hover:text-blue-800 font-medium text-sm"
+          className="text-[var(--accent)] hover:opacity-80 font-medium text-sm"
         >
           Editar Tudo
         </button>
@@ -94,7 +94,7 @@ export function SnapshotInfoSection({ processoData, onEditClick }) {
 
         {processoData.suspenso === 1 && (
           <>
-            <div className="md:col-span-3 p-2 bg-red-100 rounded text-red-800 text-xs font-medium">
+            <div className="md:col-span-3 p-2 bg-[color-mix(in_srgb,var(--danger)_15%,var(--card))] rounded text-[var(--danger)] text-xs font-medium">
               ⚠️ Processo Suspenso: {processoData.suspenso_motivo || 'Sem motivo informado'}
             </div>
           </>
@@ -134,8 +134,8 @@ export function SnapshotInfoSection({ processoData, onEditClick }) {
 function InfoItem({ label, value }) {
   return (
     <div>
-      <p className="text-gray-600 text-xs font-medium">{label}</p>
-      <p className="text-gray-900 font-semibold">{value || '-'}</p>
+      <p className="text-[color-mix(in_srgb,var(--fg)_55%,transparent)] text-xs font-medium">{label}</p>
+      <p className="text-[var(--fg)] font-semibold">{value || '-'}</p>
     </div>
   );
 }
@@ -180,15 +180,15 @@ export function SnapshotChangesViewer({ original, updated }) {
   }
 
   return (
-    <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg mb-4">
-      <h4 className="font-bold text-yellow-900 mb-3">Mudanças Detectadas ({changes.length})</h4>
+    <div className="p-4 bg-[color-mix(in_srgb,var(--warning)_10%,var(--card))] border border-[color-mix(in_srgb,var(--warning)_30%,var(--card))] rounded-lg mb-4">
+      <h4 className="font-bold text-[var(--warning)] mb-3">Mudanças Detectadas ({changes.length})</h4>
       <ul className="space-y-2">
         {changes.map((change, idx) => (
-          <li key={idx} className="text-sm text-yellow-800 flex justify-between">
+          <li key={idx} className="text-sm text-[var(--warning)] flex justify-between">
             <span className="font-medium">{change.field}:</span>
             <span>
-              <span className="text-red-600 line-through mr-2">{String(change.oldValue)}</span>
-              <span className="text-green-600">→ {String(change.newValue)}</span>
+              <span className="text-[var(--danger)] line-through mr-2">{String(change.oldValue)}</span>
+              <span className="text-[var(--success)]">→ {String(change.newValue)}</span>
             </span>
           </li>
         ))}
@@ -220,7 +220,7 @@ export function QuickEditField({ value, onChange, onSave, isLoading, fieldName }
         <span className="flex-1">{value || '-'}</span>
         <button
           onClick={() => setIsEditing(true)}
-          className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded transition-colors"
+          className="px-2 py-1 text-xs bg-[color-mix(in_srgb,var(--fg)_15%,var(--card))] hover:bg-[color-mix(in_srgb,var(--fg)_25%,var(--card))] rounded transition-colors"
         >
           Editar
         </button>
@@ -234,20 +234,20 @@ export function QuickEditField({ value, onChange, onSave, isLoading, fieldName }
         type="text"
         value={tempValue}
         onChange={(e) => setTempValue(e.target.value)}
-        className="flex-1 px-2 py-1 border border-blue-300 rounded"
+        className="flex-1 px-2 py-1 border border-[var(--accent)]/50 rounded"
         autoFocus
       />
       <button
         onClick={handleSave}
         disabled={isLoading}
-        className="px-2 py-1 text-xs bg-green-500 text-white hover:bg-green-600 rounded disabled:opacity-50"
+        className="px-2 py-1 text-xs bg-[var(--success)] text-white hover:bg-[color-mix(in_srgb,var(--success)_85%,black)] rounded disabled:opacity-50"
       >
         {isLoading ? <Loader size={12} className="animate-spin" /> : 'OK'}
       </button>
       <button
         onClick={handleCancel}
         disabled={isLoading}
-        className="px-2 py-1 text-xs bg-gray-300 hover:bg-gray-400 rounded disabled:opacity-50"
+        className="px-2 py-1 text-xs bg-[color-mix(in_srgb,var(--fg)_25%,var(--card))] hover:bg-[color-mix(in_srgb,var(--fg)_35%,var(--card))] rounded disabled:opacity-50"
       >
         X
       </button>

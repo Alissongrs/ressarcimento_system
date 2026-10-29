@@ -1,0 +1,243 @@
+/* ModalPercentuaisEmpresa — modal grande de 2 colunas (lista + timeline) */
+
+.mpe-modal {
+  width: min(1100px, 95vw);
+  max-width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.mpe-body {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 14px;
+  padding: 14px 18px;
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.mpe-left {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.mpe-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--cpv2-border);
+  border-radius: 6px;
+  background: var(--cpv2-surface-2);
+}
+.mpe-search input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 13px;
+  color: var(--cpv2-text);
+}
+
+.mpe-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-right: 4px;
+}
+
+.mpe-empresa-card {
+  padding: 9px 11px;
+  border: 1px solid var(--cpv2-border);
+  border-radius: 6px;
+  cursor: pointer;
+  background: var(--cpv2-surface);
+  transition: border-color 0.15s, background 0.15s;
+}
+.mpe-empresa-card:hover {
+  border-color: var(--cpv2-brand);
+  background: var(--cpv2-brand-soft);
+}
+.mpe-empresa-card.is-active {
+  border-color: var(--cpv2-brand);
+  background: var(--cpv2-brand-soft);
+  box-shadow: inset 0 0 0 1px var(--cpv2-brand);
+}
+
+.mpe-empresa-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.mpe-empresa-card__cod {
+  font-size: 10.5px;
+  color: var(--cpv2-text-muted);
+  font-weight: 700;
+}
+.mpe-empresa-card__nome {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--cpv2-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mpe-empresa-card__pcts {
+  display: flex;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--cpv2-text-muted);
+}
+
+.mpe-empresa-card__meta {
+  font-size: 10.5px;
+  color: var(--cpv2-text-muted);
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mpe-badge-hist {
+  background: var(--cpv2-warning-soft);
+  color: var(--cpv2-warning);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 9.5px;
+  letter-spacing: 0.3px;
+}
+
+/* ─── coluna direita: timeline ─── */
+.mpe-right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  min-width: 0;
+  padding: 0 4px 0 6px;
+  border-left: 1px solid var(--cpv2-border);
+  padding-left: 14px;
+}
+
+.mpe-right__head h4 {
+  margin: 0 0 4px;
+  font-size: 14.5px;
+}
+.mpe-right__head .mpe-cod {
+  color: var(--cpv2-text-muted);
+  font-weight: 500;
+  font-size: 12px;
+}
+.mpe-right__head .mpe-cnpj {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--cpv2-text-muted);
+}
+
+.mpe-section-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--cpv2-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin: 8px 0 4px;
+}
+
+.mpe-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mpe-vig-card {
+  padding: 9px 11px;
+  border: 1px solid var(--cpv2-border);
+  border-radius: 6px;
+  background: var(--cpv2-surface);
+  position: relative;
+}
+.mpe-vig-card.is-vigente {
+  border-color: var(--cpv2-success);
+  background: linear-gradient(180deg, var(--cpv2-success-soft) 0%, var(--cpv2-surface) 70%);
+}
+.mpe-vig-card.is-fechada {
+  opacity: 0.85;
+}
+.mpe-vig-card.is-inativa {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.mpe-vig-card__periodo {
+  font-size: 12.5px;
+  margin-bottom: 5px;
+}
+.mpe-badge-vigente {
+  background: var(--cpv2-success);
+  color: #fff;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 9.5px;
+  font-weight: 700;
+  margin-left: 8px;
+  letter-spacing: 0.5px;
+}
+
+.mpe-vig-card__pcts {
+  display: flex;
+  gap: 20px;
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.mpe-vig-card__motivo {
+  font-size: 11px;
+  color: var(--cpv2-text-muted);
+  font-style: italic;
+  margin-top: 4px;
+}
+
+.mpe-vig-card__actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+}
+
+.mpe-right__actions {
+  margin-top: 10px;
+}
+
+.mpe-form-novo {
+  background: var(--cpv2-surface-2);
+  border: 1px solid var(--cpv2-border);
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 10px;
+}
+
+.mpe-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.mpe-form-novo__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}

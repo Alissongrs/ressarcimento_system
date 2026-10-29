@@ -48,7 +48,7 @@ func ExtrairDadosEmail(c *gin.Context) {
 		SELECT COALESCE(comentario,''), COALESCE(tipo_movimentacao,'')
 		FROM FT_HISTORICO_MOVIMENTACOES
 		WHERE id_historico = ?
-		  AND id_requisicao = ?`,
+		  AND id_processo = ?`,
 		histID, processoID,
 	)
 	if err := row.Scan(&comentario, &tipoMov); err != nil {

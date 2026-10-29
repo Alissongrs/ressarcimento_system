@@ -41,7 +41,7 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-transparent p-4">
-      <Card className="w-full max-w-md glass-card backdrop-blur-sm border border-blue-800 text-gray-300">
+      <Card className="w-full max-w-md glass-card backdrop-blur-sm border border-[var(--accent)] text-gray-300">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold text-[var(--fg)]">
             Sistema Unificado de Ressarcimento
@@ -51,7 +51,7 @@ const Login = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {error && <p className="text-sm text-red-400 text-center bg-red-900/50 p-2 rounded mb-4">{error}</p>}
+          {error && <p className="text-sm text-[var(--danger)] text-center p-2 rounded mb-4" style={{ backgroundColor: 'color-mix(in srgb, var(--danger) 50%, transparent)' }}>{error}</p>}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email" className="text-gray-300">Email</Label>
@@ -79,7 +79,7 @@ const Login = () => {
               <button
                 type="button"
                 onClick={() => navigate('/register')} // Usa o navigate para ir para a tela de registro
-                className="text-blue-400 hover:underline font-medium"
+                className="text-[var(--accent-2)] hover:underline font-medium"
               >
                 Cadastre-se aqui
               </button>

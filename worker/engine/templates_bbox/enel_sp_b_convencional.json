@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "distribuidora": "enel_sp_b_convencional",
+    "fonte_calibracao": "enel_sp_b_convencional_17.pdf",
+    "data_calibracao": "2026-05-20",
+    "auto_gerado": true
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [
+        0.183,
+        0.251,
+        0.216,
+        0.271,
+        0
+      ],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "default": "B3",
+      "_anchor": "B3"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [
+        0.05,
+        0.468,
+        0.171,
+        0.488,
+        0
+      ],
+      "regex": "(Verde|Azul|Convencional|Branca|Mon[óo]?mia|MT[VACB])",
+      "default": "Convencional",
+      "_anchor": "CONVENCIONAL"
+    }
+  }
+}

@@ -174,16 +174,16 @@ export default function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
       >
         <div
           className="flex items-center justify-between px-5 py-3.5 flex-shrink-0 select-none"
-          style={{ background: 'linear-gradient(135deg, #1e3a5f, #0f2340)' }}
+          style={{ background: 'var(--gradient-primary)' }}
         >
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-500/20 flex items-center justify-center flex-shrink-0">
-              <Mail size={17} className="text-blue-300" />
+            <div className="w-9 h-9 rounded-xl bg-[color-mix(in_srgb,var(--accent-2)_20%,transparent)] flex items-center justify-center flex-shrink-0">
+              <Mail size={17} className="text-[var(--accent-2)]" />
             </div>
             <div className="min-w-0">
               <div className="text-white text-sm font-semibold">Gerar Email com IA</div>
               <div className="text-white/50 text-[11px] truncate max-w-[480px]">
-                {uc && <span className="text-blue-300/80">UC {uc}</span>}
+                {uc && <span className="text-[color-mix(in_srgb,var(--accent-2)_80%,transparent)]">UC {uc}</span>}
                 {uc && cliente && <span className="text-white/30 mx-1.5">·</span>}
                 {cliente && <span>{cliente}</span>}
                 {tipoNome && <span className="text-white/30 mx-1.5">·</span>}
@@ -227,8 +227,8 @@ export default function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
 
         {generating ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-blue-600/15 flex items-center justify-center">
-              <svg className="animate-spin w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none">
+            <div className="w-12 h-12 rounded-2xl bg-[color-mix(in_srgb,var(--accent)_15%,transparent)] flex items-center justify-center">
+              <svg className="animate-spin w-6 h-6 text-[var(--accent)]" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
               </svg>
@@ -285,14 +285,14 @@ export default function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
               </svg>
               Compositor
             </button>
-            {error && <span className="text-xs text-red-400">{error}</span>}
-            {sent  && <span className="text-xs text-green-400 font-medium">Enviado!</span>}
+            {error && <span className="text-xs text-[var(--danger)]">{error}</span>}
+            {sent  && <span className="text-xs text-[var(--success)] font-medium">Enviado!</span>}
           </div>
           <button
             onClick={handleSend}
             disabled={sending || generating}
             className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-white text-sm font-semibold disabled:opacity-50 transition-colors"
-            style={{ backgroundColor: '#1d4ed8' }}
+            style={{ backgroundColor: 'var(--accent)' }}
           >
             {sending ? (
               <><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Enviando...</>

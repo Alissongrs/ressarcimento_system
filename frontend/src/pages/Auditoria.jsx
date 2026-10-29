@@ -208,12 +208,12 @@ export default function MinhasRequisicoes() {
   };
 
   if (loading) return <div className="p-6"><span className="sap-loading">Carregando...</span></div>;
-  if (error) return <div className="p-6 text-red-400">{error}</div>;
+  if (error) return <div className="p-6" style={{ color: 'var(--danger)' }}>{error}</div>;
 
   return (
     <>
       <div className="p-4 md:p-6">
-        <h1 className="text-2xl font-extrabold mb-4">Minhas Requisições</h1>
+        <h1 className="text-2xl font-extrabold mb-4">Processos (gestão)</h1>
 
         {/* Busca por múltiplos UC/IDs (separe por espaço, vírgula ou quebra de linha) */}
         <div className="mb-4 flex items-center gap-2">
@@ -366,9 +366,9 @@ export default function MinhasRequisicoes() {
                           className={[
                             'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold',
                             i < currentIdx
-                              ? 'bg-green-500 text-white'
+                              ? 'bg-[var(--success)] text-white'
                               : i === currentIdx
-                              ? 'bg-blue-600 text-white'
+                              ? 'bg-[var(--accent)] text-white'
                               : 'bg-[var(--border)] text-[var(--fg)]/70',
                           ].join(' ')}
                         >
@@ -378,7 +378,7 @@ export default function MinhasRequisicoes() {
                           {s}
                         </div>
                         {i < steps.length - 1 && (
-                          <div className={['w-8 h-[2px]', i < currentIdx ? 'bg-green-500' : 'bg-[var(--border)]'].join(' ')} />
+                          <div className={['w-8 h-[2px]', i < currentIdx ? 'bg-[var(--success)]' : 'bg-[var(--border)]'].join(' ')} />
                         )}
                       </div>
                     ))}
@@ -398,9 +398,9 @@ export default function MinhasRequisicoes() {
 
                 <div className="mt-3 flex items-center gap-2 text-sm">
                   {etapa === 'Aprovado' ? (
-                    <CheckCircle size={16} className="text-green-500" />
+                    <CheckCircle size={16} className="text-[var(--success)]" />
                   ) : etapa === 'Rejeitado' ? (
-                    <XCircle size={16} className="text-red-500" />
+                    <XCircle size={16} className="text-[var(--danger)]" />
                   ) : (
                     <Clock size={16} className="opacity-70" />
                   )}

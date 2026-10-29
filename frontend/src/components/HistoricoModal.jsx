@@ -252,7 +252,7 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
         <div className="flex-1 overflow-y-auto p-4">
           {roadmap.stages.length > 0 && (
   <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--card)]/40 p-4">
-    <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">Roadmap do processo</div>
+    <div className="text-[11px] uppercase tracking-wide text-[color-mix(in_srgb,var(--fg)_55%,transparent)] font-semibold">Roadmap do processo</div>
     <div className="mt-3 grid gap-4">
       <div>
         <div className="text-sm font-semibold text-[var(--fg)]">Em andamento</div>
@@ -273,9 +273,9 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
                 <div key={item.key} className="flex flex-col gap-1 text-sm">
                   <div className="flex items-center gap-3">
                   {isDistribuidora ? (
-                    <CheckCircle2 size={16} className="text-emerald-500" />
+                    <CheckCircle2 size={16} className="text-[var(--success)]" />
                   ) : (
-                    <span className={`h-3.5 w-3.5 rounded-full ${isCurrent ? 'bg-[var(--accent)] animate-pulse' : isDone ? 'bg-gray-400' : 'bg-gray-500'}`} />
+                    <span className={`h-3.5 w-3.5 rounded-full ${isCurrent ? 'bg-[var(--accent)] animate-pulse' : isDone ? 'bg-[color-mix(in_srgb,var(--fg)_55%,transparent)]' : 'bg-[color-mix(in_srgb,var(--fg)_40%,transparent)]'}`} />
                   )}
                   <item.Icon
                     size={18}
@@ -285,8 +285,8 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
                         : isCurrent
                           ? 'text-[var(--accent)]'
                           : isDone
-                            ? 'text-gray-400'
-                            : 'text-gray-500'
+                            ? 'text-[color-mix(in_srgb,var(--fg)_55%,transparent)]'
+                            : 'text-[color-mix(in_srgb,var(--fg)_40%,transparent)]'
                     }
                   />
                   <span
@@ -296,15 +296,15 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
                         : isCurrent
                           ? 'text-[var(--accent)] font-semibold'
                           : isDone
-                            ? 'text-gray-200'
-                            : 'text-gray-300'
+                            ? 'text-[color-mix(in_srgb,var(--fg)_85%,transparent)]'
+                            : 'text-[color-mix(in_srgb,var(--fg)_70%,transparent)]'
                     }
                   >
                     {item.label}
                   </span>
                   </div>
                   {ranges.length > 0 && (
-                    <div className="ml-7 text-[11px] text-gray-400 space-y-1">
+                    <div className="ml-7 text-[11px] text-[color-mix(in_srgb,var(--fg)_55%,transparent)] space-y-1">
                       {ranges.map((seg, rIdx) => (
                         <div key={`${item.key}-${rIdx}`}>
                           {item.label} - Processo de {formatDateBR(seg.start)}{' '}
@@ -339,21 +339,21 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
                 <span
                   className={`h-3.5 w-3.5 rounded-full ${
                     isConcluido
-                      ? 'bg-white'
+                      ? 'bg-[var(--success)]'
                       : isCurrent
                         ? 'bg-[var(--accent)] animate-pulse'
                         : isDone
-                          ? 'bg-gray-400'
-                          : 'bg-gray-500'
+                          ? 'bg-[color-mix(in_srgb,var(--fg)_55%,transparent)]'
+                          : 'bg-[color-mix(in_srgb,var(--fg)_40%,transparent)]'
                   }`}
                 />
                 {!isConcluido && (
-                  <item.Icon size={18} className={isCurrent ? 'text-[var(--accent)]' : isDone ? 'text-gray-400' : 'text-gray-500'} />
+                  <item.Icon size={18} className={isCurrent ? 'text-[var(--accent)]' : isDone ? 'text-[color-mix(in_srgb,var(--fg)_55%,transparent)]' : 'text-[color-mix(in_srgb,var(--fg)_40%,transparent)]'} />
                 )}
-                <span className={isCurrent ? 'text-[var(--accent)] font-semibold' : isDone ? 'text-gray-200' : 'text-gray-300'}>{item.label}</span>
+                <span className={isCurrent ? 'text-[var(--accent)] font-semibold' : isDone ? 'text-[color-mix(in_srgb,var(--fg)_85%,transparent)]' : 'text-[color-mix(in_srgb,var(--fg)_70%,transparent)]'}>{item.label}</span>
                 </div>
                 {ranges.length > 0 && (
-                  <div className="ml-7 text-[11px] text-gray-400 space-y-1">
+                  <div className="ml-7 text-[11px] text-[color-mix(in_srgb,var(--fg)_55%,transparent)] space-y-1">
                     {ranges.map((seg, rIdx) => (
                       <div key={`${item.key}-${rIdx}`}>
                         {item.label} - Processo de {formatDateBR(seg.start)}{' '}
@@ -371,7 +371,7 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
         <div className="mt-2 pl-4 border-l border-[var(--border)]">
           <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide font-semibold text-[var(--fg)]">
             Distribuidora
-            <span className="normal-case text-[11px] text-gray-400">
+            <span className="normal-case text-[11px] text-[color-mix(in_srgb,var(--fg)_55%,transparent)]">
               Em análise
               {roadmap.lastDate ? (
                 <> · há {Math.max(0, Math.ceil((Date.now() - roadmap.lastDate.getTime()) / 86400000))} dias</>
@@ -383,8 +383,8 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
               const isCurrentSub = normalizeText(sub) === normalizeText(roadmap.currentSub);
               return (
                 <div key={sub} className="flex items-center gap-2 text-xs">
-                  <span className={`h-3 w-3 rounded-full ${isCurrentSub ? 'bg-[var(--accent)] animate-pulse' : 'bg-gray-500'}`} />
-                  <span className={isCurrentSub ? 'text-[var(--accent)] font-semibold' : 'text-gray-300'}>{sub}</span>
+                  <span className={`h-3 w-3 rounded-full ${isCurrentSub ? 'bg-[var(--accent)] animate-pulse' : 'bg-[color-mix(in_srgb,var(--fg)_40%,transparent)]'}`} />
+                  <span className={isCurrentSub ? 'text-[var(--accent)] font-semibold' : 'text-[color-mix(in_srgb,var(--fg)_70%,transparent)]'}>{sub}</span>
                 </div>
               );
             })}
@@ -402,7 +402,7 @@ export default function HistoricoModal({ isOpen, onClose, processoId, anchorTop 
           {loading ? (
             <div className="py-10 text-center opacity-80 sap-loading">Carregando...</div>
           ) : error ? (
-            <div className="py-10 text-center text-red-400">{error}</div>
+            <div className="py-10 text-center text-[var(--danger)]">{error}</div>
           ) : itens.length === 0 ? (
             <div className="py-10 text-center opacity-80">Nenhuma movimentação encontrada.</div>
           ) : (

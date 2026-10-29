@@ -145,7 +145,7 @@ export default function Sidebar() {
 
         {unread > 0 && (
           <span
-            className="absolute right-2 top-1 text-[10px] leading-none px-1.5 py-1 rounded-full bg-red-600 text-white font-semibold"
+            className="absolute right-2 top-1 text-[10px] leading-none px-1.5 py-1 rounded-full bg-[var(--danger)] text-white font-semibold"
             aria-hidden="true"
           >
             {badgeText}

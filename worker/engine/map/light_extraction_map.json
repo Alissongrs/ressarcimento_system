@@ -1,0 +1,319 @@
+{
+ "documento": "DANF3E - LIGHT (Serviços de Eletricidade S.A. - RJ)",
+ "_status": "Layout DANF3E próprio LIGHT. Validado em Grupo A4 (id 41946). Volume gigante: 2.915 faturas.",
+ "_grupo_amostrado": "A4 Verde Comercial",
+ "observacoes_gerais": {
+  "encoding": "UTF-8",
+  "decimal": "vírgula",
+  "milhar": "ponto",
+  "datas": "DD/MM/AAAA",
+  "particularidades": [
+   "Razão: LIGHT SERVIÇOS DE ELETRICIDADE S.A. (CNPJ 60.444.437/0001-46 inferido pela chave_acesso)",
+   "Classificação: 'Grupo A4 / A4 - Verde / Comercial / Comercial TRIFÁSICO' (formato 4 partes / separador)",
+   "URL chave_acesso: dfe-portal.svrs.rs.gov.br/NF3E/Consulta",
+   "chave_acesso: 44 dígitos CONTÍGUOS",
+   "ICMS 24% (RJ — alta!)",
+   "Vocabulário próprio para itens: 'Componente Fio' + 'Componente Encargo' (separação Fio vs Encargo)",
+   "Itens com sufixo HP (Horário Ponta) / HFP (Horário Fora Ponta) / Único",
+   "Histórico tabular HORIZONTAL: cada linha é uma grandeza (Consumo FP, Consumo P, Demanda FP, etc), com 13 valores mensais",
+   "Banco: Itaú 341-7 (igual)",
+   "Tem 'Desconto Comp. Fio HFP' e 'Desconto Comp. Encargo HP' (descontos negativos)",
+   "Tem 'PIS/COFINS da subvenção/desconto' e 'ICMS da subvenção/desconto' como itens",
+   "Reajuste tarifário com aviso textual (REH ANEEL)"
+  ]
+ },
+ "distribuidora": {
+  "razao_social": {
+   "anchor": "LIGHT no cabeçalho",
+   "regex": "(LIGHT\\s+SERVI[CÇ]OS\\s+DE\\s+ELETRICIDADE\\s+S\\.?A\\.?|LIGHT\\s+S\\.?A\\.?)",
+   "group": 1,
+   "obs": "Pode aparecer só 'Light' em alguns trechos"
+  },
+  "cnpj_emissor": {
+   "anchor": "do chave_acesso",
+   "regex": "(\\d{2}\\.\\d{3}\\.\\d{3}/\\d{4}-\\d{2})",
+   "group": 1,
+   "default": "60.444.437/0001-46"
+  },
+  "uf": "RJ",
+  "icms_pct": 24
+ },
+ "cliente": {
+  "razao_social": {
+   "anchor": "VIA VAREJO/VIA SA",
+   "regex": "^(VIA VAREJO\\s+S/?A|GRUPO CASAS BAHIA[^\\n]+|[A-Z][A-Z .&]+S/?A)$",
+   "group": 1,
+   "flags": "MULTILINE"
+  },
+  "codigo_instalacao": {
+   "anchor": "linha do código",
+   "regex": "^([\\d\\.\\-]+)\\s*$",
+   "group": 1,
+   "flags": "MULTILINE",
+   "obs": "Formato 24.280.059-03"
+  },
+  "endereco": {
+   "anchor": "AV",
+   "regex": "^(AV|R|RUA|EST)\\s+[A-Z .]+\\s+\\d+$",
+   "group": 0,
+   "flags": "MULTILINE"
+  },
+  "bairro_cidade_uf": {
+   "anchor": "CENTRO(TR)",
+   "regex": "^([A-Z]+\\(?[A-Z]*\\)?)\\s*-\\s*([A-Z ]+),\\s*([A-Z]{2})\\s*$",
+   "group": "1+2+3",
+   "flags": "MULTILINE"
+  },
+  "cep": {
+   "anchor": "CEP",
+   "regex": "CEP\\s+(\\d{5}-\\d{3})",
+   "group": 1
+  },
+  "cnpj": {
+   "anchor": "CNPJ",
+   "regex": "CNPJ\\s+(\\d{2}\\.\\d{3}\\.\\d{3}/\\d{4}-\\d{2})",
+   "group": 1
+  }
+ },
+ "ligacao_tecnica": {
+  "classificacao": {
+   "anchor": "linha Grupo A4",
+   "regex": "Grupo (A[1-4]|B[1-4]|AS)\\s*/\\s*(A[1-4]|B[1-4]|AS)\\s*-\\s*(Verde|Azul|Branca|Convencional)\\s*/\\s*([A-Z][a-záé]+)\\s*/\\s*([A-Z][a-záé]+)\\s+(TRIFÁSICO|BIFÁSICO|MONOFÁSICO)",
+   "group": "1+2+3+4+5+6"
+  }
+ },
+ "nota_fiscal": {
+  "numero_nf": {
+   "anchor": "NOTA FISCAL Nº",
+   "regex": "NOTA FISCAL\\s+Nº\\s+(\\d+)",
+   "group": 1
+  },
+  "serie": {
+   "anchor": "SÉRIE",
+   "regex": "SÉRIE\\s+(\\d{2})",
+   "group": 1
+  },
+  "data_emissao": {
+   "anchor": "DATA DE\\s+EMISSÃO:",
+   "regex": "DATA DE\\s+EMISSÃO:\\s*(\\d{2}/\\d{2}/\\d{4})",
+   "group": 1
+  },
+  "chave_acesso": {
+   "anchor": "Chave de acesso:",
+   "regex": "Chave de acesso:\\s*\\n?\\s*(\\d{44})",
+   "group": 1
+  },
+  "protocolo_autorizacao": {
+   "anchor": "Protocolo de autorização:",
+   "regex": "Protocolo de autorização:\\s*(\\d+)\\s*-\\s*(\\d{2}/\\d{2}/\\d{4})\\s+às\\s*(\\d{2}:\\d{2}:\\d{2})",
+   "group": "1+2+3"
+  }
+ },
+ "vencimento_valor": {
+  "mes_ref": {
+   "anchor": "MAR/2026",
+   "regex": "([A-Z]{3,4}/\\d{4})\\s+(\\d{2}/\\d{2}/\\d{4})\\s+R\\$([\\d\\.]+,\\d{2})",
+   "group": 1
+  },
+  "data_vencimento": {
+   "anchor": "vencimento",
+   "regex": "([A-Z]{3,4}/\\d{4})\\s+(\\d{2}/\\d{2}/\\d{4})\\s+R\\$([\\d\\.]+,\\d{2})",
+   "group": 2
+  },
+  "valor_total": {
+   "anchor": "valor",
+   "regex": "([A-Z]{3,4}/\\d{4})\\s+(\\d{2}/\\d{2}/\\d{4})\\s+R\\$([\\d\\.]+,\\d{2})",
+   "group": 3
+  }
+ },
+ "periodo_leitura": {
+  "leitura_anterior": {
+   "anchor": "datas leitura",
+   "regex": "(\\d{2}/\\d{2}/\\d{4})\\s+(\\d{2}/\\d{2}/\\d{4})\\s+(\\d+)\\s+(\\d{2}/\\d{2}/\\d{4})",
+   "group": 1
+  },
+  "leitura_atual": {
+   "anchor": "datas leitura",
+   "regex": "(\\d{2}/\\d{2}/\\d{4})\\s+(\\d{2}/\\d{2}/\\d{4})\\s+(\\d+)\\s+(\\d{2}/\\d{2}/\\d{4})",
+   "group": 2
+  },
+  "dias": {
+   "anchor": "datas leitura",
+   "regex": "(\\d{2}/\\d{2}/\\d{4})\\s+(\\d{2}/\\d{2}/\\d{4})\\s+(\\d+)\\s+(\\d{2}/\\d{2}/\\d{4})",
+   "group": 3
+  },
+  "proxima_leitura": {
+   "anchor": "datas leitura",
+   "regex": "(\\d{2}/\\d{2}/\\d{4})\\s+(\\d{2}/\\d{2}/\\d{4})\\s+(\\d+)\\s+(\\d{2}/\\d{2}/\\d{4})",
+   "group": 4
+  }
+ },
+ "grandezas_contratadas": {
+  "componente_fio_kw": {
+   "anchor": "Componente Fio",
+   "regex": "Componente Fio\\s+([\\d,]+)",
+   "group": 1
+  }
+ },
+ "tabela_itens_fatura": {
+  "estrategia": "Itens em formato 'DESCRIÇÃO HP|HFP UNIDADE QUANT TARIFA VALOR PIS/COFINS BASE_ICMS ALIQ_ICMS_PCT ICMS TARIFA_BASE'",
+  "regex_linha": "^(Componente Fio kW|Componente Encargo kWh|Energia Reativa kWh|Ajuste de Desconto C\\. (?:Fio|Enc)|Desconto Comp\\. (?:Fio|Encargo)|PIS/COFINS da subvenção/desconto|Contrib Ilum Pública Municipal|ICMS da subvenção/desconto)\\s+(HP|HFP|HFP/Único)?\\s*(kWh|kW)?\\s*([\\d\\.,\\-]+)?\\s*([\\d,]+)?\\s+([\\-\\d\\.,]+)\\s+([\\-\\d\\.,]+)?\\s+([\\-\\d\\.,]+)?\\s+([\\d,]+)?\\s+([\\-\\d\\.,]+)?\\s+([\\d\\.,]+)?$",
+  "colunas_em_ordem": [
+   "descricao",
+   "posto",
+   "unidade",
+   "quantidade",
+   "preco_unit",
+   "valor_rs",
+   "pis_cofins",
+   "base_icms",
+   "aliq_icms_pct",
+   "icms_rs",
+   "tarifa_unit"
+  ],
+  "descricoes_conhecidas_A4_verde": [
+   "Componente Fio kW HFP",
+   "Componente Encargo kWh HFP / HP",
+   "Energia Reativa kWh HFP/Único",
+   "Energia Reativa kWh HP",
+   "Ajuste de Desconto C. Fio HFP",
+   "Desconto Comp. Fio HFP",
+   "Desconto Comp. Encargo HP",
+   "Ajuste de Desconto C. Enc HP",
+   "PIS/COFINS da subvenção/desconto",
+   "Contrib Ilum Pública Municipal",
+   "ICMS da subvenção/desconto"
+  ]
+ },
+ "totais_tabela_itens": {
+  "totais_linha": {
+   "anchor": "TOTAL",
+   "regex": "TOTAL\\s+([\\d\\.]+,\\d{2})\\s+([\\d\\.]+,\\d{2})\\s+([\\d\\.]+,\\d{2})",
+   "group": "1=pis_cofins 2=valor_total 3=icms_total"
+  }
+ },
+ "tributos_resumo": {
+  "pis": {
+   "base_calculo": {
+    "anchor": "PIS/PASEP base",
+    "regex": "PIS/PASEP\\s+([\\d\\.,]+)\\s+([\\d,]+%?)\\s+([\\d\\.,]+)",
+    "group": 1
+   },
+   "aliquota_pct": {
+    "anchor": "PIS/PASEP aliq",
+    "regex": "PIS/PASEP\\s+([\\d\\.,]+)\\s+([\\d,]+)%?\\s+([\\d\\.,]+)",
+    "group": 2
+   },
+   "valor": {
+    "anchor": "PIS/PASEP valor",
+    "regex": "PIS/PASEP\\s+([\\d\\.,]+)\\s+([\\d,]+%?)\\s+([\\d\\.,]+)",
+    "group": 3
+   }
+  },
+  "cofins": {
+   "base_calculo": {
+    "anchor": "COFINS base",
+    "regex": "COFINS\\s+([\\d\\.,]+)\\s+([\\d,]+%?)\\s+([\\d\\.,]+)",
+    "group": 1
+   },
+   "aliquota_pct": {
+    "anchor": "COFINS aliq",
+    "regex": "COFINS\\s+([\\d\\.,]+)\\s+([\\d,]+)%?\\s+([\\d\\.,]+)",
+    "group": 2
+   },
+   "valor": {
+    "anchor": "COFINS valor",
+    "regex": "COFINS\\s+([\\d\\.,]+)\\s+([\\d,]+%?)\\s+([\\d\\.,]+)",
+    "group": 3
+   }
+  },
+  "icms_total": {
+   "anchor": "TOTAL linha icms",
+   "regex": "TOTAL\\s+([\\d\\.]+,\\d{2})\\s+([\\d\\.]+,\\d{2})\\s+([\\d\\.]+,\\d{2})",
+   "group": 3
+  }
+ },
+ "medicao_consumo": {
+  "estrategia": "Tabela 'Medidor | Grandezas | Postos horários | Leitura Anterior | Leitura Atual | Const Medidor | Consumo kWh'. ATENCAO: linhas Comp. Encargo (ativas) tem texto APOS o consumo, regex precisa nao ancorar em $.",
+  "regex_linha": "^(\\d{7,8})\\s+(Comp\\. Encargo-Kwh|Componente Fio-Kw|Energia Reativa-Kwh|Demanda Reativa -Kw)\\s+(Ponta|Fora Ponta|Único)\\s+([\\d\\.]+)\\s+([\\d\\.]+)\\s+([\\d,]+)\\s+([\\d\\.,]+)",
+  "colunas_em_ordem": [
+   "medidor",
+   "grandeza",
+   "posto",
+   "leitura_anterior",
+   "leitura_atual",
+   "constante",
+   "consumo"
+  ],
+  "consumo_fponta_kwh": {
+   "_obs": "Linha 'Comp. Encargo-Kwh Fora Ponta' (NAO Energia Reativa-Kwh)",
+   "regex": "Comp\\.\\s*Encargo-Kwh\\s+Fora\\s+Ponta\\s+[\\d\\.]+\\s+[\\d\\.]+\\s+[\\d,]+\\s+([\\d\\.]+)",
+   "group": 1
+  },
+  "consumo_ponta_kwh": {
+   "_obs": "Linha 'Comp. Encargo-Kwh Ponta' (NAO Energia Reativa-Kwh)",
+   "regex": "Comp\\.\\s*Encargo-Kwh\\s+Ponta\\s+[\\d\\.]+\\s+[\\d\\.]+\\s+[\\d,]+\\s+([\\d\\.]+)",
+   "group": 1
+  },
+  "leitura_anterior_ponta": {
+   "regex": "Comp\\.\\s*Encargo-Kwh\\s+Ponta\\s+([\\d\\.]+)\\s+[\\d\\.]+\\s+[\\d,]+\\s+[\\d\\.]+",
+   "group": 1
+  },
+  "leitura_atual_ponta": {
+   "regex": "Comp\\.\\s*Encargo-Kwh\\s+Ponta\\s+[\\d\\.]+\\s+([\\d\\.]+)\\s+[\\d,]+\\s+[\\d\\.]+",
+   "group": 1
+  },
+  "leitura_anterior_fponta": {
+   "regex": "Comp\\.\\s*Encargo-Kwh\\s+Fora\\s+Ponta\\s+([\\d\\.]+)\\s+[\\d\\.]+\\s+[\\d,]+\\s+[\\d\\.]+",
+   "group": 1
+  },
+  "leitura_atual_fponta": {
+   "regex": "Comp\\.\\s*Encargo-Kwh\\s+Fora\\s+Ponta\\s+[\\d\\.]+\\s+([\\d\\.]+)\\s+[\\d,]+\\s+[\\d\\.]+",
+   "group": 1
+  },
+  "constante_ponta": {
+   "regex": "Comp\\.\\s*Encargo-Kwh\\s+Ponta\\s+[\\d\\.]+\\s+[\\d\\.]+\\s+([\\d,]+)\\s+[\\d\\.]+",
+   "group": 1
+  }
+ },
+ "historico_consumo": {
+  "estrategia": "Histórico HORIZONTAL — cada linha é UMA grandeza com 13 valores (1 por mês).",
+  "regex_linha": "^(Consumo Fora Ponta|Consumo Ponta|Demanda Fora Ponta|Demanda Ponta|Consumo Reativo Fora Ponta|Consumo Reativo Ponta|Demanda Reativa Fora Ponta|Demanda Reativa Ponta)\\s+((?:[A-Z]{3}/\\d{2}\\s+[\\d\\.,]+\\s*){13})$",
+  "flags": "MULTILINE"
+ },
+ "_diferencas_chave_vs_outras": [
+  "Vocabulário único: 'Componente Fio' e 'Componente Encargo' (LIGHT-específico)",
+  "Histórico HORIZONTAL por grandeza (uma linha por métrica, 13 colunas)",
+  "Item 'PIS/COFINS da subvenção/desconto' e 'ICMS da subvenção/desconto' como itens (não tributos)",
+  "Sufixo HFP/Único nos itens de Energia Reativa",
+  "ICMS 24% (alíquota RJ)",
+  "Aviso de reajuste tarifário com texto longo",
+  "Sem MATRÍCULA no formato Energisa — só código_instalação"
+ ],
+ "validacoes_pos_extracao": [
+  "soma(itens_fatura.valor_rs) ≈ valor_total ± 0,10 (com descontos negativos)",
+  "icms_pct == 24",
+  "chave_acesso tem 44 dígitos",
+  "Validar que 'Componente Fio' e 'Componente Encargo' aparecem (assinatura LIGHT)"
+ ],
+ "_not_in_pdf": [
+  "classe_consumidor",
+  "grupo_tarifario",
+  "icms_aliquota",
+  "icms_base_calculo",
+  "icms_valor",
+  "modalidade_tarifaria",
+  "subgrupo_tarifario"
+ ],
+ "gd_scee": {
+  "_obs": "Light: Energia Injetada GD; Saldo de Creditos",
+  "injecao": {
+   "regex": "Energia\\s+Injetada\\s+GD[^\\n]*?kWh\\s+([\\d.]+)",
+   "group": 1
+  },
+  "saldo_fponta": {
+   "regex": "Saldo\\s+de\\s+Cr[ée]ditos:\\s*([\\d.]+,?\\d*)",
+   "group": 1
+  }
+ }
+}

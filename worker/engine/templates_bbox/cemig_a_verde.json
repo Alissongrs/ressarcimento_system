@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "distribuidora": "cemig_a_verde",
+    "fonte_calibracao": "cemig_a_verde_11787.pdf",
+    "data_calibracao": "2026-05-20",
+    "auto_gerado": true
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [
+        0.557,
+        0.214,
+        0.596,
+        0.235,
+        0
+      ],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "default": null,
+      "_anchor": "A4"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [
+        0.57,
+        0.214,
+        0.65,
+        0.235,
+        0
+      ],
+      "regex": "(Verde|Azul|Convencional|Branca|Mon[óo]?mia|MT[VACB])",
+      "default": "Verde",
+      "_anchor": "Verde"
+    }
+  }
+}

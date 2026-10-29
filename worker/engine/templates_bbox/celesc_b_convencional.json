@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "distribuidora": "celesc_b_convencional",
+    "fonte_calibracao": "celesc_b_convencional_11315.pdf",
+    "data_calibracao": "2026-05-20",
+    "auto_gerado": true
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [
+        0.484,
+        0.195,
+        0.519,
+        0.216,
+        0
+      ],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "default": "B3",
+      "_anchor": "B3"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [
+        0.708,
+        0.346,
+        0.779,
+        0.368,
+        0
+      ],
+      "regex": "(Verde|Azul|Convencional|Branca|Mon[óo]?mia|MT[VACB])",
+      "default": "Convencional",
+      "_anchor": "Verde"
+    }
+  }
+}

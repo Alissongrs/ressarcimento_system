@@ -32,6 +32,15 @@ export default defineConfig({
       },
     },
   },
+  // `vite preview` (serve o dist buildado) NÃO herda server.proxy — replica aqui
+  // pra o deploy local do dist conseguir falar com o backend.exe em :8080.
+  preview: {
+    proxy: {
+      '/api': { target: 'http://localhost:8080', changeOrigin: true, secure: false },
+      '/api/v1': { target: 'http://localhost:8080', changeOrigin: true, secure: false },
+      '/bi': { target: 'http://localhost:5001', changeOrigin: true, secure: false, rewrite: (path) => path.replace(/^\/bi/, '') },
+    },
+  },
   resolve: {
     alias: [
       // Project aliases

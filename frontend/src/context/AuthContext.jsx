@@ -68,6 +68,7 @@ export const AuthProvider = ({ children }) => {
           const tipoConta = decoded.tipo_conta || decoded.role || decoded.tipoConta;
           setUser({
             nome: decoded.nome,
+            email: decoded.email || decoded.user_name,
             tipo_conta: tipoConta,
             user_id: decoded.user_id,
           });
@@ -109,6 +110,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('userToken', token);
       setUser({
         nome: decoded.nome,
+        email: decoded.email || decoded.user_name,
         tipo_conta: tipoConta,
         user_id: decoded.user_id,
       });
@@ -130,7 +132,22 @@ export const AuthProvider = ({ children }) => {
 
   const clearSessionExpired = () => setSessionExpired(false);
 
-  const value = { user, login, logout, sessionExpired, clearSessionExpired, remainingSeconds };
+  // Aviso prévio quando faltam <= 120s e ainda > 0 — usado no banner do App.
+  const WARN_THRESHOLD = 120;
+  const sessionWarning =
+    remainingSeconds != null &&
+    remainingSeconds > 0 &&
+    remainingSeconds <= WARN_THRESHOLD;
+
+  const value = {
+    user,
+    login,
+    logout,
+    sessionExpired,
+    clearSessionExpired,
+    remainingSeconds,
+    sessionWarning,
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

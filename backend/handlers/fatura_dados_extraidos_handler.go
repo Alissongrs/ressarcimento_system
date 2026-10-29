@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -184,46 +186,57 @@ func GetFaturaDadosExtraida(c *gin.Context) {
 		return
 	}
 
-	rows, err := sqlDB.Query("SELECT * FROM FATURA_DADOS_EXTRAIDOS WHERE uid = ? LIMIT 1", uid)
+	// fetchByUID: SELECT * WHERE uid=? na tabela dada, devolve o row flat (map) ou nil.
+	fetchByUID := func(tabela string) (map[string]interface{}, error) {
+		rows, e := sqlDB.Query("SELECT * FROM "+tabela+" WHERE uid = ? LIMIT 1", uid)
+		if e != nil {
+			return nil, e
+		}
+		defer rows.Close()
+		cols, e := rows.Columns()
+		if e != nil {
+			return nil, e
+		}
+		if !rows.Next() {
+			return nil, nil
+		}
+		vals := make([]interface{}, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if e := rows.Scan(ptrs...); e != nil {
+			return nil, e
+		}
+		row := make(map[string]interface{}, len(cols))
+		for i, col := range cols {
+			v := vals[i]
+			if b, ok := v.([]byte); ok {
+				row[col] = string(b)
+			} else {
+				row[col] = v
+			}
+		}
+		return row, nil
+	}
+
+	// fonte=acer → tabela Acer direto; senão FDE com fallback p/ Acer (uid é único entre as tabelas).
+	var row map[string]interface{}
+	if c.Query("fonte") == "acer" {
+		row, err = fetchByUID("FATURA_ACER_DADOS_EXTRAIDOS")
+	} else {
+		if row, err = fetchByUID("FATURA_DADOS_EXTRAIDOS"); err == nil && row == nil {
+			row, err = fetchByUID("FATURA_ACER_DADOS_EXTRAIDOS")
+		}
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao consultar fatura"})
 		return
 	}
-	defer rows.Close()
-
-	cols, err := rows.Columns()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao ler colunas"})
-		return
-	}
-
-	if !rows.Next() {
+	if row == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "fatura não encontrada"})
 		return
 	}
-
-	vals := make([]interface{}, len(cols))
-	ptrs := make([]interface{}, len(cols))
-	for i := range vals {
-		ptrs[i] = &vals[i]
-	}
-	if err := rows.Scan(ptrs...); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao ler linha"})
-		return
-	}
-
-	row := make(map[string]interface{}, len(cols))
-	for i, col := range cols {
-		v := vals[i]
-		if b, ok := v.([]byte); ok {
-			row[col] = string(b)
-		} else if v == nil {
-			row[col] = nil
-		} else {
-			row[col] = v
-		}
-	}
-
 	c.JSON(http.StatusOK, row)
 }
 
@@ -298,9 +311,24 @@ func GetFDEFichaResumo(c *gin.Context) {
 // GET /api/v1/faturas/fde-uc-historico?uc=3013593026
 func GetFDEUCHistorico(c *gin.Context) {
 	uc := strings.TrimSpace(c.Query("uc"))
+	inst := strings.TrimSpace(c.Query("inst")) // numero_instalacao (opcional) — une série quando codigo_uc é sujo/varia
+	if uc == "" {
+		uc = inst
+	}
 	if uc == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "uc obrigatório"})
 		return
+	}
+	if inst == "" {
+		inst = uc
+	}
+	// Chave da UNIDADE = numero_instalacao (estável mesmo quando a UC troca de número;
+	// o codigo_uc é sujo/compartilhado na Energisa — ex.: '6671' cobre 55 faturas de
+	// instalações distintas num único mês → matchear por ele MISTURA unidades).
+	// Preferimos numero_instalacao; só caímos em codigo_uc se não veio inst.
+	ucCol, ucVal := "codigo_uc", uc
+	if strings.TrimSpace(c.Query("inst")) != "" {
+		ucCol, ucVal = "numero_instalacao", inst
 	}
 
 	db := database.GormDB_App
@@ -313,15 +341,41 @@ func GetFDEUCHistorico(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao obter conexão"})
 		return
 	}
+	tabela := "FATURA_DADOS_EXTRAIDOS"
+	if c.Query("fonte") == "acer" {
+		tabela = "FATURA_ACER_DADOS_EXTRAIDOS"
+	}
 
+	// kwh_proprio: escolha em cascata pra evitar duplicação em Grupo B.
+	//
+	// O extrator de faturas Energisa Grupo B (~1.900 faturas na PROD) grava o
+	// MESMO consumo em ponta E fponta — Grupo B só tem 1 posto (Convencional),
+	// então somar dobrava o valor exibido no gráfico F02.
+	//
+	// Regra:
+	//   1) Grupo B com ponta==fponta (mesmo valor >0) → duplicação conhecida.
+	//      Usa só um dos postos (evita a dobra).
+	//   2) kwh_total > 0 (coluna canônica pós-pipeline) → usa direto. Cobre ~41%
+	//      das Energisa e a maior parte das outras distribuidoras modernas.
+	//   3) Fallback → soma ponta+fponta como antes (Grupo A legítimo com 2 postos
+	//      distintos, faturas antigas sem kwh_total etc).
 	rows, err := sqlDB.Query(`
 		SELECT
 			id,
 			COALESCE(mes_referencia, '')                                                AS mes_referencia,
 			COALESCE(valor_total_fatura, 0)                                             AS valor,
-			COALESCE(consumo_ativo_ponta_kwh, 0) + COALESCE(consumo_ativo_fponta_kwh,0) AS kwh_proprio,
+			CASE
+			  WHEN grupo_tarifario = 'B'
+			       AND COALESCE(consumo_ativo_ponta_kwh,0) > 0
+			       AND consumo_ativo_ponta_kwh = consumo_ativo_fponta_kwh
+			    THEN consumo_ativo_ponta_kwh
+			  WHEN COALESCE(kwh_total, 0) > 0
+			    THEN kwh_total
+			  ELSE COALESCE(consumo_ativo_ponta_kwh, 0) + COALESCE(consumo_ativo_fponta_kwh, 0)
+			END AS kwh_proprio,
 			COALESCE(link_fatura, '')                                                   AS link,
 			COALESCE(historico_consumo_12_meses, '')                                    AS historico_json,
+			COALESCE(historico_consumo_json, '')                                        AS historico_json_bom,
 			COALESCE(numero_fatura, '')                                                 AS numero_fatura,
 			COALESCE(numero_medidor, '')                                                AS medidor,
 			COALESCE(fichas_apontadas->>'$.motor_regras_sql.flag_f04', '0')             AS flag_f04,
@@ -340,9 +394,13 @@ func GetFDEUCHistorico(c *gin.Context) {
 			COALESCE(fichas_apontadas->>'$.decisao_final', '')                          AS decisao_final,
 			COALESCE(fichas_apontadas->>'$.fichas_confirmadas', '')                     AS fichas_confirmadas,
 			COALESCE(fichas_apontadas->>'$.f04_aprovado', '')                           AS f04_aprovado
-		FROM FATURA_DADOS_EXTRAIDOS
-		WHERE codigo_uc = ?
-	`, uc)
+		FROM ` + tabela + `
+		-- Une a série da UNIDADE por numero_instalacao (estável mesmo com codigo_uc
+		-- sujo/variável — ex.: inst 122271101760 com codigo_uc '1.222.711.017-60',
+		-- '6/3138553-7' e '6671'; ou W0006781385 com '6667'/'6/3138626-1'). Antes
+		-- filtrava só codigo_uc → série rachada/vazia (bugs ID 61895 e 63969).
+		WHERE `+ucCol+` = ?
+	`, ucVal)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao buscar histórico: " + err.Error()})
 		return
@@ -355,8 +413,7 @@ func GetFDEUCHistorico(c *gin.Context) {
 		Link            string
 		Valor           float64
 		KwhConfirmado   float64
-		KwhSomaHist     float64
-		KwhCountHist    int
+		KwhHistVals     []float64 // 1 valor por fatura que reporta este mês no histórico embutido
 		Medidor         string
 		NumeroFatura    string
 		FlagF01         int
@@ -383,6 +440,7 @@ func GetFDEUCHistorico(c *gin.Context) {
 			kwhProprio      sql.NullFloat64
 			link            sql.NullString
 			histJSONRaw     sql.RawBytes
+			histJSONBomRaw  sql.RawBytes
 			numFatura       sql.NullString
 			medidor         sql.NullString
 			flagF04Str      sql.NullString
@@ -403,7 +461,7 @@ func GetFDEUCHistorico(c *gin.Context) {
 			f04AprovadoRaw     sql.NullString
 		)
 		if err := rows.Scan(
-			&id, &mesRefRaw, &valor, &kwhProprio, &link, &histJSONRaw,
+			&id, &mesRefRaw, &valor, &kwhProprio, &link, &histJSONRaw, &histJSONBomRaw,
 			&numFatura,
 			&medidor, &flagF04Str, &flagF05Str, &detF04, &detF05,
 			&flagF01Str, &flagF02Str, &flagF03Str,
@@ -429,6 +487,7 @@ func GetFDEUCHistorico(c *gin.Context) {
 			linkStr = link.String
 		}
 		histJSONStr := string(histJSONRaw)
+		histJSONBomStr := string(histJSONBomRaw)
 
 		mesProprio := normalizarMesYYYYMM(mesRefStr)
 		if mesProprio != "" {
@@ -497,7 +556,17 @@ func GetFDEUCHistorico(c *gin.Context) {
 			}
 		}
 
-		for mesH, kwhH := range parseHistorico12m(histJSONStr) {
+		// Histórico embutido: PREFERE historico_consumo_json (corroborado, bom) sobre
+		// historico_consumo_12_meses (legado, com extrações corrompidas tipo 112111/111).
+		// Acumula 1 valor por fatura/mês numa lista → a série final usa a MEDIANA,
+		// imune a um outlier-lixo de uma fatura isolada (era a causa do "56111").
+		porFatura := parseHistorico12m(histJSONStr)
+		for mesH, kwhH := range parseHistorico12m(histJSONBomStr) {
+			if kwhH > 0 {
+				porFatura[mesH] = kwhH // json bom sobrescreve o 12_meses dentro da MESMA fatura
+			}
+		}
+		for mesH, kwhH := range porFatura {
 			if mesH == "" || kwhH <= 0 {
 				continue
 			}
@@ -506,8 +575,7 @@ func GetFDEUCHistorico(c *gin.Context) {
 				a = &acc{}
 				porMes[mesH] = a
 			}
-			a.KwhSomaHist += kwhH
-			a.KwhCountHist++
+			a.KwhHistVals = append(a.KwhHistVals, kwhH)
 		}
 	}
 
@@ -576,12 +644,9 @@ func GetFDEUCHistorico(c *gin.Context) {
 	var result []histRow
 	for _, k := range keys {
 		a := porMes[k]
-		var kwhHist float64
-		if a.KwhCountHist > 0 {
-			kwhHist = a.KwhSomaHist / float64(a.KwhCountHist)
-		}
+		kwhHist := medianaF(a.KwhHistVals) // mediana entre faturas (robusta a outlier-lixo)
 		fonte := "historico"
-		if a.KwhConfirmado > 0 && a.KwhCountHist > 0 {
+		if a.KwhConfirmado > 0 && len(a.KwhHistVals) > 0 {
 			fonte = "fatura+historico"
 		} else if a.KwhConfirmado > 0 {
 			fonte = "fatura"
@@ -736,6 +801,19 @@ func isDigits(s string) bool {
 //   - lista de dicts: [{"mes":"AGO/25","kwh":2815.4,"tipo":"MED"}, ...]
 //   - dict {mes:kwh}: {"08/2025": 2815.4, ...}
 //   - lista de numeros (sem mes): ignorado, retorna vazio
+// anoMesPlausivel — mês "YYYY-MM" com ano no passado razoável [2015, atual+1].
+// Barra lixo de parse (ex.: histórico com ano 2030 no futuro que virava mês fantasma).
+func anoMesPlausivel(mes string) bool {
+	if len(mes) < 4 {
+		return false
+	}
+	y, err := strconv.Atoi(mes[:4])
+	if err != nil {
+		return false
+	}
+	return y >= 2015 && y <= time.Now().Year()+1
+}
+
 func parseHistorico12m(raw string) map[string]float64 {
 	out := make(map[string]float64)
 	raw = strings.TrimSpace(raw)
@@ -747,21 +825,28 @@ func parseHistorico12m(raw string) map[string]float64 {
 	var asList []map[string]any
 	if err := json.Unmarshal([]byte(raw), &asList); err == nil {
 		for _, item := range asList {
-			kwh := pegarFloat(item, "kwh", "KWH", "valor", "consumo", "Valor")
+			// inclui formato historico_consumo_json: chave "consumo_kwh" (ou ponta+fponta)
+			kwh := pegarFloat(item, "kwh", "KWH", "valor", "consumo", "Valor", "consumo_kwh")
+			if kwh <= 0 {
+				kwh = pegarFloat(item, "consumo_ponta_kwh") + pegarFloat(item, "consumo_fponta_kwh")
+			}
 			if kwh <= 0 {
 				continue
 			}
-			// Caso 1: {ano: 2023, mes: 10, kwh: 100} — formato numérico
 			ano := pegarFloat(item, "ano", "year", "Ano")
+			// mês pode ser número (10) OU nome PT em string ("JAN") — historico_consumo_json
 			mesNum := pegarFloat(item, "mes", "month", "MES", "Mes")
-			if ano >= 1900 && mesNum >= 1 && mesNum <= 12 {
-				mes := fmt.Sprintf("%04d-%02d", int(ano), int(mesNum))
-				out[mes] = kwh
+			if mesNum == 0 {
+				mesNum = float64(mesPTNum(pegarStr(item, "mes", "Mes", "month", "MES")))
+			}
+			// Caso 1: ano + mês válidos → "YYYY-MM" (ano plausível: 2015..atual+1)
+			if ano >= 2015 && int(ano) <= time.Now().Year()+1 && mesNum >= 1 && mesNum <= 12 {
+				out[fmt.Sprintf("%04d-%02d", int(ano), int(mesNum))] = kwh
 				continue
 			}
-			// Caso 2: {mes: "AGO/25", kwh: 2815.4} — formato string
+			// Caso 2: {mes: "AGO/25", kwh: 2815.4} — string com ano embutido
 			mesRaw := pegarStr(item, "mes", "Mes", "month", "MES")
-			if mes := normalizarMesHistorico(mesRaw); mes != "" {
+			if mes := normalizarMesHistorico(mesRaw); mes != "" && anoMesPlausivel(mes) {
 				out[mes] = kwh
 			}
 		}
@@ -782,7 +867,7 @@ func parseHistorico12m(raw string) map[string]float64 {
 				}
 			}
 			mes := normalizarMesHistorico(mesRaw)
-			if mes != "" && kwh > 0 {
+			if mes != "" && kwh > 0 && anoMesPlausivel(mes) {
 				out[mes] = kwh
 			}
 		}
@@ -790,6 +875,37 @@ func parseHistorico12m(raw string) map[string]float64 {
 	}
 
 	return out
+}
+
+// medianaF — mediana de uma lista (robusta a outliers; usada p/ consolidar o
+// consumo de um mês reportado pelo histórico de várias faturas). 0 se vazia.
+func medianaF(vals []float64) float64 {
+	n := len(vals)
+	if n == 0 {
+		return 0
+	}
+	s := make([]float64, n)
+	copy(s, vals)
+	sort.Float64s(s)
+	if n%2 == 1 {
+		return s[n/2]
+	}
+	return (s[n/2-1] + s[n/2]) / 2
+}
+
+// mesPTNum — nome de mês PT (3 letras, "JAN".."DEZ") → 1..12. 0 se não bater.
+func mesPTNum(s string) int {
+	m := map[string]int{
+		"jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
+		"jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12,
+	}
+	s = strings.ToLower(strings.TrimSpace(s))
+	if len(s) >= 3 {
+		if v, ok := m[s[:3]]; ok {
+			return v
+		}
+	}
+	return 0
 }
 
 func pegarStr(m map[string]any, keys ...string) string {

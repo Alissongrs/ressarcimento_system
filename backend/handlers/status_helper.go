@@ -14,10 +14,10 @@ func getStatusNomeByRequisicao(tx *sql.Tx, requisicaoID int64) string {
 	}
 	var statusNome sql.NullString
 	err := tx.QueryRow(`
-		SELECT s.status
-		FROM FT_REQUISICOES r
-		JOIN DM_STATUS s ON s.id_status = r.id_status
-		WHERE r.id_requisicao = ?
+		SELECT s.nome
+		FROM FT_PROCESSOS p
+		JOIN DM_STATUS_PROCESSO s ON s.id_status = p.id_status_atual
+		WHERE p.id_processo = ?
 		LIMIT 1
 	`, requisicaoID).Scan(&statusNome)
 	if err != nil || !statusNome.Valid {
@@ -33,10 +33,10 @@ func getStatusNomeByRequisicaoGorm(tx *gorm.DB, requisicaoID int64) string {
 	}
 	var statusNome sql.NullString
 	err := tx.Raw(`
-		SELECT s.status
-		FROM FT_REQUISICOES r
-		JOIN DM_STATUS s ON s.id_status = r.id_status
-		WHERE r.id_requisicao = ?
+		SELECT s.nome
+		FROM FT_PROCESSOS p
+		JOIN DM_STATUS_PROCESSO s ON s.id_status = p.id_status_atual
+		WHERE p.id_processo = ?
 		LIMIT 1
 	`, requisicaoID).Row().Scan(&statusNome)
 	if err != nil || !statusNome.Valid {

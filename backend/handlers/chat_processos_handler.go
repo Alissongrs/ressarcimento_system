@@ -39,25 +39,38 @@ var reUCNum = regexp.MustCompile(`\bUC\s*(\d{5,12})\b`)
 // META_MENSAL_RESSARCIMENTO em R$ — espelha a meta hardcoded no dashboard
 const metaMensalRessarcimento = 417000.0
 
-const processoChatSystemPrompt = `Você é o assistente SURE (Sistema Unificado de Ressarcimento de Energia).
-Seu papel: responder perguntas sobre processos, requisições, prazos, métricas e indicadores
-do sistema usando EXCLUSIVAMENTE os dados fornecidos no CONTEXTO abaixo.
+const processoChatSystemPrompt = `Você é a SURE, a assistente do sistema SURE (Sistema Unificado de Ressarcimento de Energia).
+Fale como uma colega de equipe experiente: português do Brasil, tom cordial, natural e direto — frases
+curtas, sem jeito de robô. Pode usar o primeiro nome da pessoa quando souber.
+Você responde sobre processos, requisições, prazos, métricas, indicadores e E-MAILS (recebidos e
+enviados: quantos chegaram, os assuntos, se a concessionária ou uma pessoa respondeu) usando
+EXCLUSIVAMENTE os dados do CONTEXTO abaixo.
 
 Regras:
-- Seja direto, objetivo e use Markdown quando útil (listas, **negrito**, tabelas).
-- Não invente processos, valores ou datas que não estejam no contexto.
-- Se a informação solicitada não está no contexto, diga "Não tenho esse dado disponível" e sugira reformular.
-- Datas no formato DD/MM/AAAA. Valores em Reais com vírgula decimal (ex: R$ 1.234,56).
+- Comece pela resposta (o número, o sim/não, o nome) e depois detalhe só o que ajuda.
+- Use Markdown quando ajudar (listas, **negrito**, tabelas curtas). Em listas longas, mostre as
+  principais e diga quantas há no total.
+- Não invente processos, valores, datas, e-mails ou remetentes que não estejam no contexto.
+- Se o dado pedido não está no contexto, diga com naturalidade o que você consegue ver e sugira como
+  perguntar (ex.: "não achei e-mail da CELESC hoje — quer que eu veja ontem ou a semana?").
+- "Houve resposta de X?": procure X no remetente (nome/domínio do e-mail), no assunto e na
+  concessionária do processo vinculado; responda sim/não com horário e assunto.
+- Datas DD/MM/AAAA e horas HH:MM (horário de Brasília). Valores em Reais com vírgula decimal (R$ 1.234,56).
 - Quando responder sobre vários processos, agrupe por etapa, concessionária ou cliente quando fizer sentido.
-- Quando relevante, ofereça um próximo passo prático (ex: "consulte a aba Métricas para gráficos").
+- Quando relevante, ofereça um próximo passo prático (ex.: "quer que eu prepare o e-mail de SR?").
+- Excel/planilha: NUNCA diga que não consegue gerar Excel. O sistema gera: se a pessoa escrever
+  "traga em excel" logo depois da sua resposta, a planilha dessa resposta é baixada na hora; para
+  relatório novo ou grande, ela pode pedir com #sistema (ex.: "#sistema relatório em excel dos
+  processos da Claro deferidos em 2026"). Para facilitar, responda com tabela Markdown quando houver dados.
 
 Vocabulário do sistema:
 - Etapas: Distribuidora → Ouvidoria → ANEEL → SMA (caminho normal).
 - Colunas Kanban: Ativos (1), Deferidos (2), Fluxo de Ressarcimento (3), Faturamento (4), Concluídos (5), Indeferidos legacy (6), Suspensos legacy (99).
-- id_etapa_processo = 11 → Indeferido (moderno).
+- id_etapa_atual /* TODO V2 */ = 11 → Indeferido (moderno).
 - "Travados" = sem movimentação há +30 dias, excluindo Concluídos/Indeferidos/Suspensos.
 - Backlog = +60 dias sem movimentação, sub_etapa <> "Aguardando retorno".
-- Meta mensal de ressarcimento: R$ 417.000.
+- SR = "sem retorno": a distribuidora não respondeu ao último e-mail enviado.
+- Meta: é de REPASSE enviado ao financeiro (mensal e anual, configuradas no sistema) — use os números do contexto, nunca um valor fixo.
 
 CONTEXTO ATUAL:`
 
@@ -74,6 +87,11 @@ func ChatProcessosHandler(c *gin.Context) {
 
 	dbCtx, ctxData := buildProcessosContext(req.Question)
 	sysPrompt := processoChatSystemPrompt + "\n\n" + dbCtx
+	// a SURE sempre chama a pessoa pelo PRIMEIRO nome
+	if _, uname := usuarioIA(c); primeiroNome(uname) != "" {
+		sysPrompt += fmt.Sprintf("\n\nVocê está conversando com %s. Chame-a sempre pelo primeiro nome (\"%s\") em toda resposta, de forma natural (no início ou no fim da frase).",
+			uname, primeiroNome(uname))
+	}
 
 	answer, err := callAisureOpenAI(ctx, req.History, req.Question, "", sysPrompt)
 	if err != nil {
@@ -241,6 +259,20 @@ func buildProcessosContext(question string) (string, map[string]any) {
 		}
 	}
 
+	// ── Meta (mensal/anual): detalhe mês a mês ──
+	if reMetaIntent.MatchString(question) {
+		if m, err := lerMetaRepasse(database.DB_App); err == nil {
+			parts = append(parts, blocoMetaDetalhe(m))
+		}
+	}
+
+	// ── E-mails (caixa de entrada / enviados) ──
+	if reEmailIntent.MatchString(question) {
+		if d := buildEmailsContext(question); d != "" {
+			parts = append(parts, d)
+		}
+	}
+
 	_ = db // fallback
 	return strings.Join(parts, "\n\n"), ctxData
 }
@@ -257,13 +289,13 @@ func buildExecutiveSummary(ctxData map[string]any) string {
 	var ativos, deferidos, fluxo, faturamento, concluidos, indeferidos, suspensos int
 	_ = db.QueryRow(`
 		SELECT
-		  SUM(CASE WHEN p.id_etapa_processo<>11 AND COALESCE(p.suspenso,0)=0 AND p.id_coluna=1 THEN 1 ELSE 0 END),
-		  SUM(CASE WHEN p.id_etapa_processo<>11 AND COALESCE(p.suspenso,0)=0 AND p.id_coluna=2 THEN 1 ELSE 0 END),
-		  SUM(CASE WHEN p.id_etapa_processo<>11 AND COALESCE(p.suspenso,0)=0 AND p.id_coluna=3 THEN 1 ELSE 0 END),
-		  SUM(CASE WHEN p.id_etapa_processo<>11 AND COALESCE(p.suspenso,0)=0 AND p.id_coluna=4 THEN 1 ELSE 0 END),
-		  SUM(CASE WHEN p.id_etapa_processo<>11 AND COALESCE(p.suspenso,0)=0 AND p.id_coluna=5 THEN 1 ELSE 0 END),
-		  SUM(CASE WHEN p.id_etapa_processo=11 OR p.id_coluna=6 THEN 1 ELSE 0 END),
-		  SUM(CASE WHEN COALESCE(p.suspenso,0)=1 OR p.id_coluna=99 THEN 1 ELSE 0 END)
+		  SUM(CASE WHEN p.id_etapa_atual /* TODO V2 */<>11 AND COALESCE((p.id_status_atual=5)/* TODO V2 */,0)=0 AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */=1 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN p.id_etapa_atual /* TODO V2 */<>11 AND COALESCE((p.id_status_atual=5)/* TODO V2 */,0)=0 AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */=2 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN p.id_etapa_atual /* TODO V2 */<>11 AND COALESCE((p.id_status_atual=5)/* TODO V2 */,0)=0 AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */=3 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN p.id_etapa_atual /* TODO V2 */<>11 AND COALESCE((p.id_status_atual=5)/* TODO V2 */,0)=0 AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */=4 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN p.id_etapa_atual /* TODO V2 */<>11 AND COALESCE((p.id_status_atual=5)/* TODO V2 */,0)=0 AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */=5 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN p.id_etapa_atual /* TODO V2 */=11 OR (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */=6 THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN COALESCE((p.id_status_atual=5)/* TODO V2 */,0)=1 OR (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */=99 THEN 1 ELSE 0 END)
 		FROM FT_PROCESSOS p`,
 	).Scan(&ativos, &deferidos, &fluxo, &faturamento, &concluidos, &indeferidos, &suspensos)
 
@@ -280,24 +312,13 @@ func buildExecutiveSummary(ctxData map[string]any) string {
 		SELECT COALESCE(SUM(r.ressarcimento_estimado), 0)
 		FROM FT_PROCESSOS p
 		JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-		WHERE p.id_etapa_processo <> 11
-		  AND COALESCE(p.suspenso, 0) = 0
-		  AND p.id_coluna IN (1,2,3,4)`,
+		WHERE p.id_etapa_atual /* TODO V2 */ <> 11
+		  AND COALESCE((p.id_status_atual=5)/* TODO V2 */, 0) = 0
+		  AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */ IN (1,2,3,4)`,
 	).Scan(&valorCarteira)
 
-	// Receita do mês (envio_financeiro / fluxo_ressarcimento aprovado este mês)
-	var receitaMes float64
-	_ = db.QueryRow(`
-		SELECT COALESCE(SUM(p.valor_fluxo), 0)
-		FROM FT_PROCESSOS p
-		WHERE YEAR(p.data_envio_financeiro) = YEAR(CURDATE())
-		  AND MONTH(p.data_envio_financeiro) = MONTH(CURDATE())`,
-	).Scan(&receitaMes)
-
-	pctMeta := 0.0
-	if metaMensalRessarcimento > 0 {
-		pctMeta = (receitaMes / metaMensalRessarcimento) * 100
-	}
+	// Meta de repasse: MESMA regra da barra "Metas de deferimento" (chat_meta_contexto.go)
+	meta, _ := lerMetaRepasse(db)
 
 	// Travados +30d (excluindo concluídos/indeferidos/suspensos)
 	var travados30 int
@@ -306,15 +327,15 @@ func buildExecutiveSummary(ctxData map[string]any) string {
 		FROM (
 		  SELECT MAX(h.data_movimentacao) AS ult
 		  FROM FT_HISTORICO_MOVIMENTACOES h
-		  GROUP BY h.id_requisicao
+		  GROUP BY h.id_processo
 		) t
 		JOIN FT_PROCESSOS p ON p.id_processo = (
-		  SELECT h2.id_requisicao FROM FT_HISTORICO_MOVIMENTACOES h2
+		  SELECT h2.id_processo FROM FT_HISTORICO_MOVIMENTACOES h2
 		  WHERE h2.data_movimentacao = t.ult LIMIT 1
 		)
-		WHERE COALESCE(p.suspenso, 0) = 0
-		  AND COALESCE(p.id_etapa_processo, 0) <> 11
-		  AND COALESCE(p.id_coluna, 1) NOT IN (5,6,99)
+		WHERE COALESCE((p.id_status_atual=5)/* TODO V2 */, 0) = 0
+		  AND COALESCE(p.id_etapa_atual /* TODO V2 */, 0) <> 11
+		  AND COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, 1) NOT IN (5,6,99)
 		  AND DATEDIFF(CURDATE(), DATE(t.ult)) >= 31`,
 	).Scan(&travados30)
 
@@ -322,17 +343,20 @@ func buildExecutiveSummary(ctxData map[string]any) string {
 		totalCarteira, chatFmtBRL(valorCarteira)))
 	sb.WriteString(fmt.Sprintf("- **Composição:** Ativos %d · Deferidos %d · Fluxo %d · Faturamento %d\n",
 		ativos, deferidos, fluxo, faturamento))
-	sb.WriteString(fmt.Sprintf("- **Receita do mês corrente:** R$ %s (%.1f%% da meta de R$ %s)\n",
-		chatFmtBRL(receitaMes), pctMeta, chatFmtBRL(metaMensalRessarcimento)))
+	sb.WriteString(linhaMetaResumo(meta))
 	sb.WriteString(fmt.Sprintf("- **Concluídos:** %d · **Indeferidos:** %d · **Suspensos:** %d\n",
 		concluidos, indeferidos, suspensos))
 	sb.WriteString(fmt.Sprintf("- **Processos travados +30 dias:** %d (sem movimentação, excluindo finalizados)\n",
 		travados30))
 
 	ctxData["valor_carteira"] = valorCarteira
-	ctxData["receita_mes"] = receitaMes
-	ctxData["meta_mensal"] = metaMensalRessarcimento
-	ctxData["meta_pct"] = pctMeta
+	if meta != nil {
+		ctxData["repasse_mes"] = meta.RepasseMes
+		ctxData["meta_mensal"] = meta.MetaMensal
+		ctxData["meta_pct"] = pct(meta.RepasseMes, meta.MetaMensal)
+		ctxData["repasse_ano"] = meta.RepasseAno
+		ctxData["meta_anual"] = meta.MetaAnual
+	}
 	ctxData["travados_30d"] = travados30
 
 	return sb.String()
@@ -393,12 +417,12 @@ func buildQuickStats(ctxData map[string]any) string {
 func buildStagesBreakdown(ctxData map[string]any) string {
 	db := database.DB_App
 	rows, err := db.Query(`
-		SELECT COALESCE(e.etapa, '(sem etapa)') AS etapa, COUNT(*) AS total
+		SELECT COALESCE(e.nome, '(sem etapa)') AS etapa, COUNT(*) AS total
 		FROM FT_PROCESSOS p
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-		WHERE COALESCE(p.suspenso, 0) = 0
-		  AND COALESCE(p.id_coluna, 1) NOT IN (5,6,99)
-		  AND COALESCE(p.id_etapa_processo, 0) <> 11
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
+		WHERE COALESCE((p.id_status_atual=5)/* TODO V2 */, 0) = 0
+		  AND COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, 1) NOT IN (5,6,99)
+		  AND COALESCE(p.id_etapa_atual /* TODO V2 */, 0) <> 11
 		GROUP BY etapa
 		ORDER BY total DESC`)
 	if err != nil {
@@ -432,19 +456,19 @@ func buildStagesBreakdown(ctxData map[string]any) string {
 func buildTempoPorEtapa(ctxData map[string]any) string {
 	db := database.DB_App
 	rows, err := db.Query(`
-		SELECT COALESCE(e.etapa,'(sem etapa)') AS etapa,
+		SELECT COALESCE(e.nome,'(sem etapa)') AS etapa,
 		       ROUND(AVG(DATEDIFF(NOW(), COALESCE(ult.ult, r.data_criacao))), 1) AS media_dias
 		FROM FT_PROCESSOS p
 		JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 		LEFT JOIN (
-		  SELECT id_requisicao, MAX(data_movimentacao) AS ult
+		  SELECT id_processo, MAX(data_movimentacao) AS ult
 		  FROM FT_HISTORICO_MOVIMENTACOES
-		  GROUP BY id_requisicao
-		) ult ON ult.id_requisicao = p.id_processo
-		WHERE COALESCE(p.suspenso, 0) = 0
-		  AND COALESCE(p.id_coluna, 1) NOT IN (5,6,99)
-		  AND COALESCE(p.id_etapa_processo, 0) <> 11
+		  GROUP BY id_processo
+		) ult ON ult.id_processo = p.id_processo
+		WHERE COALESCE((p.id_status_atual=5)/* TODO V2 */, 0) = 0
+		  AND COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, 1) NOT IN (5,6,99)
+		  AND COALESCE(p.id_etapa_atual /* TODO V2 */, 0) <> 11
 		GROUP BY etapa
 		ORDER BY media_dias DESC`)
 	if err != nil {
@@ -482,18 +506,18 @@ func buildStuck(ctxData map[string]any, limit int) string {
 		       COALESCE(r.uc,'') AS uc,
 		       COALESCE(r.cliente,'') AS cliente,
 		       COALESCE(r.concessionaria,'') AS concessionaria,
-		       COALESCE(e.etapa,'') AS etapa,
-		       COALESCE(p.sub_etapa,'') AS sub_etapa,
+		       COALESCE(e.nome,'') AS etapa,
+		       COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual),'') AS sub_etapa,
 		       COALESCE(DATE_FORMAT(MAX(h.data_movimentacao),'%d/%m/%Y'), '(nenhuma)') AS ultima_mov,
 		       DATEDIFF(NOW(), COALESCE(MAX(h.data_movimentacao), r.data_criacao)) AS dias_sem
 		FROM FT_PROCESSOS p
 		JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-		LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = p.id_processo
-		WHERE COALESCE(p.suspenso, 0) = 0
-		  AND COALESCE(p.id_coluna, 1) NOT IN (5,6,99)
-		  AND COALESCE(p.id_etapa_processo, 0) <> 11
-		GROUP BY p.id_processo, r.uc, r.cliente, r.concessionaria, e.etapa, p.sub_etapa, r.data_criacao
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
+		LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_processo = p.id_processo
+		WHERE COALESCE((p.id_status_atual=5)/* TODO V2 */, 0) = 0
+		  AND COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, 1) NOT IN (5,6,99)
+		  AND COALESCE(p.id_etapa_atual /* TODO V2 */, 0) <> 11
+		GROUP BY p.id_processo, r.uc, r.cliente, r.concessionaria, e.nome, '' /* TODO V2: removida */, r.data_criacao
 		HAVING dias_sem >= 30
 		ORDER BY dias_sem DESC
 		LIMIT ?`, limit)
@@ -539,11 +563,11 @@ func buildRecent(ctxData map[string]any, limit int) string {
 		       COALESCE(r.uc,''),
 		       COALESCE(r.cliente,''),
 		       COALESCE(r.concessionaria,''),
-		       COALESCE(e.etapa,''),
+		       COALESCE(e.nome,''),
 		       DATE_FORMAT(r.data_criacao,'%d/%m/%Y')
 		FROM FT_PROCESSOS p
 		JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 		WHERE r.data_criacao >= DATE_SUB(NOW(), INTERVAL 14 DAY)
 		ORDER BY r.data_criacao DESC
 		LIMIT ?`, limit)
@@ -578,7 +602,7 @@ func buildDeadlines(ctxData map[string]any, limit int) string {
 	rows, err := db.Query(`
 		SELECT a.mensagem,
 		       DATE_FORMAT(a.data_alerta,'%d/%m/%Y') AS dt,
-		       a.processo_id
+		       a.id_processo
 		FROM FT_ALERTAS a
 		WHERE a.lido = 0
 		  AND a.data_alerta IS NOT NULL
@@ -622,9 +646,9 @@ func buildTopConcessionarias(ctxData map[string]any, limit int) string {
 		       COALESCE(SUM(r.ressarcimento_estimado), 0) AS valor
 		FROM FT_PROCESSOS p
 		JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-		WHERE COALESCE(p.suspenso, 0) = 0
-		  AND COALESCE(p.id_coluna, 1) NOT IN (5,6,99)
-		  AND COALESCE(p.id_etapa_processo, 0) <> 11
+		WHERE COALESCE((p.id_status_atual=5)/* TODO V2 */, 0) = 0
+		  AND COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, 1) NOT IN (5,6,99)
+		  AND COALESCE(p.id_etapa_atual /* TODO V2 */, 0) <> 11
 		  AND r.concessionaria IS NOT NULL AND r.concessionaria <> ''
 		GROUP BY r.concessionaria
 		ORDER BY valor DESC, total DESC
@@ -662,9 +686,9 @@ func buildTopClientes(ctxData map[string]any, limit int) string {
 		       COALESCE(SUM(r.ressarcimento_estimado), 0) AS valor
 		FROM FT_PROCESSOS p
 		JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-		WHERE COALESCE(p.suspenso, 0) = 0
-		  AND COALESCE(p.id_coluna, 1) NOT IN (5,6,99)
-		  AND COALESCE(p.id_etapa_processo, 0) <> 11
+		WHERE COALESCE((p.id_status_atual=5)/* TODO V2 */, 0) = 0
+		  AND COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, 1) NOT IN (5,6,99)
+		  AND COALESCE(p.id_etapa_atual /* TODO V2 */, 0) <> 11
 		  AND r.cliente IS NOT NULL AND r.cliente <> ''
 		GROUP BY r.cliente
 		ORDER BY valor DESC, total DESC
@@ -717,21 +741,21 @@ func fetchProcessoDetail(pid int) string {
 		       COALESCE(r.uc,''),
 		       COALESCE(r.cliente,''),
 		       COALESCE(r.concessionaria,''),
-		       COALESCE(e.etapa,''),
-		       COALESCE(p.sub_etapa,''),
-		       COALESCE(p.id_coluna, 0),
+		       COALESCE(e.nome,''),
+		       COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual),''),
+		       COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, 0),
 		       COALESCE(DATE_FORMAT(r.data_criacao,'%d/%m/%Y'), ''),
 		       COALESCE(DATE_FORMAT(MAX(h.data_movimentacao),'%d/%m/%Y'), '(nenhuma)'),
 		       COALESCE(r.ressarcimento_estimado, 0),
 		       COALESCE(p.credito_simples, 0),
 		       COALESCE(p.credito_dobro, 0),
-		       COALESCE(p.suspenso, 0)
+		       COALESCE((p.id_status_atual=5)/* TODO V2 */, 0)
 		FROM FT_PROCESSOS p
 		JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-		LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = p.id_processo
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
+		LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_processo = p.id_processo
 		WHERE p.id_processo = ?
-		GROUP BY p.id_processo, r.uc, r.cliente, r.concessionaria, e.etapa, p.sub_etapa, p.id_coluna, r.data_criacao, r.ressarcimento_estimado, p.credito_simples, p.credito_dobro, p.suspenso`,
+		GROUP BY p.id_processo, r.uc, r.cliente, r.concessionaria, e.nome, '' /* TODO V2: removida */, (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, r.data_criacao, r.ressarcimento_estimado, p.credito_simples, p.credito_dobro, (p.id_status_atual=5)/* TODO V2 */`,
 		pid).Scan(&d.ID, &d.UC, &d.Cliente, &d.Concessionaria, &d.Etapa, &d.SubEtapa,
 		&d.Coluna, &d.CriadoEm, &d.UltimaMov, &d.ValorEstimado, &d.CredSimples, &d.CredDobro, &d.Suspenso)
 	if err != nil {
@@ -764,14 +788,14 @@ func fetchProcessoDetail(pid int) string {
 
 	// Histórico recente (top 8)
 	rows, err := db.Query(`
-		SELECT COALESCE(h.etapa_nova,''),
-		       COALESCE(h.sub_etapa,''),
+		SELECT COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''),
+		       COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),''),
 		       DATE_FORMAT(h.data_movimentacao,'%d/%m/%Y') AS dt,
 		       COALESCE(u.nome_usuario,'(sistema)') AS usuario,
 		       COALESCE(h.comentario,'')
 		FROM FT_HISTORICO_MOVIMENTACOES h
 		LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
-		WHERE h.id_requisicao = ?
+		WHERE h.id_processo = ?
 		ORDER BY h.data_movimentacao DESC
 		LIMIT 8`, pid)
 	if err == nil {
@@ -800,11 +824,11 @@ func fetchProcessosByUC(uc string) string {
 	db := database.DB_App
 	rows, err := db.Query(`
 		SELECT p.id_processo, COALESCE(r.cliente,''), COALESCE(r.concessionaria,''),
-		       COALESCE(e.etapa,''), DATE_FORMAT(r.data_criacao,'%d/%m/%Y'),
+		       COALESCE(e.nome,''), DATE_FORMAT(r.data_criacao,'%d/%m/%Y'),
 		       COALESCE(r.ressarcimento_estimado, 0)
 		FROM FT_PROCESSOS p
 		JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 		WHERE r.uc = ?
 		ORDER BY r.data_criacao DESC
 		LIMIT 15`, uc)
@@ -838,15 +862,15 @@ func fetchProcessosByConcessionaria(name string) string {
 	db := database.DB_App
 	rows, err := db.Query(`
 		SELECT p.id_processo, COALESCE(r.uc,''), COALESCE(r.cliente,''),
-		       COALESCE(e.etapa,''), COALESCE(p.sub_etapa,''),
+		       COALESCE(e.nome,''), COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual),''),
 		       COALESCE(r.ressarcimento_estimado, 0)
 		FROM FT_PROCESSOS p
 		JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 		WHERE LOWER(r.concessionaria) LIKE ?
-		  AND COALESCE(p.suspenso, 0) = 0
-		  AND COALESCE(p.id_coluna, 1) NOT IN (5,6,99)
-		  AND COALESCE(p.id_etapa_processo, 0) <> 11
+		  AND COALESCE((p.id_status_atual=5)/* TODO V2 */, 0) = 0
+		  AND COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */, 1) NOT IN (5,6,99)
+		  AND COALESCE(p.id_etapa_atual /* TODO V2 */, 0) <> 11
 		ORDER BY r.ressarcimento_estimado DESC
 		LIMIT 25`, "%"+strings.ToLower(name)+"%")
 	if err != nil {
@@ -881,11 +905,11 @@ func fetchProcessosByCliente(name string) string {
 	db := database.DB_App
 	rows, err := db.Query(`
 		SELECT p.id_processo, COALESCE(r.uc,''), COALESCE(r.concessionaria,''),
-		       COALESCE(e.etapa,''), COALESCE(p.sub_etapa,''),
+		       COALESCE(e.nome,''), COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual),''),
 		       COALESCE(r.ressarcimento_estimado, 0)
 		FROM FT_PROCESSOS p
 		JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 		WHERE LOWER(r.cliente) LIKE ?
 		ORDER BY r.ressarcimento_estimado DESC
 		LIMIT 25`, "%"+strings.ToLower(name)+"%")

@@ -16,6 +16,7 @@ import (
 
 	"ressarcimento-backend/database"
 	"ressarcimento-backend/handlers"
+	handlersV2 "ressarcimento-backend/handlers/v2"
 	"ressarcimento-backend/middleware"
 	"ressarcimento-backend/repositories"
 	"ressarcimento-backend/services"
@@ -52,12 +53,22 @@ func registerGestorHistoricoRoutes(group *gin.RouterGroup) {
 func SetupRouter(gdb *gorm.DB) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(middleware.RequestID()) // P2-7: X-Request-ID por requisição (rastreio ponta a ponta)
+	r.Use(middleware.Metrics())   // P2-7: contabiliza requisições p/ o /metrics
+	// P2-7: /metrics em formato Prometheus (texto), restrito a IP interno/admin (mesmo guard do Swagger).
+	r.GET("/metrics", middleware.SwaggerGuard(), middleware.MetricsHandler)
 	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
-		path := param.Path
+		// Gin v1.11 já inclui a query string em param.Path — extrai o basePath
+		// antes de remontar com a query mascarada (evita duplicação tipo "?limit=0?limit=0").
+		basePath := param.Path
+		if idx := strings.Index(basePath, "?"); idx >= 0 {
+			basePath = basePath[:idx]
+		}
+		path := basePath
 		if param.Request != nil && param.Request.URL != nil && param.Request.URL.RawQuery != "" {
 			raw := maskTokenQuery(param.Request.URL.RawQuery)
 			if raw != "" {
-				path = path + "?" + raw
+				path = basePath + "?" + raw
 			}
 		}
 		return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %s\n",
@@ -69,8 +80,20 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			path,
 		)
 	}))
-	// NÃ£o confiar em proxies por padrÃ£o
-	if err := r.SetTrustedProxies(nil); err != nil {
+	// P2-9: confia apenas nos proxies internos (Caddy/nginx em redes docker + loopback).
+	// Assim c.ClientIP() retorna o IP REAL do cliente (não o do proxy), corrigindo o
+	// rate-limit de login que antes era global (todos compartilhavam o IP do proxy → DoS)
+	// e o IP de auditoria. Override via TRUSTED_PROXIES (CIDRs separados por vírgula).
+	trustedProxies := []string{"127.0.0.1/32", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
+	if env := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES")); env != "" {
+		trustedProxies = trustedProxies[:0]
+		for _, p := range strings.Split(env, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				trustedProxies = append(trustedProxies, p)
+			}
+		}
+	}
+	if err := r.SetTrustedProxies(trustedProxies); err != nil {
 		println("[routes] aviso: falha ao definir trusted proxies:", err.Error())
 	}
 
@@ -213,15 +236,13 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			})
 		})
 
-		// PÃºblico com rate limiting restrito para autenticaÃ§Ã£o
+		// P2-6: auto-registro público DESABILITADO por padrão (sistema corporativo interno).
+		// Para reabrir temporariamente, defina ALLOW_PUBLIC_REGISTER=true no ambiente.
 		apiV1.POST("/register", middleware.AuthRateLimit(), handlers.Register)
 		apiV1.POST("/login", middleware.AuthRateLimit(), handlers.Login)
 		apiV1.POST("/logout", handlers.Logout)
-		apiV1.GET("/uc/:numero", handlers.GetUCByNumero)
-		apiV1.GET("/uc/:numero/faturas", handlers.GetFaturasByUC)
-
-		// Alias pÃºblico para faturas por unidade (Amee_Serving)
-		apiV1.GET("/faturas-uc", handlers.GetFaturas)
+		// /uc/:numero, /uc/:numero/faturas e /faturas-uc movidos para authRequired
+		// (segurança: expunham razão social/CNPJ/endereço/link de fatura a chamadas anônimas)
 
 		// Faturas Implantadas (por id_uc)
 		apiV1.GET("/faturas-implantadas", handlers.GetFaturasImplantadasByIdUC)
@@ -244,15 +265,97 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.GET("/filtros/etapas-subetapas", handlers.GetEtapaSubCombinacoes)
 			authRequired.GET("/instancias-deferimento", handlers.ListInstanciasDeferimento)
 
+			// Solicitacoes ao sistema (chat #sistema -> fila -> gestor aprova -> executor)
+			authRequired.POST("/solicitacoes", handlers.CriarSolicitacao)
+			authRequired.POST("/solicitacoes/interpretar", handlers.InterpretarSolicitacao)
+			authRequired.GET("/solicitacoes/sou-aprovador", handlers.SouAprovador)
+			authRequired.GET("/solicitacoes", handlers.ListarSolicitacoes)
+			authRequired.PUT("/solicitacoes/:id/aprovar", handlers.AprovarSolicitacao)
+			authRequired.DELETE("/solicitacoes/:id", handlers.RejeitarSolicitacao)
+			authRequired.PUT("/solicitacoes/:id/resultado", handlers.ResultadoSolicitacao)
+			authRequired.GET("/solicitacoes/:id/protocolo", handlers.GetProtocolo)
+			authRequired.POST("/solicitacoes/:id/reverter", handlers.ReverterSolicitacao)
+			authRequired.PUT("/solicitacoes/:id/feedback", handlers.FeedbackSolicitacao)
+			authRequired.POST("/solicitacoes/:id/corrigir", handlers.CorrigirSolicitacao)
+			authRequired.POST("/solicitacoes/:id/responder-confirmacao", handlers.ResponderConfirmacao)
+			authRequired.GET("/solicitacoes/:id/excel", handlers.ExportarSolicitacao)
+			authRequired.GET("/solicitacoes/:id/export", handlers.ExportarSolicitacao)
+			authRequired.POST("/solicitacoes/:id/anexo", handlers.UploadAnexoSolicitacao)
+			authRequired.GET("/solicitacoes/:id/anexo/:aid", handlers.BaixarAnexoSolicitacao)
+
+			// Rotinas (#rotina no chat → admin aprova → agendador) e lembretes entre usuários
+			authRequired.POST("/rotinas/interpretar", handlers.InterpretarRotinaHandler)
+			authRequired.POST("/rotinas", handlers.CriarRotinaHandler)
+			authRequired.GET("/rotinas", handlers.ListarRotinasHandler)
+			authRequired.GET("/rotinas/usuarios", handlers.UsuariosRotinasHandler)
+			authRequired.GET("/rotinas/historico/:id", handlers.HistoricoRotinasUsuarioHandler)
+			authRequired.POST("/rotinas/usuario/:id/desativar-todas", handlers.DesativarRotinasUsuarioHandler)
+			authRequired.POST("/rotinas/execucoes/:id/desfazer", handlers.DesfazerExecucaoHandler)
+			authRequired.POST("/rotinas/:id/acao", handlers.AcaoRotinaHandler)
+			authRequired.GET("/rotinas/:id/execucoes", handlers.ExecucoesRotinaHandler)
+			authRequired.POST("/lembretes/interpretar", handlers.InterpretarLembreteHandler)
+			authRequired.POST("/lembretes", handlers.CriarLembreteHandler)
+
+			// Protocolos ANEEL (acompanhamento a cada 1h) + tarefas geradas pelas mudanças
+			authRequired.GET("/protocolos-aneel", handlers.ListarProtocolosAneel)
+			authRequired.GET("/protocolos-aneel/resumo-processos", handlers.ResumoProtocolosPorProcesso)
+			authRequired.GET("/protocolos-aneel/processo/:id", handlers.ProtocolosDoProcesso)
+			authRequired.GET("/protocolos-aneel/consulta", handlers.ConsultarProtocoloAneel)
+			authRequired.GET("/protocolos-aneel/analistas", handlers.AnalistasProtocolosAneel)
+			authRequired.POST("/protocolos-aneel/vincular", handlers.VincularProtocoloAneel)
+			authRequired.POST("/protocolos-aneel/sincronizar", handlers.SincronizarProtocolosAneel)
+			authRequired.GET("/protocolos-aneel/site/abertos", handlers.AbertosSiteAneel)
+			authRequired.POST("/protocolos-aneel/site/importar", handlers.ImportarSiteAneel)
+			authRequired.POST("/protocolos-aneel/:id/responsavel", handlers.ResponsavelProtocoloAneel)
+			authRequired.POST("/protocolos-aneel/:id/confirmar", handlers.ConfirmarVinculoProtocoloAneel)
+			authRequired.GET("/tarefas", handlers.ListarTarefas)
+			// WhatsApp da empresa (QR code) — só admin
+			authRequired.GET("/whatsapp/estado", handlers.WhatsappEstado)
+			authRequired.POST("/whatsapp/conectar", handlers.WhatsappConectar)
+			authRequired.POST("/whatsapp/desconectar", handlers.WhatsappDesconectar)
+			authRequired.GET("/whatsapp/conversas", handlers.WhatsappConversas)
+			authRequired.GET("/whatsapp/mensagens", handlers.WhatsappMensagens)
+			authRequired.GET("/whatsapp/insights", handlers.WhatsappInsights)
+			authRequired.POST("/whatsapp/enviar", handlers.WhatsappEnviar)
+			authRequired.GET("/whatsapp/grupos", handlers.WhatsappGrupos)
+			authRequired.POST("/whatsapp/grupo-avisos", handlers.WhatsappDefinirGrupo)
+			authRequired.GET("/tarefas/regras", handlers.ListarRegrasTarefa)
+			authRequired.POST("/tarefas/regras", handlers.SalvarRegraTarefa)
+			authRequired.POST("/tarefas/:id/direcionar", handlers.DirecionarTarefa)
+			authRequired.POST("/tarefas/:id/concluir", handlers.ConcluirTarefa)
+
+			// Histórico do chat de perguntas (Q&A) por usuário — durável no servidor
+			// Voz do chat: texto → voz neural (edge-tts, voz feminina) — o front cai p/ a voz do navegador se falhar
+			authRequired.POST("/voz/falar", handlers.FalarVoz)
+			// SURE: saudação do dia (data/hora/temperatura + resumo de Prazos p/ quem cuida de SR)
+			authRequired.GET("/chat/saudacao", handlers.ChatSaudacao)
+			// Conversas com a SURE (histórico de conversas — retomar/excluir)
+			authRequired.POST("/chat/conversas/msg", handlers.SalvarMsgConversa)
+			authRequired.GET("/chat/conversas", handlers.ListarConversas)
+			authRequired.GET("/chat/conversas/:sessao", handlers.MensagensConversa)
+			authRequired.PUT("/chat/conversas/:sessao/titulo", handlers.SetTituloConversa)
+			authRequired.DELETE("/chat/conversas/:sessao", handlers.ExcluirConversa)
+
+			authRequired.GET("/chat/historico", handlers.GetChatHistorico)
+			authRequired.PUT("/chat/historico", handlers.SaveChatHistorico)
+			authRequired.DELETE("/chat/historico", handlers.ClearChatHistorico)
+
 			// Regras (somente leitura)
 			authRequired.GET("/rules", handlers.GetRules)
 			authRequired.GET("/rules/active", handlers.GetActiveRules)
+
+			// Informativo do sistema (janelinha): GET p/ todos, PUT (publicar) só admin
+			authRequired.GET("/informativo", handlers.GetInformativo)
 
 			// Batch meta para cards do Kanban
 			authRequired.GET("/processos/cards-meta", handlers.GetProcessosCardsMeta)
 
 			// UC: opÃ§Ãµes (unidade/empresa/concessionÃ¡ria)
 			authRequired.GET("/uc/:numero/opcoes", handlers.GetUCOpcoesByNumero)
+			// Movidos de público -> autenticado (expunham CNPJ/endereço/link de fatura)
+			authRequired.GET("/uc/:numero", handlers.GetUCByNumero)
+			authRequired.GET("/uc/:numero/faturas", handlers.GetFaturasByUC)
+			authRequired.GET("/faturas-uc", handlers.GetFaturas)
 
 			// Resumos de processo (persistidos)
 			authRequired.GET("/processos/:id/summary", handlers.GetProcessoSummary)
@@ -273,6 +376,11 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.GET("/requisicoes/departamento", handlers.GetRequisicoesDepartamento)
 
 			// Alertas
+			// sininho: avisos pessoais + histórico de protocolos ANEEL
+			authRequired.GET("/avisos", handlers.GetAvisos)
+			authRequired.POST("/avisos/:id/ciente", handlers.AvisoCiente)
+			authRequired.POST("/avisos/tarefas/:id/ciente", handlers.TarefaCiente)
+			authRequired.POST("/avisos/tarefas/:id/assumir", handlers.TarefaAssumir)
 			authRequired.GET("/alertas", handlers.GetAlertas)
 			authRequired.POST("/alertas", handlers.CreateAlerta)
 			authRequired.POST("/alertas/marcar-lido", handlers.MarcarAlertaComoLido)
@@ -291,6 +399,12 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.GET("/faturas-extraidas/:uid", handlers.GetFaturaDadosExtraida)
 			authRequired.GET("/faturas/fde-ficha-resumo", handlers.GetFDEFichaResumo)
 			authRequired.GET("/faturas/fde-uc-historico", handlers.GetFDEUCHistorico)
+			// Encaminhar: baixar todas as faturas da unidade em .zip / criar job OCR da unidade
+			authRequired.GET("/faturas/download-zip", handlers.DownloadFaturasZip)
+			authRequired.POST("/faturas/ocr-lote-from-unidade", handlers.OcrLoteFromUnidade)
+
+			// Correção manual de campos por analista (auditada em FT_AUDIT_EDICAO)
+			authRequired.PATCH("/faturas/:id", handlers.PatchFatura)
 
 			// Fichas de AnÃ¡lise (F01â€“F05 + Resumo)
 			authRequired.GET("/faturas/ficha/resumo", handlers.ListFichaResumo)
@@ -327,6 +441,13 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.POST("/faturas/analise-resultado/salvar", handlers.SalvarResultadoIAFicha)
 			authRequired.POST("/faturas/reset-ia", handlers.ResetFaturaIA)
 			authRequired.POST("/faturas/aisure/gerar-email", handlers.GerarEmailHandler)
+			authRequired.POST("/faturas/aisure/descricao-apontamento", handlers.GerarDescricaoApontamentoHandler)
+			// OCR em lote (Auditoria Inteligente — Fase 2). Sandbox, não grava no banco.
+			authRequired.POST("/ocr-lote/upload", handlers.OcrLoteUpload)
+			authRequired.GET("/ocr-lote/cruzar-fde", handlers.OcrLoteCruzarFDE)
+			authRequired.POST("/ocr-lote/run/:job", handlers.OcrLoteRun)
+			authRequired.GET("/ocr-lote/status/:job", handlers.OcrLoteStatus)
+			authRequired.GET("/ocr-lote/relatorio/:job", handlers.OcrLoteRelatorio)
 			authRequired.POST("/ia/testar-prompt", handlers.TestarPromptHandler)
 			authRequired.POST("/ia/analisar-fatura/:id", handlers.AnalisarFaturaRegrasHandler)
 			authRequired.POST("/ia/arbitrar-fatura/:id", handlers.ArbitrarFaturaHandler)
@@ -334,20 +455,75 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Análise de Desvio - Resultado IA (novo)
 			authRequired.GET("/faturas/com-analise", handlers.ListFaturasComAnalise)
 			authRequired.GET("/faturas/fde-analise", handlers.ListFaturasFDEAnalise)
+			authRequired.GET("/faturas/fde-analise/resumo", handlers.GetResumoFDEAnalise)
+			// 🅰️ Aba ACER (empresa 2028) — fonte FATURA_ACER_DADOS_EXTRAIDOS, mesmo motor.
+			authRequired.GET("/acer/resumo", handlers.GetAcerResumo)
+			authRequired.GET("/acer/apontamentos", handlers.GetAcerApontamentos)
+			authRequired.GET("/acer/uc-historico", handlers.GetAcerUCHistorico)
+
+			// Consulta Claro (somente leitura) — FATURA_CLARO_DADOS_EXTRAIDOS
+			authRequired.GET("/claro/resumo", handlers.GetClaroResumo)
+			authRequired.GET("/claro/faturas", handlers.GetClaroFaturas)
+			authRequired.GET("/claro/uc-cobertura", handlers.GetClaroCoberturaUC)
+			// 💧 Auditoria de Faturas de ÁGUA (fase 1 — sobre FATURA_AGUA_DADOS + snapshot)
+			authRequired.GET("/faturas/agua-analise", handlers.ListAguaAnalise)
+			authRequired.GET("/faturas/agua-analise/resumo", handlers.GetAguaResumo)
+			authRequired.GET("/faturas/agua/:id/historico", handlers.GetAguaHistorico)
+			authRequired.GET("/faturas/agua/:id/pdf", handlers.GetAguaFaturaPDF)
+			authRequired.GET("/faturas/agua/:id/dossie", handlers.GetAguaDossie)
+			authRequired.POST("/faturas/agua/:id/rejeitar", handlers.RejeitarAguaApontamento)
 			authRequired.GET("/faturas/fde-analise/empresas", handlers.ListEmpresasFDEAnalise)
+			authRequired.GET("/faturas/fde-analise/rankings", handlers.GetRankingsFDEAnalise)
+			// Busca no sgeeasy (Faturas_Registradas_Cache) — link por UC+período e dados por UC.
+			authRequired.GET("/faturas/link-sgeeasy", handlers.BuscarLinkFaturaSgeeasy)
+			authRequired.GET("/faturas/buscar-uc", handlers.BuscarDadosUCSgeeasy)
+			authRequired.GET("/requisicoes/uc-lookup", handlers.RequisicaoUCLookup)
+			authRequired.GET("/faturas/fde-analise/sgeeasy-gap", handlers.GetDesvioSgeeasyGap)
+			authRequired.GET("/faturas/fde-analise/convergencia", handlers.GetConvergenciaFDEAnalise)
+			authRequired.GET("/faturas/uc-historico-local", handlers.GetUCHistoricoLocal)
+			// ⭐ Motor de Análise de Desvio (F01-F05 ao vivo sobre a FDE) — JSON motor-only
+			authRequired.GET("/desvio/casos", handlers.GetDesvioCasos)
+			// ⭐ Análise de Desvio sobre a FRC (sgeeasy) — fonte temporária enquanto a FDE
+			//    está sendo configurada. F01-F05 (sem F03), restrito a {144,189,4}.
+			authRequired.GET("/desvio/frc", handlers.GetDesvioFRC)
+			// ⭐ Apontamentos do motor VERIFICADO sobre a Faturas_Registradas_Cache (sgeeasy)
+			authRequired.GET("/desvio/origem", handlers.ListApontamentosOrigem)
+			authRequired.GET("/desvio/origem/empresas", handlers.ListEmpresasApontamentosOrigem)
+			authRequired.GET("/desvio/origem/resumo", handlers.ResumoApontamentosOrigem)
 			authRequired.GET("/faturas/:id/detalhes", handlers.GetFaturaDetalhes)
 			authRequired.POST("/faturas/:id/reprocessar-ia", handlers.ReprocessarFaturaIA)
 			authRequired.POST("/faturas/:id/reanalise-fde", handlers.ReanaliseFDEHandler)
+
+			// IA no modal de Auditoria de Faturas: auditar valores (gpt-5.4-mini) + chat (gpt-5.4-nano)
+			authRequired.POST("/faturas/:id/auditar", handlers.AuditarValoresFatura)
+			// Auditoria comparativa (FDE + sgeeasy + IA em JSON estruturado — modal 3 colunas)
+			authRequired.POST("/faturas/:id/auditar-comparativo", handlers.AuditarComparativoFatura)
+			// Validação manual dos campos comparativos (grava direto na FDE + audit trail)
+			authRequired.POST("/faturas/:id/validar-comparativo", handlers.ValidarComparativoFatura)
+			// Análise completa com prompt v19 (auditor F01-F05 canônico)
+			authRequired.POST("/faturas/:id/analisar-v19", handlers.AnalisarFaturaComPromptV19)
+			authRequired.POST("/faturas/:id/analisar-historico", handlers.AnalisarHistoricoUC)
+			authRequired.GET("/faturas/:id/chat", handlers.GetChatFatura)
+			authRequired.POST("/faturas/:id/chat", handlers.ChatFatura)
+			// Rejeitar apontamento (falso positivo) → sai da lista da Auditoria
+			authRequired.POST("/faturas/:id/rejeitar-apontamento", handlers.RejeitarApontamento)
+			// Nota de verificação do analista no apontamento (observacao — sobrevive ao rebuild)
+			authRequired.POST("/faturas/:id/observacao-auditado", handlers.SetObservacaoAuditado)
+			// Todos os apontamentos (meses flagados) de uma UC — p/ os chips do modal
+			authRequired.GET("/faturas/uc-apontamentos", handlers.ListApontamentosUC)
+			// Rejeitar apontamento SGEEASY (Inconclusivos/Outlier, sem linha na FDE) por uid.
+			// Prefixo próprio p/ não conflitar com o wildcard /faturas/:id no gin.
+			authRequired.POST("/sgeeasy/rejeitar-apontamento", handlers.RejeitarApontamentoSgeeasy)
 			// ⭐ v19 — popula colunas v19 via pdf_pipeline_v2 (subprocess Python)
 			authRequired.POST("/faturas/:id/processar-v2", handlers.ProcessarV2Handler)
 			// ⭐ v19 — audit trail: histórico de reanálises da fatura
 			authRequired.GET("/faturas/:id/reanalises", handlers.ListarReanalisesHandler)
 			authRequired.POST("/faturas/:id/analisar-medidor", handlers.AnalisarMedidorHandler)
-				authRequired.GET("/faturas/uc/:uc/comparar-medidores", handlers.CompararMedidoresUCHandler)
+			authRequired.GET("/faturas/uc/:uc/comparar-medidores", handlers.CompararMedidoresUCHandler)
 			authRequired.GET("/faturas/uc/:uc/comparar-leituras", handlers.CompararLeiturasUCHandler)
 			authRequired.POST("/faturas/:id/f04/aprovar", handlers.AprovarF04Handler)
 			authRequired.POST("/faturas/:id/f04/desaprovar", handlers.DesaprovarF04Handler)
-			authRequired.POST("/faturas/:id/rejeitar-fde",  handlers.RejeitarFaturaFDEHandler)
+			authRequired.POST("/faturas/:id/rejeitar-fde", handlers.RejeitarFaturaFDEHandler)
 
 			// Busca global
 			authRequired.GET("/search/global", handlers.SearchGlobal)
@@ -356,7 +532,6 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.POST("/feedback", handlers.CreateFeedback)
 			authRequired.POST("/ai/resumo/feedback", handlers.CreateResumoFeedback)
 			authRequired.POST("/chat/rag", handlers.ChatRAGHandler)
-			authRequired.POST("/chat/feedback", handlers.CreateChatFeedback)
 			authRequired.POST("/chat/upload", handlers.ChatUploadHandler)
 			authRequired.POST("/chat/extract-pdf", handlers.ChatExtractPDFHandler)
 			authRequired.POST("/chat/learn", handlers.ChatLearnHandler)
@@ -408,6 +583,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.POST("/processos/:id/retomar", handlers.RetomarProcesso)
 			gestorRequired.GET("/processos/prazos", handlers.GetProcessosComPrazo)
 			gestorRequired.GET("/processos/backlog", handlers.GetBacklogProcessos)
+			gestorRequired.GET("/processos/:id/cobranca-cache", handlers.GetCobrancaCacheHandler)
+			gestorRequired.POST("/agente-recepcao/varredura-emails", handlers.VarrerEmailsRecepcaoHandler)
 			gestorRequired.POST("/processos/:id/backlog-check", handlers.ToggleBacklogCheck)
 			gestorRequired.GET("/processos/suspensos", handlers.GetProcessosSuspensos)
 			gestorRequired.DELETE("/processos/:id", handlers.ExcluirProcessoPermanentemente)
@@ -434,6 +611,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/processos/:id/emails", handlers.GetEmailsByProcessoID)
 			gestorRequired.POST("/processos/:id/emails/:emailId/read", handlers.MarkEmailProcessoRead)
 			gestorRequired.POST("/processos/:id/gerar-cobranca", handlers.GerarCobrancaEmailHandler)
+			// e-mails de SR (sem retorno) em lote: vencidos dos Prazos por distribuidora (chat → modal)
+			gestorRequired.POST("/processos/cobranca-lote", handlers.CobrancaLoteHandler)
 
 			// Tese técnico-jurídica
 			gestorRequired.GET("/processos/:id/tese", handlers.GetTeseHandler)
@@ -482,17 +661,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.POST("/admin/processos/recalcular-coluna", handlers.AdminPlanilhaRecalcularColuna)
 			gestorRequired.DELETE("/admin/historico/:id", handlers.AdminDeleteHistorico)
 
-			// Admin - Prazos (configuraÃ§Ãµes de prazos por kanban/etapa)
-			gestorRequired.GET("/admin/prazos", handlers.GetPrazosConfig)
-			gestorRequired.POST("/admin/prazos", handlers.SavePrazosConfig)
-
 			// Admin - Disparar alertas manualmente
 			gestorRequired.POST("/admin/alertas/disparar-agora", handlers.DispararAlertasAgora)
-
-			// Admin - Alarmes (regras de alerta por etapa/coluna)
-			gestorRequired.GET("/admin/alarmes", handlers.GetAlarmes)
-			gestorRequired.POST("/admin/alarmes", handlers.SaveAlarme)
-			gestorRequired.DELETE("/admin/alarmes/:id", handlers.DeleteAlarme)
 
 			// Admin - Editor completo (processo + mÃ³dulos)
 			gestorRequired.POST("/admin/editor/processo", handlers.AdminEditProcesso)
@@ -519,9 +689,6 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/usuarios/mencoes", handlers.GetUsuariosMencoes)
 
 			// Tags
-			gestorRequired.GET("/tags", handlers.GetAllTags)
-			gestorRequired.POST("/tags", handlers.CreateTag)
-			gestorRequired.PUT("/processos/:id/tags", handlers.UpdateProcessoTags)
 
 			// OCR (somente gestor/admin)
 			gestorRequired.POST("/ocr/analyze", handlers.OCRAnalyze)
@@ -534,7 +701,30 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.PUT("/rules/:id", handlers.UpdateRule)
 			gestorRequired.DELETE("/rules/:id", handlers.DeleteRule)
 			gestorRequired.POST("/rules/interpret", handlers.InterpretRule)
+			// "Passar a regra no banco" — agenda p/ 00:00 do dia seguinte (reversível)
+			gestorRequired.POST("/rules/:id/passar", handlers.PassarRegra)
+			gestorRequired.POST("/rules/:id/cancelar-passagem", handlers.CancelarPassagemRegra)
+			gestorRequired.POST("/rules/:id/reverter-aplicacao", handlers.ReverterAplicacaoRegra)
+
+			// Catálogo de Regras (fichas F01–F61): texto editável + "Testar" fatura × regras
+			// (o teste vai para a fila FT_TESTES_REGRA; o agente claude da VPS processa).
+			gestorRequired.GET("/fichas-regras", handlers.ListarFichasRegras)
+			gestorRequired.POST("/fichas-regras", handlers.CriarFichaRegra)
+			gestorRequired.PUT("/fichas-regras/:codigo", handlers.AtualizarFichaRegra)
+			gestorRequired.POST("/fichas-regras/:codigo/melhorar", handlers.MelhorarFichaRegra)
+			gestorRequired.GET("/fichas-regras/testes", handlers.ListarTestesSalvos)
+			gestorRequired.POST("/fichas-regras/testes", handlers.CriarTesteRegra)
+			gestorRequired.GET("/fichas-regras/testes/:id", handlers.StatusTesteRegra)
+			gestorRequired.POST("/fichas-regras/testes/:id/cancelar", handlers.CancelarTesteRegra)
+			gestorRequired.POST("/fichas-regras/testes/:id/salvar", handlers.SalvarTesteRegra)
 		}
+
+		// Aplicação agendada das regras (chamada pelo CRON às 00:00; protegida por
+		// header X-Cron-Token == env CRON_TOKEN, sem JWT pois o cron não tem sessão).
+		apiV1.POST("/rules/aplicar-agendadas", handlers.AplicarRegrasAgendadas)
+		// Áudio da voz do chat por id aleatório e temporário (5 min). Público porque o elemento
+		// <audio> não envia o header Authorization; quem gera o áudio é a rota autenticada /voz/falar.
+		apiV1.GET("/voz/audio/:id", handlers.AudioVoz)
 
 		// ------------------------- Admin only -------------------------
 		// Recursos restritos a administradores (Histórico global, Métricas
@@ -549,6 +739,30 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Métricas executivas (página /dashboard)
 			adminOnly.GET("/relatorios/metricas", handlers.GetRelatoriosMetricas)
 			adminOnly.GET("/relatorios/kanban-composicao", handlers.GetKanbanComposicao)
+			adminOnly.GET("/relatorios/tempo-resposta-protocolos", handlers.GetTempoRespostaProtocolos)
+			adminOnly.PUT("/informativo", handlers.AtualizarInformativo)
+		}
+	}
+
+	// ============================================================
+	// API v2 — Controle de Processos refatorado (banco db_ressarcimento_v2)
+	// ------------------------------------------------------------
+	// Roda em paralelo ao v1. Lê/escreve no banco novo via database.DB_V2.
+	// Frontend correspondente: /controle-processos-v2 (ControleProcessosV2.jsx)
+	// Contrato: protótipos/banco_novo_local/API_V2_CONTRATO.md
+	// ============================================================
+	apiV2 := r.Group("/api/v2")
+	{
+		// Públicas (sem AuthMiddleware) — login/logout/register
+		handlersV2.RegisterAuthRoutesPublic(apiV2)
+
+		// Autenticadas
+		authV2 := apiV2.Group("/")
+		authV2.Use(middleware.AuthMiddleware())
+		{
+			handlersV2.RegisterAuthRoutesAuthed(authV2)
+			handlersV2.RegisterReadRoutes(authV2)
+			handlersV2.RegisterWriteRoutes(authV2)
 		}
 	}
 
@@ -616,8 +830,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 		api.POST("/login", handlers.Login)
 		api.POST("/logout", handlers.Logout)
 
-		api.GET("/uc/:numero", handlers.GetUCByNumero)
-		api.GET("/uc/:numero/faturas", handlers.GetFaturasByUC)
+		// /uc/:numero e /uc/:numero/faturas movidos para o grupo autenticado abaixo
 		api.GET("/departamentos", handlers.GetDepartamentos)
 
 		api.PUT("/alertas/:id", handlers.UpdateAlerta)
@@ -643,6 +856,10 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// HistÃ³rico (legado, qualquer usuÃ¡rio autenticado)
 			authRequired.GET("/requisicoes/:id/historico", handlers.GetHistoricoByRequisicaoID)
 			authRequired.GET("/processos/:id/historico", handlers.GetHistoricoMovimentacoes)
+
+			// Movidos de público -> autenticado (expunham CNPJ/endereço/link de fatura)
+			authRequired.GET("/uc/:numero", handlers.GetUCByNumero)
+			authRequired.GET("/uc/:numero/faturas", handlers.GetFaturasByUC)
 		}
 
 		gestorRequired := api.Group("/")
@@ -669,6 +886,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.POST("/processos/:id/retomar", handlers.RetomarProcesso)
 			gestorRequired.GET("/processos/prazos", handlers.GetProcessosComPrazo)
 			gestorRequired.GET("/processos/backlog", handlers.GetBacklogProcessos)
+			gestorRequired.GET("/processos/:id/cobranca-cache", handlers.GetCobrancaCacheHandler)
+			gestorRequired.POST("/agente-recepcao/varredura-emails", handlers.VarrerEmailsRecepcaoHandler)
 			gestorRequired.POST("/processos/:id/backlog-check", handlers.ToggleBacklogCheck)
 			gestorRequired.GET("/processos/suspensos", handlers.GetProcessosSuspensos)
 			gestorRequired.DELETE("/processos/:id", handlers.ExcluirProcessoPermanentemente)
@@ -714,9 +933,6 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/acoes-do-dia", handlers.GetAcoesDodia)
 
 			gestorRequired.GET("/usuarios/mencoes", handlers.GetUsuariosMencoes)
-			gestorRequired.GET("/tags", handlers.GetAllTags)
-			gestorRequired.POST("/tags", handlers.CreateTag)
-			gestorRequired.PUT("/processos/:id/tags", handlers.UpdateProcessoTags)
 		}
 
 		// ------------------------- Admin only (legado) -------------------------

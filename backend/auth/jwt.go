@@ -54,6 +54,7 @@ type Claims struct {
 	UserID    int64  `json:"user_id"`
 	TipoConta string `json:"tipo_conta,omitempty"`
 	Nome      string `json:"nome,omitempty"`
+	Email     string `json:"email,omitempty"`
 	UserName  string `json:"user_name,omitempty"`
 	Role      string `json:"role,omitempty"`
 	jwt.RegisteredClaims

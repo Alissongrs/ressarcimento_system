@@ -25,6 +25,7 @@ import (
 	"gorm.io/gorm"
 
 	"ressarcimento-backend/database"
+	"ressarcimento-backend/services"
 )
 
 /* â"€â"€â"€ cache de arquivos de texto (TTL 60s) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */
@@ -167,7 +168,7 @@ type aisureChatResp struct {
 }
 
 type aisureAttachFaturaReq struct {
-	ProcessoID int64  `json:"processo_id"`
+	ProcessoID int64  `json:"id_processo"`
 	URL        string `json:"url"`
 	Comentario string `json:"comentario"`
 }
@@ -396,6 +397,13 @@ func aisureSupportsReasoningEffort(model string) bool {
 
 
 func callAisureOpenAI(ctx context.Context, history []aisureMsg, question, ctxStr string, systemPromptOverride ...string) (string, error) {
+	return callAisureOpenAIMaxTokens(ctx, history, question, ctxStr, 1024, systemPromptOverride...)
+}
+
+// callAisureOpenAIMaxTokens é callAisureOpenAI com o teto de tokens de saída configurável.
+// Usada quando a resposta esperada é sabidamente maior que o padrão de 1024 (ex: cobrança
+// com 4 tons no mesmo JSON) — sem mudar o limite padrão dos outros ~10 chamadores.
+func callAisureOpenAIMaxTokens(ctx context.Context, history []aisureMsg, question, ctxStr string, maxTokens int, systemPromptOverride ...string) (string, error) {
 	model := aisureOpenAIModel()
 
 	type oaiMsg struct {
@@ -424,7 +432,7 @@ func callAisureOpenAI(ctx context.Context, history []aisureMsg, question, ctxStr
 	reqBody := map[string]interface{}{
 		"model":                model,
 		"messages":             msgs,
-		aisureTokensKey(model): 1024,
+		aisureTokensKey(model): maxTokens,
 	}
 	if effort := strings.TrimSpace(os.Getenv("OPENAI_REASONING_EFFORT")); effort != "" && aisureSupportsReasoningEffort(model) {
 		reqBody["reasoning_effort"] = effort
@@ -807,10 +815,10 @@ func aisureCurrentProcessStep(tx *gorm.DB, processoID int64) (string, string) {
 	var sub sql.NullString
 	_ = queryRowGorm(tx, `
 		SELECT
-			COALESCE(e.nome_etapa_processo, ''),
-			COALESCE(p.sub_etapa, '')
+			COALESCE(e.nome, ''),
+			COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual), '')
 		FROM FT_PROCESSOS p
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 		WHERE p.id_processo = ?
 		ORDER BY p.ultima_atualizacao DESC, p.id_processo DESC
 		LIMIT 1`,
@@ -820,9 +828,6 @@ func aisureCurrentProcessStep(tx *gorm.DB, processoID int64) (string, string) {
 }
 
 func aisureRegisterRawFaturaHistory(tx *gorm.DB, processoID int64, userName, sourceURL, filename, comment string) {
-	statusNome := getStatusNomeByRequisicaoGorm(tx, processoID)
-	etapaAtual, subAtual := aisureCurrentProcessStep(tx, processoID)
-
 	parts := []string{
 		fmt.Sprintf("Fatura anexada automaticamente via link: %s", filename),
 	}
@@ -834,12 +839,8 @@ func aisureRegisterRawFaturaHistory(tx *gorm.DB, processoID int64, userName, sou
 	}
 	comentario := strings.Join(parts, "\n")
 
-	_, _ = execGorm(tx, `
-		INSERT INTO FT_HISTORICO_MOVIMENTACOES
-		  (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
-		VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NOW(), 'fatura')`,
-		processoID, statusNome, statusNome, etapaAtual, etapaAtual, subAtual, comentario,
-	)
+	// P1-1: histórico no schema V2 (anexo de fatura não muda etapa/status → novo = atual).
+	_ = registrarHistoricoV2(tx, int(processoID), 0, "fatura", comentario, nil, nil)
 	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
 	_ = SincronizarStatusProcesso(tx, int(processoID))
 }
@@ -882,7 +883,7 @@ func aisureAttachRawFaturaToProcessTx(tx *gorm.DB, processoID int64, sourceURL, 
 	err := queryRowGorm(tx, `
 		SELECT id_anexo
 		FROM FT_ANEXOS
-		WHERE id_requisicao = ?
+		WHERE id_processo = ?
 		  AND nome_arquivo = ?
 		  AND tamanho_bytes = ?
 		ORDER BY id_anexo DESC
@@ -904,7 +905,7 @@ func aisureAttachRawFaturaToProcessTx(tx *gorm.DB, processoID int64, sourceURL, 
 
 	res, err := execGorm(tx, `
 		INSERT INTO FT_ANEXOS
-		  (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
+		  (id_processo, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		processoID, name, pseudoPath, userName, time.Now(), mimeType, len(data), data,
 	)
@@ -1844,23 +1845,174 @@ func GerarEmailHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"email": emailText})
 }
 
+/* ─── GerarDescricaoApontamentoHandler ───────────────────────────────────
+   POST /api/v1/faturas/aisure/descricao-apontamento
+   Gera a descrição do apontamento (F02) via gpt-4o-mini (modelo FIXADO — não
+   segue OPENAI_MODEL global) quando o analista clica em "confirmar erro".
+   Recebe os fatos já calculados no front e devolve um texto claro pro processo. */
+type gerarDescApontReq struct {
+	Ficha         string  `json:"ficha"`
+	Cliente       string  `json:"cliente"`
+	UC            string  `json:"uc"`
+	Instalacao    string  `json:"instalacao"`
+	Grupo         string  `json:"grupo"`
+	Modalidade    string  `json:"modalidade"`
+	Classificacao string  `json:"classificacao"`
+	Fichas        string  `json:"fichas"`
+	Distribuidora string  `json:"distribuidora"`
+	MesRef        string  `json:"mes_ref"`
+	Cruzamento    string  `json:"cruzamento"`
+	ConsumoKwh    float64 `json:"consumo_kwh"`
+	MediaKwh      float64 `json:"media_kwh"`
+	BaseMeses     int     `json:"base_meses"`
+	ExcedenteKwh  float64 `json:"excedente_kwh"`
+	DesvioPct     float64 `json:"desvio_pct"`
+	TarifaKwh     float64 `json:"tarifa_kwh"`
+	BaseEnergia   float64 `json:"base_energia"`
+	Ressarcimento float64 `json:"ressarcimento"`
+	Observacao    string  `json:"observacao"`
+}
+
+func GerarDescricaoApontamentoHandler(c *gin.Context) {
+	var in gerarDescApontReq
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "payload inválido"})
+		return
+	}
+	const modelo = "gpt-4o-mini"
+
+	system := "Você é analista de ressarcimento de energia elétrica. Escreva a DESCRIÇÃO de um apontamento de desvio de consumo, em português, para que qualquer analista que assuma o processo entenda o caso SEM contexto prévio. Regras: baseie-se ESTRITAMENTE nos dados fornecidos (não invente nem arredonde valores; use os números como vieram, no padrão brasileiro R$ e kWh); seja objetivo e técnico; organize em blocos curtos — (1) identificação da UC/cliente, (2) o desvio de consumo detectado com os números, (3) como o ressarcimento foi estimado (tarifa de energia × excedente), (4) fontes/validação. Não use saudações, assinatura, nem promessas; no máximo ~12 linhas."
+
+	// formata em pt-BR (milhar '.', decimal ',') p/ o texto do processo ficar apresentável.
+	brFmt := func(v float64, dec int) string {
+		s := strconv.FormatFloat(v, 'f', dec, 64)
+		neg := strings.HasPrefix(s, "-")
+		if neg {
+			s = s[1:]
+		}
+		intp, frac := s, ""
+		if i := strings.IndexByte(s, '.'); i >= 0 {
+			intp, frac = s[:i], s[i+1:]
+		}
+		var out []byte
+		for i := 0; i < len(intp); i++ {
+			if i > 0 && (len(intp)-i)%3 == 0 {
+				out = append(out, '.')
+			}
+			out = append(out, intp[i])
+		}
+		res := string(out)
+		if frac != "" {
+			res += "," + frac
+		}
+		if neg {
+			res = "-" + res
+		}
+		return res
+	}
+	fnf := func(v float64) string { return brFmt(v, 2) }
+	var b strings.Builder
+	b.WriteString("=== DADOS DO APONTAMENTO (" + first2(in.Ficha, "F02") + ") ===\n")
+	if in.Cliente != "" {
+		b.WriteString("Cliente: " + in.Cliente + "\n")
+	}
+	if in.UC != "" {
+		b.WriteString("UC: " + in.UC + "\n")
+	}
+	if in.Instalacao != "" && in.Instalacao != in.UC {
+		b.WriteString("Instalação: " + in.Instalacao + "\n")
+	}
+	if in.Grupo != "" {
+		b.WriteString("Grupo/Subgrupo: " + in.Grupo + "\n")
+	}
+	if in.Modalidade != "" {
+		b.WriteString("Modalidade tarifária: " + in.Modalidade + "\n")
+	}
+	if in.Classificacao != "" {
+		b.WriteString("Classificação pelo histórico: " + in.Classificacao + "\n")
+	}
+	if in.Fichas != "" {
+		b.WriteString("Fichas aplicadas: " + in.Fichas + "\n")
+	}
+	if in.Distribuidora != "" {
+		b.WriteString("Distribuidora: " + in.Distribuidora + "\n")
+	}
+	if in.MesRef != "" {
+		b.WriteString("Mês de referência: " + in.MesRef + "\n")
+	}
+	b.WriteString("Consumo do mês: " + brFmt(in.ConsumoKwh, 0) + " kWh\n")
+	b.WriteString("Média histórica (" + strconv.Itoa(in.BaseMeses) + " meses): " + brFmt(in.MediaKwh, 0) + " kWh\n")
+	b.WriteString("Excedente sobre a média: " + brFmt(in.ExcedenteKwh, 0) + " kWh\n")
+	b.WriteString("Desvio sobre a média: " + brFmt(in.DesvioPct, 1) + "%\n")
+	b.WriteString("Tarifa de energia aplicada: R$ " + brFmt(in.TarifaKwh, 4) + "/kWh\n")
+	b.WriteString("Base de energia da fatura (R$): R$ " + fnf(in.BaseEnergia) + "\n")
+	b.WriteString("Ressarcimento estimado (excedente × tarifa): R$ " + fnf(in.Ressarcimento) + "\n")
+	if in.Cruzamento != "" {
+		b.WriteString("Cruzamento parser × SEFAZ × itens: " + in.Cruzamento + "\n")
+	}
+	if strings.TrimSpace(in.Observacao) != "" {
+		b.WriteString("OBSERVAÇÃO A DESTACAR (ressalva de confiança — inclua na descrição como alerta ao analista): " + in.Observacao + "\n")
+	}
+
+	type oaiMsg struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	msgs := []oaiMsg{
+		{Role: "system", Content: system},
+		{Role: "user", Content: b.String()},
+	}
+	reqBody := map[string]interface{}{
+		"model":       modelo,
+		"messages":    msgs,
+		"max_tokens":  700,
+		"temperature": 0.3,
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
+	defer cancel()
+	res, retryErr := doOpenAIWithRetry(ctx, payload)
+	if retryErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "falha ao gerar descrição: " + retryErr.Error()})
+		return
+	}
+	if res.status != http.StatusOK {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("openai status %d", res.status)})
+		return
+	}
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(res.body, &out); err != nil || len(out.Choices) == 0 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "sem resposta do modelo"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"descricao": strings.TrimSpace(out.Choices[0].Message.Content), "modelo": modelo})
+}
+
+// first2 devolve o primeiro valor não-vazio (helper local).
+func first2(v, def string) string {
+	if strings.TrimSpace(v) != "" {
+		return v
+	}
+	return def
+}
+
 /* â"€â"€â"€ GerarCobrancaEmailHandler â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
    POST /api/v1/processos/:id/gerar-cobranca
    Analisa histÃ³rico + e-mails do processo e gera 2 sugestÃµes de
    e-mail de cobranÃ§a de resposta para a concessionÃ¡ria.
 â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */
 
-const cobrancaSystemPrompt = `VocÃª Ã© especialista em ressarcimento de energia elÃ©trica conforme a REN 1000/2021 da ANEEL.
-Gere EXATAMENTE DUAS sugestÃµes de e-mail de cobranÃ§a de resposta dirigido Ã  concessionÃ¡ria distribuidora.
-Cada sugestÃ£o deve:
-- Ser sucinta (mÃ¡x 180 palavras), profissional e assertiva
-- Citar art. 126 Â§1Âº da REN 1000/2021 (prazo mÃ¡ximo de 30 dias Ãºteis para resposta) quando o prazo estiver vencido
-- Mencionar nÃºmero do processo, UC, cliente e a sub-etapa atual
-- Solicitar posicionamento formal com urgÃªncia
-- Estar em HTML usando apenas <p> e <strong> — sem DOCTYPE, sem <html>, sem <head>
-
-Retorne SOMENTE o JSON abaixo, sem markdown, sem texto extra:
-{"subject":"...","opcao1":"<p>...</p>","opcao2":"<p>...</p>"}`
+const cobrancaSystemPrompt = "Voce e especialista em ressarcimento de energia eletrica conforme a REN 1000/2021 da ANEEL.\n" + "Gere EXATAMENTE QUATRO sugestoes de e-mail de cobranca de resposta dirigido a concessionaria distribuidora, em tons diferentes: formal, direto, amigavel e firme.\n" + "Cada sugestao deve:\n" + "- Ser sucinta (max 150 palavras), profissional\n" + "- Citar art. 126 par.1 da REN 1000/2021 (prazo maximo de 30 dias uteis para resposta) na versao formal, quando o prazo estiver vencido\n" + "- Mencionar UC, cliente e a sub-etapa atual\n" + "- Solicitar posicionamento com urgencia, sem ameaca, litigio ou medida judicial\n" + "- Estar em HTML usando apenas <p>, <strong> e <br> - sem DOCTYPE, sem <html>, sem <head>\n\n" + "Retorne SOMENTE o JSON abaixo, sem markdown, sem texto extra:\n" + `{"subject":"...","formal":"<p>...</p>","direto":"<p>...</p>","amigavel":"<p>...</p>","firme":"<p>...</p>"}`
 
 var reMarkdownBlock = regexp.MustCompile(`(?s)^` + "```" + `[a-z]*\n?`)
 
@@ -1871,45 +2023,138 @@ func GerarCobrancaEmailHandler(c *gin.Context) {
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	res, err := GerarCobrancaParaProcesso(ctx, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "processo nÃ£o encontrado"})
+			return
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "falha ao gerar cobranÃ§a: " + err.Error()})
+		return
+	}
+
+	// Atualiza o cache (PROCESSO_COBRANCA_CACHE) com o resultado fresco — próxima leitura
+	// via GetCobrancaCacheHandler já vem instantânea, sem chamar IA de novo.
+	if db := database.GormDB_App; db != nil {
+		salvarCacheCobranca(db, id, emailThreadHash(db, id), res, "ready", "")
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"subject":          res.Subject,
+		"formal":           res.Formal,
+		"direto":           res.Direto,
+		"amigavel":         res.Amigavel,
+		"firme":            res.Firme,
+		"uc":               res.UC,
+		"cliente":          res.Cliente,
+		"concessionaria":   res.Concessionaria,
+		"para":             res.Para,
+		"cc":               res.Cc,
+		"sem_retorno":      res.SemRetorno,
+		"dias_sem_retorno": res.DiasSemRetorno,
+	})
+}
+
+// CobrancaResultado é o resultado da análise de cobrança/SR de um processo, com os 4
+// tons gerados numa única chamada de IA (Formal/Direto/Amigável/Firme).
+type CobrancaResultado struct {
+	Subject         string
+	Formal          string
+	Direto          string
+	Amigavel        string
+	Firme           string
+	UC              string
+	Cliente         string
+	Concessionaria  string
+	Para            string // destinatário do último e-mail enviado (vazio se nunca houve)
+	Cc              string // demais destinatários (Para+CC) do último e-mail, exceto o próprio Para
+	SemRetorno      bool
+	TemEmailEnviado bool
+	DiasSemRetorno  int
+}
+
+// GerarCobrancaParaProcesso monta o contexto do processo (dados + histórico + e-mails),
+// decide a situação de contato (SR/pendência) e chama a IA pra sugerir 2 opções de
+// e-mail de cobrança. Reaproveitada tanto pelo endpoint HTTP (GerarCobrancaEmailHandler)
+// quanto pelo cron de cache (ProcessarCobrancasCache) — só a IA é chamada em qualquer um
+// dos dois caminhos, nunca duplicada.
+func GerarCobrancaParaProcesso(ctx context.Context, id int) (*CobrancaResultado, error) {
 	db := database.GormDB_App
 	if db == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "banco indisponÃ­vel"})
-		return
+		return nil, fmt.Errorf("banco indisponÃ­vel")
 	}
 
 	// 1. Dados do processo
 	var uc, cliente, conc, subEtapa, etapa, tipoNome, subtipoNome, descricao, ressarcimento, dataMov string
+	var idStatusAtual, idInstanciaAtual sql.NullInt64
 	scanErr := queryRowGorm(db, `
 		SELECT
 		  COALESCE(uc,''),
 		  COALESCE(cliente,''),
 		  COALESCE(concessionaria,''),
-		  COALESCE(sub_etapa,''),
-		  COALESCE(etapa,''),
+		  COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = id_status_atual),''),
+		  COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = id_etapa_atual),''),
 		  COALESCE(nome_tipo_irregularidade,''),
 		  COALESCE(nome_subtipo_irregularidade,''),
 		  COALESCE(descricao_irregularidade,''),
 		  COALESCE(CAST(ressarcimento_estimado AS CHAR),''),
-		  DATE_FORMAT(COALESCE(data_movimentacao, ultima_atualizacao, NOW()), '%d/%m/%Y %H:%i')
+		  DATE_FORMAT(COALESCE(data_movimentacao, ultima_atualizacao, NOW()), '%d/%m/%Y %H:%i'),
+		  id_status_atual,
+		  id_instancia_atual
 		FROM FT_PROCESSOS WHERE id_processo = ? LIMIT 1`, id).
-		Scan(&uc, &cliente, &conc, &subEtapa, &etapa, &tipoNome, &subtipoNome, &descricao, &ressarcimento, &dataMov)
+		Scan(&uc, &cliente, &conc, &subEtapa, &etapa, &tipoNome, &subtipoNome, &descricao, &ressarcimento, &dataMov,
+			&idStatusAtual, &idInstanciaAtual)
 	if scanErr != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "processo nÃ£o encontrado"})
-		return
+		return nil, sql.ErrNoRows
+	}
+
+	// 1b. Data-base REAL do prazo vencido — mesma fonte de verdade usada na tela (Prazos.jsx,
+	// coluna Prazos do Controle de Processos): quando o processo entrou no status ATUAL,
+	// não uma data qualquer do histórico. É isso, e não o histórico de movimentações em
+	// texto livre, que define "há quantos dias está sem retorno" — passamos esse fato já
+	// calculado pra IA em vez de pedir que ela infira a partir de comentários antigos
+	// (causa raiz de um bug real: a IA citou uma movimentação de ~4 meses atrás como se
+	// fosse o último contato, quando o prazo correto — calculado pela mesma regra da tela —
+	// era de 39 dias).
+	var prazoDataBaseStr, prazoInstanciaNome string
+	var prazoDiasDecorridos, prazoDiasLimite int
+	var prazoUteis bool
+	if idStatusAtual.Valid && idInstanciaAtual.Valid {
+		var dataBase sql.NullTime
+		_ = queryRowGorm(db, `
+			SELECT MAX(data_movimentacao) FROM FT_HISTORICO_MOVIMENTACOES
+			WHERE id_processo = ? AND id_status_novo = ?`, id, idStatusAtual.Int64,
+		).Scan(&dataBase)
+		if dataBase.Valid {
+			if regra, ok := services.PrazoPorInstancia[int(idInstanciaAtual.Int64)]; ok {
+				prazoDiasLimite = regra.Dias
+				prazoUteis = regra.Uteis
+				if regra.Uteis {
+					prazoDiasDecorridos = services.DiasUteisEntre(dataBase.Time, time.Now())
+				} else {
+					prazoDiasDecorridos = services.DiasCorridosEntre(dataBase.Time, time.Now())
+				}
+				prazoDataBaseStr = dataBase.Time.Format("02/01/2006")
+			}
+		}
+		_ = queryRowGorm(db, `SELECT COALESCE(nome,'') FROM DM_INSTANCIAS WHERE id_instancia = ?`, idInstanciaAtual.Int64).Scan(&prazoInstanciaNome)
 	}
 
 	// 2. HistÃ³rico de movimentaÃ§Ãµes (atÃ© 20 Ãºltimas)
 	histRows, err := queryGorm(db, `
 		SELECT
-		  COALESCE(h.etapa_anterior,''),
-		  COALESCE(h.etapa_nova,''),
-		  COALESCE(h.sub_etapa,''),
+		  COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),''),
+		  COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''),
+		  COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),''),
 		  COALESCE(h.comentario,''),
 		  DATE_FORMAT(h.data_movimentacao,'%d/%m/%Y %H:%i'),
 		  COALESCE(u.nome_usuario,'Sistema')
 		FROM FT_HISTORICO_MOVIMENTACOES h
 		LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
-		WHERE h.id_requisicao = ?
+		WHERE h.id_processo = ?
 		ORDER BY h.data_movimentacao DESC LIMIT 20`, id)
 	var histLines []string
 	if err == nil {
@@ -1932,20 +2177,48 @@ func GerarCobrancaEmailHandler(c *gin.Context) {
 
 	// 3. E-mails jÃ¡ enviados para o processo (contexto de cobranÃ§as anteriores)
 	emailRows, err := queryGorm(db, `
-		SELECT COALESCE(assunto,''), DATE_FORMAT(data_envio,'%d/%m/%Y'), COALESCE(para_email,'')
+		SELECT COALESCE(assunto,''), DATE_FORMAT(data_envio,'%d/%m/%Y'), COALESCE(para_email,''), tipo
 		FROM FT_EMAILS_PROCESSO
 		WHERE id_processo = ?
-		ORDER BY data_envio DESC LIMIT 5`, id)
+		ORDER BY data_envio DESC LIMIT 8`, id)
 	var emailLines []string
 	if err == nil {
 		defer emailRows.Close()
 		for emailRows.Next() {
-			var assunto, data, para string
-			if emailRows.Scan(&assunto, &data, &para) == nil {
-				emailLines = append(emailLines, fmt.Sprintf("[%s] Para: %s | Assunto: %s", data, para, assunto))
+			var assunto, data, para, tipo string
+			if emailRows.Scan(&assunto, &data, &para, &tipo) == nil {
+				dir := "Enviado"
+				if tipo == "recebido" {
+					dir = "Recebido"
+				}
+				emailLines = append(emailLines, fmt.Sprintf("[%s] %s | Para/De: %s | Assunto: %s", data, dir, para, assunto))
 			}
 		}
 	}
+
+	// 3b. Verifica se cabe cobrança de retorno (SR = "Sem Resposta"). Nem todo processo tem
+	// e-mail 'enviado' registrado — alguns começam pelo site da distribuidora, e as tratativas
+	// seguintes é que viram e-mail (ou nem isso). Regra: SR vale SEMPRE, exceto quando o último
+	// evento de e-mail foi um 'recebido' sem nada nosso depois — aí é pendência (resposta não
+	// tratada), não falta de retorno.
+	var ultimoEnviado, ultimoRecebido sql.NullTime
+	_ = queryRowGorm(db, `
+		SELECT MAX(CASE WHEN tipo='enviado' THEN data_envio END),
+		       MAX(CASE WHEN tipo='recebido' THEN data_envio END)
+		FROM FT_EMAILS_PROCESSO WHERE id_processo = ?`, id,
+	).Scan(&ultimoEnviado, &ultimoRecebido)
+	pendenciaNaoTratada := ultimoRecebido.Valid && (!ultimoEnviado.Valid || ultimoRecebido.Time.After(ultimoEnviado.Time))
+	semRetorno := !pendenciaNaoTratada
+	diasSemRetorno := 0
+	temEmailEnviado := ultimoEnviado.Valid
+	if semRetorno && temEmailEnviado {
+		diasSemRetorno = int(time.Since(ultimoEnviado.Time).Hours() / 24)
+	}
+
+	// 3c. Destinatário e CC do último e-mail ENVIADO — a cobrança deve ir para o mesmo
+	// contato, com os mesmos destinatários em cópia (Para+CC do e-mail anterior, exceto o
+	// próprio Para novo). Se nunca houve e-mail enviado, fica vazio — usuário preenche.
+	emailPara, emailCc := ultimoEmailEnviadoDestinatarios(db, id)
 
 	// 4. Monta contexto
 	var sb strings.Builder
@@ -1972,6 +2245,23 @@ func GerarCobrancaEmailHandler(c *gin.Context) {
 	}
 	sb.WriteString("Ãšltima atualizaÃ§Ã£o: " + dataMov + "\n")
 
+	if prazoDataBaseStr != "" {
+		unidade := "dias corridos"
+		if prazoUteis {
+			unidade = "dias Ãºteis"
+		}
+		fmt.Fprintf(&sb,
+			"\n=== PRAZO REGULATÃ“RIO (jÃ¡ calculado â€” Ã© O FATO CORRETO, use exatamente este, NÃƒO calcule ou infira outra data a partir do histÃ³rico abaixo) ===\n"+
+				"O processo estÃ¡ na instÃ¢ncia %s desde %s (data de entrada no status/etapa atual).\n"+
+				"Prazo regulatÃ³rio desta instÃ¢ncia: %d %s.\n"+
+				"Dias decorridos desde essa data: %d.\n"+
+				"Esta Ã© a Ãºnica data que deve ser usada como referÃªncia de \"hÃ¡ quanto tempo estÃ¡ sem retorno\" â€” "+
+				"o histÃ³rico de movimentaÃ§Ãµes abaixo pode conter datas mais antigas (ex: protocolo original, "+
+				"tratativas anteriores a uma reentrada nesta etapa) que NÃƒO devem ser usadas para calcular o prazo vencido.\n",
+			prazoInstanciaNome, prazoDataBaseStr, prazoDiasLimite, unidade, prazoDiasDecorridos,
+		)
+	}
+
 	if len(histLines) > 0 {
 		sb.WriteString("\n=== HISTÓRICO DE MOVIMENTAÃ‡Ã•ES ===\n")
 		for _, l := range histLines {
@@ -1986,6 +2276,14 @@ func GerarCobrancaEmailHandler(c *gin.Context) {
 		}
 	}
 
+	if semRetorno {
+		if temEmailEnviado {
+			fmt.Fprintf(&sb, "\n=== SITUACAO DO CONTATO ===\nUltimo contato foi um e-mail ENVIADO, sem resposta ('recebido') desde entao, ha %d dia(s). Reforce esse ponto na cobranca.\n", diasSemRetorno)
+		} else {
+			sb.WriteString("\n=== SITUACAO DO CONTATO ===\nNao ha e-mail enviado registrado para este processo (o primeiro contato provavelmente foi feito pelo site/portal da distribuidora). O prazo esta vencido e nao ha retorno. Redija como um PRIMEIRO reforco por e-mail sobre o caso, sem se referir a um e-mail anterior que nao existiu.\n")
+		}
+	}
+
 	// Inclui templates de referÃªncia no contexto (se disponÃ­veis)
 	if tmpl := loadCobrancaTemplates(); tmpl != "" {
 		sb.WriteString("\n=== MODELOS DE REFERÃŠNCIA (use apenas para calibrar tom/estrutura) ===\n")
@@ -1995,8 +2293,9 @@ func GerarCobrancaEmailHandler(c *gin.Context) {
 
 	question := fmt.Sprintf(
 		"Processo #%d — UC %s — Cliente: %s — ConcessionÃ¡ria: %s — Sub-etapa: %s. "+
-			"O prazo de resposta estÃ¡ vencido. Analise o histÃ³rico e e-mails anteriores. "+
-			"Gere as 2 sugestÃµes de e-mail de cobranÃ§a conforme o system prompt.",
+			"O prazo de resposta estÃ¡ vencido. Use o bloco de PRAZO REGULATÃ“RIO jÃ¡ calculado no "+
+			"contexto como fonte da data/dias decorridos â€” NÃƒO infira essa informaÃ§Ã£o do histÃ³rico "+
+			"de movimentaÃ§Ãµes. Gere as 4 sugestÃµes de e-mail de cobranÃ§a conforme o system prompt.",
 		id, uc, cliente, conc, subEtapa,
 	)
 
@@ -2006,13 +2305,12 @@ func GerarCobrancaEmailHandler(c *gin.Context) {
 		sysPrompt = cobrancaSystemPrompt
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
-	defer cancel()
-
-	raw, err := callAisureOpenAI(ctx, nil, question, sb.String(), sysPrompt)
+	// 4 tons x até 150 palavras + HTML + wrapper JSON facilmente passa do teto padrão de
+	// 1024 tokens (visto na prática: campos finais do JSON saindo vazios quando cortado
+	// no meio da geração) — usa um teto maior só aqui.
+	raw, err := callAisureOpenAIMaxTokens(ctx, nil, question, sb.String(), 3000, sysPrompt)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "falha ao gerar cobranÃ§a: " + err.Error()})
-		return
+		return nil, fmt.Errorf("falha ao gerar cobranca: %w", err)
 	}
 
 	// Strip markdown code block if present
@@ -2024,29 +2322,87 @@ func GerarCobrancaEmailHandler(c *gin.Context) {
 	}
 
 	var parsed struct {
-		Subject string `json:"subject"`
-		Opcao1  string `json:"opcao1"`
-		Opcao2  string `json:"opcao2"`
+		Subject  string `json:"subject"`
+		Formal   string `json:"formal"`
+		Direto   string `json:"direto"`
+		Amigavel string `json:"amigavel"`
+		Firme    string `json:"firme"`
 	}
 	if jsonErr := json.Unmarshal([]byte(raw), &parsed); jsonErr != nil {
-		// Fallback: return raw text as opcao1
-		c.JSON(http.StatusOK, gin.H{
-			"subject":        fmt.Sprintf("CobranÃ§a de Resposta — Processo #%d", id),
-			"opcao1":         raw,
-			"opcao2":         "",
-			"uc":             uc,
-			"cliente":        cliente,
-			"concessionaria": conc,
-		})
-		return
+		// Fallback: usa o texto cru como versão formal (as outras ficam vazias — o
+		// frontend já trata tom sem texto como indisponível, sem quebrar o seletor).
+		return &CobrancaResultado{
+			Subject:         fmt.Sprintf("Cobranca de Resposta — Processo #%d", id),
+			Formal:          raw,
+			UC:              uc,
+			Cliente:         cliente,
+			Concessionaria:  conc,
+			Para:            emailPara,
+			Cc:              emailCc,
+			SemRetorno:      semRetorno,
+			TemEmailEnviado: temEmailEnviado,
+			DiasSemRetorno:  diasSemRetorno,
+		}, nil
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"subject":        parsed.Subject,
-		"opcao1":         parsed.Opcao1,
-		"opcao2":         parsed.Opcao2,
-		"uc":             uc,
-		"cliente":        cliente,
-		"concessionaria": conc,
-	})
+	return &CobrancaResultado{
+		Subject:         parsed.Subject,
+		Formal:          parsed.Formal,
+		Direto:          parsed.Direto,
+		Amigavel:        parsed.Amigavel,
+		Firme:           parsed.Firme,
+		UC:              uc,
+		Cliente:         cliente,
+		Concessionaria:  conc,
+		Para:            emailPara,
+		Cc:              emailCc,
+		SemRetorno:      semRetorno,
+		TemEmailEnviado: temEmailEnviado,
+		DiasSemRetorno:  diasSemRetorno,
+	}, nil
+}
+
+// ultimoEmailEnviadoDestinatarios busca o destinatário principal e o conjunto de CC do
+// último e-mail ENVIADO para o processo. O CC devolvido é a união (Para+CC) do e-mail
+// anterior, deduplicada e SEM o endereço que já vai no novo "Para" (evita duplicar o
+// mesmo contato nos dois campos). Endereços podem vir separados por vírgula ou ponto-e-vírgula.
+func ultimoEmailEnviadoDestinatarios(db *gorm.DB, idProcesso int) (para string, cc string) {
+	var paraRaw, ccRaw sql.NullString
+	err := queryRowGorm(db, `
+		SELECT para_email, cc_email FROM FT_EMAILS_PROCESSO
+		WHERE id_processo = ? AND tipo = 'enviado'
+		ORDER BY data_envio DESC LIMIT 1`, idProcesso,
+	).Scan(&paraRaw, &ccRaw)
+	if err != nil {
+		return "", ""
+	}
+	para = strings.TrimSpace(paraRaw.String)
+	if para == "" {
+		return "", ""
+	}
+
+	paraLower := strings.ToLower(para)
+	seen := map[string]bool{paraLower: true}
+	var ccList []string
+	for _, addr := range splitEmailList(ccRaw.String) {
+		low := strings.ToLower(addr)
+		if !seen[low] {
+			seen[low] = true
+			ccList = append(ccList, addr)
+		}
+	}
+	return para, strings.Join(ccList, ", ")
+}
+
+func splitEmailList(raw string) []string {
+	raw = strings.ReplaceAll(raw, ";", ",")
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

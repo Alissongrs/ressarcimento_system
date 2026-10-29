@@ -33,22 +33,22 @@ func main() {
 		log.Fatalf("Coluna 'Deferidos' não encontrada em DM_KANBAN_COLUNAS: %v", err)
 	}
 	var existeDeferidos int
-	if err := db.QueryRow("SELECT COUNT(1) FROM DM_ETAPAS_PROCESSO WHERE etapa IN ('Deferidos','Deferido')").Scan(&existeDeferidos); err != nil {
+	if err := db.QueryRow("SELECT COUNT(1) FROM DM_ETAPAS WHERE etapa IN ('Deferidos','Deferido')").Scan(&existeDeferidos); err != nil {
 		log.Fatalf("Erro ao verificar etapa Deferidos: %v", err)
 	}
 	if existeDeferidos == 0 {
-		if _, err := db.Exec("INSERT INTO DM_ETAPAS_PROCESSO (etapa, id_coluna_kanban) VALUES ('Deferidos', ?)", col2ID); err != nil {
+		if _, err := db.Exec("INSERT INTO DM_ETAPAS (etapa, id_coluna_kanban) VALUES ('Deferidos', ?)", col2ID); err != nil {
 			log.Fatalf("Falha ao criar etapa 'Deferidos': %v", err)
 		}
 	} else {
-		if _, err := db.Exec("UPDATE DM_ETAPAS_PROCESSO SET id_coluna_kanban = ? WHERE etapa IN ('Deferidos','Deferido')", col2ID); err != nil {
+		if _, err := db.Exec("UPDATE DM_ETAPAS SET id_coluna_kanban = ? WHERE etapa IN ('Deferidos','Deferido')", col2ID); err != nil {
 			log.Fatalf("Falha ao ajustar etapa 'Deferidos': %v", err)
 		}
 	}
 
 	// Corrige Validação/Fluxo -> Fluxo de Ressarcimento
 	if _, err := db.Exec(`
-        UPDATE DM_ETAPAS_PROCESSO e
+        UPDATE DM_ETAPAS e
         JOIN DM_KANBAN_COLUNAS kc ON kc.nome_coluna = 'Fluxo de Ressarcimento'
         SET e.id_coluna_kanban = kc.id_coluna
         WHERE e.etapa IN ('Validação','Validacao','Fluxo de Ressarcimento');
@@ -63,7 +63,7 @@ func main() {
 func dump(db *sql.DB) {
 	rows, err := db.Query(`
         SELECT e.etapa, e.id_coluna_kanban, kc.nome_coluna
-        FROM DM_ETAPAS_PROCESSO e
+        FROM DM_ETAPAS e
         LEFT JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban
         WHERE e.etapa IN ('Deferidos','Deferido','Validação','Validacao','Fluxo de Ressarcimento')
         ORDER BY e.etapa;

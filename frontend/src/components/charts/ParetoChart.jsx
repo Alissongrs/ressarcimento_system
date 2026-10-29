@@ -39,7 +39,7 @@ export default function ParetoChart({ data = [], title, height = 220 }) {
             );
           })}
           {/* Pareto line */}
-          <path d={path} stroke="#ef4444" strokeWidth="2" fill="none" />
+          <path d={path} stroke="var(--danger)" strokeWidth="2" fill="none" />
           {/* Right axis (percentage) */}
           {Array.from({ length:5 }, (_,i)=>i*25).map((p,i)=>{
             const y = lineY(p);

@@ -32,7 +32,7 @@ package handlers
 		}
 
 		query := `
-			INSERT INTO Deferimentos (processo_id, status_analise, data_procedencia, credito_simples, credito_dobro, precisa_contestacao, observacoes)
+			INSERT INTO Deferimentos (id_processo, status_analise, data_procedencia, credito_simples, credito_dobro, precisa_contestacao, observacoes)
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON DUPLICATE KEY UPDATE
 			status_analise = VALUES(status_analise), data_procedencia = VALUES(data_procedencia), credito_simples = VALUES(credito_simples),

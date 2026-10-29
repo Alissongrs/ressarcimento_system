@@ -24,7 +24,7 @@ export default function AdminFeedbacks() {
       <h1 className="text-2xl font-semibold mb-1">Feedbacks dos usuários</h1>
       <p className="opacity-70 mb-4">Somente administradores.</p>
       {loading && <div className="opacity-70 sap-loading">Carregando...</div>}
-      {err && <div className="text-red-600 mb-3">{err}</div>}
+      {err && <div className="text-[var(--danger)] mb-3">{err}</div>}
       <div className="space-y-3">
         {items.map((it) => (
           <div key={it.id_feedback} className="rounded-md border border-[var(--border)] bg-[var(--panel)] text-[var(--fg)] p-3">

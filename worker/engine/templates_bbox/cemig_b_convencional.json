@@ -1,0 +1,46 @@
+{
+  "_meta": {
+    "distribuidora": "CEMIG",
+    "grupo": "B",
+    "modalidade": "Convencional",
+    "fonte_calibracao": "_cemig_b_11311.pdf",
+    "data_calibracao": "2026-05-20",
+    "observacoes": "CEMIG B Conv combina PIS+COFINS em valor único. ICMS aliq aparece no item, não no total. Layout idêntico em 3 amostras validadas (11311, 11333, 11347). Bbox y estendido pra capturar vírgula entre dígitos; group='last' pega TOTAL após linhas anteriores."
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [0.59, 0.215, 0.64, 0.225, 0],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "_anchor_palavra": "B3 em y=0.219, x~0.61"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [0.50, 0.215, 0.60, 0.225, 0],
+      "regex": "(Verde|Azul|Convencional|Branca)",
+      "_anchor_palavra": "Convencional em y=0.219, x=0.502..0.594"
+    },
+    "valor_total_fatura": {
+      "bbox": [0.52, 0.328, 0.59, 0.344, 0],
+      "regex": "([\\d.]+,\\d{2})",
+      "group": "last",
+      "_anchor_palavra": "linha TOTAL (last match após Contrib Ilum)"
+    },
+    "pis_cofins_combinado": {
+      "bbox": [0.60, 0.328, 0.65, 0.344, 0],
+      "regex": "(\\d+,\\d{2})",
+      "group": "last",
+      "_anchor_palavra": "TOTAL coluna PIS/COFINS"
+    },
+    "icms_base": {
+      "bbox": [0.66, 0.328, 0.73, 0.344, 0],
+      "regex": "([\\d.]+,\\d{2})",
+      "group": "last",
+      "_anchor_palavra": "TOTAL coluna Base ICMS"
+    },
+    "icms_valor": {
+      "bbox": [0.80, 0.328, 0.86, 0.344, 0],
+      "regex": "(\\d+,\\d{2})",
+      "group": "last",
+      "_anchor_palavra": "TOTAL coluna ICMS valor"
+    }
+  }
+}

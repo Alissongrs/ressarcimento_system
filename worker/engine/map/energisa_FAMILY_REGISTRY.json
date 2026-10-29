@@ -1,0 +1,123 @@
+{
+ "_documento": "Registry família ENERGISA — distribuidoras que compartilham 100% do template DANF3E base",
+ "_uso": "Quando o extrator identificar uma das distribuidoras abaixo, usa 'energisa_extraction_map.json' como base e aplica apenas as substituições listadas aqui.",
+ "_validado": "ENERGISA MS testado com sample id 26322 — confirmado idêntico ao SS.",
+ "mapa_base": "energisa_extraction_map.json",
+ "distribuidoras": {
+  "ENERGISA_SUL_SUDESTE": {
+   "razao_social": "ENERGISA SUL-SUDESTE - DISTRIBUIDORA DE ENERGIA S.A.",
+   "ufs": [
+    "SP"
+   ],
+   "icms_pct": 18,
+   "url_chave_acesso": "https://dfe-portal.svrs.rs.gov.br/nf3e/consulta",
+   "_volume": "~3000",
+   "_status": "TESTADO em produção"
+  },
+  "ENERGISA_MINAS_RIO": {
+   "razao_social": "ENERGISA MINAS RIO - DISTRIBUIDORA DE ENERGIA S.A.",
+   "_aliases_no_banco": [
+    "ENERGISA MR",
+    "ENERGISA MG",
+    "ENERGISA NF"
+   ],
+   "ufs": [
+    "MG",
+    "RJ"
+   ],
+   "icms_pct_mg": 18,
+   "icms_pct_rj": 24,
+   "url_chave_acesso": "http://www.sped.fazenda.mg.gov.br/spedmg/nf3e",
+   "_volume": "~160",
+   "_status": "VALIDADO — mesmo template SS"
+  },
+  "ENERGISA_TOCANTINS": {
+   "razao_social": "ENERGISA TOCANTINS - DISTRIBUIDORA DE ENERGIA S.A.",
+   "cnpj_emissor": "25.086.034/0001-71",
+   "ie_emissor": "29.031.998-6",
+   "endereco_emissor": "104 Norte, Conj. IV, Lote 12A - Plano Diretor Norte",
+   "cep_emissor": "77006-032",
+   "cidade_uf_emissor": "Palmas/TO",
+   "ufs": [
+    "TO"
+   ],
+   "icms_pct": 20,
+   "tensao_tipica_A4_v": "13800",
+   "url_chave_acesso": "https://dfe-portal.svrs.rs.gov.br/nf3e/consulta",
+   "_volume": "62",
+   "_status": "TESTADO (id 28472)",
+   "_diferenca": "Medidor pode começar com dígito (06000066479) em vez de letra (W...)"
+  },
+  "ENERGISA_MS": {
+   "razao_social": "ENERGISA MATO GROSSO DO SUL - DISTR. DE ENERGIA S.A.",
+   "cnpj_emissor": "15.413.826/0001-50",
+   "ie_emissor": "28.105.553-0",
+   "endereco_emissor": "Av. Gury Marques, 8000",
+   "cep_emissor": "79072-900",
+   "cidade_uf_emissor": "Campo Grande/MS",
+   "ufs": [
+    "MS"
+   ],
+   "icms_pct": 17,
+   "url_chave_acesso": "https://www.dfe.ms.gov.br/nf3e/consulta",
+   "_volume": "355",
+   "_status": "VALIDADO (id 26322)",
+   "_diferenca": "Medidor formato '00000Z87314' (Z no meio). URL SEFAZ-MS específica."
+  },
+  "ENERGISA_MT": {
+   "razao_social": "ENERGISA MATO GROSSO - DISTRIBUIDORA DE ENERGIA S.A.",
+   "ufs": [
+    "MT"
+   ],
+   "icms_pct": 17,
+   "_volume": "143",
+   "_status": "ASSUMIDO — validar com sample id 28458"
+  },
+  "ENERGISA_PB": {
+   "razao_social": "ENERGISA PARAIBA - DISTRIBUIDORA DE ENERGIA S.A.",
+   "ufs": [
+    "PB"
+   ],
+   "icms_pct": 18,
+   "_volume": "192",
+   "_status": "ASSUMIDO — validar com sample id 26334"
+  },
+  "ENERGISA_SE": {
+   "razao_social": "ENERGISA SERGIPE - DISTRIBUIDORA DE ENERGIA S.A.",
+   "ufs": [
+    "SE"
+   ],
+   "icms_pct": 27,
+   "_volume": "136",
+   "_status": "ASSUMIDO — validar com sample id 26288 (ICMS 27% típico SE)"
+  }
+ },
+ "_overrides_universais": {
+  "icms_aliquota_valida": [
+   17,
+   18,
+   20,
+   24,
+   27
+  ],
+  "medidor_regex_universal": "(W\\d{10}|0\\d{10}|\\d{11}|[0]{5}[A-Z]\\d{5})"
+ },
+ "_volume_coberto_total": "~4.048 faturas (~80% do volume Energisa da base)",
+ "gd_scee": {
+  "_obs": "Energisa MT/TO GD: Energia At(v/o) Injetada (- Ponta/- Fora Ponta | mUC MM/AAAA oPT/mPT) KWH <qtd>; Saldo Ac: N(P) N(FP); fallback Saldo Acumulado",
+  "injecao": {
+   "regex": "Energia\\s+At[vo]\\s+[Ii]njetada[^\\n]*?[Kk][Ww][Hh]\\s+([\\d.]+,\\d{2})",
+   "group": 1,
+   "multi": true,
+   "abs": true
+  },
+  "saldo_ponta": {
+   "regex": "Saldo\\s+Ac:?\\s*([\\d.]+)\\s*\\(P\\)",
+   "group": 1
+  },
+  "saldo_fponta": {
+   "regex": "\\(P\\)\\s*([\\d.]+)\\s*\\(FP\\)",
+   "group": 1
+  }
+ }
+}

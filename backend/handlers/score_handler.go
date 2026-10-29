@@ -89,7 +89,7 @@ func scoreFromCache(processoID string) (*ScoreResponse, bool) {
 	err := database.GormDB_App.Raw(`
 		SELECT score, label, percentual, calculado_em
 		FROM FT_SCORE_PROGRESSAO
-		WHERE id_requisicao = ?`, processoID).Scan(&cached).Error
+		WHERE id_processo = ?`, processoID).Scan(&cached).Error
 	if err != nil || cached.CalculadoEm.IsZero() {
 		return nil, false
 	}
@@ -107,7 +107,7 @@ func scoreFromCache(processoID string) (*ScoreResponse, bool) {
 // saveScoreCache persiste o score calculado no banco (INSERT ou UPDATE).
 func saveScoreCache(processoID string, r ScoreResponse) {
 	database.GormDB_App.Exec(`
-		INSERT INTO FT_SCORE_PROGRESSAO (id_requisicao, score, label, percentual, calculado_em, modelo_versao)
+		INSERT INTO FT_SCORE_PROGRESSAO (id_processo, score, label, percentual, calculado_em, modelo_versao)
 		VALUES (?, ?, ?, ?, NOW(), '1.0')
 		ON DUPLICATE KEY UPDATE
 		  score = VALUES(score),
@@ -130,21 +130,11 @@ func InvalidateScoreCache(processoID any) {
 		`UPDATE FT_PROCESSOS SET score_percentual = NULL WHERE id_processo = ?`, processoID)
 }
 
-// RegistrarTrainingLog grava o resultado real quando um processo sai de Ativos.
-// colunaDestino IN (3,4,5) = avançou; (6,99) = não avançou.
+// RegistrarTrainingLog era um log de treino do score (tabela FT_SCORE_TRAINING_LOG,
+// removida). Mantido como no-op para não quebrar os chamadores; o Score de
+// Progressão continua funcionando sem esse log.
 func RegistrarTrainingLog(processoID any, colunaDestino int, features ScoreData) {
-	avancou := 0
-	if colunaDestino == 3 || colunaDestino == 4 || colunaDestino == 5 {
-		avancou = 1
-	}
-	featJSON, err := json.Marshal(features)
-	if err != nil {
-		return
-	}
-	database.GormDB_App.Exec(`
-		INSERT INTO FT_SCORE_TRAINING_LOG (id_requisicao, avancou, features_json)
-		VALUES (?, ?, ?)`,
-		processoID, avancou, string(featJSON))
+	// no-op: FT_SCORE_TRAINING_LOG removida.
 }
 
 // ScoreProcessoHandler retorna o Score de Progressão para um processo específico
@@ -229,7 +219,7 @@ func PrecalcularScoresHandler(c *gin.Context) {
 		JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
 		LEFT JOIN FT_SCORE_PROGRESSAO sp ON sp.id_requisicao = r.id_requisicao
 			AND sp.calculado_em > DATE_SUB(NOW(), INTERVAL 24 HOUR)
-		WHERE p.id_coluna = 1
+		WHERE (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */ = 1
 		  AND sp.id_requisicao IS NULL`
 
 	rows, err := database.GormDB_App.Raw(qAtivos).Rows()

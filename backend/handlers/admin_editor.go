@@ -16,7 +16,7 @@ import (
 // AdminEditPayload consolida campos para criação/edição completa de um processo
 type AdminEditPayload struct {
 	// Identificação
-	ProcessoID *int    `json:"processo_id,omitempty"`
+	ProcessoID *int    `json:"id_processo,omitempty"`
 	CriarNovo  bool    `json:"criar_novo"`
 	Coluna     *string `json:"coluna,omitempty"`
 
@@ -145,13 +145,14 @@ func AdminEditProcesso(c *gin.Context) {
 		var colID sql.NullInt64
 		var colNome sql.NullString
 		_ = queryRowGorm(tx, `
-			SELECT k.id_coluna, k.nome_coluna
-			  FROM DM_ETAPAS_PROCESSO e
-			  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-			 WHERE e.id_etapa_processo = ?`,
+			SELECT
+			  CASE WHEN e.id_etapa=6 THEN 5 WHEN e.id_etapa IN (4,5) THEN 4 ELSE 1 END AS id_coluna,
+			  CASE WHEN e.id_etapa=6 THEN 'Concluídos' WHEN e.id_etapa IN (4,5) THEN 'Faturamento' ELSE 'Ativos' END AS nome_coluna
+			  FROM DM_ETAPAS e
+			 WHERE e.id_etapa = ?`,
 			etapaID.Int64,
 		).Scan(&colID, &colNome)
-		_, err = execGorm(tx, `INSERT INTO FT_PROCESSOS (id_processo, id_etapa_processo, sub_etapa, id_sub_etapa_processo, id_coluna, nome_coluna, relevancia, data_alerta, ultima_atualizacao)
+		_, err = execGorm(tx, `INSERT INTO FT_PROCESSOS (id_processo, id_etapa_atual /* TODO V2 */, sub_etapa, id_status_atual /* TODO V2 */, id_coluna, nome_coluna, relevancia, data_alerta, ultima_atualizacao)
                           VALUES (?, ?, ?, ?, ?, ?, COALESCE(?,0), NULLIF(?, ''), COALESCE(NULLIF(?, ''), NOW()))`,
 			pid, etapaID.Int64, subEtapa, nullIntToIface(subEtapaID), nullIntToIface(colID), func() interface{} {
 				if colNome.Valid {
@@ -166,7 +167,7 @@ func AdminEditProcesso(c *gin.Context) {
 		createdProcess = true
 	} else {
 		if body.ProcessoID == nil || *body.ProcessoID <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "processo_id obrigatório ou use criar_novo"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "id_processo obrigatório ou use criar_novo"})
 			return
 		}
 		pid = *body.ProcessoID
@@ -222,7 +223,14 @@ func AdminEditProcesso(c *gin.Context) {
 			colLabel := strings.TrimSpace(*body.Coluna)
 			var colID sql.NullInt64
 			var colNome sql.NullString
-			_ = queryRowGorm(tx, `SELECT id_coluna, nome_coluna FROM DM_KANBAN_COLUNAS WHERE nome_coluna = ? LIMIT 1`, colLabel).Scan(&colID, &colNome)
+			_ = queryRowGorm(tx, `SELECT id_coluna, nome_coluna FROM (
+				SELECT 6 AS id_coluna, 'Indeferidos' AS nome_coluna
+				UNION ALL SELECT 99, 'Suspensos'
+				UNION ALL SELECT 5, 'Concluídos'
+				UNION ALL SELECT 4, 'Faturamento'
+				UNION ALL SELECT 2, 'Deferidos'
+				UNION ALL SELECT 1, 'Ativos'
+			) km WHERE km.nome_coluna = ? LIMIT 1`, colLabel).Scan(&colID, &colNome)
 			if colID.Valid {
 				set = append(set, "id_coluna = ?")
 				args = append(args, colID.Int64)
@@ -236,18 +244,19 @@ func AdminEditProcesso(c *gin.Context) {
 		}
 		if body.Etapa != nil {
 			var etapaID int
-			if err = queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", strings.TrimSpace(*body.Etapa)).Scan(&etapaID); err == nil {
-				set = append(set, "id_etapa_processo = ?")
+			if err = queryRowGorm(tx, "SELECT id_etapa FROM DM_ETAPAS WHERE nome = ?", strings.TrimSpace(*body.Etapa)).Scan(&etapaID); err == nil {
+				set = append(set, "id_etapa_atual /* TODO V2 */ = ?")
 				args = append(args, etapaID)
 				// Só sobrescreve a coluna quando o usuário NÃO definiu explicitamente a coluna
 				if body.Coluna == nil || strings.TrimSpace(*body.Coluna) == "" {
 					var colID sql.NullInt64
 					var colNome sql.NullString
 					_ = queryRowGorm(tx, `
-						SELECT k.id_coluna, k.nome_coluna
-						  FROM DM_ETAPAS_PROCESSO e
-						  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-						 WHERE e.id_etapa_processo = ?`,
+						SELECT
+						  CASE WHEN e.id_etapa=6 THEN 5 WHEN e.id_etapa IN (4,5) THEN 4 ELSE 1 END AS id_coluna,
+						  CASE WHEN e.id_etapa=6 THEN 'Concluídos' WHEN e.id_etapa IN (4,5) THEN 'Faturamento' ELSE 'Ativos' END AS nome_coluna
+						  FROM DM_ETAPAS e
+						 WHERE e.id_etapa = ?`,
 						etapaID,
 					).Scan(&colID, &colNome)
 					set = append(set, "id_coluna = ?")
@@ -265,7 +274,7 @@ func AdminEditProcesso(c *gin.Context) {
 			set = append(set, "sub_etapa = ?")
 			args = append(args, strings.TrimSpace(*body.SubEtapa))
 			subID, _ := resolveSubEtapaIDGorm(tx, strings.TrimSpace(*body.SubEtapa))
-			set = append(set, "id_sub_etapa_processo = ?")
+			set = append(set, "id_status_atual /* TODO V2 */ = ?")
 			args = append(args, nullIntToIface(subID))
 		}
 		// Suspensos: força flag/coluna/sub_etapa mesmo que sub_etapa venha vazio
@@ -275,7 +284,7 @@ func AdminEditProcesso(c *gin.Context) {
 			set = append(set, "id_coluna = 99")
 			set = append(set, "nome_coluna = 'Suspensos'")
 			set = append(set, "sub_etapa = 'Suspenso'")
-			set = append(set, "id_sub_etapa_processo = NULL")
+			set = append(set, "id_status_atual /* TODO V2 */ = NULL")
 		}
 		if body.Relevancia != nil {
 			set = append(set, "relevancia = ?")
@@ -371,7 +380,7 @@ func AdminEditProcesso(c *gin.Context) {
 			qs = append(qs, "?")
 		}
 		// segurança: garanta que pertence ao processo
-		q := "DELETE FROM FT_HISTORICO_MOVIMENTACOES WHERE id_historico IN (" + strings.Join(qs, ",") + ") AND id_requisicao = ?"
+		q := "DELETE FROM FT_HISTORICO_MOVIMENTACOES WHERE id_historico IN (" + strings.Join(qs, ",") + ") AND id_processo = ?"
 		for _, id := range body.HistoricoDeleteIDs {
 			args = append(args, id)
 		}
@@ -387,12 +396,13 @@ func AdminEditProcesso(c *gin.Context) {
 		for _, h := range body.Historico {
 			if h.IDHistorico > 0 {
 				// Update
-				_, err = execGorm(tx, `UPDATE FT_HISTORICO_MOVIMENTACOES SET 
-                                    status_anterior = ?, status_novo = ?, etapa_anterior = ?, etapa_nova = ?, sub_etapa = ?,
-                                    relevancia_anterior = ?, relevancia_nova = ?, comentario = ?, justificativa_atraso = ?, tipo_movimentacao = ?, data_movimentacao = ?
-                                  WHERE id_historico = ? AND id_requisicao = ?`,
-					adminNullIfEmpty(h.StatusAnterior), adminNullIfEmpty(h.StatusNovo), adminNullIfEmpty(h.EtapaAnterior), adminNullIfEmpty(h.EtapaNova), adminNullIfEmpty(h.SubEtapa),
-					adminBoolStrOrNull(h.RelevanciaAnterior), adminBoolStrOrNull(h.RelevanciaNova), strings.TrimSpace(h.Comentario), adminNullIfEmpty(h.JustificativaAtraso), adminNullIfEmpty(h.TipoMovimentacao), h.Data,
+				_, err = execGorm(tx, `UPDATE FT_HISTORICO_MOVIMENTACOES SET
+                                    id_etapa_anterior = (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+                                    id_etapa_nova     = (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+                                    comentario = ?, justificativa_atraso = ?, tipo_movimentacao = ?, data_movimentacao = ?
+                                  WHERE id_historico = ? AND id_processo = ?`,
+					adminNullIfEmpty(h.EtapaAnterior), adminNullIfEmpty(h.EtapaNova),
+					strings.TrimSpace(h.Comentario), adminNullIfEmpty(h.JustificativaAtraso), adminNullIfEmpty(h.TipoMovimentacao), h.Data,
 					h.IDHistorico, pid,
 				)
 				if err != nil {
@@ -401,14 +411,16 @@ func AdminEditProcesso(c *gin.Context) {
 				}
 			} else {
 				// Insert
-				_, err = execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES (
-                                    id_requisicao, id_usuario_gestor, status_anterior, status_novo,
-                                    etapa_anterior, etapa_nova, sub_etapa,
-                                    relevancia_anterior, relevancia_nova,
-                                    comentario, justificativa_atraso, tipo_movimentacao, data_movimentacao)
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-					pid, userIDNull, adminNullIfEmpty(h.StatusAnterior), adminNullIfEmpty(h.StatusNovo), adminNullIfEmpty(h.EtapaAnterior), adminNullIfEmpty(h.EtapaNova), adminNullIfEmpty(h.SubEtapa),
-					adminBoolStrOrNull(h.RelevanciaAnterior), adminBoolStrOrNull(h.RelevanciaNova), strings.TrimSpace(h.Comentario), adminNullIfEmpty(h.JustificativaAtraso), adminNullIfEmpty(h.TipoMovimentacao), h.Data)
+				_, err = execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES
+                                    (id_processo, id_usuario_gestor,
+                                     id_etapa_anterior, id_etapa_nova,
+                                     comentario, justificativa_atraso, tipo_movimentacao, data_movimentacao)
+                                  VALUES (?, ?,
+                                     (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+                                     (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+                                     ?, ?, ?, ?)`,
+					pid, userIDNull, adminNullIfEmpty(h.EtapaAnterior), adminNullIfEmpty(h.EtapaNova),
+					strings.TrimSpace(h.Comentario), adminNullIfEmpty(h.JustificativaAtraso), adminNullIfEmpty(h.TipoMovimentacao), h.Data)
 				if err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao inserir histórico: " + err.Error()})
 					return
@@ -433,7 +445,7 @@ func AdminEditProcesso(c *gin.Context) {
 	if createdProcess {
 		syncSnapshotFromOriginal(pid, 0)
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "processo_id": pid})
+	c.JSON(http.StatusOK, gin.H{"ok": true, "id_processo": pid})
 }
 
 // AdminNextProcessID retorna o próximo ID sugerido para criação de processo

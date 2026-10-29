@@ -2,6 +2,7 @@
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -435,30 +436,29 @@ func CreateProcessoFromDesvioKwh(c *gin.Context) {
 	var colID sql.NullInt64
 	var colNome sql.NullString
 	_ = queryRowGorm(tx, `
-		SELECT k.id_coluna, k.nome_coluna
-		  FROM DM_ETAPAS_PROCESSO e
-		  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-		 WHERE e.id_etapa_processo = ?`,
+		SELECT
+			CASE WHEN e.id_etapa=6 THEN 5 WHEN e.id_etapa IN (4,5) THEN 4 ELSE 1 END AS id_coluna,
+			CASE WHEN e.id_etapa=6 THEN 'Concluídos' WHEN e.id_etapa IN (4,5) THEN 'Faturamento' ELSE 'Ativos' END AS nome_coluna
+		  FROM DM_ETAPAS e
+		 WHERE e.id_etapa = ?`,
 		1,
 	).Scan(&colID, &colNome)
-	if _, err := execGorm(tx, `INSERT INTO FT_PROCESSOS (id_processo, id_etapa_processo, sub_etapa, id_sub_etapa_processo, id_coluna, nome_coluna, relevancia, ultima_atualizacao) VALUES (?, ?, ?, ?, ?, ?, 0, NOW())`, pid, 1, subEtapa, nullIntToIface(subID), nullIntToIface(colID), func() interface{} { if colNome.Valid { return colNome.String }; return nil }()); err != nil {
+	if _, err := execGorm(tx, `INSERT INTO FT_PROCESSOS (id_processo, id_etapa_atual /* TODO V2 */, sub_etapa, id_status_atual /* TODO V2 */, id_coluna, nome_coluna, relevancia, ultima_atualizacao) VALUES (?, ?, ?, ?, ?, ?, 0, NOW())`, pid, 1, subEtapa, nullIntToIface(subID), nullIntToIface(colID), func() interface{} { if colNome.Valid { return colNome.String }; return nil }()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao salvar processo"})
 		return
 	}
 
-	statusNome := getStatusNomeByRequisicaoGorm(tx, int64(pid))
-	_, _ = execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao) VALUES (?, NULL, ?, ?, '', 'Distribuidora', ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'movimentacao')`,
-		pid, statusNome, statusNome, subEtapa, "Requisição criada via análise de desvio KWH FPonta",
-	)
+	// P1-1: histórico no schema V2 (processo recém-criado em etapa 'Distribuidora' → novo = atual).
+	_ = registrarHistoricoV2(tx, pid, 0, "movimentacao", "Requisição criada via análise de desvio KWH FPonta", nil, nil)
 
 	if strings.TrimSpace(link.String) != "" {
-		_, _ = execGorm(tx, `INSERT INTO FT_REQUISICOES_FATURAS (id_requisicao, link, mes_ref, dt_vencimento, valor_total) VALUES (?, ?, ?, NULL, NULL)`,
+		if _, errF := execGorm(tx, `INSERT INTO FT_REQUISICOES_FATURAS (id_processo, link, mes_ref, dt_vencimento, valor_total) VALUES (?, ?, ?, NULL, NULL)`,
 			pid, link.String, valOrNullStr(mesRef.String),
-		)
-		statusNome := getStatusNomeByRequisicaoGorm(tx, int64(pid))
-		_, _ = execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao) VALUES (?, NULL, ?, ?, '', 'Distribuidora', ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'fatura')`,
-			pid, statusNome, statusNome, subEtapa, "Fatura selecionada: "+strings.TrimSpace(link.String),
-		)
+		); errF != nil {
+			log.Printf("Aviso: falha ao vincular fatura (req %d): %v", pid, errF)
+		}
+		// P1-1: histórico no schema V2.
+		_ = registrarHistoricoV2(tx, pid, 0, "fatura", "Fatura selecionada: "+strings.TrimSpace(link.String), nil, nil)
 	}
 
 	// vw_processos_desvio_media_kwh_fponta não possui flag de criação; nada a atualizar aqui.

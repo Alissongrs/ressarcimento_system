@@ -145,7 +145,7 @@ const ModalEmail = ({ processo, onClose }) => {
               value={para}
               onChange={(e) => setPara(e.target.value)}
               placeholder="Para (use ; para múltiplos)"
-              className="w-full p-2 border-b focus:outline-none focus:border-blue-500"
+              className="w-full p-2 border-b focus:outline-none focus:border-[var(--accent)]"
             />
             <div className="flex gap-4">
               <input
@@ -153,14 +153,14 @@ const ModalEmail = ({ processo, onClose }) => {
                 value={cc}
                 onChange={(e) => setCc(e.target.value)}
                 placeholder="Cc (use ; para múltiplos)"
-                className="w-1/2 p-2 border-b focus:outline-none focus:border-blue-500"
+                className="w-1/2 p-2 border-b focus:outline-none focus:border-[var(--accent)]"
               />
               <input
                 type="text"
                 value={cco}
                 onChange={(e) => setCco(e.target.value)}
                 placeholder="Cco (use ; para múltiplos)"
-                className="w-1/2 p-2 border-b focus:outline-none focus:border-blue-500"
+                className="w-1/2 p-2 border-b focus:outline-none focus:border-[var(--accent)]"
               />
             </div>
             <input
@@ -168,7 +168,7 @@ const ModalEmail = ({ processo, onClose }) => {
               value={assunto}
               onChange={(e) => setAssunto(e.target.value)}
               placeholder="Assunto"
-              className="w-full p-2 border-b focus:outline-none focus:border-blue-500"
+              className="w-full p-2 border-b focus:outline-none focus:border-[var(--accent)]"
             />
             <ReactQuill
               theme="snow"
@@ -217,7 +217,7 @@ const ModalEmail = ({ processo, onClose }) => {
             ) : historicoEmails.length > 0 ? (
               historicoEmails.map((email) => (
                 <div key={email.id_email} className="glass-card border rounded-lg p-4 mb-4">
-                  <div className="grid grid-cols-2 gap-x-4 text-sm text-gray-600 border-b pb-3 mb-3">
+                  <div className="grid grid-cols-2 gap-x-4 text-sm border-b pb-3 mb-3" style={{ color: 'color-mix(in srgb, var(--fg) 55%, transparent)' }}>
                     <p className="flex items-center gap-2">
                       <User size={14} /> <strong>De:</strong> {email.de_email}
                     </p>

@@ -1,0 +1,573 @@
+{
+  "_documento": "MASTER INDEX — Mapeamento de nomes de distribuidoras (como aparecem no banco) → arquivo de mapa de extração",
+  "_uso": "Use este JSON pra resolver o nome da distribuidora no banco. Lookup direto pelo nome → pega o arquivo de mapa e (opcionalmente) qual filial usar dentro do mapa.",
+  "_total_distribuidoras_cobertas": 71,
+  "_total_volume_coberto": "~25.500 faturas (~99% da base)",
+  "_data_atualizacao": "2026-05-14 (Energisa expansion)",
+  "indice_por_nome_banco": {
+    "NEOENERGIA COSERN": {
+      "mapa": "neoenergia_cosern_extraction_map.json",
+      "registry": "neoenergia_FAMILY_REGISTRY.json",
+      "filial": "NEOENERGIA_COSERN_RN",
+      "volume": 84,
+      "status": "VALIDADO"
+    },
+    "NEOENERGIA BA (COELBA)": {
+      "mapa": "neoenergia_cosern_extraction_map.json",
+      "registry": "neoenergia_FAMILY_REGISTRY.json",
+      "filial": "NEOENERGIA_COELBA_BA",
+      "volume": 559,
+      "status": "VALIDADO"
+    },
+    "NEOENERGIA COELBA": {
+      "mapa": "neoenergia_cosern_extraction_map.json",
+      "registry": "neoenergia_FAMILY_REGISTRY.json",
+      "filial": "NEOENERGIA_COELBA_BA",
+      "volume": 21,
+      "status": "VALIDADO"
+    },
+    "NEOENERGIA PE (CELPE)": {
+      "mapa": "neoenergia_cosern_extraction_map.json",
+      "registry": "neoenergia_FAMILY_REGISTRY.json",
+      "filial": "NEOENERGIA_CELPE_PE",
+      "volume": 660,
+      "status": "ASSUMIDO"
+    },
+    "NEOENERGIA PERNAMBUCO": {
+      "mapa": "neoenergia_cosern_extraction_map.json",
+      "registry": "neoenergia_FAMILY_REGISTRY.json",
+      "filial": "NEOENERGIA_CELPE_PE",
+      "volume": 5,
+      "status": "ASSUMIDO"
+    },
+    "COMPANHIA ENERGÉTICA DE PERNAMBUCO": {
+      "mapa": "neoenergia_cosern_extraction_map.json",
+      "registry": "neoenergia_FAMILY_REGISTRY.json",
+      "filial": "NEOENERGIA_CELPE_PE",
+      "volume": 6,
+      "status": "ASSUMIDO"
+    },
+    "NEOENERGIA BRASILIA (CEB)": {
+      "mapa": "neoenergia_cosern_extraction_map.json",
+      "registry": "neoenergia_FAMILY_REGISTRY.json",
+      "filial": "NEOENERGIA_CEB_DF",
+      "volume": 247,
+      "status": "ASSUMIDO"
+    },
+    "NEOENERGIA BRASILIA": {
+      "mapa": "neoenergia_cosern_extraction_map.json",
+      "registry": "neoenergia_FAMILY_REGISTRY.json",
+      "filial": "NEOENERGIA_CEB_DF",
+      "volume": 24,
+      "status": "ASSUMIDO"
+    },
+    "NEOENERGIA": {
+      "mapa": "neoenergia_cosern_extraction_map.json",
+      "registry": "neoenergia_FAMILY_REGISTRY.json",
+      "filial": "GENERICO",
+      "volume": 5,
+      "status": "FALLBACK",
+      "_obs": "Nome genérico — desambiguar pelo CNPJ"
+    },
+    "CPFL SANTA CRUZ": {
+      "mapa": "cpfl_santacruz_extraction_map.json",
+      "registry": "cpfl_FAMILY_REGISTRY.json",
+      "filial": "CPFL_SANTA_CRUZ_JAGUARI",
+      "volume": 69,
+      "status": "VALIDADO"
+    },
+    "CPFL PAULISTA": {
+      "mapa": "cpfl_santacruz_extraction_map.json",
+      "registry": "cpfl_FAMILY_REGISTRY.json",
+      "filial": "CPFL_PAULISTA",
+      "volume": 881,
+      "status": "VALIDADO"
+    },
+    "CPFL PIRATININGA": {
+      "mapa": "cpfl_santacruz_extraction_map.json",
+      "registry": "cpfl_FAMILY_REGISTRY.json",
+      "filial": "CPFL_PIRATININGA",
+      "volume": 1078,
+      "status": "ASSUMIDO"
+    },
+    "RGE": {
+      "mapa": "cpfl_santacruz_extraction_map.json",
+      "registry": "cpfl_FAMILY_REGISTRY.json",
+      "filial": "RGE",
+      "volume": 154,
+      "status": "ASSUMIDO"
+    },
+    "RGE SUL": {
+      "mapa": "cpfl_santacruz_extraction_map.json",
+      "registry": "cpfl_FAMILY_REGISTRY.json",
+      "filial": "RGE",
+      "volume": 13,
+      "status": "ASSUMIDO"
+    },
+    "RGE SUL DISTRIBUIDORA DE ENERGIA S.A.": {
+      "mapa": "cpfl_santacruz_extraction_map.json",
+      "registry": "cpfl_FAMILY_REGISTRY.json",
+      "filial": "RGE",
+      "volume": 6,
+      "status": "ASSUMIDO"
+    },
+    "EDP SP": {
+      "mapa": "edp_extraction_map.json",
+      "filial": "EDP_SP",
+      "volume": 540,
+      "status": "VALIDADO"
+    },
+    "EDP SP DISTRIB DE ENERGIA SA": {
+      "mapa": "edp_extraction_map.json",
+      "filial": "EDP_SP",
+      "volume": 10,
+      "status": "VALIDADO"
+    },
+    "EDP ES": {
+      "mapa": "edp_extraction_map.json",
+      "filial": "EDP_ES",
+      "volume": 279,
+      "status": "ASSUMIDO"
+    },
+    "ELEKTRO": {
+      "mapa": "elektro_ms_extraction_map.json",
+      "registry": "elektro_copel_FAMILY_REGISTRY.json",
+      "filial": "ELEKTRO_SP_FERNANDOPOLIS",
+      "volume": 39,
+      "status": "VALIDADO"
+    },
+    "ELEKTRO SP": {
+      "mapa": "elektro_ms_extraction_map.json",
+      "registry": "elektro_copel_FAMILY_REGISTRY.json",
+      "filial": "ELEKTRO_SP_FERNANDOPOLIS",
+      "volume": 954,
+      "status": "VALIDADO"
+    },
+    "ELEKTRO MS": {
+      "mapa": "elektro_ms_extraction_map.json",
+      "registry": "elektro_copel_FAMILY_REGISTRY.json",
+      "filial": "ELEKTRO_MS_TRES_LAGOAS",
+      "volume": 6,
+      "status": "VALIDADO"
+    },
+    "ELEKTRO REDES SA": {
+      "mapa": "elektro_ms_extraction_map.json",
+      "registry": "elektro_copel_FAMILY_REGISTRY.json",
+      "filial": "ELEKTRO_SP_FERNANDOPOLIS",
+      "volume": 15,
+      "status": "VALIDADO"
+    },
+    "ELEKTRO REDES S.A.": {
+      "mapa": "elektro_ms_extraction_map.json",
+      "registry": "elektro_copel_FAMILY_REGISTRY.json",
+      "filial": "ELEKTRO_SP_FERNANDOPOLIS",
+      "volume": 15,
+      "status": "VALIDADO"
+    },
+    "COPEL": {
+      "mapa": null,
+      "registry": "elektro_copel_FAMILY_REGISTRY.json",
+      "filial": "COPEL_DISTRIBUICAO_PR",
+      "volume": 888,
+      "status": "PENDENTE",
+      "_obs": "COPEL tem layout proprio diferente do Elektro DANFELEKA. Precisa copel_extraction_map.json separado."
+    },
+    "Copel Distribuição S.A.": {
+      "mapa": null,
+      "registry": "elektro_copel_FAMILY_REGISTRY.json",
+      "filial": "COPEL_DISTRIBUICAO_PR",
+      "volume": 5,
+      "status": "PENDENTE"
+    },
+    "EQUATORIAL GO (ENEL GOIAS)": {
+      "mapa": "equatorial_goias_extraction_map.json",
+      "volume": 568,
+      "status": "VALIDADO"
+    },
+    "EQUATORIAL GO": {
+      "mapa": "equatorial_goias_extraction_map.json",
+      "volume": 31,
+      "status": "VALIDADO"
+    },
+    "ENEL GOIAS": {
+      "mapa": "equatorial_goias_extraction_map.json",
+      "volume": 0,
+      "status": "VALIDADO"
+    },
+    "EQUATORIAL PA": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "EQUATORIAL_PARA",
+      "volume": 332,
+      "status": "VALIDADO"
+    },
+    "Equatorial Pará": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "EQUATORIAL_PARA",
+      "volume": 6,
+      "status": "VALIDADO"
+    },
+    "Equatorial Pará Distribuidora de Energia S.A.": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "EQUATORIAL_PARA",
+      "volume": 6,
+      "status": "VALIDADO"
+    },
+    "EQUATORIAL MA": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "EQUATORIAL_MARANHAO",
+      "volume": 22,
+      "status": "ASSUMIDO"
+    },
+    "EQUATORIAL MAR": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "EQUATORIAL_MARANHAO",
+      "volume": 147,
+      "status": "ASSUMIDO"
+    },
+    "Equatorial Maranhão Distribuidora de Energia S.A.": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "EQUATORIAL_MARANHAO",
+      "volume": 5,
+      "status": "ASSUMIDO"
+    },
+    "EQUATORIAL AL": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "EQUATORIAL_ALAGOAS",
+      "volume": 185,
+      "status": "ASSUMIDO"
+    },
+    "EQUATORIAL PI": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "EQUATORIAL_PIAUI",
+      "volume": 112,
+      "status": "ASSUMIDO"
+    },
+    "EQUATORIAL RS (CEEE)": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "EQUATORIAL_CEEE_RS",
+      "volume": 188,
+      "status": "ASSUMIDO"
+    },
+    "CEEE": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "EQUATORIAL_CEEE_RS",
+      "volume": 8,
+      "status": "ASSUMIDO"
+    },
+    "CEEE GRUPO EQUATORIAL": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "EQUATORIAL_CEEE_RS",
+      "volume": 5,
+      "status": "ASSUMIDO"
+    },
+    "EQUATORIAL ENERGIA": {
+      "mapa": "equatorial_norte_extraction_map.json",
+      "filial": "GENERICO",
+      "volume": 17,
+      "status": "FALLBACK",
+      "_obs": "Nome genérico — desambiguar pelo CNPJ ou UF"
+    },
+    "LIGHT": {
+      "mapa": "light_extraction_map.json",
+      "volume": 2915,
+      "status": "VALIDADO"
+    },
+    "ENEL SP": {
+      "mapa": "enel_sp_extraction_map.json",
+      "volume": 8197,
+      "status": "VALIDADO"
+    },
+    "ENEL DISTRIBUIÇÃO SÃO PAULO": {
+      "mapa": "enel_sp_extraction_map.json",
+      "volume": 26,
+      "status": "VALIDADO"
+    },
+    "ELETROPAULO METROPOLITANA": {
+      "mapa": "enel_sp_extraction_map.json",
+      "volume": 0,
+      "status": "VALIDADO"
+    },
+    "CEMIG": {
+      "mapa": "cemig_extraction_map.json",
+      "volume": 1508,
+      "status": "VALIDADO"
+    },
+    "ENEL RIO": {
+      "mapa": "enel_distribuicao_modern_FAMILY_REGISTRY.json",
+      "filial": "ENEL_RIO",
+      "volume": 693,
+      "status": "VALIDADO"
+    },
+    "ENEL RJ": {
+      "mapa": "enel_distribuicao_modern_FAMILY_REGISTRY.json",
+      "filial": "ENEL_RIO",
+      "volume": 9,
+      "status": "VALIDADO"
+    },
+    "Ampla Energia e Serviços S. A.": {
+      "mapa": "enel_distribuicao_modern_FAMILY_REGISTRY.json",
+      "filial": "ENEL_RIO",
+      "volume": 12,
+      "status": "VALIDADO"
+    },
+    "ENEL CE": {
+      "mapa": "enel_distribuicao_modern_FAMILY_REGISTRY.json",
+      "filial": "ENEL_CEARA",
+      "volume": 297,
+      "status": "VALIDADO"
+    },
+    "Companhia Energética do Ceará": {
+      "mapa": "enel_distribuicao_modern_FAMILY_REGISTRY.json",
+      "filial": "ENEL_CEARA",
+      "volume": 6,
+      "status": "VALIDADO"
+    },
+    "CELESC": {
+      "mapa": "celesc_extraction_map.json",
+      "volume": 566,
+      "status": "VALIDADO"
+    },
+    "AMAZONAS DISTRIBUIDORA": {
+      "mapa": "amazonas_extraction_map.json",
+      "volume": 0,
+      "status": "VALIDADO"
+    },
+    "AMAZONAS ENERGIA": {
+      "mapa": "amazonas_extraction_map.json",
+      "volume": 0,
+      "status": "VALIDADO"
+    },
+    "DMED": {
+      "mapa": "dmed_extraction_map.json",
+      "volume": 0,
+      "status": "VALIDADO"
+    },
+    "DME Distribuição (PoçosCaldas)": {
+      "mapa": "dmed_extraction_map.json",
+      "volume": 1,
+      "status": "VALIDADO"
+    },
+    "DEMEI": {
+      "mapa": "demei_extraction_map.json",
+      "volume": 0,
+      "status": "VALIDADO"
+    },
+    "SULGIPE": {
+      "mapa": null,
+      "volume": 6,
+      "status": "PENDENTE",
+      "_obs": "Apenas grupo B disponível. Volume baixo (6 faturas). Link sgevia.com.br do prompt original retorna 404. Pular ou usar GPT fallback."
+    },
+    "ENERGISA SUL SUDESTE": {
+      "mapa": "energisa_ss_extraction_map.json",
+      "volume": 3000,
+      "status": "PRODUCAO"
+    },
+    "ENERGISA SS": {
+      "mapa": "energisa_ss_extraction_map.json",
+      "volume": 99,
+      "status": "PRODUCAO"
+    },
+    "ENERGISA SUL-SUDESTE": {
+      "mapa": "energisa_ss_extraction_map.json",
+      "volume": 16,
+      "status": "PRODUCAO"
+    },
+    "ENERGISA SUL/SUDESTE": {
+      "mapa": "energisa_ss_extraction_map.json",
+      "volume": 83,
+      "status": "PRODUCAO"
+    },
+    "ENERGISA MS": {
+      "mapa": "energisa_ms_extraction_map.json",
+      "volume": 355,
+      "status": "VALIDADO"
+    },
+    "ENERGISA MT": {
+      "mapa": "energisa_mt_extraction_map.json",
+      "volume": 143,
+      "status": "ASSUMIDO"
+    },
+    "ENERGISA PB": {
+      "mapa": "energisa_pb_extraction_map.json",
+      "volume": 192,
+      "status": "VALIDADO"
+    },
+    "ENERGISA SE": {
+      "mapa": "energisa_se_extraction_map.json",
+      "volume": 136,
+      "status": "VALIDADO"
+    },
+    "ENERGISA MR (ENERGISA MG)": {
+      "mapa": "energisa_mr_mg_extraction_map.json",
+      "volume": 152,
+      "status": "VALIDADO"
+    },
+    "ENERGISA MR (ENERGISA NF)": {
+      "mapa": "energisa_mr_nf_extraction_map.json",
+      "volume": 15,
+      "status": "VALIDADO"
+    },
+    "ENERGISA MR": {
+      "mapa": "energisa_mr_mg_extraction_map.json",
+      "volume": 0,
+      "status": "VALIDADO"
+    },
+    "ENERGISA NF": {
+      "mapa": "energisa_mr_nf_extraction_map.json",
+      "volume": 0,
+      "status": "VALIDADO"
+    },
+    "ENERGISA MG": {
+      "mapa": "energisa_mg_extraction_map.json",
+      "volume": 8,
+      "status": "VALIDADO"
+    },
+    "ENERGISA TOCANTINS": {
+      "mapa": "energisa_tocantins_extraction_map.json",
+      "volume": 62,
+      "status": "VALIDADO"
+    },
+    "ENERGISA TO": {
+      "mapa": "energisa_tocantins_extraction_map.json",
+      "volume": 0,
+      "status": "VALIDADO"
+    }
+  },
+  "indice_por_arquivo_de_mapa": {
+    "neoenergia_cosern_extraction_map.json": [
+      "NEOENERGIA COSERN",
+      "NEOENERGIA BA (COELBA)",
+      "NEOENERGIA COELBA",
+      "NEOENERGIA PE (CELPE)",
+      "NEOENERGIA PERNAMBUCO",
+      "COMPANHIA ENERGÉTICA DE PERNAMBUCO",
+      "NEOENERGIA BRASILIA (CEB)",
+      "NEOENERGIA BRASILIA",
+      "NEOENERGIA"
+    ],
+    "cpfl_santacruz_extraction_map.json": [
+      "CPFL SANTA CRUZ",
+      "CPFL PAULISTA",
+      "CPFL PIRATININGA",
+      "RGE",
+      "RGE SUL",
+      "RGE SUL DISTRIBUIDORA DE ENERGIA S.A."
+    ],
+    "edp_extraction_map.json": [
+      "EDP SP",
+      "EDP SP DISTRIB DE ENERGIA SA",
+      "EDP ES"
+    ],
+    "elektro_ms_extraction_map.json": [
+      "ELEKTRO",
+      "ELEKTRO SP",
+      "ELEKTRO MS",
+      "ELEKTRO REDES SA",
+      "ELEKTRO REDES S.A."
+    ],
+    "equatorial_goias_extraction_map.json": [
+      "EQUATORIAL GO (ENEL GOIAS)",
+      "EQUATORIAL GO",
+      "ENEL GOIAS"
+    ],
+    "equatorial_norte_extraction_map.json": [
+      "EQUATORIAL PA",
+      "Equatorial Pará",
+      "Equatorial Pará Distribuidora de Energia S.A.",
+      "EQUATORIAL MA",
+      "EQUATORIAL MAR",
+      "Equatorial Maranhão Distribuidora de Energia S.A.",
+      "EQUATORIAL AL",
+      "EQUATORIAL PI",
+      "EQUATORIAL RS (CEEE)",
+      "CEEE",
+      "CEEE GRUPO EQUATORIAL",
+      "EQUATORIAL ENERGIA"
+    ],
+    "light_extraction_map.json": [
+      "LIGHT"
+    ],
+    "enel_sp_extraction_map.json": [
+      "ENEL SP",
+      "ENEL DISTRIBUIÇÃO SÃO PAULO",
+      "ELETROPAULO METROPOLITANA"
+    ],
+    "cemig_extraction_map.json": [
+      "CEMIG"
+    ],
+    "enel_distribuicao_modern_FAMILY_REGISTRY.json": [
+      "ENEL RIO",
+      "ENEL RJ",
+      "Ampla Energia e Serviços S. A.",
+      "ENEL CE",
+      "Companhia Energética do Ceará"
+    ],
+    "celesc_extraction_map.json": [
+      "CELESC"
+    ],
+    "amazonas_extraction_map.json": [
+      "AMAZONAS DISTRIBUIDORA",
+      "AMAZONAS ENERGIA"
+    ],
+    "dmed_extraction_map.json": [
+      "DMED",
+      "DME Distribuição (PoçosCaldas)"
+    ],
+    "demei_extraction_map.json": [
+      "DEMEI"
+    ],
+    "energisa_ss_extraction_map.json": [
+      "ENERGISA SUL SUDESTE",
+      "ENERGISA SS",
+      "ENERGISA SUL-SUDESTE",
+      "ENERGISA SUL/SUDESTE"
+    ],
+    "energisa_ms_extraction_map.json": [
+      "ENERGISA MS"
+    ],
+    "energisa_mt_extraction_map.json": [
+      "ENERGISA MT"
+    ],
+    "energisa_pb_extraction_map.json": [
+      "ENERGISA PB"
+    ],
+    "energisa_se_extraction_map.json": [
+      "ENERGISA SE"
+    ],
+    "energisa_mr_mg_extraction_map.json": [
+      "ENERGISA MR (ENERGISA MG)",
+      "ENERGISA MR"
+    ],
+    "energisa_mr_nf_extraction_map.json": [
+      "ENERGISA MR (ENERGISA NF)",
+      "ENERGISA NF"
+    ],
+    "energisa_mg_extraction_map.json": [
+      "ENERGISA MG"
+    ],
+    "energisa_tocantins_extraction_map.json": [
+      "ENERGISA TOCANTINS",
+      "ENERGISA TO"
+    ]
+  },
+  "_resumo_estatistico": {
+    "total_distribuidoras_no_banco": 53,
+    "total_distribuidoras_mapeadas": 52,
+    "total_mapas_criados": 16,
+    "total_registries_criados": 5,
+    "volume_estimado_coberto": "~25.500 faturas",
+    "percentual_cobertura_volume": "~99%",
+    "distribuidoras_pendentes": [
+      "SULGIPE (6 faturas - link 404)"
+    ],
+    "estrategia_de_dedup": "Família ENERGISA: 9 mapas INDIVIDUAIS (1 por filial), todos clonados do template SS validado. Outras famílias (Neoenergia, CPFL, Elektro+Copel, ENEL moderno) mantêm 1 mapa base + registry de overrides."
+  },
+  "_status_categorias": {
+    "VALIDADO": "Layout confirmado contra amostra real do banco. Pronto pra produção.",
+    "ASSUMIDO": "Layout inferido por similaridade com filial validada da mesma família. Recomendado validar com 1-2 amostras antes de produção.",
+    "FALLBACK": "Nome genérico de distribuidora — desambiguar por CNPJ ou UF no momento da extração.",
+    "PRODUCAO": "Em uso há tempos, comportamento estável.",
+    "PENDENTE": "Não foi possível mapear (link inválido, sem amostra)."
+  }
+}

@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Piloto — Chat do Solicitante (SURE)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#070f1c; --panel:#0c1a28; --panel2:#0f2436; --line:rgba(255,255,255,.1);
+    --txt:#e6edf3; --muted:rgba(255,255,255,.62); --muted2:rgba(255,255,255,.42);
+    --cyan:#5CC8FF; --teal:#2DD4BF; --grad:linear-gradient(135deg,#5CC8FF,#2DD4BF);
+    --ok:#2DD4BF; --okbg:rgba(45,212,191,.12); --okbd:rgba(45,212,191,.32);
+    --lock:#fbbf24; --lockbg:rgba(251,191,36,.1); --lockbd:rgba(251,191,36,.3);
+    --disp:'Space Grotesk','Inter',sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:Inter,system-ui,sans-serif; color:var(--txt);
+    background:radial-gradient(1200px 620px at 15% -10%,#143a52 0%,transparent 60%),
+               radial-gradient(900px 520px at 100% 110%,#0f3a44 0%,transparent 55%),var(--bg);
+    line-height:1.5; padding:40px 20px 80px;
+  }
+  .wrap{max-width:1180px;margin:0 auto}
+  .topo{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+  .mk{width:44px;height:44px;flex:0 0 44px;filter:drop-shadow(0 0 12px rgba(93,200,255,.4))}
+  h1{font-family:var(--disp);font-weight:700;font-size:26px;margin:0;letter-spacing:.01em}
+  .lead{color:var(--muted);font-size:15px;max-width:72ch;margin:6px 0 4px}
+  .tag{display:inline-block;font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+       color:#06212a;background:var(--grad);padding:4px 10px;border-radius:999px}
+
+  .secHead{display:flex;align-items:center;gap:12px;margin:48px 0 16px}
+  .secNum{font-family:var(--disp);font-weight:700;font-size:15px;color:#06212a;background:var(--grad);
+          width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:0 0 30px}
+  .secHead h2{font-family:var(--disp);font-weight:600;font-size:20px;margin:0}
+  .secHead p{margin:2px 0 0;color:var(--muted);font-size:13.5px}
+
+  /* layout tela + anotações */
+  .split{display:grid;grid-template-columns:1.55fr 1fr;gap:22px;align-items:start}
+  @media(max-width:900px){.split{grid-template-columns:1fr}}
+
+  /* "janela" do app */
+  .win{border-radius:16px;overflow:hidden;border:1px solid var(--line);
+       box-shadow:0 24px 70px rgba(0,0,0,.55)}
+  .winbar{display:flex;align-items:center;gap:7px;padding:10px 14px;background:#0a1626;border-bottom:1px solid var(--line)}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+  .winurl{margin-left:12px;font-size:12px;color:var(--muted2);font-family:ui-monospace,monospace}
+
+  /* menu superior (reduzido ao que o solicitante acessa) */
+  .topnav{display:flex;align-items:center;gap:22px;padding:11px 18px;background:#0a1626;border-bottom:1px solid var(--line)}
+  .topnav .brand{display:flex;align-items:center;gap:8px;font-family:var(--disp);font-weight:700;letter-spacing:.14em;font-size:14px}
+  .navitem{font-size:13px;color:var(--muted);position:relative}
+  .navitem.active{color:#fff;font-weight:600}
+  .navitem.active:after{content:'';position:absolute;left:0;right:0;bottom:-13px;height:2px;background:var(--grad);border-radius:2px}
+  .navright{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .navperfil{font-size:10.5px;font-weight:600;color:var(--cyan);border:1px solid rgba(93,200,255,.35);background:rgba(93,200,255,.08);padding:3px 9px;border-radius:999px}
+  .navuser{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted)}
+  .navav{width:26px;height:26px;border-radius:8px;background:#1b3148;color:var(--cyan);font-weight:600;font-size:11px;display:flex;align-items:center;justify-content:center}
+  .navsair{font-size:12.5px;color:var(--muted2)}
+  .ghost{color:var(--muted2);text-decoration:line-through;opacity:.5;font-size:12.5px}
+
+  /* chat tela cheia */
+  .chat{background:var(--panel);display:flex;flex-direction:column;height:620px}
+  .chatHead{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line);
+            background:linear-gradient(158deg,#103049,#0a1b2e)}
+  .chatHead .nm{font-family:var(--disp);font-weight:600;font-size:15px}
+  .chatHead .st{font-size:12px;color:var(--teal);display:flex;align-items:center;gap:6px}
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 0 rgba(45,212,191,.6);animation:p 2s infinite}
+  @keyframes p{0%{box-shadow:0 0 0 0 rgba(45,212,191,.5)}70%{box-shadow:0 0 0 7px rgba(45,212,191,0)}100%{box-shadow:0 0 0 0 rgba(45,212,191,0)}}
+  .perfilPill{margin-left:auto;font-size:11px;font-weight:600;color:var(--cyan);border:1px solid rgba(93,200,255,.35);
+              background:rgba(93,200,255,.08);padding:4px 10px;border-radius:999px}
+
+  .msgs{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px}
+  .row{display:flex;gap:10px;max-width:86%}
+  .row.me{align-self:flex-end;flex-direction:row-reverse}
+  .av{width:30px;height:30px;border-radius:9px;flex:0 0 30px;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .av.bot{background:var(--grad);color:#06212a}
+  .av.me{background:#1b3148;color:var(--cyan);font-weight:600;font-size:12px}
+  .bub{padding:11px 14px;border-radius:14px;font-size:13.5px}
+  .bub.bot{background:var(--panel2);border:1px solid var(--line);border-top-left-radius:4px}
+  .bub.me{background:var(--grad);color:#06212a;border-top-right-radius:4px;font-weight:500}
+  .bub b{color:#fff}
+  .bub.me b{color:#06212a}
+
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .chip{font-size:12.5px;font-weight:500;color:var(--cyan);border:1px solid rgba(93,200,255,.4);
+        background:rgba(93,200,255,.07);padding:7px 12px;border-radius:999px;cursor:default}
+
+  /* cartão de processo dentro do chat */
+  .pcard{margin-top:10px;background:#0b1a2a;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .pcard .ph{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line);background:#0e2234}
+  .pcard .ph .pn{font-family:var(--disp);font-weight:600;font-size:13.5px}
+  .badge{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;letter-spacing:.03em}
+  .badge.def{color:var(--ok);background:var(--okbg);border:1px solid var(--okbd)}
+  .badge.and{color:#93c5fd;background:rgba(147,197,253,.1);border:1px solid rgba(147,197,253,.3)}
+  .pcard .pb{padding:12px 14px}
+  .kv{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;padding:4px 0}
+  .kv .k{color:var(--muted)} .kv .v{font-weight:600}
+
+  /* timeline movimentações */
+  .tl{margin:8px 0 2px;padding-left:6px}
+  .tl li{list-style:none;position:relative;padding:0 0 12px 20px;font-size:12.5px;color:var(--muted)}
+  .tl li:before{content:'';position:absolute;left:3px;top:4px;width:9px;height:9px;border-radius:50%;background:var(--teal)}
+  .tl li:after{content:'';position:absolute;left:7px;top:13px;bottom:-2px;width:1.5px;background:var(--line)}
+  .tl li:last-child{padding-bottom:0}.tl li:last-child:after{display:none}
+  .tl .dt{color:var(--muted2);font-size:11.5px}
+  .tl b{color:var(--txt)}
+
+  /* bloco valor liberado / bloqueado */
+  .vbox{margin-top:10px;border-radius:11px;padding:11px 13px;font-size:12.5px;display:flex;gap:10px;align-items:flex-start}
+  .vbox.ok{background:var(--okbg);border:1px solid var(--okbd)}
+  .vbox.lock{background:var(--lockbg);border:1px solid var(--lockbd)}
+  .vbox .ic{font-size:16px;line-height:1.2}
+  .vbox .big{font-family:var(--disp);font-weight:700;font-size:18px;color:#eafff9}
+  .vbox.lock .ttl{color:var(--lock);font-weight:600}
+
+  /* mini tabela relatório */
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted2);font-weight:600;text-transform:uppercase;font-size:10.5px;letter-spacing:.05em}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .rowsum td{font-weight:700;border-bottom:none;border-top:1px solid rgba(255,255,255,.18)}
+
+  .composer{display:flex;gap:10px;padding:14px 18px;border-top:1px solid var(--line);background:#0a1626}
+  .composer .inp{flex:1;background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:10px;
+                 padding:11px 13px;color:var(--muted);font-size:13px}
+  .composer .snd{width:42px;border-radius:10px;border:none;background:var(--grad);color:#06212a;font-size:17px;font-weight:700}
+
+  /* painel de anotações */
+  .notes{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:14px;padding:18px 18px 8px}
+  .notes h3{font-family:var(--disp);font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--cyan);margin:0 0 12px}
+  .note{display:flex;gap:11px;margin-bottom:16px}
+  .nnum{flex:0 0 24px;height:24px;border-radius:7px;background:rgba(93,200,255,.14);color:var(--cyan);
+        font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(93,200,255,.3)}
+  .note p{margin:0;font-size:13px;color:var(--muted)}
+  .note p b{color:var(--txt)}
+  .pill-ok{color:var(--ok);font-weight:600}
+  .pill-lock{color:var(--lock);font-weight:600}
+
+  /* seção controle de processos / tooltip ? */
+  .cp{background:var(--panel);padding:18px}
+  .cpbar{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .cpbar .t{font-family:var(--disp);font-weight:600;font-size:15px}
+  .cpTable{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .cpTable table{margin:0}
+  .cpTable th,.cpTable td{padding:10px 12px;font-size:12.5px}
+  .conc{display:inline-flex;align-items:center;gap:7px}
+  .help{width:17px;height:17px;border-radius:50%;border:1px solid rgba(93,200,255,.5);color:var(--cyan);
+        font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;cursor:help;position:relative}
+  .tip{position:relative;display:inline-block}
+  .pop{position:absolute;left:24px;top:-8px;width:260px;background:#0e2234;border:1px solid rgba(93,200,255,.3);
+       border-radius:12px;padding:12px 14px;box-shadow:0 18px 50px rgba(0,0,0,.6);z-index:5}
+  .pop .pt{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--cyan);margin-bottom:8px}
+  .pop .big{font-family:var(--disp);font-weight:700;font-size:26px;color:#eafff9}
+  .pop .sub{font-size:11.5px;color:var(--muted);margin-top:4px}
+  .pop .mini{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);padding:3px 0;border-top:1px solid var(--line);margin-top:8px}
+
+  .foot{margin-top:60px;border-top:1px solid var(--line);padding-top:20px;color:var(--muted2);font-size:12.5px}
+  .foot b{color:var(--muted)}
+  .disc{display:inline-block;margin-top:10px;font-size:11.5px;color:var(--muted2);border:1px dashed var(--line);
+        padding:6px 11px;border-radius:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topo">
+    <svg class="mk" viewBox="0 0 64 64" fill="none"><defs><linearGradient id="g" x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#5CC8FF"/><stop offset="1" stop-color="#2DD4BF"/></linearGradient></defs><rect x="7" y="7" width="50" height="50" rx="15" stroke="url(#g)" stroke-width="3.5"/><path d="M34 11 L20 34 L28 34 L25 53 L44 28 L35 28 Z" fill="url(#g)"/></svg>
+    <div>
+      <h1>Piloto — Chat do Solicitante</h1>
+      <div style="margin-top:4px"><span class="tag">Protótipo visual</span></div>
+    </div>
+  </div>
+  <p class="lead">Como ficaria a experiência do usuário <b>solicitante</b> ao entrar no SURE: uma página dedicada com o chat em tela cheia, focada em consultar processos e requisições para repassar ao cliente — com as regras de liberação de informação embutidas.</p>
+
+  <!-- ====================== SEÇÃO 1 ====================== -->
+  <div class="secHead">
+    <span class="secNum">1</span>
+    <div><h2>Tela dedicada — chat ocupa a tela toda</h2>
+    <p>Ao logar, o solicitante cai direto aqui. Nada de menus do painel de gestão: só o chat.</p></div>
+  </div>
+
+  <div class="split">
+    <div class="win">
+      <div class="winbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="winurl">sure.app.br/assistente</span></div>
+      <div class="topnav">
+        <span class="brand">
+          <svg viewBox="0 0 64 64" width="20" height="20" fill="none"><defs><linearGradient id="g2" x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#5CC8FF"/><stop offset="1" stop-color="#2DD4BF"/></linearGradient></defs><rect x="7" y="7" width="50" height="50" rx="15" stroke="url(#g2)" stroke-width="4"/><path d="M34 11 L20 34 L28 34 L25 53 L44 28 L35 28 Z" fill="url(#g2)"/></svg>
+          SURE
+        </span>
+        <span class="navitem active">Assistente</span>
+        <div class="navright">
+          <span class="navperfil">Solicitante</span>
+          <div class="navuser"><span class="navav">MA</span> Marina Alves</div>
+          <span class="navsair">Sair ⏻</span>
+        </div>
+      </div>
+      <div class="chat">
+        <div class="chatHead">
+          <div class="av bot">✦</div>
+          <div><div class="nm">Assistente SURE</div><div class="st"><span class="pulse"></span> online</div></div>
+        </div>
+        <div class="msgs">
+          <div class="row"><div class="av bot">✦</div><div class="bub bot">
+            Olá, <b>Marina</b>! 👋 Posso te ajudar a consultar <b>processos</b> e <b>requisições</b> para você repassar ao cliente.
+          </div></div>
+
+          <!-- o assistente PERGUNTA o que a pessoa quer (quando ela não diz) -->
+          <div class="row"><div class="av bot">✦</div><div class="bub bot">
+            Para começar, o que você precisa saber?
+            <div class="chips">
+              <span class="chip">📋 Movimentações de um processo</span>
+              <span class="chip">⏱️ Tempo médio de deferimento</span>
+              <span class="chip">📊 Relatório de um cliente</span>
+            </div>
+          </div></div>
+
+          <div class="row me"><div class="av me">MA</div><div class="bub me">Como está o processo 18765?</div></div>
+        </div>
+        <div class="composer">
+          <div class="inp">Pergunte sobre um processo, requisição ou cliente…</div>
+          <button class="snd">➤</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="notes">
+      <h3>O que muda</h3>
+      <div class="note"><span class="nnum">1</span><p><b>Página própria</b> (<code>/assistente</code>): ao logar, o solicitante cai direto no chat em tela cheia — sem o painel administrativo.</p></div>
+      <div class="note"><span class="nnum">2</span><p><b>Menu superior enxuto:</b> aparece só o que ele tem acesso — <b>Assistente</b> + sua conta. Itens de gestão ficam ocultos.
+        <br><span class="ghost">Processos</span> <span class="ghost">Requisições</span> <span class="ghost">Auditoria</span> <span class="ghost">Relatórios</span>
+        <br><span style="font-size:12px;color:var(--muted2)">(o que um gestor veria — escondido para o solicitante)</span></p></div>
+      <div class="note"><span class="nnum">3</span><p>O assistente <b>pergunta o que a pessoa quer</b> quando ela não especifica: movimentações, tempo médio de deferimento ou relatório de cliente.</p></div>
+    </div>
+  </div>
+
+  <!-- ====================== SEÇÃO 2 ====================== -->
+  <div class="secHead">
+    <span class="secNum">2</span>
+    <div><h2>Consulta a um processo — com a regra de cautela do valor</h2>
+    <p>Movimentações sempre aparecem. <span class="pill-ok">Valor e data só quando deferimento + data estão preenchidos.</span></p></div>
+  </div>
+
+  <div class="split">
+    <div class="win">
+      <div class="winbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="winurl">sure.app.br/assistente</span></div>
+      <div class="chat" style="height:auto">
+        <div class="msgs" style="height:auto">
+
+          <!-- CASO A: deferimento preenchido -> libera valor -->
+          <div class="row"><div class="av bot">✦</div><div class="bub bot">
+            Encontrei o processo abaixo. ✅ <b>Deferido pela concessionária</b> e já devolvido ao cliente — pode informar o valor e a forma.
+            <div class="pcard">
+              <div class="ph"><span class="pn">Processo #18765</span><span class="badge def">DEFERIDO</span></div>
+              <div class="pb">
+                <div class="kv"><span class="k">Cliente</span><span class="v">Via Varejo</span></div>
+                <div class="kv"><span class="k">Concessionária</span><span class="v">Enel SP</span></div>
+                <div class="kv"><span class="k">UC</span><span class="v">3002891­044</span></div>
+                <ul class="tl">
+                  <li><b>Requisição criada</b><div class="dt">12/08/2026</div></li>
+                  <li><b>Protocolo na concessionária</b><div class="dt">19/08/2026</div></li>
+                  <li><b>Análise da distribuidora</b><div class="dt">05/09/2026</div></li>
+                  <li><b>Deferimento pela concessionária</b><div class="dt">02/10/2026</div></li>
+                  <li><b>Aguardando confirmação de depósito</b><div class="dt">03/10/2026</div></li>
+                  <li><b>Enviado ao financeiro</b><div class="dt">06/10/2026</div></li>
+                  <li><b>Devolução realizada · Fatura</b><div class="dt">09/10/2026</div></li>
+                </ul>
+                <div class="vbox ok">
+                  <span class="ic">✅</span>
+                  <div><div style="color:var(--ok);font-weight:600">Valor deferido — liberado</div>
+                    <div class="big">R$ 45.230,00</div>
+                    <div style="color:var(--muted);margin-top:2px">Data do deferimento: <b style="color:#fff">02/10/2026</b></div>
+                  </div>
+                </div>
+                <div class="kv" style="margin-top:12px"><span class="k">Forma de devolução</span><span class="v">📄 Fatura <span style="color:var(--muted2);font-weight:400">(compensação na conta)</span></span></div>
+                <div class="kv"><span class="k">Comprovante enviado ao cliente</span><span class="v">09/10/2026</span></div>
+                <div class="kv"><span class="k">Tempo de envio do comprovante</span><span class="v" style="color:var(--teal)">3 dias <span style="color:var(--muted2);font-weight:400">(financeiro → devolução)</span></span></div>
+              </div>
+            </div>
+          </div></div>
+
+          <div class="row me"><div class="av me">MA</div><div class="bub me">E o processo 18770?</div></div>
+
+          <!-- CASO B: sem deferimento -> bloqueia valor -->
+          <div class="row"><div class="av bot">✦</div><div class="bub bot">
+            Esse ainda está em andamento. Mostro as movimentações, mas <b>ainda não há valor/data para informar ao cliente</b>.
+            <div class="pcard">
+              <div class="ph"><span class="pn">Processo #18770</span><span class="badge and">EM ANÁLISE</span></div>
+              <div class="pb">
+                <div class="kv"><span class="k">Cliente</span><span class="v">Via Varejo</span></div>
+                <div class="kv"><span class="k">Concessionária</span><span class="v">Enel SP</span></div>
+                <ul class="tl">
+                  <li><b>Requisição criada</b><div class="dt">22/09/2026</div></li>
+                  <li><b>Protocolo na concessionária</b><div class="dt">28/09/2026</div></li>
+                  <li><b>Aguardando análise da distribuidora</b><div class="dt">em aberto</div></li>
+                </ul>
+                <div class="vbox lock">
+                  <span class="ic">🔒</span>
+                  <div><div class="ttl">Valor ainda não disponível</div>
+                    <div style="color:var(--muted);margin-top:3px">O processo <b style="color:#fff">não tem deferimento confirmado</b>. Não informe valor nem prazo ao cliente até o deferimento sair.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div></div>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="notes">
+      <h3>Regra de liberação</h3>
+      <div class="note"><span class="nnum">✓</span><p><b class="pill-ok">Libera valor + data</b> apenas quando <b>valor de deferimento</b> E <b>data de deferimento</b> estão preenchidos no processo.</p></div>
+      <div class="note"><span class="nnum">🔒</span><p><b class="pill-lock">Segura o valor</b> enquanto o processo está em análise/sem deferimento. O chat avisa explicitamente para <b>não repassar valor/prazo</b> ao cliente ainda.</p></div>
+      <div class="note"><span class="nnum">i</span><p>As <b>movimentações</b> (linha do tempo) aparecem nos dois casos — elas não expõem dinheiro, só o andamento.</p></div>
+      <div class="note"><span class="nnum">↩</span><p>Depois do <b>Deferimento pela concessionária</b>, a linha segue: <b>Aguardando confirmação de depósito → Enviado ao financeiro → Devolução realizada</b>, mostrando a <b>forma</b> (Fatura, GD ou Depósito).</p></div>
+      <div class="note"><span class="nnum">⏱</span><p><b>Tempo de envio do comprovante</b> = de <b>“Enviado ao financeiro”</b> até a <b>devolução</b>. Também vira uma <b>média</b> (por concessionária/cliente), pré-calculada.</p></div>
+      <div class="note"><span class="nnum">!</span><p>Como o solicitante <b>repassa ao cliente</b>, a cautela é dar <b>só o que está confirmado</b>. Nada de estimativa de valor.</p></div>
+    </div>
+  </div>
+
+  <!-- ====================== SEÇÃO 3 ====================== -->
+  <div class="secHead">
+    <span class="secNum">3</span>
+    <div><h2>Relatório de um cliente + tempo médio de deferimento</h2>
+    <p>Visão consolidada de um cliente, com um indicador pré-calculado de tempo médio.</p></div>
+  </div>
+
+  <div class="split">
+    <div class="win">
+      <div class="winbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="winurl">sure.app.br/assistente</span></div>
+      <div class="chat" style="height:auto">
+        <div class="msgs" style="height:auto">
+          <div class="row me"><div class="av me">MA</div><div class="bub me">Me dá um relatório do cliente Via Varejo</div></div>
+          <div class="row"><div class="av bot">✦</div><div class="bub bot">
+            Aqui está o resumo de <b>Via Varejo</b> (valores só de processos <b>deferidos</b>):
+            <div class="pcard">
+              <div class="ph"><span class="pn">Cliente — Via Varejo</span><span class="badge def">⏱️ média 58 dias</span></div>
+              <div class="pb">
+                <table>
+                  <tr><th>Situação</th><th class="num">Qtd.</th><th class="num">Valor</th></tr>
+                  <tr><td>Deferidos</td><td class="num">14</td><td class="num">R$ 612.400</td></tr>
+                  <tr><td>Em análise</td><td class="num">6</td><td class="num">—</td></tr>
+                  <tr><td>Indeferidos</td><td class="num">2</td><td class="num">—</td></tr>
+                  <tr class="rowsum"><td>Total</td><td class="num">22</td><td class="num">R$ 612.400</td></tr>
+                </table>
+                <div class="vbox ok" style="margin-top:12px">
+                  <span class="ic">⏱️</span>
+                  <div><div style="color:var(--ok);font-weight:600">Tempo médio até o deferimento</div>
+                    <div class="big">58 dias</div>
+                    <div style="color:var(--muted);margin-top:2px">do protocolo na concessionária até o deferimento (clientes deferidos)</div>
+                  </div>
+                </div>
+                <div class="vbox ok" style="margin-top:10px">
+                  <span class="ic">↩</span>
+                  <div><div style="color:var(--ok);font-weight:600">Tempo médio de envio do comprovante</div>
+                    <div class="big">4 dias</div>
+                    <div style="color:var(--muted);margin-top:2px">de “enviado ao financeiro” até a devolução ao cliente</div>
+                  </div>
+                </div>
+                <div class="kv" style="margin-top:10px"><span class="k">Formas de devolução</span><span class="v">📄 Fatura (9) · 🏦 Depósito (4) · ⚡ GD (1)</span></div>
+                <div class="kv"><span class="k">Em análise (sem valor liberado)</span><span class="v" style="color:var(--lock)">6 processos 🔒</span></div>
+              </div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="notes">
+      <h3>Relatório &amp; métricas</h3>
+      <div class="note"><span class="nnum">1</span><p>O cliente pode ser pedido <b>pelo nome</b> (“relatório da Via Varejo”). O chat devolve um resumo pronto para repasse.</p></div>
+      <div class="note"><span class="nnum">2</span><p>A coluna <b>Valor</b> só soma <b>processos deferidos</b> — em análise/indeferido aparece “—”, mantendo a mesma cautela.</p></div>
+      <div class="note"><span class="nnum">3</span><p><b>Tempo médio de deferimento</b> fica <b>pré-calculado</b> (por cliente e por concessionária), para a resposta ser instantânea.</p></div>
+      <div class="note"><span class="nnum">4</span><p>Se a pessoa não disser o que quer, o assistente <b>sugere</b>: movimentações, tempo médio (concessionária/cliente) ou relatório.</p></div>
+    </div>
+  </div>
+
+  <!-- ====================== SEÇÃO 4 ====================== -->
+  <div class="secHead">
+    <span class="secNum">4</span>
+    <div><h2>Bônus — botão “?” no Controle de Processos</h2>
+    <p>Tempo médio de deferimento por concessionária, direto na tela de gestão (passando o mouse no “?”).</p></div>
+  </div>
+
+  <div class="split">
+    <div class="win">
+      <div class="winbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="winurl">sure.app.br/controle-processos</span></div>
+      <div class="cp">
+        <div class="cpbar"><span class="t">Controle de Processos</span></div>
+        <div class="cpTable">
+          <table>
+            <tr><th>Processo</th><th>Cliente</th><th>Concessionária</th><th>Status</th></tr>
+            <tr><td>#18765</td><td>Via Varejo</td>
+              <td><span class="conc">Enel SP
+                <span class="tip"><span class="help">?</span>
+                  <span class="pop">
+                    <div class="pt">Tempo médio de deferimento</div>
+                    <div class="big">62 dias</div>
+                    <div class="sub">Enel SP · base nos últimos 12 meses</div>
+                    <div class="mini"><span>Mais rápido</span><span>31 dias</span></div>
+                    <div class="mini"><span>Mais lento</span><span>140 dias</span></div>
+                    <div class="mini"><span>Envio do comprovante</span><span>4 dias</span></div>
+                  </span>
+                </span>
+              </span></td>
+              <td><span class="badge def">DEFERIDO</span></td></tr>
+            <tr><td>#18770</td><td>Via Varejo</td><td><span class="conc">Enel SP <span class="help">?</span></span></td><td><span class="badge and">EM ANÁLISE</span></td></tr>
+            <tr><td>#18802</td><td>Einstein</td><td><span class="conc">CEMIG <span class="help">?</span></span></td><td><span class="badge and">EM ANÁLISE</span></td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="notes">
+      <h3>Indicador por concessionária</h3>
+      <div class="note"><span class="nnum">?</span><p>Um <b>“?”</b> ao lado da concessionária abre um balão com o <b>tempo médio de deferimento</b> dela (e os extremos).</p></div>
+      <div class="note"><span class="nnum">⚙</span><p>Mesma métrica que alimenta o chat — <b>calculada uma vez</b> e reaproveitada nas duas telas.</p></div>
+      <div class="note"><span class="nnum">↺</span><p>Atualiza sozinha conforme novos processos são deferidos (recalculo periódico).</p></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <b>Como ler este piloto:</b> é só um protótipo de telas (HTML estático) para alinhar o conceito — ainda não está ligado ao sistema. Os números, clientes e processos são <b>fictícios</b>, só para ilustrar.
+    <br><span class="disc">Próximo passo sugerido: você aprova o visual/regras e eu implemento no SURE de verdade (página <code>/assistente</code>, filtros de valor, cálculo de tempo médio e o “?” no Controle de Processos).</span>
+  </div>
+
+</div>
+</body>
+</html>

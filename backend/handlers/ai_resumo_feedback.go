@@ -16,7 +16,7 @@
 	_, err := execGorm(database.GormDB_App, `
 			CREATE TABLE IF NOT EXISTS ai_resumo_feedback (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-			processo_id BIGINT UNSIGNED NOT NULL,
+			id_processo BIGINT UNSIGNED NOT NULL,
 			model VARCHAR(100) NOT NULL,
 			prompt_version VARCHAR(50) NOT NULL,
 			input_hash CHAR(64) NOT NULL,
@@ -27,7 +27,7 @@
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			created_by BIGINT UNSIGNED NULL,
 			PRIMARY KEY (id),
-			KEY idx_processo (processo_id),
+			KEY idx_processo (id_processo),
 			KEY idx_label (label),
 			KEY idx_created_at (created_at),
 			UNIQUE KEY uq_input_hash (input_hash)
@@ -36,7 +36,7 @@
 	}
 
 	type resumoFeedbackIn struct {
-		ProcessoID    int64           `json:"processo_id"`
+		ProcessoID    int64           `json:"id_processo"`
 		Model         string          `json:"model"`
 		PromptVersion string          `json:"prompt_version"`
 		InputHash     string          `json:"input_hash"`
@@ -81,7 +81,7 @@ func CreateResumoFeedback(c *gin.Context) {
 		in.Comentario = strings.TrimSpace(in.Comentario)
 
 		if in.ProcessoID == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "processo_id obrigatório"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "id_processo obrigatório"})
 			return
 		}
 		if in.Model == "" || in.PromptVersion == "" {
@@ -114,7 +114,7 @@ func CreateResumoFeedback(c *gin.Context) {
 
 		_, err := execGorm(database.GormDB_App, `
 			INSERT INTO ai_resumo_feedback (
-				processo_id, model, prompt_version, input_hash, input_payload, output_text, label, comentario, created_by
+				id_processo, model, prompt_version, input_hash, input_payload, output_text, label, comentario, created_by
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON DUPLICATE KEY UPDATE
 				label = VALUES(label),
@@ -129,7 +129,7 @@ func CreateResumoFeedback(c *gin.Context) {
 				if err2 := ensureAIResumoFeedbackTable(); err2 == nil {
 					_, err = execGorm(database.GormDB_App, `
 						INSERT INTO ai_resumo_feedback (
-							processo_id, model, prompt_version, input_hash, input_payload, output_text, label, comentario, created_by
+							id_processo, model, prompt_version, input_hash, input_payload, output_text, label, comentario, created_by
 						) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 						ON DUPLICATE KEY UPDATE
 							label = VALUES(label),

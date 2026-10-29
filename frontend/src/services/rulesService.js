@@ -35,3 +35,22 @@ export async function interpretRule(text) {
   const { data } = await api.post('/rules/interpret', { text });
   return data?.message || '';
 }
+
+// "Passar a regra no banco": agenda a aplicação p/ 00:00 do dia seguinte.
+// Retorna { ok, scheduled_for }.
+export async function passarRegra(id) {
+  const { data } = await api.post(`/rules/${id}/passar`);
+  return data;
+}
+
+// Cancela o agendamento antes de aplicar.
+export async function cancelarPassagemRegra(id) {
+  const { data } = await api.post(`/rules/${id}/cancelar-passagem`);
+  return data?.ok === true;
+}
+
+// Desfaz a última aplicação da regra no banco (reversão).
+export async function reverterAplicacaoRegra(id) {
+  const { data } = await api.post(`/rules/${id}/reverter-aplicacao`);
+  return data?.ok === true;
+}

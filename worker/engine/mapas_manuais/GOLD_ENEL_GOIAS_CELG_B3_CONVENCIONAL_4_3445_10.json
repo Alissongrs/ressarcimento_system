@@ -1,0 +1,107 @@
+{
+  "_meta": {
+    "arquivo_pdf": "4_3445_10.pdf",
+    "fatura_id": 67756,
+    "distribuidora": "Enel Distribuição Goiás (Celg Distribuição S.A.)",
+    "layout": "enel_goias_celg — caía em layout_desconhecido (plumber serializa posicional fora de ordem; nome da dist não aparece no texto)",
+    "cod_empresa": 4,
+    "criado_em": "2026-05-27",
+    "fonte": "extração manual visual do usuário (gold standard)",
+    "observacoes": [
+      "Layout posicional 2-colunas — texto_plumber curto (~1761 chars) e desordenado",
+      "Nome da distribuidora NÃO aparece no texto extraído (está em logo/imagem) — inferir por GOIANIA/GO",
+      "Fatura por MÍNIMO faturável: valor total R$ 0,00 (itens positivos 93,50 anulados por crédito de consumo -93,50)",
+      "consumo_mes = 100 kWh (mínimo), mas histórico JUN/2020 = MÍN 0,00",
+      "Histórico de 13 meses com tipos LID/MÉD/MÍN"
+    ]
+  },
+  "distribuidora": {
+    "razao_social": "Celg Distribuição S.A.",
+    "nome_fantasia": "Enel Distribuição Goiás",
+    "cnpj_emissor": "01.543.032/0001-04",
+    "ie_emissor": "100.549.420",
+    "cidade_uf_emissor": "Goiânia/GO",
+    "cep_emissor": "74805-180"
+  },
+  "cliente": {
+    "razao_social": "VIA VAREJO S/A",
+    "cnpj_cliente": "33.041.260/0652-90",
+    "endereco": "AVENIDA ANHANGUERA, Q. 58, L. 127, N. 4530",
+    "bairro": "CENTRO",
+    "cep": "74043010",
+    "municipio_uf": "GOIANIA/GO"
+  },
+  "identificadores_instalacao": {
+    "numero_instalacao": "10415026",
+    "numero_cliente": "101783697",
+    "numero_medidor": "10582452-6",
+    "unidade_de_entrega": "10 / 328"
+  },
+  "nota_fiscal": {
+    "numero_nf": "1250880",
+    "serie": "4",
+    "data_emissao": "11/06/2020"
+  },
+  "ligacao_tecnica": {
+    "grupo": "B",
+    "subgrupo": "B3",
+    "classe": "COMERCIAL OU SERVIÇOS E OUTRAS",
+    "subclasse": "COMERCIAL NORMAL",
+    "tipo_fornecimento": "TRIFÁSICO",
+    "modalidade_tarifaria": "CONVENCIONAL"
+  },
+  "periodo_faturamento": {
+    "conta_referente": "JUN/2020",
+    "data_emissao": "11/06/2020",
+    "data_vencimento": "26/06/2020",
+    "proxima_leitura": "09/07/2020",
+    "numero_dias": 29
+  },
+  "dados_medicao": {
+    "numero_medidor": "10582452-6",
+    "leitura_anterior_data": "10/03/2020",
+    "leitura_atual_data": "09/06/2020",
+    "leitura_atual_valor": 68381,
+    "tipo_faturamento": "MÍNIMO",
+    "fator_multiplicador": 1,
+    "consumo_mes_kwh": 100,
+    "numero_dias": 29
+  },
+  "vencimento_valor": {
+    "data_vencimento": "26/06/2020",
+    "valor_total_a_pagar": 0.00,
+    "conta_referente": "JUN/2020"
+  },
+  "bandeiras_tarifarias": {"bandeira_aplicada": "VERDE"},
+  "itens_fatura": [
+    {"descricao": "CONTRIB. ILUMINAÇÃO PÚBLICA - MUNICIPAL", "valor": 12.60},
+    {"descricao": "VALOR MIN. FATURÁVEL CUSTO DISP", "quantidade": 100.00, "unidade": "kWh", "tarifa": 0.809030, "valor": 80.90},
+    {"descricao": "CRÉDITO DE CONSUMO", "valor": -93.50}
+  ],
+  "tributos": {
+    "pis_pasep": {"aliquota_pct": 0.8983, "base_calculo": 80.90, "valor": 0.72},
+    "icms": {"aliquota_pct": 29.00, "base_calculo": 80.90, "valor": 23.46},
+    "cofins": {"aliquota_pct": 4.1374, "base_calculo": 80.90, "valor": 3.34}
+  },
+  "totais": {
+    "valor_minimo_faturavel": 80.90,
+    "contribuicao_iluminacao_publica": 12.60,
+    "credito_consumo": -93.50,
+    "valor_total_a_pagar": 0.00
+  },
+  "historico_faturamento": [
+    {"mes_ano": "JUN/2019", "tipo": "LID", "kwh": 6444.00, "dias": 29},
+    {"mes_ano": "JUL/2019", "tipo": "LID", "kwh": 6706.00, "dias": 32},
+    {"mes_ano": "AGO/2019", "tipo": "LID", "kwh": 6438.00, "dias": 30},
+    {"mes_ano": "SET/2019", "tipo": "LID", "kwh": 7626.00, "dias": 33},
+    {"mes_ano": "OUT/2019", "tipo": "LID", "kwh": 7601.00, "dias": 30},
+    {"mes_ano": "NOV/2019", "tipo": "LID", "kwh": 7199.00, "dias": 29},
+    {"mes_ano": "DEZ/2019", "tipo": "LID", "kwh": 9643.00, "dias": 32},
+    {"mes_ano": "JAN/2020", "tipo": "LID", "kwh": 9772.00, "dias": 30},
+    {"mes_ano": "FEV/2020", "tipo": "LID", "kwh": 12188.00, "dias": 32},
+    {"mes_ano": "MAR/2020", "tipo": "LID", "kwh": 10397.00, "dias": 29},
+    {"mes_ano": "ABR/2020", "tipo": "MÉD", "kwh": 7977.25, "dias": 29},
+    {"mes_ano": "MAI/2020", "tipo": "MÉD", "kwh": 8133.93, "dias": 33},
+    {"mes_ano": "JUN/2020", "tipo": "MÍN", "kwh": 0.00, "dias": 29}
+  ]
+}

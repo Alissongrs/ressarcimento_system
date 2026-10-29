@@ -11,17 +11,15 @@ import { useNavigate } from 'react-router-dom';
 import {
   X, AlertTriangle, Clock, Inbox, Mail, CalendarClock,
   Sparkles, ArrowRight, FilePlus, LayoutDashboard, Target,
+  Wrench, Check, XCircle,
 } from 'lucide-react';
 import { getRelatoriosMetricas, getRelatoriosMetricasBatch } from '../services/relatoriosService.js';
 import { getAllRequisicoes, getProcessosComPrazo } from '../services/requisicaoService.js';
+import api from '../services/apiClient';
 
 const META_MENSAL = 417000;
-const fmtMM = (n) => {
-  const v = Number(n || 0);
-  return v >= 1e6
-    ? `R$ ${(v / 1e6).toFixed(2)} MM`
-    : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 });
-};
+// Valor da meta sempre por extenso e com centavos (pedido 21/10/2026) — sem "MM" arredondado.
+const fmtMM = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const SESSION_FLAG = 'sure_welcome_shown_session';
 const SNOOZE_FLAG = 'sure_welcome_snooze_until';
@@ -61,10 +59,10 @@ function diaDaSemana() {
 
 function AtentionCard({ icon: Icon, label, value, hint, severity = 'neutral', onClick }) {
   const colors = {
-    crit: { bg: 'rgba(239,68,68,0.10)', border: 'rgba(239,68,68,0.40)', fg: '#ef4444' },
-    warn: { bg: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.40)', fg: '#f59e0b' },
-    ok:   { bg: 'rgba(16,185,129,0.10)', border: 'rgba(16,185,129,0.40)', fg: '#10b981' },
-    info: { bg: 'rgba(59,130,246,0.10)', border: 'rgba(59,130,246,0.40)', fg: '#3b82f6' },
+    crit: { bg: 'color-mix(in srgb, var(--danger) 10%, transparent)', border: 'color-mix(in srgb, var(--danger) 40%, transparent)', fg: 'var(--danger)' },
+    warn: { bg: 'color-mix(in srgb, var(--warning) 10%, transparent)', border: 'color-mix(in srgb, var(--warning) 40%, transparent)', fg: 'var(--warning)' },
+    ok:   { bg: 'color-mix(in srgb, var(--success) 10%, transparent)', border: 'color-mix(in srgb, var(--success) 40%, transparent)', fg: 'var(--success)' },
+    info: { bg: 'color-mix(in srgb, var(--accent) 10%, transparent)', border: 'color-mix(in srgb, var(--accent) 40%, transparent)', fg: 'var(--accent)' },
     neutral: { bg: 'var(--panel)', border: 'var(--border)', fg: 'var(--fg)' },
   };
   const c = colors[severity] || colors.neutral;
@@ -121,6 +119,15 @@ export default function WelcomeBriefingModal({ user, onClose }) {
     prazosProx48h: null,
     metaMensalAtingido: null,
   });
+
+  const isAdmin = String(user?.tipo_conta || '').toLowerCase() === 'admin';
+  const [correcoes, setCorrecoes] = useState([]);
+  const [corrLoading, setCorrLoading] = useState(false);
+  const [corrBusy, setCorrBusy] = useState({}); // id_correcao → true enquanto decide
+
+  // Fila de correções pendentes descontinuada (tabela FDE_CORRECOES_PENDENTES removida).
+  // States mantidos vazios para o bloco de UI abaixo não renderizar nada.
+  const decidirCorrecao = async () => {};
 
   useEffect(() => {
     let cancelled = false;
@@ -321,7 +328,7 @@ export default function WelcomeBriefingModal({ user, onClose }) {
             const atingido = Number(data.metaMensalAtingido || 0);
             const meta = META_MENSAL;
             const pct = meta > 0 ? Math.min(200, (atingido / meta) * 100) : 0;
-            const color = pct >= 100 ? '#10b981' : pct >= 66 ? '#3b82f6' : pct >= 33 ? '#f59e0b' : '#ef4444';
+            const color = pct >= 100 ? 'var(--success)' : pct >= 66 ? 'var(--accent)' : pct >= 33 ? 'var(--warning)' : 'var(--danger)';
             const restante = Math.max(0, meta - atingido);
             const mes = new Date().toLocaleDateString('pt-BR', { month: 'long' });
             return (
@@ -380,14 +387,97 @@ export default function WelcomeBriefingModal({ user, onClose }) {
             );
           })()}
 
+          {/* Correções pendentes (só admin) */}
+          {isAdmin && (correcoes.length > 0 || corrLoading) && (
+            <>
+              <div className="mt-6 flex items-center gap-2 text-[11px] uppercase tracking-wide opacity-60 font-semibold mb-3">
+                <Wrench size={13} />
+                <span>Correções de fatura aguardando sua aprovação</span>
+                {correcoes.length > 0 && (
+                  <span
+                    className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold"
+                    style={{ background: 'color-mix(in srgb, var(--accent) 22%, transparent)', color: 'var(--accent)' }}
+                  >
+                    {correcoes.length}
+                  </span>
+                )}
+              </div>
+              {corrLoading && correcoes.length === 0 ? (
+                <div className="text-xs opacity-50 px-1">Carregando…</div>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {correcoes.map((c) => {
+                    const busy = !!corrBusy[c.id_correcao];
+                    const origemLbl = c.origem === 'ia' ? 'IA' : c.origem === 'chat' ? 'Chat IA' : (c.solicitante || 'usuário');
+                    return (
+                      <div
+                        key={c.id_correcao}
+                        className="rounded-xl border-2 px-4 py-3"
+                        style={{ background: 'var(--panel)', borderColor: 'var(--border)' }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[11px] opacity-60 mb-0.5">
+                              {(c.empresa || '—')}{c.codigo_uc ? ` · UC ${c.codigo_uc}` : ''}{c.mes_referencia ? ` · ${c.mes_referencia}` : ''}
+                            </div>
+                            <div className="text-sm font-semibold">
+                              <span className="opacity-70">{c.campo}</span>
+                            </div>
+                            <div className="mt-1 text-xs flex items-center gap-2 flex-wrap">
+                              <span className="px-1.5 py-0.5 rounded font-mono line-through opacity-60" style={{ background: 'color-mix(in srgb, var(--danger) 10%, transparent)' }}>
+                                {c.valor_atual || '(vazio)'}
+                              </span>
+                              <ArrowRight size={12} className="opacity-50" />
+                              <span className="px-1.5 py-0.5 rounded font-mono font-bold" style={{ background: 'color-mix(in srgb, var(--success) 12%, transparent)', color: 'var(--success)' }}>
+                                {c.valor_sugerido || '(vazio)'}
+                              </span>
+                            </div>
+                            {c.justificativa && (
+                              <div className="mt-1.5 text-[11px] opacity-70 italic">“{c.justificativa}”</div>
+                            )}
+                            <div className="mt-1 text-[10px] opacity-50">
+                              Solicitado por {origemLbl}{c.criado_em ? ` · ${c.criado_em}` : ''}
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-1.5 flex-shrink-0">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => decidirCorrecao(c.id_correcao, 'aprovar')}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-white text-xs font-semibold transition-opacity disabled:opacity-40"
+                              style={{ background: 'var(--success)' }}
+                              title="Aprovar e aplicar no FDE"
+                            >
+                              <Check size={13} /> Aprovar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => decidirCorrecao(c.id_correcao, 'rejeitar')}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40"
+                              style={{ borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)', color: 'var(--danger)' }}
+                              title="Rejeitar (não altera a fatura)"
+                            >
+                              <XCircle size={13} /> Rejeitar
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
           {/* Atalhos */}
           <div className="mt-6 text-[11px] uppercase tracking-wide opacity-60 font-semibold mb-3">
             Atalhos
           </div>
           <div className="flex flex-wrap gap-2">
-            <ShortcutButton icon={FilePlus} label="Nova requisição" onClick={() => navAndClose('/novo')} accent="#3b82f6" />
-            <ShortcutButton icon={LayoutDashboard} label="Controle de Processos" onClick={() => navAndClose('/processos')} accent="#10b981" />
-            <ShortcutButton icon={Mail} label="Caixa de Email" onClick={() => navAndClose('/caixa-de-email')} accent="#f59e0b" />
+            <ShortcutButton icon={FilePlus} label="Nova requisição" onClick={() => navAndClose('/novo')} accent="var(--accent)" />
+            <ShortcutButton icon={LayoutDashboard} label="Controle de Processos" onClick={() => navAndClose('/processos')} accent="var(--success)" />
+            <ShortcutButton icon={Mail} label="Caixa de Email" onClick={() => navAndClose('/caixa-de-email')} accent="var(--warning)" />
           </div>
         </div>
 

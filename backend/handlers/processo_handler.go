@@ -278,9 +278,16 @@ func GetProcessosKanban(c *gin.Context) {
 	query := `
         SELECT
             p.id_processo,
-            etapa.etapa,
-            p.sub_etapa,
-            coluna.nome_coluna,
+            etapa.nome,
+            (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual),
+            CASE
+                WHEN p.id_aprovacao_atual = 2 THEN 'Indeferidos'
+                WHEN p.id_status_atual = 5 THEN 'Suspensos'
+                WHEN p.id_etapa_atual = 6 THEN 'Concluídos'
+                WHEN p.id_etapa_atual IN (4,5) THEN 'Faturamento'
+                WHEN p.id_aprovacao_atual = 1 THEN 'Deferidos'
+                ELSE 'Ativos'
+            END AS nome_coluna,
             p.ultima_atualizacao,
             p.data_alerta,
             p.relevancia,
@@ -289,20 +296,17 @@ func GetProcessosKanban(c *gin.Context) {
             req.concessionaria,
             req.ressarcimento_estimado,
             req.endereco_completo,
-            IFNULL(CONCAT('[', GROUP_CONCAT(DISTINCT JSON_OBJECT('id', t.id_tag, 'nome', t.nome, 'cor', t.cor)), ']'), '[]') AS tags_json,
+            '[]' AS tags_json,
             def.credito_simples,
             def.credito_dobro,
-            COALESCE(p.suspenso, CASE WHEN LOWER(COALESCE(p.sub_etapa,'')) = 'suspenso' THEN 1 ELSE 0 END) AS suspenso
+            COALESCE(p.suspenso, 0) AS suspenso
         FROM
             FT_PROCESSOS p
         JOIN FT_REQUISICOES req ON p.id_processo = req.id_requisicao
-        JOIN DM_ETAPAS_PROCESSO etapa ON p.id_etapa_processo = etapa.id_etapa_processo
-        JOIN DM_KANBAN_COLUNAS coluna ON etapa.id_coluna_kanban = coluna.id_coluna
-        LEFT JOIN FT_PROCESSO_TAGS pt ON p.id_processo = pt.id_processo
-        LEFT JOIN DM_TAGS t ON pt.id_tag = t.id_tag
+        JOIN DM_ETAPAS etapa ON etapa.id_etapa = p.id_etapa_atual
         LEFT JOIN FT_DEFERIMENTOS def ON p.id_processo = def.id_processo
         GROUP BY
-            p.id_processo, etapa.etapa, p.sub_etapa, coluna.nome_coluna
+            p.id_processo
         ORDER BY
             p.ultima_atualizacao DESC`
 
@@ -317,7 +321,14 @@ func GetProcessosKanban(c *gin.Context) {
 	processosAgrupados := make(map[string][]models.Processo)
 	totaisPorColuna := make(map[string]float64)
 
-	colunasRows, _ := database.GormDB_App.Raw("SELECT nome_coluna FROM DM_KANBAN_COLUNAS ORDER BY ordem ASC").Rows()
+	colunasRows, _ := database.GormDB_App.Raw(`SELECT nome_coluna FROM (
+		SELECT 'Ativos' AS nome_coluna, 1 AS ordem
+		UNION ALL SELECT 'Deferidos', 2
+		UNION ALL SELECT 'Faturamento', 3
+		UNION ALL SELECT 'Concluídos', 4
+		UNION ALL SELECT 'Suspensos', 5
+		UNION ALL SELECT 'Indeferidos', 6
+	) k ORDER BY ordem ASC`).Rows()
 	if colunasRows != nil {
 		defer colunasRows.Close()
 		for colunasRows.Next() {
@@ -488,13 +499,15 @@ func MovimentarProcesso(c *gin.Context) {
 			novaEtapaNome = "Concluídos"
 		case "repasse", "repasse amee":
 			novaEtapaNome = "Repasse Amee"
+		case "suspenso", "suspensos":
+			novaEtapaNome = "Suspenso"
 		}
 		if strings.EqualFold(strings.TrimSpace(novaEtapaNome), "concluídos") {
 			novaEtapaNome = "Concluídos"
 		}
 
 		var etapaNomeDB string
-		if err := database.GormDB_App.Raw("SELECT etapa FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", novaEtapaNome).Row().Scan(&etapaNomeDB); err == nil {
+		if err := database.GormDB_App.Raw("SELECT nome FROM DM_ETAPAS WHERE nome = ?", novaEtapaNome).Row().Scan(&etapaNomeDB); err == nil {
 			novaEtapaNome = etapaNomeDB
 		} else {
 			colTry := novaEtapaNome
@@ -505,11 +518,14 @@ func MovimentarProcesso(c *gin.Context) {
 				colTry = "Concluídos"
 			}
 			if err2 := database.GormDB_App.Raw(`
-				SELECT e.etapa
-				  FROM DM_ETAPAS_PROCESSO e
-				  JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban
-				 WHERE kc.nome_coluna = ?
-			  ORDER BY e.id_etapa_processo ASC
+				SELECT e.nome
+				  FROM DM_ETAPAS e
+				 WHERE (CASE
+				            WHEN e.id_etapa = 6 THEN 'Concluídos'
+				            WHEN e.id_etapa IN (4,5) THEN 'Faturamento'
+				            ELSE 'Ativos'
+				        END) = ?
+			  ORDER BY e.id_etapa ASC
 			     LIMIT 1`, colTry).Row().Scan(&etapaNomeDB); err2 == nil {
 				novaEtapaNome = etapaNomeDB
 			}
@@ -564,9 +580,9 @@ func MovimentarProcesso(c *gin.Context) {
 	var etapaAnteriorNome, subEtapaAnterior sql.NullString
 	var relevanciaAnterior sql.NullBool
 	if err := queryRowGorm(tx, `
-		SELECT etapa.etapa, p.sub_etapa, p.relevancia
+		SELECT etapa.nome, (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual), p.relevancia
 		  FROM FT_PROCESSOS p
-		  JOIN DM_ETAPAS_PROCESSO etapa ON p.id_etapa_processo = etapa.id_etapa_processo
+		  JOIN DM_ETAPAS etapa ON etapa.id_etapa = p.id_etapa_atual
 		 WHERE p.id_processo = ?`, processoID).Scan(&etapaAnteriorNome, &subEtapaAnterior, &relevanciaAnterior); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Processo ou etapa anterior não encontrado"})
 		return
@@ -588,11 +604,7 @@ func MovimentarProcesso(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar relevância do processo"})
 			return
 		}
-		// Mantém snapshot alinhado para evitar rollback via sync
-		if _, err = execGorm(tx, "UPDATE FT_PROCESSO_SNAPSHOT SET relevancia = ? WHERE id_processo = ?", relNovo, processoID); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar relevância do snapshot"})
-			return
-		}
+		// V2: FT_PROCESSO_SNAPSHOT removida — relevância vive só em FT_PROCESSOS (atualizada acima).
 	}
 
 	// Atualiza etapa/subetapa no processo (apenas quando mudou algo)
@@ -602,46 +614,18 @@ func MovimentarProcesso(c *gin.Context) {
 
 		if etapaMudou {
 			var novaEtapaID int
-			if err = queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", novaEtapaNome).Scan(&novaEtapaID); err != nil {
+			if err = queryRowGorm(tx, "SELECT id_etapa FROM DM_ETAPAS WHERE nome = ?", novaEtapaNome).Scan(&novaEtapaID); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "O nome da etapa fornecida é inválido: " + novaEtapaNome})
 				return
 			}
-			setClauses = append(setClauses, "id_etapa_processo = ?")
+			setClauses = append(setClauses, "id_etapa_atual = ?")
 			args = append(args, novaEtapaID)
-			setClauses = append(setClauses, "etapa = ?")
-			args = append(args, novaEtapaNome)
-
-			var colID sql.NullInt64
-			var colNome sql.NullString
-			_ = queryRowGorm(tx, `
-				SELECT k.id_coluna, k.nome_coluna
-				  FROM DM_ETAPAS_PROCESSO e
-				  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-				 WHERE e.id_etapa_processo = ?`,
-				novaEtapaID,
-			).Scan(&colID, &colNome)
-			if strings.EqualFold(strings.TrimSpace(novaEtapaNome), "Concluídos") {
-				colID = sql.NullInt64{Int64: 5, Valid: true}
-				colNome = sql.NullString{String: "Concluídos", Valid: true}
-			}
-			setClauses = append(setClauses, "id_coluna = ?")
-			if colID.Valid {
-				args = append(args, colID.Int64)
-			} else {
-				args = append(args, nil)
-			}
-			setClauses = append(setClauses, "nome_coluna = ?")
-			if colNome.Valid {
-				args = append(args, colNome.String)
-			} else {
-				args = append(args, nil)
-			}
+			// V2: colunas etapa/id_coluna/nome_coluna foram removidas — a coluna do kanban
+			// é derivada de id_etapa/id_status/id_aprovacao na leitura.
 		}
 		if subMudou {
-			setClauses = append(setClauses, "sub_etapa = ?")
-			args = append(args, novaSubEtapaNome)
 			subID, _ := resolveSubEtapaIDGorm(tx, novaSubEtapaNome)
-			setClauses = append(setClauses, "id_sub_etapa_processo = ?")
+			setClauses = append(setClauses, "id_status_atual = ?")
 			args = append(args, nullIntToIface(subID))
 		}
 		setClauses = append(setClauses, "ultima_atualizacao = NOW()")
@@ -656,13 +640,11 @@ func MovimentarProcesso(c *gin.Context) {
 			}
 		}
 
-		// Se houve movimentação manual sem atualização de dados (defer/fluxo/fat),
-		// aplica regra automática para alinhar coluna com os dados já existentes.
+		// V2: a coluna do kanban é derivada (id_etapa/id_status/id_aprovacao) — não há mais
+		// id_coluna/nome_coluna a recalcular. O estado já foi atualizado acima; mantém FT_PROCESSOS
+		// coerente com o histórico (best-effort).
 		if !hasDeferimentoUpdate && !hasFluxoUpdate && !hasFaturamentoUpdate {
-			if err := updateColunaByData(tx, processoID, gestorID); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao recalcular coluna do processo"})
-				return
-			}
+			_ = SincronizarStatusProcesso(tx, processoID)
 		}
 	}
 
@@ -733,7 +715,7 @@ func MovimentarProcesso(c *gin.Context) {
 			subID, _ := resolveSubEtapaIDGorm(tx, novaSubEtapaNome)
 			if _, err = execGorm(tx,
 				`UPDATE FT_PROCESSOS
-				 SET sub_etapa = ?, id_sub_etapa_processo = ?, ultima_atualizacao = NOW()
+				 SET sub_etapa = ?, id_status_atual /* TODO V2 */ = ?, ultima_atualizacao = NOW()
 				 WHERE id_processo = ?`,
 				novaSubEtapaNome, nullIntToIface(subID), processoID,
 			); err != nil {
@@ -815,14 +797,7 @@ func MovimentarProcesso(c *gin.Context) {
 		statusNovo = statusNovo + " - " + s
 	}
 
-	// relevância (mantém compatibilidade)
-	var relAnt, relNov interface{}
-	if relMudou {
-		if relevanciaAnterior.Valid {
-			relAnt = relevanciaAnterior.Bool
-		}
-		relNov = relNovo
-	}
+	// V2: relevancia_anterior/nova removidas do histórico; a relevância vive só em FT_PROCESSOS.
 
 	// tipo de movimentação (admin não deve contar na última movimentação e ser filtrado na VIEW)
 	tipoMov := "movimentacao"
@@ -833,17 +808,25 @@ func MovimentarProcesso(c *gin.Context) {
 	if willInsertHist {
 		res, err2 := execGorm(tx, `
 			INSERT INTO FT_HISTORICO_MOVIMENTACOES
-			  (id_requisicao, id_usuario_gestor, status_anterior, status_novo,
-			   etapa_anterior, etapa_nova, sub_etapa,
-			   relevancia_anterior, relevancia_nova, comentario,
-			   data_movimentacao, justificativa_atraso, tipo_movimentacao)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NULL, ?)`,
+			  (id_processo, id_usuario_gestor,
+			   id_etapa_anterior, id_etapa_nova,
+			   id_instancia_anterior, id_instancia_nova,
+			   id_status_anterior, id_status_novo,
+			   comentario, data_movimentacao, justificativa_atraso, tipo_movimentacao)
+			SELECT ?, ?,
+			   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+			   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+			   p.id_instancia_atual, p.id_instancia_atual,
+			   (SELECT id_status FROM DM_STATUS_PROCESSO WHERE nome = ? LIMIT 1),
+			   (SELECT id_status FROM DM_STATUS_PROCESSO WHERE nome = ? LIMIT 1),
+			   ?, NOW(), NULL, ?
+			  FROM FT_PROCESSOS p WHERE p.id_processo = ?`,
 			processoID, gestorID,
-			statusAnterior, statusNovo,
-			etapaAnteriorNome.String, etapaNovaNomeEfetiva, subEtapaNovaEfetiva,
-			relAnt, relNov,
+			etapaAnteriorNome.String, etapaNovaNomeEfetiva,
+			strings.TrimSpace(subEtapaAnterior.String), strings.TrimSpace(subEtapaNovaEfetiva),
 			strings.TrimSpace(comentario),
 			tipoMov,
+			processoID,
 		)
 		if err2 != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar movimentação no histórico"})
@@ -885,29 +868,33 @@ func MovimentarProcesso(c *gin.Context) {
 			// Descobre etapa destino na coluna Faturamento
 			var nextEtapaNome string
 			_ = queryRowGorm(tx, `
-					SELECT e.etapa
-					  FROM DM_ETAPAS_PROCESSO e
-					  JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban
-					 WHERE kc.nome_coluna = 'Faturamento'
-					 ORDER BY e.id_etapa_processo ASC
+					SELECT e.nome
+					  FROM DM_ETAPAS e
+					 WHERE (CASE
+					            WHEN e.id_etapa = 6 THEN 'Concluídos'
+					            WHEN e.id_etapa IN (4,5) THEN 'Faturamento'
+					            ELSE 'Ativos'
+					        END) = 'Faturamento'
+					 ORDER BY e.id_etapa ASC
 					 LIMIT 1`).Scan(&nextEtapaNome)
 			if strings.TrimSpace(nextEtapaNome) == "" {
 				nextEtapaNome = "Faturamento"
 			}
 			var nextEtapaID int
-			if err2 := queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ? LIMIT 1", nextEtapaNome).Scan(&nextEtapaID); err2 == nil && nextEtapaID > 0 {
+			if err2 := queryRowGorm(tx, "SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1", nextEtapaNome).Scan(&nextEtapaID); err2 == nil && nextEtapaID > 0 {
 				var colID sql.NullInt64
 				var colNome sql.NullString
 				_ = queryRowGorm(tx, `
-					SELECT k.id_coluna, k.nome_coluna
-					  FROM DM_ETAPAS_PROCESSO e
-					  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-					 WHERE e.id_etapa_processo = ?`,
+					SELECT
+					  CASE WHEN e.id_etapa = 6 THEN 5 WHEN e.id_etapa IN (4,5) THEN 4 ELSE 1 END,
+					  CASE WHEN e.id_etapa = 6 THEN 'Concluídos' WHEN e.id_etapa IN (4,5) THEN 'Faturamento' ELSE 'Ativos' END
+					  FROM DM_ETAPAS e
+					 WHERE e.id_etapa = ?`,
 					nextEtapaID,
 				).Scan(&colID, &colNome)
 				_, _ = execGorm(tx,
 					`UPDATE FT_PROCESSOS
-					 SET id_etapa_processo = ?, sub_etapa = NULL, id_sub_etapa_processo = NULL,
+					 SET id_etapa_atual /* TODO V2: era id_etapa_processo */ = ?, sub_etapa = NULL, id_status_atual /* TODO V2 */ = NULL,
 					     id_coluna = ?, nome_coluna = ?, ultima_atualizacao = NOW()
 					 WHERE id_processo = ?`,
 					nextEtapaID,
@@ -927,14 +914,22 @@ func MovimentarProcesso(c *gin.Context) {
 				)
 				// Insere histórico de avanço automático
 				_, _ = execGorm(tx, `
-						INSERT INTO FT_HISTORICO_MOVIMENTACOES (
-						  id_requisicao, id_usuario_gestor, status_anterior, status_novo,
-						  etapa_anterior, etapa_nova, sub_etapa,
-						  relevancia_anterior, relevancia_nova, comentario, data_movimentacao, justificativa_atraso, tipo_movimentacao)
-						VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 'Avanço automático: Enviado', NOW(), NULL, 'auto')`,
+						INSERT INTO FT_HISTORICO_MOVIMENTACOES
+						  (id_processo, id_usuario_gestor,
+						   id_etapa_anterior, id_etapa_nova,
+						   id_instancia_anterior, id_instancia_nova,
+						   id_status_anterior, id_status_novo,
+						   comentario, data_movimentacao, justificativa_atraso, tipo_movimentacao)
+						SELECT ?, ?,
+						   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+						   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+						   p.id_instancia_atual, p.id_instancia_atual,
+						   p.id_status_atual, p.id_status_atual,
+						   'Avanço automático: Enviado', NOW(), NULL, 'auto'
+						  FROM FT_PROCESSOS p WHERE p.id_processo = ?`,
 					processoID, gestorID,
-					statusNovo, nextEtapaNome,
 					etapaNovaNomeEfetiva, nextEtapaNome,
+					processoID,
 				)
 				// Broadcast mudança de coluna
 				go func(pid int) {
@@ -990,7 +985,7 @@ func MovimentarProcesso(c *gin.Context) {
 			}
 		}
 
-		// Uploads (anexos)
+		// Uploads (anexos) — V2: SEMPRE grava arquivo_blob no banco (não confiamos só no disco)
 		if form, err := c.MultipartForm(); err == nil {
 			files := form.File["anexos"]
 			if len(files) > 0 {
@@ -998,14 +993,31 @@ func MovimentarProcesso(c *gin.Context) {
 				for _, file := range files {
 					filename := filepath.Base(file.Filename)
 					filePath := filepath.Join("uploads/", fmt.Sprintf("%d-gestor-%d-%s", processoID, time.Now().Unix(), filename))
-					if err := c.SaveUploadedFile(file, filePath); err != nil {
-						log.Printf("[MOV-ANEXO] save error (proc=%d file=%s): %v", processoID, filename, err)
-						c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar anexo do gestor"})
+					// Lê o conteúdo em memória pra gravar como BLOB
+					fileHandle, errOpen := file.Open()
+					if errOpen != nil {
+						log.Printf("[MOV-ANEXO] open error (proc=%d file=%s): %v", processoID, filename, errOpen)
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao ler anexo do gestor"})
 						return
 					}
+					data, errRead := io.ReadAll(fileHandle)
+					fileHandle.Close()
+					if errRead != nil {
+						log.Printf("[MOV-ANEXO] read error (proc=%d file=%s): %v", processoID, filename, errRead)
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao ler anexo do gestor"})
+						return
+					}
+					// Best-effort: também grava no disco (fallback de leitura legacy)
+					_ = os.WriteFile(filePath, data, 0644)
+					mimeType := file.Header.Get("Content-Type")
+					if mimeType == "" {
+						mimeType = "application/octet-stream"
+					}
 					if _, err := execGorm(tx,
-						"INSERT INTO FT_ANEXOS (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por) VALUES (?, ?, ?, 'gestor')",
-						processoID, filename, filePath,
+						`INSERT INTO FT_ANEXOS
+						  (id_processo, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
+						  VALUES (?, ?, ?, 'gestor', NOW(), ?, ?, ?)`,
+						processoID, filename, filePath, mimeType, len(data), data,
 					); err != nil {
 						log.Printf("[MOV-ANEXO] insert error (proc=%d file=%s): %v", processoID, filename, err)
 						c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar anexo no banco"})
@@ -1033,10 +1045,10 @@ func MovimentarProcesso(c *gin.Context) {
 	var colID int
 	var colNome string
 	if err := database.GormDB_App.Raw(`
-		SELECT kc.id_coluna, kc.nome_coluna
+		SELECT
+		  CASE WHEN p.id_aprovacao_atual = 2 THEN 6 WHEN p.id_status_atual = 5 THEN 99 WHEN p.id_etapa_atual = 6 THEN 5 WHEN p.id_etapa_atual IN (4,5) THEN 4 WHEN p.id_aprovacao_atual = 1 THEN 2 ELSE 1 END,
+		  CASE WHEN p.id_aprovacao_atual = 2 THEN 'Indeferidos' WHEN p.id_status_atual = 5 THEN 'Suspensos' WHEN p.id_etapa_atual = 6 THEN 'Concluídos' WHEN p.id_etapa_atual IN (4,5) THEN 'Faturamento' WHEN p.id_aprovacao_atual = 1 THEN 'Deferidos' ELSE 'Ativos' END
 		  FROM FT_PROCESSOS p
-		  JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-		  JOIN DM_KANBAN_COLUNAS kc ON kc.id_coluna = e.id_coluna_kanban
 		 WHERE p.id_processo = ?`, processoID).Row().Scan(&colID, &colNome); err != nil {
 
 		colunaID := mapColunaID(func() string {
@@ -1130,13 +1142,13 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
               h.id_historico,
               h.id_usuario_gestor,
               COALESCE(h.mail_graph_message_id, '') AS mail_graph_message_id,
-              h.status_anterior,
-              h.status_novo,
-              h.etapa_anterior,
-            h.etapa_nova,
-            h.sub_etapa,
-            h.relevancia_anterior,
-            h.relevancia_nova,
+              (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_anterior) AS status_anterior,
+              (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo) AS status_novo,
+              (SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior) AS etapa_anterior,
+            (SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova) AS etapa_nova,
+            (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo) AS sub_etapa,
+            NULL AS relevancia_anterior,
+            NULL AS relevancia_nova,
             h.comentario,
             h.justificativa_atraso,
             h.data_movimentacao,
@@ -1147,23 +1159,9 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
         LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
         LEFT JOIN FT_HISTORICO_CANAIS hc ON hc.id_historico = h.id_historico
         LEFT JOIN DM_CANAIS_COMUNICACAO dc ON dc.id_canal = hc.id_canal
-        WHERE h.id_requisicao = ?
+        WHERE h.id_processo = ?
           GROUP BY
-              h.id_historico,
-              h.id_usuario_gestor,
-              h.mail_graph_message_id,
-              h.status_anterior,
-            h.status_novo,
-            h.etapa_anterior,
-            h.etapa_nova,
-            h.sub_etapa,
-            h.relevancia_anterior,
-            h.relevancia_nova,
-            h.comentario,
-            h.justificativa_atraso,
-            h.data_movimentacao,
-            h.tipo_movimentacao,
-            u.nome_usuario
+              h.id_historico
         ORDER BY h.data_movimentacao DESC, h.id_historico DESC
     `, id)
 	if err != nil {
@@ -1283,7 +1281,7 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 	if rowsA, errA := queryGorm(database.GormDB_App, `
 		SELECT nome_arquivo, caminho_arquivo, data_upload
 		  FROM FT_ANEXOS
-		 WHERE id_requisicao = ?
+		 WHERE id_processo = ?
 		 ORDER BY data_upload DESC`, id); errA == nil {
 		defer rowsA.Close()
 		for rowsA.Next() {
@@ -1298,7 +1296,7 @@ func GetHistoricoMovimentacoes(c *gin.Context) {
 	} else if rowsA, errA := queryGorm(database.GormDB_App, `
 		SELECT nome_arquivo, caminho_arquivo, NULL
 		  FROM FT_ANEXOS
-		 WHERE id_requisicao = ?`, id); errA == nil {
+		 WHERE id_processo = ?`, id); errA == nil {
 		defer rowsA.Close()
 		for rowsA.Next() {
 			var a anexoDB
@@ -1433,7 +1431,7 @@ func AddHistoricoAnexo(c *gin.Context) {
 
 	var histTime sql.NullTime
 	_ = queryRowGorm(database.GormDB_App,
-		"SELECT data_movimentacao FROM FT_HISTORICO_MOVIMENTACOES WHERE id_historico = ? AND id_requisicao = ?",
+		"SELECT data_movimentacao FROM FT_HISTORICO_MOVIMENTACOES WHERE id_historico = ? AND id_processo = ?",
 		histID, processoID,
 	).Scan(&histTime)
 	if !histTime.Valid {
@@ -1476,14 +1474,14 @@ func AddHistoricoAnexo(c *gin.Context) {
 			return
 		}
 		_, err := execGorm(tx,
-			"INSERT INTO FT_ANEXOS (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload) VALUES (?, ?, ?, 'gestor', ?)",
+			"INSERT INTO FT_ANEXOS (id_processo, nome_arquivo, caminho_arquivo, enviado_por, data_upload) VALUES (?, ?, ?, 'gestor', ?)",
 			processoID, filename, filePath, histTime.Time,
 		)
 		if err != nil {
 			log.Printf("[HIST-ANEXO] insert error (proc=%d hist=%d file=%s): %v", processoID, histID, filename, err)
 			// Fallback: coluna data_upload pode não existir
 			if _, err2 := execGorm(tx,
-				"INSERT INTO FT_ANEXOS (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por) VALUES (?, ?, ?, 'gestor')",
+				"INSERT INTO FT_ANEXOS (id_processo, nome_arquivo, caminho_arquivo, enviado_por) VALUES (?, ?, ?, 'gestor')",
 				processoID, filename, filePath,
 			); err2 != nil {
 				log.Printf("[HIST-ANEXO] insert fallback error (proc=%d hist=%d file=%s): %v", processoID, histID, filename, err2)
@@ -1585,9 +1583,9 @@ func ComentarProcesso(c *gin.Context) {
 	// Etapa/Subetapa atuais do processo
 	var etapaAtual, subAtual sql.NullString
 	_ = queryRowGorm(tx, `
-        SELECT e.etapa, p.sub_etapa
+        SELECT e.nome, (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual)
           FROM FT_PROCESSOS p
-          JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+          JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
          WHERE p.id_processo = ?`, processoID).Scan(&etapaAtual, &subAtual)
 
 	etapaTxt := strings.TrimSpace(etapaAtual.String)
@@ -1608,21 +1606,13 @@ func ComentarProcesso(c *gin.Context) {
 	log.Printf("[DEBUG-COM-RESOLVED] proc=%d etapaTxt='%s' subTxt='%s'",
 		processoID, etapaTxt, subTxt)
 
-	statusTxt := etapaTxt
-	if subTxt != "" {
-		statusTxt = statusTxt + " - " + subTxt
-	}
-
+	// V2: histórico usa id_processo + colunas FK. Um comentário puro NÃO move o processo,
+	// então não gravamos transição de etapa/status (ficam NULL) — renderiza só o texto.
 	res, err := execGorm(tx, `
-		INSERT INTO FT_HISTORICO_MOVIMENTACOES 
-		   (id_requisicao, id_usuario_gestor,
-			status_anterior, status_novo,
-			etapa_anterior, etapa_nova, sub_etapa,
-			comentario, data_movimentacao, tipo_movimentacao)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'comentario')`,
+		INSERT INTO FT_HISTORICO_MOVIMENTACOES
+		   (id_processo, id_usuario_gestor, comentario, data_movimentacao, tipo_movimentacao)
+		VALUES (?, ?, ?, NOW(), 'comentario')`,
 		processoID, gestorID,
-		statusTxt, statusTxt,
-		etapaTxt, etapaTxt, subTxt,
 		strings.TrimSpace(body.Comentario),
 	)
 	if err != nil {
@@ -1655,7 +1645,7 @@ func ComentarProcesso(c *gin.Context) {
 		var lista []string
 		if err := json.Unmarshal([]byte(raw), &lista); err == nil && len(lista) > 0 {
 			var lastID int64
-			_ = queryRowGorm(tx, "SELECT id_historico FROM FT_HISTORICO_MOVIMENTACOES WHERE id_requisicao = ? ORDER BY id_historico DESC LIMIT 1", processoID).Scan(&lastID)
+			_ = queryRowGorm(tx, "SELECT id_historico FROM FT_HISTORICO_MOVIMENTACOES WHERE id_processo = ? ORDER BY id_historico DESC LIMIT 1", processoID).Scan(&lastID)
 			if lastID > 0 {
 				allowed := map[string]bool{"whatsapp": true, "ligacao": true, "email": true, "sms": true, "site": true, "pessoal": true}
 				for _, rawNome := range lista {
@@ -1920,7 +1910,7 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 	}
 	// etapa/sub-etapa atuais
 	var etapaNome, subEtapa sql.NullString
-	_ = queryRowGorm(tx, `SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo WHERE p.id_processo = ?`, processoID).
+	_ = queryRowGorm(tx, `SELECT e.nome, (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual) FROM FT_PROCESSOS p JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual WHERE p.id_processo = ?`, processoID).
 		Scan(&etapaNome, &subEtapa)
 
 	msg := "Deferimento atualizado"
@@ -1935,9 +1925,22 @@ func SalvarDeferimentoSimples(c *gin.Context) {
 		msg = msg + " na data " + payload.DataProcedencia
 	}
 
-	_, _ = execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-		processoID, gestorID, etapaNome.String, etapaNome.String, etapaNome.String, etapaNome.String, subEtapa.String, msg)
+	// P1-1: histórico V2 (alteração de crédito não muda etapa/status → anterior = novo = atual).
+	_, _ = execGorm(tx, `
+		INSERT INTO FT_HISTORICO_MOVIMENTACOES
+		  (id_processo, id_usuario_gestor,
+		   id_etapa_anterior, id_etapa_nova,
+		   id_instancia_anterior, id_instancia_nova,
+		   id_status_anterior, id_status_novo,
+		   comentario, data_movimentacao, tipo_movimentacao)
+		SELECT ?, ?,
+		   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+		   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+		   p.id_instancia_atual, p.id_instancia_atual,
+		   p.id_status_atual, p.id_status_atual,
+		   ?, NOW(), 'movimentacao'
+		  FROM FT_PROCESSOS p WHERE p.id_processo = ?`,
+		processoID, gestorID, etapaNome.String, etapaNome.String, msg, processoID)
 
 	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
 	_ = SincronizarStatusProcesso(tx, processoID)
@@ -2041,40 +2044,44 @@ func DescartarProcesso(c *gin.Context) {
 
 	var etapaAnteriorNome, subAnterior sql.NullString
 	if err = queryRowGorm(tx, `
-		SELECT e.etapa, p.sub_etapa
-		  FROM FT_PROCESSOS p 
-		  JOIN DM_ETAPAS_PROCESSO e ON p.id_etapa_processo = e.id_etapa_processo 
+		SELECT e.nome, (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual)
+		  FROM FT_PROCESSOS p
+		  JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 		 WHERE p.id_processo = ?`, processoID).Scan(&etapaAnteriorNome, &subAnterior); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Processo ou etapa anterior não encontrado"})
 		return
 	}
 
 	var novaEtapaID int
-	if err = queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = 'Indeferido'").Scan(&novaEtapaID); err != nil {
+	if err = queryRowGorm(tx, "SELECT id_etapa FROM DM_ETAPAS WHERE nome = 'Indeferido'").Scan(&novaEtapaID); err != nil {
 		log.Printf("Erro ao buscar ID da etapa Indeferido: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro interno ao descartar o processo"})
 		return
 	}
 
 	// mantemos ultima_atualizacao (mesmo para admin) por ser transição de status
-	if _, err = execGorm(tx, "UPDATE FT_PROCESSOS SET id_etapa_processo = ?, ultima_atualizacao = NOW() WHERE id_processo = ?", novaEtapaID, processoID); err != nil {
+	if _, err = execGorm(tx, "UPDATE FT_PROCESSOS SET id_etapa_atual /* TODO V2: era id_etapa_processo */ = ?, ultima_atualizacao = NOW() WHERE id_processo = ?", novaEtapaID, processoID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao descartar o processo"})
 		return
 	}
 
-	// Monta status_anterior/status_novo
-	statusAnterior := etapaAnteriorNome.String
-	if s := strings.TrimSpace(subAnterior.String); s != "" {
-		statusAnterior = statusAnterior + " - " + s
-	}
-	statusNovo := "Indeferido"
-
-	if _, err = execGorm(tx,
-		`INSERT INTO FT_HISTORICO_MOVIMENTACOES 
-           (id_requisicao, id_usuario_gestor, status_anterior, status_novo, 
-            etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'movimentacao')`,
-		processoID, gestorID, statusAnterior, statusNovo, etapaAnteriorNome.String, "Indeferido", "", strings.TrimSpace(input.Comentario),
+	// P1-1: histórico V2. FT_PROCESSOS já foi movido p/ 'Indeferido' acima (UPDATE direto);
+	// aqui gravamos a trilha de auditoria com etapa_anterior (pré-update) → 'Indeferido'.
+	if _, err = execGorm(tx, `
+		INSERT INTO FT_HISTORICO_MOVIMENTACOES
+		  (id_processo, id_usuario_gestor,
+		   id_etapa_anterior, id_etapa_nova,
+		   id_instancia_anterior, id_instancia_nova,
+		   id_status_anterior, id_status_novo,
+		   comentario, data_movimentacao, tipo_movimentacao)
+		SELECT ?, ?,
+		   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+		   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = 'Indeferido' LIMIT 1),
+		   p.id_instancia_atual, p.id_instancia_atual,
+		   p.id_status_atual, p.id_status_atual,
+		   ?, NOW(), 'movimentacao'
+		  FROM FT_PROCESSOS p WHERE p.id_processo = ?`,
+		processoID, gestorID, etapaAnteriorNome.String, strings.TrimSpace(input.Comentario), processoID,
 	); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar movimentação no histórico"})
 		return
@@ -2144,15 +2151,15 @@ func SuspenderProcesso(c *gin.Context) {
 	defer tx.Rollback()
 
 	var etapaAtual, subAtual sql.NullString
-	_ = queryRowGorm(tx, `SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo=p.id_etapa_processo WHERE p.id_processo=?`,
+	_ = queryRowGorm(tx, `SELECT e.nome, (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual) FROM FT_PROCESSOS p JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual WHERE p.id_processo=?`,
 		processoID).Scan(&etapaAtual, &subAtual)
 
 	// não mexe na sub_etapa; não altera ultima_atualizacao (opcional: pode alterar se desejar)
 	var etapaSuspID sql.NullInt64
-	_ = queryRowGorm(tx, `SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa IN ('Suspenso','Suspensos') LIMIT 1`).Scan(&etapaSuspID)
+	_ = queryRowGorm(tx, `SELECT id_etapa FROM DM_ETAPAS WHERE nome IN ('Suspenso','Suspensos') LIMIT 1`).Scan(&etapaSuspID)
 
 	if etapaSuspID.Valid {
-		if _, err := execGorm(tx, `UPDATE FT_PROCESSOS SET suspenso=1, id_etapa_processo=?, sub_etapa='Suspenso', id_sub_etapa_processo=NULL, id_coluna=99, nome_coluna='Suspensos', ultima_atualizacao=NOW() WHERE id_processo=?`, etapaSuspID.Int64, processoID); err != nil {
+		if _, err := execGorm(tx, `UPDATE FT_PROCESSOS SET suspenso=1, id_etapa_atual /* TODO V2: era id_etapa_processo */=?, sub_etapa='Suspenso', id_status_atual /* TODO V2 */=NULL, id_coluna=99, nome_coluna='Suspensos', ultima_atualizacao=NOW() WHERE id_processo=?`, etapaSuspID.Int64, processoID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao suspender processo"})
 			return
 		}
@@ -2163,15 +2170,22 @@ func SuspenderProcesso(c *gin.Context) {
 		}
 	}
 
-	_, _ = execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES
-        (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
-        VALUES (?,?,?,?,?,?,?,?,NOW(),'suspensao')`,
-		processoID,
-		gestorID,
-		buildStatus(etapaAtual.String, subAtual.String),
-		"Suspenso",
-		etapaAtual.String, "Suspenso", "Suspenso",
-		strings.TrimSpace(body.Comentario),
+	// P1-1: histórico V2. FT_PROCESSOS já foi suspenso acima (UPDATE direto); trilha de auditoria.
+	_, _ = execGorm(tx, `
+        INSERT INTO FT_HISTORICO_MOVIMENTACOES
+          (id_processo, id_usuario_gestor,
+           id_etapa_anterior, id_etapa_nova,
+           id_instancia_anterior, id_instancia_nova,
+           id_status_anterior, id_status_novo,
+           comentario, data_movimentacao, tipo_movimentacao)
+        SELECT ?, ?,
+           (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+           (SELECT id_etapa FROM DM_ETAPAS WHERE nome IN ('Suspenso','Suspensos') LIMIT 1),
+           p.id_instancia_atual, p.id_instancia_atual,
+           p.id_status_atual, p.id_status_atual,
+           ?, NOW(), 'suspensao'
+          FROM FT_PROCESSOS p WHERE p.id_processo = ?`,
+		processoID, gestorID, etapaAtual.String, strings.TrimSpace(body.Comentario), processoID,
 	)
 
 	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).
@@ -2213,15 +2227,16 @@ func RetomarProcesso(c *gin.Context) {
 	defer tx.Rollback()
 
 	var etapaAtual, subAtual sql.NullString
-	_ = queryRowGorm(tx, `SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo=p.id_etapa_processo WHERE p.id_processo=?`,
+	_ = queryRowGorm(tx, `SELECT e.nome, (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual) FROM FT_PROCESSOS p JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual WHERE p.id_processo=?`,
 		processoID).Scan(&etapaAtual, &subAtual)
 
 	var prevEtapa, prevSub sql.NullString
 	_ = queryRowGorm(tx, `
-        SELECT etapa_anterior, sub_etapa
-          FROM FT_HISTORICO_MOVIMENTACOES
-         WHERE id_requisicao = ? AND tipo_movimentacao = 'suspensao'
-         ORDER BY data_movimentacao DESC
+        SELECT (SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),
+               (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo)
+          FROM FT_HISTORICO_MOVIMENTACOES h
+         WHERE h.id_processo = ? AND h.tipo_movimentacao = 'suspensao'
+         ORDER BY h.data_movimentacao DESC
          LIMIT 1`, processoID).Scan(&prevEtapa, &prevSub)
 
 	targetStage := strings.TrimSpace(prevEtapa.String)
@@ -2234,17 +2249,18 @@ func RetomarProcesso(c *gin.Context) {
 	args := []interface{}{}
 	if targetStage != "" {
 		var stageID sql.NullInt64
-		_ = queryRowGorm(tx, "SELECT id_etapa_processo FROM DM_ETAPAS_PROCESSO WHERE etapa = ?", targetStage).Scan(&stageID)
+		_ = queryRowGorm(tx, "SELECT id_etapa FROM DM_ETAPAS WHERE nome = ?", targetStage).Scan(&stageID)
 		if stageID.Valid {
-			setClauses = append(setClauses, "id_etapa_processo = ?")
+			setClauses = append(setClauses, "id_etapa_atual /* TODO V2: era id_etapa_processo */ = ?")
 			args = append(args, stageID.Int64)
 			var colID sql.NullInt64
 			var colNome sql.NullString
 			_ = queryRowGorm(tx, `
-				SELECT k.id_coluna, k.nome_coluna
-				  FROM DM_ETAPAS_PROCESSO e
-				  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
-				 WHERE e.id_etapa_processo = ?`,
+				SELECT
+				  CASE WHEN e.id_etapa = 6 THEN 5 WHEN e.id_etapa IN (4,5) THEN 4 ELSE 1 END,
+				  CASE WHEN e.id_etapa = 6 THEN 'Concluídos' WHEN e.id_etapa IN (4,5) THEN 'Faturamento' ELSE 'Ativos' END
+				  FROM DM_ETAPAS e
+				 WHERE e.id_etapa = ?`,
 				stageID.Int64,
 			).Scan(&colID, &colNome)
 			setClauses = append(setClauses, "id_coluna = ?")
@@ -2265,7 +2281,7 @@ func RetomarProcesso(c *gin.Context) {
 		setClauses = append(setClauses, "sub_etapa = ?")
 		args = append(args, targetSub)
 		subID, _ := resolveSubEtapaIDGorm(tx, targetSub)
-		setClauses = append(setClauses, "id_sub_etapa_processo = ?")
+		setClauses = append(setClauses, "id_status_atual /* TODO V2 */ = ?")
 		args = append(args, nullIntToIface(subID))
 	}
 	args = append(args, processoID)
@@ -2279,19 +2295,22 @@ func RetomarProcesso(c *gin.Context) {
 	if restoredStage == "" {
 		restoredStage = etapaAtual.String
 	}
-	restoredSub := targetSub
-	if restoredSub == "" {
-		restoredSub = subAtual.String
-	}
-	_, _ = execGorm(tx, `INSERT INTO FT_HISTORICO_MOVIMENTACOES
-        (id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
-        VALUES (?,?,?,?,?,?,?,?,NOW(),'retomada')`,
-		processoID,
-		gestorID,
-		buildStatus(etapaAtual.String, subAtual.String),
-		buildStatus(restoredStage, restoredSub),
-		etapaAtual.String, restoredStage, restoredSub,
-		strings.TrimSpace(body.Comentario),
+	// P1-1: histórico V2. FT_PROCESSOS já foi restaurado acima (UPDATE direto); trilha de auditoria.
+	_, _ = execGorm(tx, `
+        INSERT INTO FT_HISTORICO_MOVIMENTACOES
+          (id_processo, id_usuario_gestor,
+           id_etapa_anterior, id_etapa_nova,
+           id_instancia_anterior, id_instancia_nova,
+           id_status_anterior, id_status_novo,
+           comentario, data_movimentacao, tipo_movimentacao)
+        SELECT ?, ?,
+           (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+           (SELECT id_etapa FROM DM_ETAPAS WHERE nome = ? LIMIT 1),
+           p.id_instancia_atual, p.id_instancia_atual,
+           p.id_status_atual, p.id_status_atual,
+           ?, NOW(), 'retomada'
+          FROM FT_PROCESSOS p WHERE p.id_processo = ?`,
+		processoID, gestorID, etapaAtual.String, restoredStage, strings.TrimSpace(body.Comentario), processoID,
 	)
 
 	// Sincroniza FT_PROCESSOS com a ultima movimentacao do historico (best-effort).

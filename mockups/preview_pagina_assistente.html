@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Preview — Página do Assistente (solicitante)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* fundo do app (igual tema escuro) */
+  html,body{margin:0;height:100%;background:#081320;font-family:'Inter',system-ui,sans-serif;color:#e6edf3}
+  *{box-sizing:border-box}
+
+  /* ── barra superior do app (≈70px — é o que a página desconta) ─────────── */
+  .topnav{height:70px;display:flex;align-items:center;gap:18px;padding:0 24px;
+    border-bottom:1px solid rgba(255,255,255,.08);background:linear-gradient(90deg,#0a1b2e,#0c2236)}
+  .topnav .logo{font-family:'Space Grotesk',sans-serif;font-weight:700;letter-spacing:3px;font-size:18px;color:#fff}
+  .topnav .nav{display:flex;gap:6px;margin-left:8px}
+  .topnav .nav a{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:#5CC8FF;
+    background:rgba(93,200,255,.1);border:1px solid rgba(93,200,255,.3);padding:7px 14px;border-radius:9px;text-decoration:none}
+  .topnav .who{margin-left:auto;display:flex;align-items:center;gap:9px;font-size:13px;color:rgba(255,255,255,.75)}
+  .topnav .who .ava{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#5CC8FF,#2DD4BF);
+    color:#06212a;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+
+  /* ============ ESTILO REAL DA PÁGINA (copiado de AssistentePage.jsx) ============ */
+  .asst{height:calc(100vh - 70px);display:flex;flex-direction:column;max-width:none;margin:0;
+    background:#0c1a28;border:none;border-radius:0;overflow:hidden;color:#e6edf3}
+  .asst-head{display:flex;align-items:center;gap:12px;padding:14px max(20px,calc((100% - 960px)/2));border-bottom:1px solid rgba(255,255,255,.08);
+    background:linear-gradient(158deg,#103049,#0a1b2e)}
+  .asst-av{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#5CC8FF,#2DD4BF);color:#06212a;
+    display:flex;align-items:center;justify-content:center;font-size:15px;flex:0 0 32px}
+  .asst-nm{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:15px;color:#fff}
+  .asst-st{font-size:12px;color:#2DD4BF;display:flex;align-items:center;gap:6px}
+  .asst-pulse{width:8px;height:8px;border-radius:50%;background:#2DD4BF;animation:asstp 2s infinite}
+  @keyframes asstp{0%{box-shadow:0 0 0 0 rgba(45,212,191,.5)}70%{box-shadow:0 0 0 7px rgba(45,212,191,0)}100%{box-shadow:0 0 0 0 rgba(45,212,191,0)}}
+  .asst-msgs{flex:1;overflow-y:auto;padding:24px max(20px,calc((100% - 960px)/2));display:flex;flex-direction:column;gap:14px}
+  .asst-row{display:flex;gap:10px;max-width:80%;align-self:flex-start}
+  .asst-row.me{align-self:flex-end;flex-direction:row-reverse}
+  .asst-bav{width:30px;height:30px;border-radius:9px;flex:0 0 30px;background:linear-gradient(135deg,#5CC8FF,#2DD4BF);
+    color:#06212a;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .asst-bub{padding:11px 14px;border-radius:14px;font-size:13.5px;line-height:1.5}
+  .asst-bub.asst-bot{background:#0f2436;border:1px solid rgba(255,255,255,.08);border-top-left-radius:4px}
+  .asst-bub.asst-me{background:linear-gradient(135deg,#5CC8FF,#2DD4BF);color:#06212a;border-top-right-radius:4px;font-weight:500}
+  .asst-bub b{color:#fff}
+  .asst-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .asst-chip{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500;color:#5CC8FF;
+    border:1px solid rgba(93,200,255,.4);background:rgba(93,200,255,.08);padding:8px 12px;border-radius:999px;cursor:pointer}
+  .asst-chip:hover{background:rgba(93,200,255,.16)}
+  .asst-card{margin-top:10px;background:#0b1a2a;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden}
+  .asst-ch{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid rgba(255,255,255,.08);background:#0e2234;flex-wrap:wrap}
+  .asst-pn{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:13.5px}
+  .asst-badge{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;margin-left:auto}
+  .asst-badge.def{color:#2DD4BF;background:rgba(45,212,191,.12);border:1px solid rgba(45,212,191,.32)}
+  .asst-cb{padding:12px 14px}
+  .asst-kv{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;padding:4px 0}
+  .asst-kv .k{color:rgba(255,255,255,.62)}.asst-kv .v{font-weight:600;text-align:right}
+  .asst-tl{margin:8px 0 2px;padding-left:6px}
+  .asst-tl li{list-style:none;position:relative;padding:0 0 12px 20px;font-size:12.5px;color:rgba(255,255,255,.62)}
+  .asst-tl li:before{content:'';position:absolute;left:3px;top:4px;width:9px;height:9px;border-radius:50%;background:#2DD4BF}
+  .asst-tl li:after{content:'';position:absolute;left:7px;top:13px;bottom:-2px;width:1.5px;background:rgba(255,255,255,.08)}
+  .asst-tl li:last-child{padding-bottom:0}.asst-tl li:last-child:after{display:none}
+  .asst-tl .dt{color:rgba(255,255,255,.42);font-size:11.5px}.asst-tl b{color:#e6edf3}
+  .asst-vbox{margin-top:10px;border-radius:11px;padding:11px 13px;font-size:12.5px;display:flex;gap:10px;align-items:flex-start}
+  .asst-vbox.ok{background:rgba(45,212,191,.12);border:1px solid rgba(45,212,191,.32);color:#2DD4BF}
+  .asst-vbox .t{font-weight:600}.asst-vbox .t.ok{color:#2DD4BF}
+  .asst-vbox .big{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:18px;color:#eafff9;margin-top:2px}
+  .asst-vbox .sub{color:rgba(255,255,255,.62);margin-top:3px}.asst-vbox .sub b{color:#fff}
+  .asst-composer{display:block;padding:10px max(20px,calc((100% - 960px)/2)) 20px;background:#0c1a28}
+  .asst-inbar{display:flex;align-items:flex-start;gap:8px;background:#0f2436;border:1px solid rgba(255,255,255,.14);
+    border-radius:22px;padding:12px 10px 10px 18px;min-height:76px;box-shadow:0 10px 34px rgba(0,0,0,.4);transition:border-color .15s,box-shadow .15s}
+  .asst-inbar:focus-within{border-color:rgba(45,212,191,.6);box-shadow:0 10px 34px rgba(0,0,0,.4),0 0 0 3px rgba(45,212,191,.14)}
+  .asst-inp{flex:1;background:transparent;border:none;padding:4px 2px;color:#eaf2fb;font-size:14px;line-height:1.5;outline:none;
+    font-family:inherit;resize:none;overflow-y:auto;max-height:200px;display:block}
+  .asst-inp::placeholder{color:rgba(230,237,243,.42)}
+  .asst-snd{width:40px;height:40px;flex:0 0 40px;align-self:flex-end;border-radius:50%;border:none;background:linear-gradient(135deg,#5CC8FF,#2DD4BF);color:#06212a;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 14px rgba(45,212,191,.3)}
+  @media(max-width:640px){.asst{height:calc(100vh - 60px);border-radius:0;border-left:none;border-right:none}.asst-row{max-width:95%}}
+
+  /* ícone genérico inline */
+  .ic{width:14px;height:14px;display:inline-block;vertical-align:-2px}
+  .ic18{width:18px;height:18px;flex:0 0 18px}
+</style>
+</head>
+<body>
+
+  <!-- Barra superior do app (menu enxuto do solicitante: só "Assistente") -->
+  <div class="topnav">
+    <span class="logo">SURE</span>
+    <nav class="nav">
+      <a href="#"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.9 5.8L4 10l5.1 3.8L7 20l5-3.6L17 20l-2.1-6.2L20 10l-6.1-1.2z"/></svg> Assistente</a>
+    </nav>
+    <div class="who"><span class="ava">S</span> Solicitante</div>
+  </div>
+
+  <!-- Página do Assistente (tamanho real) -->
+  <div class="asst">
+    <div class="asst-head">
+      <div class="asst-av">✦</div>
+      <div>
+        <div class="asst-nm">Assistente SURE</div>
+        <div class="asst-st"><span class="asst-pulse"></span> online</div>
+      </div>
+    </div>
+
+    <div class="asst-msgs">
+      <!-- saudação -->
+      <div class="asst-row">
+        <div class="asst-bav">✦</div>
+        <div class="asst-bub asst-bot">Olá, Maria! 👋 Posso te ajudar a consultar <b>processos</b> e <b>requisições</b> para você repassar ao cliente.</div>
+      </div>
+
+      <!-- chips -->
+      <div class="asst-row">
+        <div class="asst-bav">✦</div>
+        <div class="asst-bub asst-bot">
+          Escolha uma opção:
+          <div class="asst-chips">
+            <button class="asst-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg> Movimentações de um processo</button>
+            <button class="asst-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Tempo médio de deferimento</button>
+            <button class="asst-chip"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg> Relatório de um cliente</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- mensagem do usuário -->
+      <div class="asst-row me">
+        <div class="asst-bub asst-me">#18765</div>
+      </div>
+
+      <!-- resposta: card de processo DEFERIDO -->
+      <div class="asst-row">
+        <div class="asst-bav">✦</div>
+        <div class="asst-bub asst-bot">
+          Encontrei o processo abaixo. ✅ <b>Deferido</b> — pode informar o valor e a forma ao cliente.
+          <div class="asst-card">
+            <div class="asst-ch">
+              <span class="asst-pn">Processo #18765</span>
+              <span class="asst-badge def">DEFERIDO</span>
+            </div>
+            <div class="asst-cb">
+              <div class="asst-kv"><span class="k">Cliente</span><span class="v">Via Varejo S.A.</span></div>
+              <div class="asst-kv"><span class="k">Concessionária</span><span class="v">CEMIG</span></div>
+
+              <ul class="asst-tl">
+                <li><b>Reclamação</b> — protocolo aberto<div class="dt">12/05/2026</div></li>
+                <li><b>Contestação</b> — enviada à distribuidora<div class="dt">20/05/2026</div></li>
+                <li><b>Deferimento pela concessionária</b><div class="dt">14/08/2026</div></li>
+                <li><b>Aguardando confirmação de depósito</b><div class="dt">15/08/2026</div></li>
+              </ul>
+
+              <div class="asst-vbox ok">
+                <svg class="ic18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></svg>
+                <div>
+                  <div class="t ok">Valor deferido — liberado</div>
+                  <div class="big">R$ 48.230,75</div>
+                  <div class="sub">Data do deferimento: <b>14/08/2026</b></div>
+                </div>
+              </div>
+
+              <div class="asst-kv" style="margin-top:10px"><span class="k">Forma de devolução</span><span class="v">📄 Fatura</span></div>
+              <div class="asst-kv"><span class="k">Devolvido em</span><span class="v">22/08/2026</span></div>
+              <div class="asst-kv"><span class="k">Tempo de envio do comprovante</span><span class="v" style="color:#2DD4BF">7 dias</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- composer -->
+    <form class="asst-composer" onsubmit="return false">
+      <div class="asst-inbar">
+        <textarea class="asst-inp" rows="1" placeholder="Pergunte sobre um processo, requisição ou cliente… (Enter envia, Shift+Enter quebra linha)"></textarea>
+        <button class="asst-snd" aria-label="Enviar">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>
+        </button>
+      </div>
+    </form>
+  </div>
+
+<script>
+  // auto-grow do textarea (demo): cresce com o conteúdo até 200px, depois rola.
+  // Enter envia / Shift+Enter quebra linha (igual ao Claude).
+  const ta = document.querySelector('.asst-inp');
+  if (ta) {
+    const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 200) + 'px'; };
+    ta.addEventListener('input', grow);
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); /* enviaria aqui */ }
+    });
+    grow();
+  }
+</script>
+</body>
+</html>

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net/http"
 	"os"
@@ -386,34 +385,11 @@ func overlapScore(query, text string) float64 {
 	return hit / float64(len(qset))
 }
 
+// fetchFeedbackDocs retornava documentos de feedback do chat (tabela
+// AI_CHAT_FEEDBACK, removida). Agora retorna vazio — o chat RAG segue
+// funcionando sem o enriquecimento por feedback.
 func fetchFeedbackDocs(db *gorm.DB, limit int) ([]feedbackDoc, error) {
-	rows, err := queryGorm(db, `
-		SELECT id, doc_text, embedding
-		FROM AI_CHAT_FEEDBACK
-		WHERE embedding IS NOT NULL
-		ORDER BY created_at DESC
-		LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []feedbackDoc
-	for rows.Next() {
-		var id int64
-		var text string
-		var embRaw []byte
-		if err := rows.Scan(&id, &text, &embRaw); err != nil {
-			return nil, err
-		}
-		var emb []float64
-		_ = json.Unmarshal(embRaw, &emb)
-		if len(emb) == 0 || text == "" {
-			continue
-		}
-		out = append(out, feedbackDoc{ID: id, Text: text, Embedding: emb})
-	}
-	return out, nil
+	return nil, nil
 }
 
 func buildContext(question string, queryEmb []float64, topK int, attachments []ragAttachment) ([]ragSnippet, string, bool, error) {
@@ -638,98 +614,5 @@ func ChatRAGHandler(c *gin.Context) {
 	})
 }
 
-type chatFeedbackInput struct {
-	Question      string      `json:"question"`
-	Answer        string      `json:"answer"`
-	Rating        int         `json:"rating"`
-	Comment       string      `json:"comment"`
-	Sources       []ragSnippet `json:"sources"`
-	Model         string      `json:"model"`
-	PromptVersion string      `json:"prompt_version"`
-}
-
-// POST /api/v1/chat/feedback
-// CreateChatFeedback godoc
-// @Summary      Feedback do chat
-// @Tags         Chat
-// @Accept       json
-// @Produce      json
-// @Success      200  {object}  map[string]any
-// @Failure      400  {object}  map[string]any
-// @Failure      500  {object}  map[string]any
-// @Router       /api/v1/chat/feedback [post]
-func CreateChatFeedback(c *gin.Context) {
-	var uid int64
-	if v, ok := c.Get("userID"); ok {
-		if id, ok2 := v.(int64); ok2 {
-			uid = id
-		}
-	}
-	if uid == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
-		return
-	}
-
-	var in chatFeedbackInput
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-		return
-	}
-
-	in.Question = strings.TrimSpace(in.Question)
-	in.Answer = strings.TrimSpace(in.Answer)
-	in.Comment = strings.TrimSpace(in.Comment)
-	in.Model = strings.TrimSpace(in.Model)
-	in.PromptVersion = strings.TrimSpace(in.PromptVersion)
-
-	if in.Question == "" || in.Answer == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "question and answer required"})
-		return
-	}
-	if in.Rating < 1 || in.Rating > 5 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "rating must be 1..5"})
-		return
-	}
-
-	docText := strings.TrimSpace(strings.Join([]string{
-		"Question: " + in.Question,
-		"Answer: " + in.Answer,
-		"Comment: " + in.Comment,
-	}, "\n"))
-
-	var embedding []float64
-	emb, err := embedText(docText)
-	if err == nil {
-		embedding = emb
-	}
-	embJSON, _ := json.Marshal(embedding)
-	sourcesJSON, _ := json.Marshal(in.Sources)
-
-	_, err = execGorm(database.GormDB_App, `
-		INSERT INTO AI_CHAT_FEEDBACK (
-			user_id, question, answer, rating, comment, sources, model, prompt_version, doc_text, embedding
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, uid, in.Question, in.Answer, in.Rating, in.Comment, sourcesJSON, in.Model, in.PromptVersion, docText, embJSON)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save feedback"})
-		return
-	}
-
-	if in.Rating >= 4 {
-		content := map[string]interface{}{
-			"question":   in.Question,
-			"answer":     in.Answer,
-			"rating":     in.Rating,
-			"comment":    in.Comment,
-			"sources":    in.Sources,
-			"model":      in.Model,
-			"created_at": nowISO(),
-		}
-		if err := appendLegacyComponent("chat_feedback:"+fmt.Sprint(time.Now().Unix()), "Resposta validada por feedback", content); err != nil {
-			log.Printf("failed to append feedback to auditta_index: %v", err)
-		}
-	}
-
-	c.JSON(http.StatusCreated, gin.H{"ok": true})
-}
+// Feedback do chat (tabela AI_CHAT_FEEDBACK) foi removido.
 

@@ -46,7 +46,7 @@ func StreamProcessoEvents(c *gin.Context) {
 
 	// Evento inicial
 	fmt.Fprintf(c.Writer, "event: open\n")
-	fmt.Fprintf(c.Writer, "data: {\"ok\":true,\"processo_id\":%d}\n\n", pid)
+	fmt.Fprintf(c.Writer, "data: {\"ok\":true,\"id_processo\":%d}\n\n", pid)
 	c.Writer.Flush()
 
 	notify := c.Stream

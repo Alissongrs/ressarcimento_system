@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sure — Ambiente de Testes Antecipado</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: #0c1117;
+    color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  .stage {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .slide {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(1200px, 92vw);
+    max-height: 92vh;
+    padding: 48px 56px;
+    background: linear-gradient(135deg, #161c24 0%, #1c2531 100%);
+    border-radius: 18px;
+    border: 1px solid rgba(88, 166, 255, 0.15);
+    box-shadow: 0 24px 70px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.03) inset;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .35s ease, transform .35s ease;
+    overflow-y: auto;
+  }
+  .slide.active {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  .slide.prev { transform: translate(-60%, -50%) scale(0.97); }
+  .slide.next { transform: translate(-40%, -50%) scale(0.97); }
+
+  /* Tipografia */
+  h1 {
+    font-size: clamp(28px, 3.2vw, 44px);
+    font-weight: 700;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #58a6ff 0%, #79c0ff 60%, #a5d6ff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.02em;
+  }
+  h2 {
+    font-size: clamp(22px, 2.4vw, 32px);
+    font-weight: 600;
+    margin-bottom: 24px;
+    color: #f0f6fc;
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: clamp(16px, 1.4vw, 20px);
+    font-weight: 600;
+    color: #79c0ff;
+    margin: 24px 0 12px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  p, li { font-size: clamp(15px, 1.2vw, 18px); line-height: 1.6; color: #c9d1d9; }
+  ul { padding-left: 24px; margin: 12px 0; }
+  li { margin-bottom: 8px; }
+  strong { color: #f0f6fc; font-weight: 600; }
+  .accent { color: #56d364; }
+  .danger { color: #f85149; }
+  .muted { color: #8b949e; font-size: 14px; }
+
+  /* Quote / blockquote */
+  blockquote {
+    border-left: 3px solid #58a6ff;
+    padding: 12px 20px;
+    margin: 16px 0;
+    background: rgba(88, 166, 255, 0.06);
+    border-radius: 0 8px 8px 0;
+    font-size: clamp(15px, 1.3vw, 18px);
+    line-height: 1.55;
+  }
+  blockquote.danger { border-left-color: #f85149; background: rgba(248, 81, 73, 0.06); }
+  blockquote.success { border-left-color: #56d364; background: rgba(86, 211, 100, 0.06); }
+
+  /* Tabelas */
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 20px 0;
+    font-size: clamp(13px, 1.05vw, 16px);
+  }
+  th {
+    text-align: left;
+    padding: 12px 16px;
+    background: rgba(88, 166, 255, 0.10);
+    color: #79c0ff;
+    font-weight: 600;
+    border-bottom: 2px solid rgba(88, 166, 255, 0.25);
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+  }
+  td {
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    color: #c9d1d9;
+    vertical-align: top;
+  }
+  tr:hover td { background: rgba(255, 255, 255, 0.02); }
+  th:first-child { border-top-left-radius: 8px; }
+  th:last-child { border-top-right-radius: 8px; }
+
+  /* Cards */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .card {
+    background: rgba(88, 166, 255, 0.05);
+    border: 1px solid rgba(88, 166, 255, 0.15);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .card .icon { font-size: 28px; margin-bottom: 8px; display: block; }
+  .card h4 {
+    color: #f0f6fc;
+    font-size: 16px;
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .card p { font-size: 14px; color: #8b949e; line-height: 1.5; }
+
+  /* Code blocks */
+  .code-block {
+    background: #0d1117;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin: 16px 0;
+    font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: clamp(12px, 1vw, 14px);
+    line-height: 1.7;
+    color: #adbac7;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .code-block .arrow { color: #56d364; }
+  .code-block .danger-arrow { color: #f85149; }
+  .code-block .label { color: #79c0ff; }
+
+  /* Comparison side-by-side */
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+  .compare > div { padding: 16px 20px; border-radius: 10px; }
+  .compare .before { background: rgba(248, 81, 73, 0.06); border: 1px solid rgba(248, 81, 73, 0.2); }
+  .compare .after  { background: rgba(86, 211, 100, 0.06); border: 1px solid rgba(86, 211, 100, 0.2); }
+  .compare h4 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+  }
+  .compare .before h4 { color: #f85149; }
+  .compare .after h4 { color: #56d364; }
+
+  /* ASCII Box */
+  .ascii-box {
+    background: #0d1117;
+    border: 1px solid rgba(88, 166, 255, 0.2);
+    border-radius: 10px;
+    padding: 24px 28px;
+    margin: 20px 0;
+    font-family: "JetBrains Mono", monospace;
+    font-size: clamp(12px, 1.1vw, 15px);
+    line-height: 1.7;
+    color: #79c0ff;
+    text-align: left;
+    overflow-x: auto;
+  }
+  .ascii-box .border { color: #58a6ff; }
+  .ascii-box .check { color: #56d364; font-weight: 600; }
+
+  /* Navegação */
+  .nav-controls {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    background: rgba(22, 28, 36, 0.95);
+    padding: 8px 16px;
+    border-radius: 100px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 100;
+  }
+  .nav-btn {
+    background: rgba(88, 166, 255, 0.15);
+    color: #79c0ff;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 100px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all .2s ease;
+  }
+  .nav-btn:hover {
+    background: rgba(88, 166, 255, 0.25);
+    color: #f0f6fc;
+  }
+  .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .counter {
+    color: #c9d1d9;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 0 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Slide footer */
+  .slide-footer {
+    margin-top: 32px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    color: #6e7681;
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  /* Title slide */
+  .title-slide {
+    text-align: center;
+  }
+  .title-slide h1 {
+    font-size: clamp(40px, 4.5vw, 64px);
+    margin-bottom: 16px;
+  }
+  .title-slide .subtitle {
+    font-size: clamp(18px, 1.6vw, 24px);
+    color: #8b949e;
+    margin-bottom: 32px;
+  }
+  .title-slide .meta {
+    margin-top: 48px;
+    color: #6e7681;
+    font-size: 14px;
+  }
+
+  /* Responsivo mobile */
+  @media (max-width: 768px) {
+    .slide { padding: 24px 20px; width: 95vw; }
+    .grid { grid-template-columns: 1fr; }
+    .compare { grid-template-columns: 1fr; }
+    table { font-size: 13px; }
+    th, td { padding: 8px 10px; }
+    .nav-controls { bottom: 12px; padding: 6px 12px; }
+    .nav-btn { padding: 6px 12px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="stage">
+
+  <!-- Slide 1: Capa -->
+  <div class="slide active title-slide" data-slide="1">
+    <h1>Sure — Ambiente de Testes</h1>
+    <p class="subtitle">O motor que antecipa problemas antes da analista relatar</p>
+    <div class="grid" style="margin-top: 40px;">
+      <div class="card">
+        <span class="icon">⚡</span>
+        <h4>Iteração 10× mais rápida</h4>
+        <p>De 2 horas perdidas a 60 segundos para validar uma mudança.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🛡️</span>
+        <h4>Zero downtime</h4>
+        <p>Analistas trabalham enquanto você experimenta — produção intocada.</p>
+      </div>
+      <div class="card">
+        <span class="icon">🎯</span>
+        <h4>Confiança no deploy</h4>
+        <p>Subir mudança só depois do bench verde em 500 faturas-padrão.</p>
+      </div>
+    </div>
+    <div class="meta">Apresentação interna · Sure · 2026</div>
+  </div>
+
+  <!-- Slide 2: O problema -->
+  <div class="slide" data-slide="2">
+    <h2>O problema que estamos resolvendo</h2>
+
+    <blockquote class="danger">
+      <strong>Hoje:</strong> mudança vai direto pra produção. Bugs como
+      <code>row not defined</code>, <code>raw not defined</code>, ou etapa
+      <strong>Suspenso</strong> faltando, afetam <strong>analistas reais</strong>
+      antes de qualquer alerta.
+    </blockquote>
+
+    <blockquote class="success">
+      <strong>Com ambiente de testes:</strong> o <strong>mesmo bug</strong> é
+      detectado em <strong>5 segundos</strong>, antes de tocar em <strong>1
+      fatura real</strong>.
+    </blockquote>
+
+    <h3>Por que isso importa pro Sure</h3>
+    <ul>
+      <li>O Sure processa <strong>milhares de faturas</strong> de <strong>20+ distribuidoras</strong> com layouts distintos</li>
+      <li>Cada calibração nova pode <strong>quebrar 3 antigas</strong> sem que ninguém perceba</li>
+      <li>A descoberta vem por <strong>relato da analista</strong> — caro e tardio</li>
+      <li>Reverter exige <strong>reprocessar milhares de registros</strong></li>
+    </ul>
+
+    <div class="slide-footer">
+      <span>Slide 2 de 6</span>
+      <span>Por que mudar agora</span>
+    </div>
+  </div>
+
+  <!-- Slide 3: Os 6 ganhos -->
+  <div class="slide" data-slide="3">
+    <h2>Os 6 ganhos no dia-a-dia</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 28%;">Ganho</th>
+          <th>O que viabiliza</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>🛡️ Zero downtime</strong></td>
+          <td>Deploys não interrompem o trabalho — a equipe analisa enquanto você testa mudanças isoladamente</td>
+        </tr>
+        <tr>
+          <td><strong>🧪 Calibrar sem risco</strong></td>
+          <td>Novo regex Light/Enel/CEMIG validado num parque controlado antes do parque real de produção</td>
+        </tr>
+        <tr>
+          <td><strong>⏱️ Iteração 10× mais rápida</strong></td>
+          <td>Roda 100 faturas em &lt; 30s vs. esperar o batch noturno em produção</td>
+        </tr>
+        <tr>
+          <td><strong>🎯 Regressão na hora</strong></td>
+          <td>Mudou regex de CIP? Os 4.5k aprovados continuam aprovados? Testa em 2 minutos</td>
+        </tr>
+        <tr>
+          <td><strong>📊 Comparativo lado-a-lado</strong></td>
+          <td>Versão A vs B nas <strong>mesmas</strong> 100 faturas — escolhe a vencedora antes de promover</td>
+        </tr>
+        <tr>
+          <td><strong>🔬 Custo de IA controlado</strong></td>
+          <td>Bench Haiku/GPT-5.4 num conjunto fixo — sem queimar US$ em produção pra descobrir limitação</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="slide-footer">
+      <span>Slide 3 de 6</span>
+      <span>O que ganhamos</span>
+    </div>
+  </div>
+
+  <!-- Slide 4: Antes vs Depois -->
+  <div class="slide" data-slide="4">
+    <h2>Como o Sure fica diferente</h2>
+
+    <div class="compare">
+      <div class="before">
+        <h4>❌ Antes (hoje)</h4>
+        <div class="code-block" style="margin: 0; background: transparent; border: none; padding: 0;">
+Edita código
+<span class="danger-arrow">→</span> push direto
+<span class="danger-arrow">→</span> 4.700 faturas pegam o bug
+<span class="danger-arrow">→</span> analista relata
+<span class="danger-arrow">→</span> fix correndo
+<span class="danger-arrow">→</span> re-deploy
+<span class="danger-arrow">→</span> 2 horas perdidas</div>
+      </div>
+
+      <div class="after">
+        <h4>✅ Depois (com ambiente)</h4>
+        <div class="code-block" style="margin: 0; background: transparent; border: none; padding: 0;">
+Edita código
+<span class="arrow">→</span> bench local (60s)
+<span class="arrow">→</span> vê impacto medido
+<span class="arrow">→</span> ajusta antes de subir
+<span class="arrow">→</span> push só quando verde
+<span class="arrow">→</span> produção sem surpresa</div>
+      </div>
+    </div>
+
+    <h3 style="margin-top: 32px;">A diferença em números</h3>
+    <div class="grid">
+      <div class="card">
+        <h4 class="accent">60 segundos</h4>
+        <p>Para saber se a mudança quebrou algo — vs 2 horas hoje</p>
+      </div>
+      <div class="card">
+        <h4 class="accent">0 analistas afetadas</h4>
+        <p>Durante toda a fase de validação — vs todas elas hoje</p>
+      </div>
+      <div class="card">
+        <h4 class="accent">100% reproduzível</h4>
+        <p>Mesmo bench, mesmas faturas, mesmo resultado — vs "depende"</p>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <span>Slide 4 de 6</span>
+      <span>O salto operacional</span>
+    </div>
+  </div>
+
+  <!-- Slide 5: Casos concretos -->
+  <div class="slide" data-slide="5">
+    <h2>Casos reais — o que JÁ aconteceu esta semana</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 36%;">Incidente</th>
+          <th style="width: 32%;">Custo SEM ambiente</th>
+          <th>Custo COM ambiente</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Bug</strong> <code>row not defined</code> em v3.3 complementos</td>
+          <td class="danger">2.000+ faturas reprocessadas + propagações desativadas</td>
+          <td class="accent">Pega em 1 fatura de teste → 30s pra corrigir</td>
+        </tr>
+        <tr>
+          <td><strong>Bug</strong> <code>raw not defined</code> em v3.7 colunas SQL</td>
+          <td class="danger">cols=0 em milhares de registros sem ninguém notar</td>
+          <td class="accent">Smoke test rejeita o commit antes de subir</td>
+        </tr>
+        <tr>
+          <td><strong>Suspensão de processo travada</strong> (etapa "Suspenso" faltando em DM)</td>
+          <td class="danger">Usuária reportou + workaround SQL urgente</td>
+          <td class="accent">Teste de integração já cobre essa rota</td>
+        </tr>
+        <tr>
+          <td><strong>Subvenção ICMS Enel SP</strong> zerar tributos</td>
+          <td class="danger">Aplicação retroativa em 243 faturas</td>
+          <td class="accent">Validação positiva no bench antes de promover</td>
+        </tr>
+        <tr>
+          <td><strong>Light RJ — 3 IDs distintos</strong> (cod_instalacao / cod_cliente / conta_contrato)</td>
+          <td class="danger">2 iterações no parque (16/584 → 584/584)</td>
+          <td class="accent">2 layouts mapeados em 1 round local</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <blockquote style="margin-top: 24px;">
+      <strong>Total da semana:</strong> ~6 horas de retrabalho + N analistas
+      atrapalhadas + dúvida residual sobre cobertura.
+      <br><strong>Com ambiente:</strong> esses 5 incidentes viram 5 commits
+      verdes sem nenhum dos efeitos colaterais.
+    </blockquote>
+
+    <div class="slide-footer">
+      <span>Slide 5 de 6</span>
+      <span>Evidência prática</span>
+    </div>
+  </div>
+
+  <!-- Slide 6: Componentes -->
+  <div class="slide" data-slide="6">
+    <h2>O que o ambiente pode ter</h2>
+
+    <div class="ascii-box">
+<span class="border">┌─────────────────────────────────────────────────────────┐</span>
+<span class="border">│</span>  <strong style="color:#79c0ff">AMBIENTE DE TESTES SURE</strong>                                <span class="border">│</span>
+<span class="border">├─────────────────────────────────────────────────────────┤</span>
+<span class="border">│</span>  <span class="check">✓</span> Banco espelho (faturas reais anonimizadas)         <span class="border">│</span>
+<span class="border">│</span>  <span class="check">✓</span> Pipeline isolado (mesma stack, sem load real)      <span class="border">│</span>
+<span class="border">│</span>  <span class="check">✓</span> Conjunto-bench (~500 faturas por distribuidora)    <span class="border">│</span>
+<span class="border">│</span>  <span class="check">✓</span> Validador automatizado (CI / pre-commit)           <span class="border">│</span>
+<span class="border">│</span>  <span class="check">✓</span> Comparador A/B (regra v1 vs v2 no mesmo bench)     <span class="border">│</span>
+<span class="border">│</span>  <span class="check">✓</span> Mocks SEFAZ/sgeeasy (sem custo de rede externa)    <span class="border">│</span>
+<span class="border">│</span>  <span class="check">✓</span> Dashboards de cobertura por distribuidora          <span class="border">│</span>
+<span class="border">│</span>  <span class="check">✓</span> Smoke tests de regressão (4.5k aprovadas garantidas) <span class="border">│</span>
+<span class="border">└─────────────────────────────────────────────────────────┘</span>
+    </div>
+
+    <h3>O valor estratégico</h3>
+
+    <blockquote class="danger" style="margin-bottom: 12px;">
+      <strong>Sem ambiente:</strong> o Sure cresce em <strong>risco</strong>.
+      Cada calibração nova pode quebrar 3 antigas, e você só descobre quando
+      a analista reporta.
+    </blockquote>
+
+    <blockquote class="success" style="margin-bottom: 12px;">
+      <strong>Com ambiente:</strong> o Sure cresce com <strong>confiança</strong>.
+      Adicionar uma 20ª distribuidora não assusta — o bench garante que as
+      outras 19 continuam funcionando.
+    </blockquote>
+
+    <blockquote>
+      <strong>No final do dia:</strong> menos retrabalho, menos noites
+      consertando, <strong>mais tempo construindo</strong> o motor de detecção
+      que diferencia o Sure no mercado.
+    </blockquote>
+
+    <div class="slide-footer">
+      <span>Slide 6 de 6 — Fim</span>
+      <span>Pronto pra construir 🚀</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Controles de navegação -->
+<div class="nav-controls">
+  <button class="nav-btn" id="prevBtn">← Anterior</button>
+  <span class="counter" id="counter">1 / 6</span>
+  <button class="nav-btn" id="nextBtn">Próximo →</button>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+
+  function show(idx) {
+    if (idx < 0 || idx >= total) return;
+    slides.forEach((s, i) => {
+      s.classList.remove('active', 'prev', 'next');
+      if (i === idx) s.classList.add('active');
+      else if (i < idx) s.classList.add('prev');
+      else s.classList.add('next');
+    });
+    current = idx;
+    document.getElementById('counter').textContent = `${idx + 1} / ${total}`;
+    document.getElementById('prevBtn').disabled = idx === 0;
+    document.getElementById('nextBtn').disabled = idx === total - 1;
+  }
+
+  document.getElementById('prevBtn').onclick = () => show(current - 1);
+  document.getElementById('nextBtn').onclick = () => show(current + 1);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+      e.preventDefault();
+      show(current + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      e.preventDefault();
+      show(current - 1);
+    } else if (e.key === 'Home') {
+      show(0);
+    } else if (e.key === 'End') {
+      show(total - 1);
+    } else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+  });
+
+  show(0);
+</script>
+
+</body>
+</html>

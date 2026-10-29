@@ -28,9 +28,10 @@ func ensureSnapshotRow(idProcesso int) {
 }
 
 func syncSnapshotFromOriginal(idProcesso int, userID int) {
-	ensureSnapshotRow(idProcesso)
-	if err := syncFromOriginalTables(idProcesso, userID); err != nil {
-		log.Printf("[snapshot] sync from originals failed for processo %d: %v", idProcesso, err)
-	}
+	// V2: o mecanismo de espelho FT_PROCESSO_SNAPSHOT + sp_sync_from_original_tables foi
+	// removido na migração. O estado do processo vive direto em FT_PROCESSOS, então não há
+	// mais snapshot a sincronizar. No-op (evita Error 1146/1305 a cada save de classificação).
+	_ = idProcesso
+	_ = userID
 }
 

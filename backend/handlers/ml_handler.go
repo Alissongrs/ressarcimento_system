@@ -85,13 +85,13 @@ func MLProcessoHandler(c *gin.Context) {
 		COALESCE(p.ressarcimento_estimado, 0) as valor_estimado,
 		COALESCE(COUNT(DISTINCT h.id_historico), 0) as num_movimentacoes,
 		COALESCE(COUNT(DISTINCT a.id_anexo), 0) as num_anexos,
-		CASE WHEN MAX(h.etapa_nova) = 'Distribuidora' OR MAX(h.etapa_anterior) = 'Distribuidora' THEN 1 ELSE 0 END as passou_analise,
+		CASE WHEN MAX((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova)) = 'Distribuidora' OR MAX((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior)) = 'Distribuidora' THEN 1 ELSE 0 END as passou_analise,
 		COALESCE(p.cliente, 'Desconhecido') as cliente,
 		COALESCE(DATEDIFF(d.data_procedencia, p.data_criacao), 30) as dias_totais
 	FROM FT_PROCESSOS p
 	LEFT JOIN FT_DEFERIMENTOS d ON p.id_processo = d.id_processo
-	LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON p.id_processo = h.id_requisicao
-	LEFT JOIN FT_ANEXOS a ON p.id_processo = a.id_requisicao
+	LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON p.id_processo = h.id_processo
+	LEFT JOIN FT_ANEXOS a ON p.id_processo = a.id_processo
 	WHERE p.id_processo = ?
 	GROUP BY p.id_processo
 	`

@@ -49,7 +49,7 @@ export default function AlertasVencimentoModal({ open, onClose }) {
           </button>
         </div>
         {loading && <div className="opacity-70 sap-loading">Carregando...</div>}
-        {err && <div className="text-red-600 mb-3">{err}</div>}
+        {err && <div className="text-[var(--danger)] mb-3">{err}</div>}
         <div className="flex-1 overflow-auto space-y-4">
           <Section title="Vencem hoje" items={dueToday} emptyMsg="Nenhum alerta para hoje." />
           <Section title="Faltam 1 dia" items={dueTomorrow} emptyMsg="Nenhum alerta para amanhã." />

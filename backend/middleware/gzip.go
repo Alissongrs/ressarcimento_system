@@ -46,8 +46,13 @@ func Gzip() gin.HandlerFunc {
 			return
 		}
 
-		// Não comprime SSE (Server-Sent Events) - precisa de streaming
-		if c.GetHeader("Content-Type") == "text/event-stream" {
+		// Não comprime SSE (Server-Sent Events) - precisa de streaming. O navegador pede SSE
+		// pelo header Accept (o Content-Type é da RESPOSTA, não vem na requisição); comprimir
+		// prende os heartbeats no buffer do gzip e o proxy corta a conexão
+		// (net::ERR_INCOMPLETE_CHUNKED_ENCODING em /alertas/stream).
+		if strings.Contains(c.GetHeader("Accept"), "text/event-stream") ||
+			strings.HasSuffix(c.Request.URL.Path, "/stream") ||
+			c.GetHeader("Content-Type") == "text/event-stream" {
 			c.Next()
 			return
 		}

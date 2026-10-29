@@ -44,15 +44,15 @@ func HistoricoRecent(c *gin.Context) {
     rows, err := queryGorm(database.GormDB_App, `
         SELECT
           h.id_historico,
-          h.id_requisicao,
+          h.id_processo,
           COALESCE(h.mail_graph_message_id, '') AS mail_graph_message_id,
           COALESCE(h.id_usuario_gestor,0) as id_usuario,
           COALESCE(u.nome_usuario,'') AS usuario_nome,
-          COALESCE(h.status_anterior, '') AS status_anterior,
-          COALESCE(h.status_novo, '')     AS status_novo,
-          COALESCE(h.etapa_anterior, '')  AS etapa_anterior,
-          COALESCE(h.etapa_nova, '')      AS etapa_nova,
-          COALESCE(h.sub_etapa, '')       AS sub_etapa,
+          COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_anterior), '') AS status_anterior,
+          COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), '')     AS status_novo,
+          COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior), '')  AS etapa_anterior,
+          COALESCE((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova), '')      AS etapa_nova,
+          COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), '')       AS sub_etapa,
           COALESCE(h.tipo_movimentacao,'') AS tipo_movimentacao,
           DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS quando,
           COALESCE(h.comentario,'')       AS comentario

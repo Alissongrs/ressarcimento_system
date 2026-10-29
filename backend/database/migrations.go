@@ -7,94 +7,62 @@ import (
 	"strings"
 )
 
-// RunMigrations executa migrações essenciais no banco principal (DB_App).
-// Idempotente: pode rodar a cada inicialização sem causar erro.
+// RunMigrations é o entrypoint chamado no boot do backend.
+//
+// Por padrão, ele SÓ faz verificação de versão via CheckSchemaVersion (não roda
+// nenhum DDL). Isso mata o auto-migrate destrutivo que rodava a cada startup
+// (o bloco no final desta arquivo chega a fazer DROP COLUMN em DM_USUARIO — em
+// produção isso é uma bomba armada).
+//
+// Fluxo esperado em produção:
+//  1. Ops roda `migrate up` (golang-migrate) como passo explícito do deploy,
+//     com advisory lock protegendo contra dois deploys concorrentes.
+//  2. Backend sobe e apenas verifica que schema_migrations não está dirty.
+//
+// Escape hatch pra desenvolvimento local: setar SURE_LEGACY_AUTO_MIGRATE=true
+// no .env re-habilita o comportamento antigo (runLegacyMigrationsUnsafe),
+// protegido por advisory lock. Não use isso em prod.
 func RunMigrations() error {
 	if DB_App == nil {
 		return fmt.Errorf("DB_App não inicializado")
 	}
-	return runMigrations(DB_App)
+
+	// Sempre: version check (nunca faz DDL).
+	if err := CheckSchemaVersion(DB_App); err != nil {
+		return err
+	}
+
+	// Sempre (inclusive prod): auto-migrate ADITIVO e idempotente — DDL só
+	// não-destrutivo (CREATE IF NOT EXISTS / ADD COLUMN se faltar). É o que faz
+	// mudanças de schema aditivas entrarem no deploy sem ninguém rodar o
+	// golang-migrate à mão. Ver migrations_additive.go. Nunca bloqueia o boot.
+	if err := runAdditiveMigrations(DB_App); err != nil {
+		log.Printf("[migrate] aviso: auto-migrate aditivo: %v", err)
+	}
+
+	if !LegacyAutoMigrateEnabled() {
+		log.Println("[migrate] auto-migrate desligado (SURE_LEGACY_AUTO_MIGRATE!=true). Use golang-migrate como passo explícito do deploy.")
+		return nil
+	}
+
+	log.Println("[migrate] ⚠️  SURE_LEGACY_AUTO_MIGRATE=true — rodando bloco legado. NÃO use isso em produção.")
+	release, err := acquireMigrateLock(DB_App, 30)
+	if err != nil {
+		return fmt.Errorf("advisory lock: %w", err)
+	}
+	defer release()
+	return runLegacyMigrationsUnsafe(DB_App)
 }
 
-// runMigrations garante colunas/índices mínimos necessários ao backend.
-func runMigrations(db *sql.DB) error {
-	// 1) Coluna 'suspenso' em FT_PROCESSOS
-	var colCount int
-	err := db.QueryRow(`
-		SELECT COUNT(1)
-		FROM INFORMATION_SCHEMA.COLUMNS
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME = 'FT_PROCESSOS'
-		  AND COLUMN_NAME = 'suspenso'`,
-	).Scan(&colCount)
-	if err != nil {
-		return fmt.Errorf("verificando coluna suspenso: %w", err)
-	}
-	if colCount == 0 {
-		log.Println("[migrate] Adicionando coluna FT_PROCESSOS.suspenso ...")
-		if _, err := db.Exec(`ALTER TABLE FT_PROCESSOS ADD COLUMN suspenso TINYINT(1) NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("criando coluna suspenso: %w", err)
-		}
-	}
-
-	// 2) Índice idx_proc_suspenso
-	var idxCount int
-	if err := db.QueryRow(`
-		SELECT COUNT(1)
-		FROM INFORMATION_SCHEMA.STATISTICS
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME='FT_PROCESSOS'
-		  AND INDEX_NAME='idx_proc_suspenso'`,
-	).Scan(&idxCount); err != nil {
-		return fmt.Errorf("verificando índice: %w", err)
-	}
-	if idxCount == 0 {
-		log.Println("[migrate] Criando índice idx_proc_suspenso ...")
-		if _, err := db.Exec(`CREATE INDEX idx_proc_suspenso ON FT_PROCESSOS (suspenso)`); err != nil {
-			if !strings.Contains(strings.ToLower(err.Error()), "exists") {
-				return fmt.Errorf("criando índice idx_proc_suspenso: %w", err)
-			}
-		}
-	}
-
-	// 3) Backfill por sub_etapa
-	log.Println("[migrate] Backfill de suspenso por sub_etapa='Suspenso' ...")
-	if _, err := db.Exec(`UPDATE FT_PROCESSOS SET suspenso = 1 WHERE LOWER(COALESCE(sub_etapa,'')) = 'suspenso'`); err != nil {
-		return fmt.Errorf("backfill por sub_etapa: %w", err)
-	}
-
-	// 4) Backfill opcional por tag 'Suspenso'
-	var hasPT, hasTags int
-	_ = db.QueryRow(`
-		SELECT COUNT(1)
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME='FT_PROCESSO_TAGS'`,
-	).Scan(&hasPT)
-	_ = db.QueryRow(`
-		SELECT COUNT(1)
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME='DM_TAGS'`,
-	).Scan(&hasTags)
-
-	if hasPT > 0 && hasTags > 0 {
-		log.Println("[migrate] Backfill de suspenso por tag 'Suspenso' ...")
-		if _, err := db.Exec(`
-			UPDATE FT_PROCESSOS p
-			JOIN FT_PROCESSO_TAGS pt ON pt.id_processo = p.id_processo
-			JOIN DM_TAGS t ON t.id_tag = pt.id_tag
-			SET p.suspenso = 1
-			WHERE LOWER(t.nome) = 'suspenso'`,
-		); err != nil {
-			return fmt.Errorf("backfill por tag: %w", err)
-		}
-	}
-
-	// 5) Log de verificação
-	var total, suspensos sql.NullInt64
-	_ = db.QueryRow(`SELECT COUNT(*), SUM(suspenso) FROM FT_PROCESSOS`).Scan(&total, &suspensos)
-	log.Printf("[migrate] FT_PROCESSOS: total=%d, suspensos=%d", total.Int64, suspensos.Int64)
+// runLegacyMigrationsUnsafe é o bloco antigo de auto-migrate — CRIA/ALTERA/DROP
+// tabelas idempotentemente. Ficou aqui só como escape hatch pra devs locais
+// (SURE_LEGACY_AUTO_MIGRATE=true). Não deve ser chamado em produção.
+//
+// TODO: substituir todo esse blob por arquivos .sql versionados em migrations/
+// consumidos por golang-migrate. Este arquivo pode então ser deletado.
+func runLegacyMigrationsUnsafe(db *sql.DB) error {
+	_ = strings.ToLower // mantém import strings vivo (era usado nas migrações 1-5 desligadas)
+	log.Println("[migrate] V2: migrações de schema legado (suspenso/sub_etapa) desabilitadas — schema PROD já em V2")
 
 	// 6) Tabela de feedbacks dos usuários (se não existir)
 	var hasFb int
@@ -157,42 +125,7 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
-	// 6c) Tabela de feedbacks do chat IA (RAG)
-	var hasChatFeedback int
-	_ = db.QueryRow(`
-		SELECT COUNT(1)
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME='AI_CHAT_FEEDBACK'`,
-	).Scan(&hasChatFeedback)
-
-	if hasChatFeedback == 0 {
-		log.Println("[migrate] Criando tabela AI_CHAT_FEEDBACK ...")
-		if _, err := db.Exec(`
-			CREATE TABLE AI_CHAT_FEEDBACK (
-			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-			  user_id INT NOT NULL,
-			  question TEXT NOT NULL,
-			  answer LONGTEXT NOT NULL,
-			  rating TINYINT NOT NULL,
-			  comment TEXT NULL,
-			  sources JSON NULL,
-			  model VARCHAR(100) NULL,
-			  prompt_version VARCHAR(50) NULL,
-			  doc_text LONGTEXT NULL,
-			  embedding JSON NULL,
-			  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			  PRIMARY KEY (id),
-			  KEY idx_chat_feedback_user (user_id),
-			  KEY idx_chat_feedback_rating (rating),
-			  KEY idx_chat_feedback_created (created_at),
-			  CONSTRAINT fk_chat_feedback_user FOREIGN KEY (user_id) REFERENCES DM_USUARIO(id_usuario)
-			    ON DELETE CASCADE ON UPDATE CASCADE
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
-		); err != nil {
-			return fmt.Errorf("criando AI_CHAT_FEEDBACK: %w", err)
-		}
-	}
+	// 6c) AI_CHAT_FEEDBACK removida (feature de feedback do chat descontinuada).
 
 	// 6d) Tabela de log do chat IA (RAG)
 	var hasChatLog int
@@ -284,89 +217,8 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
-	// 7) Tabela de prazos por coluna do Kanban (admin configura)
-	var hasPrazosKanban int
-	_ = db.QueryRow(`
-		SELECT COUNT(1)
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME='DM_PRAZOS_KANBAN'`,
-	).Scan(&hasPrazosKanban)
-
-	if hasPrazosKanban == 0 {
-		log.Println("[migrate] Criando tabela DM_PRAZOS_KANBAN ...")
-		if _, err := db.Exec(`
-			CREATE TABLE DM_PRAZOS_KANBAN (
-			  id INT AUTO_INCREMENT PRIMARY KEY,
-			  id_coluna_kanban INT NOT NULL UNIQUE,
-			  prazo_dias INT NULL,
-			  CONSTRAINT fk_prazo_coluna FOREIGN KEY (id_coluna_kanban) REFERENCES DM_KANBAN_COLUNAS(id_coluna)
-			    ON DELETE CASCADE ON UPDATE CASCADE
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
-		); err != nil {
-			return fmt.Errorf("criando DM_PRAZOS_KANBAN: %w", err)
-		}
-	}
-
-	// 8) Tabela de prazos por etapa/sub-etapa (admin configura)
-	var hasPrazosEtapa int
-	_ = db.QueryRow(`
-		SELECT COUNT(1)
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME='DM_PRAZOS_ETAPA'`,
-	).Scan(&hasPrazosEtapa)
-
-	if hasPrazosEtapa == 0 {
-		log.Println("[migrate] Criando tabela DM_PRAZOS_ETAPA ...")
-		if _, err := db.Exec(`
-			CREATE TABLE DM_PRAZOS_ETAPA (
-			  id INT AUTO_INCREMENT PRIMARY KEY,
-			  id_etapa_processo INT NOT NULL,
-			  sub_etapa VARCHAR(50) NULL,
-			  prazo_dias INT NOT NULL,
-			  UNIQUE KEY uq_etapa_sub (id_etapa_processo, sub_etapa),
-			  CONSTRAINT fk_prazo_etapa FOREIGN KEY (id_etapa_processo) REFERENCES DM_ETAPAS_PROCESSO(id_etapa_processo)
-			    ON DELETE CASCADE ON UPDATE CASCADE
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
-		); err != nil {
-			return fmt.Errorf("criando DM_PRAZOS_ETAPA: %w", err)
-		}
-	}
-
-	// 9) Tabela de alarmes personalizados (admin configura)
-	var hasAlarmes int
-	_ = db.QueryRow(`
-		SELECT COUNT(1)
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME='DM_ALARMES'`,
-	).Scan(&hasAlarmes)
-
-	if hasAlarmes == 0 {
-		log.Println("[migrate] Criando tabela DM_ALARMES ...")
-		if _, err := db.Exec(`
-			CREATE TABLE DM_ALARMES (
-			  id INT AUTO_INCREMENT PRIMARY KEY,
-			  nome VARCHAR(100) NOT NULL,
-			  ativo TINYINT(1) NOT NULL DEFAULT 1,
-			  tipo ENUM('coluna','etapa','etapa_sub') NOT NULL,
-			  id_coluna_kanban INT NULL,
-			  id_etapa_processo INT NULL,
-			  sub_etapa VARCHAR(50) NULL,
-			  prazo_dias INT NOT NULL,
-			  severity ENUM('info','warn','crit') NOT NULL DEFAULT 'warn',
-			  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			  UNIQUE KEY uq_alarme_scope (tipo, id_coluna_kanban, id_etapa_processo, sub_etapa),
-			  CONSTRAINT fk_alarm_col FOREIGN KEY (id_coluna_kanban) REFERENCES DM_KANBAN_COLUNAS(id_coluna)
-			    ON DELETE SET NULL ON UPDATE CASCADE,
-			  CONSTRAINT fk_alarm_etapa FOREIGN KEY (id_etapa_processo) REFERENCES DM_ETAPAS_PROCESSO(id_etapa_processo)
-			    ON DELETE SET NULL ON UPDATE CASCADE
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
-		); err != nil {
-			return fmt.Errorf("criando DM_ALARMES: %w", err)
-		}
-	}
+	// 7-9) DM_PRAZOS_KANBAN, DM_PRAZOS_ETAPA e DM_ALARMES removidas
+	// (features de prazos configuráveis e alarmes descontinuadas).
 
 	// 10) Seed de canais de comunicação (para histórico via canais)
 	var hasCanais int
@@ -394,9 +246,10 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
-	// 11) Garantir etapas do processo conforme dicionário atual
-	{
-		log.Println("[migrate] Garantindo etapas DM_ETAPAS_PROCESSO (ids fixos e colunas de kanban) ...")
+	// TODO V2: bloco 11 desabilitado — DM_ETAPAS_PROCESSO renomeada pra DM_ETAPAS e
+	// já foi seedeada na migração V2 (etapas 1..6: Reclamação/Contestação/Conciliação/Faturamento/Repasse/Encerramento).
+	if false {
+		log.Println("[migrate] TODO V2: bloco DM_ETAPAS_PROCESSO desabilitado")
 
 		// Garante que a coluna etapa_descricao exista (sem cedilha)
 		var hasEtapasTbl int
@@ -729,6 +582,7 @@ WHERE pr.id_coluna IS NOT NULL
 			}
 			ensureColumn("repasse_simples", "DECIMAL(12,2)")
 			ensureColumn("repasse_dobro", "DECIMAL(12,2)")
+			ensureColumn("observacao", "TEXT")
 		}
 	}
 
@@ -760,6 +614,52 @@ WHERE pr.id_coluna IS NOT NULL
 			ensureColumn("mime_type", "VARCHAR(120)")
 			ensureColumn("tamanho_bytes", "BIGINT")
 			ensureColumn("arquivo_blob", "MEDIUMBLOB")
+		}
+	}
+
+	// 14c) Coluna 'referencia' nos itens de devolução do faturamento (Simples/Dobro/Simples e Dobro)
+	{
+		var hasFatItem int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.TABLES
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME='FT_FATURAMENTO_ITEM'`,
+		).Scan(&hasFatItem)
+		if hasFatItem > 0 {
+			var colCount int
+			_ = db.QueryRow(`
+				SELECT COUNT(1)
+				FROM INFORMATION_SCHEMA.COLUMNS
+				WHERE TABLE_SCHEMA = DATABASE()
+				  AND TABLE_NAME='FT_FATURAMENTO_ITEM'
+				  AND COLUMN_NAME='referencia'`,
+			).Scan(&colCount)
+			if colCount == 0 {
+				log.Printf("[migrate] Adicionando coluna FT_FATURAMENTO_ITEM.referencia ...")
+				_, _ = db.Exec("ALTER TABLE FT_FATURAMENTO_ITEM ADD COLUMN referencia VARCHAR(30) NULL")
+			}
+		}
+	}
+
+	// 14d) Auditoria de edições manuais (ex.: comentário de movimentação editado no histórico)
+	{
+		_, err := db.Exec(`
+			CREATE TABLE IF NOT EXISTS FT_AUDIT_EDICAO (
+			  id_audit       BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			  entidade       VARCHAR(40)  NOT NULL,
+			  id_entidade    INT          NOT NULL,
+			  campo          VARCHAR(60)  NOT NULL,
+			  valor_anterior TEXT         NULL,
+			  valor_novo     TEXT         NULL,
+			  observacao     TEXT         NULL,
+			  id_usuario     INT          NULL,
+			  data_edicao    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			  PRIMARY KEY (id_audit),
+			  KEY idx_audit_entidade (entidade, id_entidade)
+			)`)
+		if err != nil {
+			log.Printf("[migrate] FT_AUDIT_EDICAO: %v", err)
 		}
 	}
 
@@ -875,7 +775,7 @@ END`, strings.Join(insertCols, ", "), strings.Join(insertVals, ", "))
 		if _, err := db.Exec(`
 			CREATE TABLE mail_messages (
 			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-			  graph_message_id VARCHAR(200) NOT NULL,
+			  graph_message_id VARCHAR(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, -- id do Graph diferencia maiúsculas
 			  internet_message_id VARCHAR(255) NULL,
 			  subject TEXT NULL,
 			  from_email VARCHAR(255) NULL,
@@ -1066,58 +966,8 @@ END`, strings.Join(insertCols, ", "), strings.Join(insertVals, ", "))
 		}
 	}
 
-	// 6e) Leitura de e-mails por usuário (FT_EMAILS_PROCESSO)
-	var hasEmailReads int
-	_ = db.QueryRow(`
-		SELECT COUNT(1)
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME='FT_EMAILS_LEITURAS'`,
-	).Scan(&hasEmailReads)
-
-	if hasEmailReads == 0 {
-		log.Println("[migrate] Criando tabela FT_EMAILS_LEITURAS ...")
-		if _, err := db.Exec(`
-			CREATE TABLE FT_EMAILS_LEITURAS (
-			  id_email INT NOT NULL,
-			  id_usuario INT NOT NULL,
-			  data_leitura DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			  PRIMARY KEY (id_email, id_usuario),
-			  KEY idx_email_leitura (id_email),
-			  KEY idx_usuario_leitura (id_usuario),
-			  CONSTRAINT fk_email_leitura_email FOREIGN KEY (id_email) REFERENCES FT_EMAILS_PROCESSO(id_email)
-			    ON DELETE CASCADE ON UPDATE CASCADE,
-			  CONSTRAINT fk_email_leitura_usuario FOREIGN KEY (id_usuario) REFERENCES DM_USUARIO(id_usuario)
-			    ON DELETE CASCADE ON UPDATE CASCADE
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
-			return fmt.Errorf("criando FT_EMAILS_LEITURAS: %w", err)
-		}
-	}
-
-	// 9.1) Mailbox: mail_message_reads (read per user)
-	var hasMailReads int
-	_ = db.QueryRow(`
-		SELECT COUNT(1)
-		FROM INFORMATION_SCHEMA.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME='mail_message_reads'`,
-	).Scan(&hasMailReads)
-	if hasMailReads == 0 {
-		log.Println("[migrate] Criando tabela mail_message_reads ...")
-		if _, err := db.Exec(`
-			CREATE TABLE mail_message_reads (
-			  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-			  user_id BIGINT UNSIGNED NOT NULL,
-			  graph_message_id VARCHAR(200) NOT NULL,
-			  read_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			  PRIMARY KEY (id),
-			  UNIQUE KEY uq_mail_read_user_msg (user_id, graph_message_id),
-			  KEY idx_mail_read_msg (graph_message_id),
-			  KEY idx_mail_read_user (user_id)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
-			return fmt.Errorf("criando mail_message_reads: %w", err)
-		}
-	}
+	// 6e) FT_EMAILS_LEITURAS removida (rastreio de leitura de e-mail por usuário descontinuado).
+	// 9.1) mail_message_reads (minúscula) removida — leitura de e-mail usa MAIL_MESSAGE_READS.
 
 	// 17) Score de Progressão — cache por processo
 	{
@@ -1146,33 +996,7 @@ END`, strings.Join(insertCols, ", "), strings.Join(insertVals, ", "))
 		}
 	}
 
-	// 17b) Score de Progressão — log de treino (resultado real ao sair de Ativos)
-	{
-		var hasTrainLog int
-		_ = db.QueryRow(`
-			SELECT COUNT(1)
-			FROM INFORMATION_SCHEMA.TABLES
-			WHERE TABLE_SCHEMA = DATABASE()
-			  AND TABLE_NAME='FT_SCORE_TRAINING_LOG'`,
-		).Scan(&hasTrainLog)
-
-		if hasTrainLog == 0 {
-			log.Println("[migrate] Criando tabela FT_SCORE_TRAINING_LOG ...")
-			if _, err := db.Exec(`
-				CREATE TABLE FT_SCORE_TRAINING_LOG (
-				  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-				  id_requisicao  BIGINT NOT NULL,
-				  avancou        TINYINT(1) NOT NULL,
-				  features_json  JSON NOT NULL,
-				  criado_em      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-				  PRIMARY KEY (id),
-				  UNIQUE KEY uq_score_log_req (id_requisicao),
-				  KEY idx_score_log_avancou (avancou)
-				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`); err != nil {
-				return fmt.Errorf("criando FT_SCORE_TRAINING_LOG: %w", err)
-			}
-		}
-	}
+	// 17b) FT_SCORE_TRAINING_LOG removida (log de treino do score descontinuado).
 
 	// 17c) Coluna score_percentual em FT_PROCESSOS (denormalização para queries diretas)
 	{
@@ -1189,6 +1013,27 @@ END`, strings.Join(insertCols, ", "), strings.Join(insertVals, ", "))
 			log.Println("[migrate] Adicionando coluna FT_PROCESSOS.score_percentual ...")
 			if _, err := db.Exec(`ALTER TABLE FT_PROCESSOS ADD COLUMN score_percentual FLOAT NULL`); err != nil {
 				log.Printf("[migrate] aviso: falha ao adicionar score_percentual (ignorado): %v", err)
+			}
+		}
+	}
+
+	// 17.1) Coluna percentual_repasse em FT_PROCESSOS — percentual MANUAL por processo.
+	// Override do percentual da empresa (DM_EMPRESA_PERCENTUAL): quando preenchido, manda
+	// no cálculo do repasse SÓ deste processo e NÃO altera o percentual geral da empresa.
+	{
+		var hasPctCol int
+		_ = db.QueryRow(`
+			SELECT COUNT(1)
+			FROM INFORMATION_SCHEMA.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME='FT_PROCESSOS'
+			  AND COLUMN_NAME='percentual_repasse'`,
+		).Scan(&hasPctCol)
+
+		if hasPctCol == 0 {
+			log.Println("[migrate] Adicionando coluna FT_PROCESSOS.percentual_repasse ...")
+			if _, err := db.Exec(`ALTER TABLE FT_PROCESSOS ADD COLUMN percentual_repasse DECIMAL(5,2) NULL`); err != nil {
+				log.Printf("[migrate] aviso: falha ao adicionar percentual_repasse (ignorado): %v", err)
 			}
 		}
 	}
@@ -1255,6 +1100,11 @@ END`, strings.Join(insertCols, ", "), strings.Join(insertVals, ", "))
 	dropDMUsuarioCol("ativo")
 	dropDMUsuarioCol("created_at")
 	dropDMUsuarioCol("updated_at")
+
+	// Login (Microsoft + link mágico): colunas DM_USUARIO.ms_oid/ms_email,
+	// tabela FT_MAGIC_LINKS e índice único foram MOVIDOS para o auto-migrate
+	// aditivo (migrations_additive.go → runAdditiveMigrations), que roda no boot
+	// inclusive em produção. Não duplicar aqui.
 
 	log.Println("✅ Todas as migrações concluídas com sucesso")
 	return nil

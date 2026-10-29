@@ -24,7 +24,7 @@ export default function NewProcessToast({ open, processo, onClose, onView, timeo
             </div>
             <div className="mt-3 flex justify-end gap-2">
               <button onClick={onClose} className="px-3 py-1 rounded-md text-xs hover:opacity-90" style={{ background: 'var(--panel-bg-60)' }}>Fechar</button>
-              <button onClick={onView} className="px-3 py-1 rounded-md text-xs text-white hover:opacity-90" style={{ background: '#2563EB' }}>Ver</button>
+              <button onClick={onView} className="px-3 py-1 rounded-md text-xs text-white hover:opacity-90" style={{ background: 'var(--accent)' }}>Ver</button>
             </div>
           </div>
         </div>

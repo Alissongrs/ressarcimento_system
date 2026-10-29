@@ -1,0 +1,136 @@
+{
+  "_meta": {
+    "id_fonte": 59440,
+    "uid_fonte": "143991120221101",
+    "arquivo_origem": "14_3991_1B.pdf",
+    "distribuidora": "CPFL Piratininga",
+    "razao_social_distribuidora": "Companhia Piratininga de Força e Luz",
+    "marca_grupo": "CPFL Energia",
+    "tipo_documento": "Nota Fiscal / Conta de Energia Elétrica (layout antigo, pré-NF3e/DANF3E)",
+    "subgrupo_modalidade": "A4 / Tarifa Verde",
+    "classe": "Residencial",
+    "tipo_fornecimento": "Trifásico",
+    "tem_gd": true,
+    "ano_referencia": "2022",
+    "criado_por": "usuario_manual_gpt_externo",
+    "criado_em": "2026-05-24",
+    "template_id": "cpfl_piratininga_nf_conta_antiga_a4_verde_residencial_gd_boleto_itau_pix_2paginas",
+    "uso": "Gold-standard layout antigo CPFL Piratininga 2022. Patterns atuais do extrator_complementar.extrair_itens_cpfl foram calibrados pra layout moderno (MES/AA + UN + QTD + ...) e não cobrem este formato. Reprovou no validador com score 53 por 0 itens capturados."
+  },
+  "diagnostico_layout": {
+    "paginas_pdf": 2,
+    "pagina_1": "Cobrança principal: cabeçalho, cliente, instalação, NF/Conta, referência, vencimento, leitura, itens com GD negativos, tributos, demanda dividida, boleto Itaú, PIX",
+    "pagina_2": "Validação técnica: leituras, perda 2,5%, geração, histórico",
+    "problema_principal_ocr": "Valores negativos com sinal NO FINAL ('681,60-', '2.070,04-', '372,61-'). Demanda dividida em 2 linhas (78,228 + 121,772 = 200kW contratada). Perda de 2,5% aplicada ao consumo (não aplicar à energia injetada). Layout NF/Conta antigo, sem chave NF3e/protocolo/QR fiscal.",
+    "estrategia_recomendada": [
+      "Criar template próprio para CPFL Piratininga antiga A4 Verde Residencial GD",
+      "Não procurar chave de acesso de 44 dígitos",
+      "Não procurar protocolo NF3e",
+      "Tratar QR Code 'Pague aqui - PIX' como PIX de pagamento (não QR fiscal)",
+      "Converter valores 'NNN,NN-' para '-NNN,NN' (regex de normalização)",
+      "Preservar linhas negativas de energia injetada",
+      "Não duplicar demanda (78,228 + 121,772 = 200kW total, não somar 200 ao total)",
+      "Página 2 tem perda 2,5% que multiplica o consumo medido. Não aplicar perda à energia injetada"
+    ]
+  },
+  "assinatura_template": {
+    "marcadores": [
+      "Companhia Piratininga de Força e Luz",
+      "CPFL Energia",
+      "Tarifa Verde-A4 Residencial",
+      "Energia Atv Fornec",
+      "Energia Atv Injetada",
+      "Energia Atv Inj Fponta",
+      "Consumo Reativo Exc",
+      "Demanda TUSD",
+      "CIP Municipal",
+      "Pague aqui - PIX"
+    ],
+    "marcadores_negativos": [
+      "DANF3E",
+      "DANFE - DOCUMENTO AUXILIAR",
+      "chave de acesso",
+      "Protocolo de Autorização"
+    ],
+    "padrao_negativo_valor": "(\\d{1,3}(?:\\.\\d{3})*,\\d{2})-"
+  },
+  "campos_extraidos": {
+    "cliente": {
+      "razao_social": "JRREZEK PARTICIPACOES LTDA",
+      "cnpj": "23.303.834/0001-71"
+    },
+    "identificadores": {
+      "instalacao_seu_codigo": "4002656492",
+      "pn": "714919903",
+      "conta_contrato": "220001538000"
+    },
+    "classificacao": {
+      "subgrupo": "A4",
+      "modalidade": "Verde",
+      "classe": "Residencial",
+      "tipo_fornecimento": "Trifásico",
+      "demanda_contratada_kw": 200
+    },
+    "nota_fiscal_conta": {
+      "numero_nf_conta": "108579763",
+      "serie": "C",
+      "emissao": "02/12/2022",
+      "apresentacao": "05/12/2022",
+      "reservado_fisco": "039F.0DA7.D03C.F30B.B679.5B03.C7A2.2BC1",
+      "tem_chave_nf3e": false,
+      "tem_protocolo_nf3e": false,
+      "tem_qr_fiscal": false
+    },
+    "vencimento_valor": {
+      "mes_ref": "NOV/2022",
+      "vencimento": "12/12/2022",
+      "total_a_pagar": "10.682,22"
+    },
+    "itens_fatura": [
+      {"descricao": "Energia Atv Fornec Ponta TUSD",   "unidade": "kWh", "quantidade": "1.980,300",  "valor": "1.959,31"},
+      {"descricao": "Energia Atv Fornec Fponta TUSD",  "unidade": "kWh", "quantidade": "13.452,510", "valor": "1.721,37"},
+      {"descricao": "Energia Atv Fornec Ponta - TE",   "unidade": "kWh", "quantidade": "1.980,300",  "valor": "1.235,50"},
+      {"descricao": "Energia Atv Fornec Fponta - TE",  "unidade": "kWh", "quantidade": "13.452,510", "valor": "5.227,77"},
+      {"descricao": "Consumo Reativo Exc Ponta",       "unidade": "KVr", "quantidade": "46,740",     "valor": "19,07"},
+      {"descricao": "Consumo Reativo Exc Fora Ponta",  "unidade": "KVr", "quantidade": "1.215,240",  "valor": "496,08"},
+      {"descricao": "Demanda TUSD",                    "unidade": "kW",  "quantidade": "78,228",     "valor": "1.080,05"},
+      {"descricao": "Demanda TUSD",                    "unidade": "kW",  "quantidade": "121,772",    "valor": "1.681,24"},
+      {"descricao": "Energia Atv Inj Fponta TUSD",     "unidade": "kWh", "quantidade": "5.326,800",  "valor": "-681,60"},
+      {"descricao": "Energia Atv Injetada Fponta TE",  "unidade": "kWh", "quantidade": "5.326,800",  "valor": "-2.070,04"},
+      {"descricao": "CIP Municipal",                   "valor": "13,47"}
+    ],
+    "pagamento": {
+      "banco": "Itaú",
+      "codigo_banco": "341-7",
+      "linha_digitavel": "34191.09008 31390.252935 80255.210009 9 91970001068222",
+      "beneficiario": "Cia Piratininga Força Luz",
+      "cnpj_beneficiario": "04.172.213/0001-51",
+      "valor_documento": "10.682,22",
+      "tem_pix": true
+    }
+  },
+  "validacoes": {
+    "soma_itens_bate_total": true,
+    "calculo_total": "1.959,31 + 1.721,37 + 1.235,50 + 5.227,77 + 19,07 + 496,08 + 1.080,05 + 1.681,24 - 681,60 - 2.070,04 + 13,47 = 10.682,22",
+    "demanda_total_contratada": "78,228 + 121,772 = 200,000 kW",
+    "perda_transformacao_2_5_pct": "(8423 - 6813) * 1,2 * 1,025 = 1.980,300 kWh (ponta); (62169 - 51232) * 1,2 * 1,025 = 13.452,510 kWh (fora ponta)",
+    "energia_injetada_sem_perda": "(11659 - 7220) * 1,2 = 5.326,800 kWh (NAO aplicar 1,025)"
+  },
+  "regex_sugeridos": {
+    "normalizacao_negativos": "(\\d{1,3}(?:\\.\\d{3})*,\\d{2})-",
+    "item_consumo": "Energia\\s+Atv\\s+(Fornec|Injetada|Inj)\\s+(Ponta|Fponta)(?:\\s*-?\\s*(TE|TUSD))?\\s+([\\d.,]+)\\s+kWh\\s+[\\d.,]+\\s+([\\d.,]+(?:-)?)",
+    "demanda": "Demanda\\s+TUSD\\s+([\\d.,]+)\\s+kW\\s+[\\d.,]+\\s+([\\d.,]+)",
+    "cip": "CIP\\s+Municipal\\s+([\\d.,]+)",
+    "linha_digitavel": "(\\d{5}\\.\\d{5}\\s+\\d{5}\\.\\d{6}\\s+\\d{5}\\.\\d{6}\\s+\\d\\s+\\d{14})"
+  },
+  "guardrails": [
+    "Não usar template DANF3E/NF3e moderno",
+    "Não procurar chave de acesso de 44 dígitos",
+    "Não tratar QR Code PIX como QR Code fiscal",
+    "Converter valores com sinal no final para negativos reais (681,60- → -681,60)",
+    "Preservar linhas negativas de energia injetada",
+    "Não duplicar demanda (200 = 78,228 + 121,772)",
+    "Aplicar perda 2,5% só ao consumo medido, NAO à energia injetada",
+    "Não confundir instalação 4002656492, PN 714919903 e conta contrato 220001538000"
+  ]
+}

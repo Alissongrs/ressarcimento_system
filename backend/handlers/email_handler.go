@@ -13,7 +13,6 @@ import (
 	"ressarcimento-backend/services"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -139,9 +138,9 @@ func EnviarEmailProcesso(c *gin.Context) {
 			continue
 		}
 		pseudoPath := buildAnexoPath(processoID, 0, a.Name)
-		if _, err := execGorm(tx, 
+		if _, err := execGorm(tx,
 			`INSERT INTO FT_ANEXOS
-			  (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
+			  (id_processo, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
 			  VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
 			processoID, a.Name, pseudoPath, remetenteEmailFromUser, a.ContentType, len(a.Data), a.Data,
 		); err != nil {
@@ -165,9 +164,9 @@ func EnviarEmailProcesso(c *gin.Context) {
 
 	var etapaAtual, subAtual sql.NullString
 	_ = queryRowGorm(tx, `
-        SELECT e.etapa, p.sub_etapa
+        SELECT e.nome, (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual)
           FROM FT_PROCESSOS p
-          JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+          JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
          WHERE p.id_processo = ?`, processoID).Scan(&etapaAtual, &subAtual)
 
 	etapaTxt := strings.TrimSpace(etapaAtual.String)
@@ -175,23 +174,8 @@ func EnviarEmailProcesso(c *gin.Context) {
 		etapaTxt = "Distribuidora" // fallback sensato
 	}
 	subTxt := strings.TrimSpace(subAtual.String)
-	statusNome := strings.TrimSpace(getStatusNomeByRequisicaoGorm(tx, int64(processoID)))
-	if statusNome == "" {
-		statusNome = "Em andamento"
-	}
-
-	_, err = execGorm(tx, `
-        INSERT INTO FT_HISTORICO_MOVIMENTACOES
-        (id_requisicao, id_usuario_gestor,
-         status_anterior, status_novo,
-         etapa_anterior, etapa_nova, sub_etapa,
-         comentario, data_movimentacao)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		processoID, remetenteID,
-		statusNome, statusNome,
-		etapaTxt, etapaTxt, subTxt,
-		comentarioHistorico, time.Now(),
-	)
+	// P1-1: registro do envio de e-mail no histórico (schema V2, sem mudança de etapa → novo = atual).
+	err = registrarHistoricoV2(tx, processoID, remetenteID, "email", comentarioHistorico, nil, nil)
 	if err != nil {
 		log.Printf("Erro ao salvar o envio de e-mail no histórico do processo %d: %v", processoID, err)
 	}
@@ -206,9 +190,9 @@ func EnviarEmailProcesso(c *gin.Context) {
 		if _, err := execGorm(tx, `
 			UPDATE FT_PROCESSOS
 			   SET etapa = 'Distribuidora',
-			       id_etapa_processo = 1,
+			       id_etapa_atual /* TODO V2 */ = 1,
 			       sub_etapa = ?,
-			       id_sub_etapa_processo = ?
+			       id_status_atual /* TODO V2 */ = ?
 			 WHERE id_processo = ?`,
 			subAguardando, nullIntToIface(subID), processoID,
 		); err != nil {
@@ -216,16 +200,19 @@ func EnviarEmailProcesso(c *gin.Context) {
 		} else {
 			_, _ = execGorm(tx, `
 				INSERT INTO FT_HISTORICO_MOVIMENTACOES
-				(id_requisicao, id_usuario_gestor,
-				 status_anterior, status_novo,
-				 etapa_anterior, etapa_nova, sub_etapa,
-				 comentario, data_movimentacao)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				processoID, remetenteID,
-				"Distribuidora - "+subEmElaboracao, "Distribuidora - "+subAguardando,
-				"Distribuidora", "Distribuidora", subAguardando,
-				"Sub-etapa movida automaticamente após envio de e-mail",
-				time.Now(),
+				  (id_processo, id_usuario_gestor,
+				   id_etapa_anterior, id_etapa_nova,
+				   id_instancia_anterior, id_instancia_nova,
+				   id_status_anterior, id_status_novo,
+				   comentario, data_movimentacao, tipo_movimentacao)
+				SELECT ?, ?,
+				   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = 'Distribuidora' LIMIT 1),
+				   (SELECT id_etapa FROM DM_ETAPAS WHERE nome = 'Distribuidora' LIMIT 1),
+				   p.id_instancia_atual, p.id_instancia_atual,
+				   p.id_status_atual, p.id_status_atual,
+				   'Sub-etapa movida automaticamente após envio de e-mail', NOW(), 'movimentacao'
+				  FROM FT_PROCESSOS p WHERE p.id_processo = ?`,
+				processoID, remetenteID, processoID,
 			)
 		}
 	}
@@ -308,7 +295,13 @@ func GetEmailsByProcessoID(c *gin.Context) {
 		SELECT e.id_email, e.id_processo, e.id_usuario_remetente,
 		       COALESCE(u.nome_usuario, u.email, '') AS usuario_remetente,
 		       e.de_email, e.para_email, e.cc_email, e.cco_email,
-		       e.assunto, e.corpo, e.data_envio, e.tipo
+		       e.assunto, e.corpo, e.data_envio, e.tipo,
+		       (SELECT mm.graph_message_id
+		          FROM mail_messages mm
+		         WHERE mm.subject COLLATE utf8mb4_unicode_ci = e.assunto COLLATE utf8mb4_unicode_ci
+		           AND mm.from_email COLLATE utf8mb4_unicode_ci = e.de_email COLLATE utf8mb4_unicode_ci
+		         ORDER BY ABS(TIMESTAMPDIFF(SECOND, mm.received_at, e.data_envio)) ASC
+		         LIMIT 1) AS graph_message_id
 		  FROM FT_EMAILS_PROCESSO e
 		  LEFT JOIN DM_USUARIO u ON u.id_usuario = e.id_usuario_remetente
 		 WHERE e.id_processo = ?
@@ -335,6 +328,7 @@ func GetEmailsByProcessoID(c *gin.Context) {
 			&email.Corpo,
 			&email.DataEnvio,
 			&email.Tipo,
+			&email.GraphMessageID,
 		); err != nil {
 			continue
 		}
@@ -388,7 +382,7 @@ func MarkEmailProcessoRead(c *gin.Context) {
 	}
 
 	var exists int
-	if err := queryRowGorm(database.GormDB_App, 
+	if err := queryRowGorm(database.GormDB_App,
 		`SELECT COUNT(1) FROM FT_EMAILS_PROCESSO WHERE id_email = ? AND id_processo = ?`,
 		emailID, processoID,
 	).Scan(&exists); err != nil || exists == 0 {
@@ -396,54 +390,15 @@ func MarkEmailProcessoRead(c *gin.Context) {
 		return
 	}
 
-	if _, err := execGorm(database.GormDB_App, 
-		`INSERT INTO FT_EMAILS_LEITURAS (id_email, id_usuario, data_leitura)
-		 VALUES (?, ?, NOW())
-		 ON DUPLICATE KEY UPDATE data_leitura = VALUES(data_leitura)`,
-		emailID, userID,
-	); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao marcar leitura"})
-		return
-	}
-
+	// Rastreio de leitura por usuário (FT_EMAILS_LEITURAS) foi removido — no-op.
+	_ = userID
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// lookupProcessoEmailReads retornava quem leu cada e-mail (FT_EMAILS_LEITURAS,
+// removida). Agora retorna vazio.
 func lookupProcessoEmailReads(emailIDs []int64) map[int64][]string {
-	out := map[int64][]string{}
-	if len(emailIDs) == 0 {
-		return out
-	}
-	placeholders := strings.Repeat("?,", len(emailIDs))
-	placeholders = strings.TrimSuffix(placeholders, ",")
-	args := make([]any, 0, len(emailIDs))
-	for _, id := range emailIDs {
-		args = append(args, id)
-	}
-	query := fmt.Sprintf(`
-		SELECT l.id_email, COALESCE(u.nome_usuario, u.email, '') AS nome
-		  FROM FT_EMAILS_LEITURAS l
-		  LEFT JOIN DM_USUARIO u ON u.id_usuario = l.id_usuario
-		 WHERE l.id_email IN (%s)
-		 ORDER BY l.data_leitura ASC`, placeholders)
-	rows, err := queryGorm(database.GormDB_App, query, args...)
-	if err != nil {
-		return out
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id int64
-		var nome string
-		if err := rows.Scan(&id, &nome); err != nil {
-			continue
-		}
-		nome = strings.TrimSpace(nome)
-		if nome == "" {
-			nome = "Usuário"
-		}
-		out[id] = append(out[id], nome)
-	}
-	return out
+	return map[int64][]string{}
 }
 
 

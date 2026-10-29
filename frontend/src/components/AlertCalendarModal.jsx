@@ -185,8 +185,8 @@ export default function AlertCalendarModal({ open, onClose }) {
             />
             <style>{`
               .rdp-day_highlighted {
-                background: rgba(30, 58, 95, 0.16);
-                color: #1e3a5f;
+                background: color-mix(in srgb, var(--accent) 16%, transparent);
+                color: var(--accent);
                 font-weight: 700;
                 border-radius: 9999px;
               }
@@ -244,7 +244,7 @@ export default function AlertCalendarModal({ open, onClose }) {
                 <span className="text-xs">Todos <span className="opacity-50">(visível para a equipe + envia e-mail no prazo)</span></span>
               </label>
 
-              {error && <div className="text-xs text-red-500">{error}</div>}
+              {error && <div className="text-xs text-[var(--danger)]">{error}</div>}
 
               <div className="flex items-center justify-between gap-2">
                 <button type="button" onClick={resetForm} className="btn-outline text-sm">
@@ -270,10 +270,16 @@ export default function AlertCalendarModal({ open, onClose }) {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-medium flex items-center gap-2">
-                          {item.id_processo ? `PROC-${String(item.id_processo).padStart(3, '0')}` : 'Alerta'}
+                          {item.id_processo ? `PROC-${String(item.id_processo).padStart(3, '0')}` : (item.hora_alerta ? 'Lembrete' : 'Alerta')}
+                          {item.hora_alerta && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full inline-flex items-center gap-1"
+                              style={{ background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)' }}>
+                              <Clock3 size={10} /> {item.hora_alerta}
+                            </span>
+                          )}
                           {item.para_todos && (
                             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
-                              style={{ background: 'rgba(99,102,241,0.15)', color: '#6366f1' }}>
+                              style={{ background: 'color-mix(in srgb, var(--accent-2) 15%, transparent)', color: 'var(--accent-2)' }}>
                               Todos
                             </span>
                           )}
@@ -291,7 +297,7 @@ export default function AlertCalendarModal({ open, onClose }) {
                           <button
                             type="button"
                             onClick={() => handleDelete(item)}
-                            className="rounded-lg px-2 py-1 text-[11px] border text-red-500 inline-flex items-center gap-1"
+                            className="rounded-lg px-2 py-1 text-[11px] border text-[var(--danger)] inline-flex items-center gap-1"
                             style={{ borderColor: 'var(--border)' }}
                           >
                             <Trash2 size={12} />

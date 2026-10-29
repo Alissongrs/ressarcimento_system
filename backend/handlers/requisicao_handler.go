@@ -1,8 +1,9 @@
-﻿// backend/handlers/requisicao_handler.go
+// backend/handlers/requisicao_handler.go
 package handlers
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"ressarcimento-backend/database"
+	"ressarcimento-backend/empresas"
+	"ressarcimento-backend/periodosnorm"
 	"ressarcimento-backend/sse"
 
 	"github.com/gin-gonic/gin"
@@ -44,6 +47,134 @@ type CreateRequisicaoPayload struct {
 	ProblemaIdentificado    string                  `json:"problemaIdentificado" form:"problemaIdentificado" example:"DescriÃ§ão adicional"`
 	GostariaAnexarFatura    bool                    `json:"gostariaAnexarFatura" form:"gostariaAnexarFatura" example:"false"`
 	Anexos                  []*multipart.FileHeader `json:"-" form:"anexos"`
+}
+
+// buscarLinkFaturaFDEporPeriodo devolve o link_fatura da 1ª fatura encontrada no
+// FDE para a UC (numero_instalacao) em algum dos meses do período. Usado como
+// fallback na criação da requisição pra o link ir automaticamente (padrão).
+func buscarLinkFaturaFDEporPeriodo(uc, periodosJSON string) string {
+	if database.GormDB_App == nil || strings.TrimSpace(uc) == "" {
+		return ""
+	}
+	sqlDB, err := database.GormDB_App.DB()
+	if err != nil {
+		return ""
+	}
+	var periodos []struct {
+		Mes string `json:"mes"`
+		Ano string `json:"ano"`
+	}
+	_ = json.Unmarshal([]byte(periodosJSON), &periodos)
+	for _, p := range periodos {
+		if p.Mes == "" || p.Ano == "" {
+			continue
+		}
+		mref := fmt.Sprintf("%s-%s-01", p.Ano, p.Mes)
+		var link sql.NullString
+		_ = sqlDB.QueryRow(
+			"SELECT link_fatura FROM FATURA_DADOS_EXTRAIDOS WHERE numero_instalacao = ? AND mes_referencia = ? AND link_fatura IS NOT NULL AND TRIM(link_fatura) <> '' LIMIT 1",
+			uc, mref).Scan(&link)
+		if link.Valid && strings.TrimSpace(link.String) != "" {
+			return strings.TrimSpace(link.String)
+		}
+	}
+	return ""
+}
+
+// anexarFaturasDaRequisicao baixa os PDFs das faturas relevantes e os anexa ao processo
+// (FT_ANEXOS, id_processo = id da requisição). Faturas consideradas:
+//   - a APONTADA (fatura_id enviado pela Auditoria), e
+//   - as do PERÍODO informado (periodos_irregularidade [{mes,ano}]) casadas no FDE por UC+mês.
+//
+// Roda em goroutine (não trava a criação da requisição). Dedup por nome do anexo; ignora
+// respostas que não são PDF (ex.: portal HTML).
+func anexarFaturasDaRequisicao(pid int, uc, faturaID, periodosJSON string) {
+	if database.GormDB_App == nil {
+		return
+	}
+	sqlDB, err := database.GormDB_App.DB()
+	if err != nil {
+		return
+	}
+	uc = strings.TrimSpace(uc)
+	seen := map[string]bool{}
+	type alvo struct{ link, mes string }
+	var alvos []alvo
+	add := func(link, mes string) {
+		link = strings.TrimSpace(link)
+		if link == "" || seen[link] {
+			return
+		}
+		seen[link] = true
+		alvos = append(alvos, alvo{link, mes})
+	}
+	// 1) fatura apontada
+	if strings.TrimSpace(faturaID) != "" {
+		var lk, mr sql.NullString
+		_ = sqlDB.QueryRow(
+			"SELECT link_fatura, DATE_FORMAT(mes_referencia,'%Y-%m') FROM FATURA_DADOS_EXTRAIDOS WHERE id = ?",
+			faturaID).Scan(&lk, &mr)
+		if lk.Valid {
+			add(lk.String, mr.String)
+		}
+	}
+	// 2) faturas do período (UC + cada mês)
+	var periodos []struct {
+		Mes string `json:"mes"`
+		Ano string `json:"ano"`
+	}
+	_ = json.Unmarshal([]byte(periodosJSON), &periodos)
+	for _, p := range periodos {
+		if uc == "" || p.Mes == "" || p.Ano == "" {
+			continue
+		}
+		mref := fmt.Sprintf("%s-%s-01", p.Ano, p.Mes)
+		rows, e := sqlDB.Query(
+			"SELECT link_fatura, DATE_FORMAT(mes_referencia,'%Y-%m') FROM FATURA_DADOS_EXTRAIDOS WHERE numero_instalacao = ? AND mes_referencia = ? AND link_fatura IS NOT NULL AND TRIM(link_fatura) <> ''",
+			uc, mref)
+		if e != nil {
+			continue
+		}
+		for rows.Next() {
+			var lk, mr sql.NullString
+			if rows.Scan(&lk, &mr) == nil && lk.Valid {
+				add(lk.String, mr.String)
+			}
+		}
+		rows.Close()
+	}
+	// 3) baixa + anexa (dedup por nome)
+	for _, a := range alvos {
+		b64, _ := baixarPDFBase64(a.link)
+		if b64 == "" {
+			continue
+		}
+		data, derr := base64.StdEncoding.DecodeString(b64)
+		if derr != nil || len(data) < 500 {
+			continue
+		}
+		n := 8
+		if len(data) < n {
+			n = len(data)
+		}
+		if !strings.HasPrefix(strings.TrimSpace(string(data[:n])), "%PDF") {
+			continue // não é PDF (ex.: portal HTML) — não anexa lixo
+		}
+		mes := a.mes
+		if mes == "" {
+			mes = "s-ref"
+		}
+		nome := fmt.Sprintf("fatura_%s_%s.pdf", uc, mes)
+		var existe int
+		if sqlDB.QueryRow("SELECT 1 FROM FT_ANEXOS WHERE id_processo = ? AND nome_arquivo = ? LIMIT 1",
+			pid, nome).Scan(&existe) == nil {
+			continue // já anexada
+		}
+		_, _ = sqlDB.Exec(`INSERT INTO FT_ANEXOS
+			(id_processo, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
+			VALUES (?, ?, '', 'gestor', NOW(), 'application/pdf', ?, ?)`,
+			pid, nome, len(data), data)
+	}
 }
 
 // createRequisicaoPersistente insere em FT_REQUISICOES e FT_PROCESSOS (fluxo básico).
@@ -88,10 +219,30 @@ func createRequisicaoPersistente(c *gin.Context) {
 	if cliente == "" {
 		cliente = strings.TrimSpace(get("cliente"))
 	}
+	// ESTRUTURAL: quando o frontend informa o CÓDIGO do cliente, o nome é SEMPRE
+	// resolvido pela Tab_Empresa (fonte de verdade) — não confiamos no texto enviado
+	// (ex.: a aba de Água manda "Empresa <cod>" por não ter razão social na Cache).
+	// Aditivo: se nenhum código vier, mantém o comportamento anterior.
+	codCliente := strings.TrimSpace(get("cod_cliente"))
+	if codCliente == "" {
+		codCliente = strings.TrimSpace(get("cod_empresa"))
+	}
+	if codCliente != "" {
+		if sqlDB, e := database.GormDB_App.DB(); e == nil {
+			var rz sql.NullString
+			_ = sqlDB.QueryRow("SELECT Rz_Social FROM Tab_Empresa WHERE Cod_Empresa = ?", codCliente).Scan(&rz)
+			if rz.Valid && strings.TrimSpace(rz.String) != "" {
+				cliente = strings.TrimSpace(rz.String)
+			}
+		}
+	}
 	uc := strings.TrimSpace(payload.UC)
 	if uc == "" {
 		uc = strings.TrimSpace(get("uc"))
 	}
+	// SAFEGUARD: se o uc veio como codigo_uc interno, resolve p/ o numero_instalacao real
+	// (identificável) antes de gravar. Só troca quando o FDE tem mapeamento único e limpo.
+	uc = resolveUCInstalacao(uc)
 	concessionaria := strings.TrimSpace(payload.Concessionaria)
 	if concessionaria == "" {
 		concessionaria = strings.TrimSpace(get("concessionaria"))
@@ -114,6 +265,9 @@ func createRequisicaoPersistente(c *gin.Context) {
 	if periodosIrregularidade == "" {
 		periodosIrregularidade = strings.TrimSpace(get("periodos_irregularidade"))
 	}
+	if periodosIrregularidade != "" {
+		periodosIrregularidade = periodosnorm.Normalizar(periodosIrregularidade)
+	}
 	linkFatura := strings.TrimSpace(payload.LinkFatura)
 	if linkFatura == "" {
 		linkFatura = strings.TrimSpace(get("linkFatura"))
@@ -130,6 +284,22 @@ func createRequisicaoPersistente(c *gin.Context) {
 	// Se veio lista completa, o linkFatura é o primeiro da lista
 	if len(linksFaturasDetalhes) > 0 && linkFatura == "" {
 		linkFatura = strings.TrimSpace(linksFaturasDetalhes[0].Link)
+	}
+	// Fallback (padrão): se NENHUM link veio do frontend, busca no FDE por UC +
+	// período — a mesma fonte do attach automático. Garante que TODA requisição
+	// grave o link_fatura sozinha (antes ficava nulo quando o front não mandava).
+	fichasVal := strings.ToUpper(strings.TrimSpace(get("fichas")))
+	isAgua := strings.HasPrefix(fichasVal, "FA")
+	linkAgua := strings.TrimSpace(get("link_fatura_agua"))
+	if linkAgua == "" {
+		linkAgua = strings.TrimSpace(get("linkFaturaAgua"))
+	}
+	if linkFatura == "" && linkAgua != "" {
+		linkFatura = linkAgua
+	}
+	// AGUA nao esta no FDE de energia: nunca usar o fallback FDE p/ requisicao de agua.
+	if linkFatura == "" && !isAgua && uc != "" {
+		linkFatura = buscarLinkFaturaFDEporPeriodo(uc, periodosIrregularidade)
 	}
 	cnpj := strings.TrimSpace(payload.CNPJ)
 	if cnpj == "" {
@@ -209,6 +379,14 @@ func createRequisicaoPersistente(c *gin.Context) {
 		return
 	}
 	defer tx.Rollback()
+
+	// Nome oficial do cliente pelo cadastro (DM_EMPRESA_PERCENTUAL) — "CLARO SA"/"Claro" → "CLARO",
+	// "VIA SA" → "VIA S.A." etc. Empresa sem cadastro mantém o nome digitado. (23/10/2026)
+	if sqlDB, e := database.GormDB_App.DB(); e == nil {
+		if _, nomeOf, ok := empresas.Canonico(c.Request.Context(), sqlDB, cliente); ok {
+			cliente = nomeOf
+		}
+	}
 
 	log.Printf("[CreateRequisicaoPersist] recebidos: uc=%q cliente=%q endereco=%q descricao=%q periodos=%q link=%q",
 		uc, cliente, enderecoCompleto, descricaoIrregularidade, periodosIrregularidade, linkFatura)
@@ -291,11 +469,12 @@ func createRequisicaoPersistente(c *gin.Context) {
 		fmt.Sprintf("Anexos: %d", anexosCount),
 		fmt.Sprintf("Descrição: %s", descricaoIrregularidade),
 	}, "\n")
-	_, _ = execGorm(tx, `
-		INSERT INTO FT_HISTORICO_MOVIMENTACOES
-		(id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
-		VALUES (?, ?, '', 'Nova Requisição', '', 'Nova Requisição', '', ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'criacao')`,
-		pid, nullIntOrNil(userIDNull), histComentario)
+	// TODO V2: histórico de "criação da requisição" desligado.
+	// FT_HISTORICO_MOVIMENTACOES.id_processo só faz sentido após o processo ser criado
+	// (que acontece na aprovação). As colunas status_anterior/etapa_nova/sub_etapa
+	// foram removidas (viraram id_status_novo/id_etapa_nova FKs). Conteúdo do comentário
+	// fica preservado em FT_REQUISICOES como metadata da requisição.
+	_ = histComentario
 
 	// Registra faturas em FT_REQUISICOES_FATURAS com mes_ref
 	// Preferência: lista completa (linksFaturasDetalhes); fallback: linkFatura isolado
@@ -310,39 +489,25 @@ func createRequisicaoPersistente(c *gin.Context) {
 			if mr != "" {
 				mrVal = mr
 			}
-			_, _ = execGorm(tx, `
-				INSERT INTO FT_REQUISICOES_FATURAS (id_requisicao, link, mes_ref, dt_vencimento, valor_total)
+			if _, errF := execGorm(tx, `
+				INSERT INTO FT_REQUISICOES_FATURAS (id_processo, link, mes_ref, dt_vencimento, valor_total)
 				VALUES (?, ?, ?, NULL, NULL)`,
 				pid, lnk, mrVal,
-			)
+			); errF != nil {
+				log.Printf("Aviso: falha ao vincular fatura (req %d): %v", pid, errF)
+			}
 		}
-		statusNome := strings.TrimSpace(getStatusNomeByRequisicaoGorm(tx, int64(pid)))
-		if statusNome == "" {
-			statusNome = "Nova Requisição"
-		}
-		_, _ = execGorm(tx, `
-			INSERT INTO FT_HISTORICO_MOVIMENTACOES
-			(id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
-			VALUES (?, ?, ?, ?, '', '', '', ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'fatura')`,
-			pid, nullIntOrNil(userIDNull), statusNome, statusNome,
-			fmt.Sprintf("%d fatura(s) selecionada(s)", len(linksFaturasDetalhes)),
-		)
+		// TODO V2: histórico "fatura selecionada" desabilitado — processo ainda não existe nesta fase
+		// (cria-se só na aprovação). Vínculo da fatura permanece em FT_REQUISICOES_FATURAS acima.
 	} else if strings.TrimSpace(linkFatura) != "" {
-		_, _ = execGorm(tx, `
-			INSERT INTO FT_REQUISICOES_FATURAS (id_requisicao, link, mes_ref, dt_vencimento, valor_total)
+		if _, errF := execGorm(tx, `
+			INSERT INTO FT_REQUISICOES_FATURAS (id_processo, link, mes_ref, dt_vencimento, valor_total)
 			VALUES (?, ?, NULL, NULL, NULL)`,
 			pid, linkFatura,
-		)
-		statusNome := strings.TrimSpace(getStatusNomeByRequisicaoGorm(tx, int64(pid)))
-		if statusNome == "" {
-			statusNome = "Nova Requisição"
+		); errF != nil {
+			log.Printf("Aviso: falha ao vincular fatura (req %d): %v", pid, errF)
 		}
-		_, _ = execGorm(tx, `
-			INSERT INTO FT_HISTORICO_MOVIMENTACOES
-			(id_requisicao, id_usuario_gestor, status_anterior, status_novo, etapa_anterior, etapa_nova, sub_etapa, comentario, data_movimentacao, tipo_movimentacao)
-			VALUES (?, ?, ?, ?, '', '', '', ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'fatura')`,
-			pid, nullIntOrNil(userIDNull), statusNome, statusNome, "Fatura selecionada: "+strings.TrimSpace(linkFatura),
-		)
+		// TODO V2: histórico "fatura selecionada" desabilitado (idem acima).
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -352,13 +517,27 @@ func createRequisicaoPersistente(c *gin.Context) {
 
 	syncSnapshotFromOriginal(pid, 0)
 
+	// Anexa os PDFs das faturas (a apontada via fatura_id + as do período informado) ao
+	// processo — id_processo = id da requisição (mesma chave). Roda em background pra não
+	// travar a resposta; baixa do link_fatura do FDE. Dedup por nome do anexo.
+	go anexarFaturasDaRequisicao(pid, strings.TrimSpace(uc), strings.TrimSpace(get("fatura_id")), periodosIrregularidade)
+	// Água: anexa o dossiê do apontamento (gráfico + conta + conferência + instruções) e a fatura —
+	// só quando o apontamento foi conferido como VERDADEIRO. O id vem em analise_ia.fatura_agua_id.
+	var analiseAgua struct {
+		Origem       string      `json:"origem"`
+		FaturaAguaID json.Number `json:"fatura_agua_id"`
+	}
+	if json.Unmarshal([]byte(get("analise_ia")), &analiseAgua) == nil && analiseAgua.Origem == "agua" && analiseAgua.FaturaAguaID != "" {
+		go anexarDossieAgua(pid, analiseAgua.FaturaAguaID.String())
+	}
+
 	// Dispara cálculo de score em background para o novo processo
 	go func(reqID int) {
 		var data ScoreData
 		const q = `
 		SELECT
 			COALESCE(COUNT(DISTINCT hm.id_historico), 0),
-			COALESCE((SELECT COUNT(DISTINCT id_anexo) FROM FT_ANEXOS WHERE id_requisicao = p.id_requisicao), 0),
+			COALESCE((SELECT COUNT(DISTINCT id_anexo) FROM FT_ANEXOS WHERE id_processo = p.id_processo), 0),
 			COALESCE(p.ressarcimento_estimado, 0),
 			COALESCE(DATEDIFF(NOW(), p.data_criacao), 0),
 			0,
@@ -368,7 +547,7 @@ func createRequisicaoPersistente(c *gin.Context) {
 			CASE WHEN COALESCE(p.link_fatura, '') != '' THEN 1 ELSE 0 END,
 			CASE WHEN COALESCE(p.periodos_irregularidade, '') != '' THEN 1 ELSE 0 END
 		FROM FT_REQUISICOES p
-		LEFT JOIN FT_HISTORICO_MOVIMENTACOES hm ON p.id_requisicao = hm.id_requisicao
+		LEFT JOIN FT_HISTORICO_MOVIMENTACOES hm ON p.id_requisicao = hm.id_processo
 		WHERE p.id_requisicao = ?
 		GROUP BY p.id_requisicao, p.ressarcimento_estimado, p.data_criacao,
 		         p.id_tipo_irregularidade, p.id_subtipo_irregularidade,
@@ -381,10 +560,18 @@ func createRequisicaoPersistente(c *gin.Context) {
 			return
 		}
 		resp := ScoreResponse{}
-		if v, ok := result["score"].(float64); ok { resp.Score = v }
-		if v, ok := result["label"].(string); ok { resp.Label = v }
-		if v, ok := result["percentual"].(float64); ok { resp.Percentual = v }
-		if v, ok := result["erro"].(string); ok { resp.Erro = v }
+		if v, ok := result["score"].(float64); ok {
+			resp.Score = v
+		}
+		if v, ok := result["label"].(string); ok {
+			resp.Label = v
+		}
+		if v, ok := result["percentual"].(float64); ok {
+			resp.Percentual = v
+		}
+		if v, ok := result["erro"].(string); ok {
+			resp.Erro = v
+		}
 		if resp.Erro == "" {
 			saveScoreCache(fmt.Sprintf("%d", reqID), resp)
 		}
@@ -488,6 +675,35 @@ func formatBRL(n sql.NullFloat64) string {
 // @Failure 400 {object} map[string]any
 // @Failure 500 {object} map[string]any
 // @Router /api/v1/requisicoes [post]
+// resolveUCInstalacao — SAFEGUARD (30/07): se o `uc` recebido for na verdade o codigo_uc interno
+// (sgeeasy, ex.: 3316) e o FDE tiver UM numero_instalacao LIMPO (só dígitos 4-12) e diferente pra
+// esse codigo_uc, devolve o numero_instalacao (o nº que o time reconhece, ex.: 990272818). Senão,
+// mantém o uc como veio. Evita a requisição nascer com id interno em vez da instalação real.
+// Conservador: só troca quando o mapa é ÚNICO e LIMPO — nunca grava valor sujo/ambíguo.
+func resolveUCInstalacao(uc string) string {
+	uc = strings.TrimSpace(uc)
+	if uc == "" || database.GormDB_App == nil {
+		return uc
+	}
+	sqlDB, err := database.GormDB_App.DB()
+	if err != nil {
+		return uc
+	}
+	var n int
+	var inst sql.NullString
+	if err := sqlDB.QueryRow(`
+		SELECT COUNT(DISTINCT numero_instalacao), MAX(numero_instalacao)
+		  FROM FATURA_DADOS_EXTRAIDOS
+		 WHERE codigo_uc = ? AND numero_instalacao REGEXP '^[0-9]{4,12}$'
+		   AND numero_instalacao <> codigo_uc`, uc).Scan(&n, &inst); err != nil {
+		return uc
+	}
+	if n == 1 && inst.Valid && strings.TrimSpace(inst.String) != "" && inst.String != uc {
+		return inst.String
+	}
+	return uc
+}
+
 func CreateRequisicaoPersist(c *gin.Context) {
 	createRequisicaoPersistente(c)
 }
@@ -541,91 +757,91 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 				IFNULL(u.nome_usuario, 'Sistema') AS nome_usuario,
 				IFNULL(
 					CASE
-						WHEN COALESCE(h.sub_etapa_anterior,'') <> '' THEN CONCAT(IFNULL(h.etapa_anterior,''), ' - ', h.sub_etapa_anterior)
-						ELSE IFNULL(h.etapa_anterior,'')
+						WHEN COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_anterior),'') <> '' THEN CONCAT(IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),''), ' - ', (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_anterior))
+						ELSE IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),'')
 					END, ''
 				) AS status_anterior,
 				IFNULL(
 					CASE
-						WHEN COALESCE(h.sub_etapa_nova,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa_nova)
-						ELSE IFNULL(h.etapa_nova,'')
+						WHEN COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),'') <> '' THEN CONCAT(IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''), ' - ', (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo))
+						ELSE IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),'')
 					END, ''
 				) AS status_novo,
 				IFNULL(
 					CASE
-						WHEN COALESCE(h.sub_etapa_nova,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa_nova)
-						ELSE IFNULL(h.etapa_nova,'')
+						WHEN COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),'') <> '' THEN CONCAT(IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''), ' - ', (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo))
+						ELSE IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),'')
 					END, ''
 				) AS status_composto,
-				IFNULL(h.etapa_anterior, '') AS etapa_anterior,
-				IFNULL(h.etapa_nova, '')     AS etapa_nova,
-				IFNULL(h.sub_etapa_anterior, '') AS sub_etapa_anterior,
-				IFNULL(h.sub_etapa_nova, '') AS sub_etapa_nova,
-				IFNULL(CAST(h.relevancia_anterior AS CHAR), '') AS relevancia_anterior,
-				IFNULL(CAST(h.relevancia_nova AS CHAR), '')     AS relevancia_nova,
+				IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior), '') AS etapa_anterior,
+				IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova), '')     AS etapa_nova,
+				IFNULL((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_anterior), '') AS sub_etapa_anterior,
+				IFNULL((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), '') AS sub_etapa_nova,
+				IFNULL('', '') AS relevancia_anterior,
+				IFNULL('', '')     AS relevancia_nova,
 				IFNULL(h.comentario, '') AS comentario,
 				DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao,
 				IFNULL(h.tipo_movimentacao,'') AS tipo_movimentacao
 			FROM FT_HISTORICO_MOVIMENTACOES h
 			LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
-			WHERE h.id_requisicao = ?
+			WHERE h.id_processo = ?
 			ORDER BY h.data_movimentacao DESC`
 
 	if hasNewCols >= 2 {
 		if rows, err := database.GormDB_App.Raw(queryNew, id).Rows(); err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var it HistoricoItem
-			if err := rows.Scan(
-				&it.ID,
-				&it.NomeUsuario,
-				&it.StatusAnterior,
-				&it.StatusNovo,
-				&it.StatusComposto,
-				&it.EtapaAnterior,
-				&it.EtapaNova,
-				&it.SubEtapaAnterior,
-				&it.SubEtapaNova,
-				&it.RelevanciaAnterior,
-				&it.RelevanciaNova,
-				&it.Comentario,
-				&it.DataMovimentacao,
-				&it.TipoMovimentacao,
-			); err != nil {
-				continue
+			defer rows.Close()
+			for rows.Next() {
+				var it HistoricoItem
+				if err := rows.Scan(
+					&it.ID,
+					&it.NomeUsuario,
+					&it.StatusAnterior,
+					&it.StatusNovo,
+					&it.StatusComposto,
+					&it.EtapaAnterior,
+					&it.EtapaNova,
+					&it.SubEtapaAnterior,
+					&it.SubEtapaNova,
+					&it.RelevanciaAnterior,
+					&it.RelevanciaNova,
+					&it.Comentario,
+					&it.DataMovimentacao,
+					&it.TipoMovimentacao,
+				); err != nil {
+					continue
+				}
+				historicos = append(historicos, it)
 			}
-			historicos = append(historicos, it)
-		}
-		if historicos == nil {
-			historicos = make([]HistoricoItem, 0)
-		}
-		// Prepend criaÃ§ão do processo, se houver
-		var createdAt sql.NullTime
-		if err := database.GormDB_App.Raw(
-			"SELECT data_criacao FROM FT_REQUISICOES WHERE id_requisicao = ?",
-			id,
-		).Row().Scan(&createdAt); err == nil && createdAt.Valid {
-			ts := createdAt.Time.In(time.Local).Format("02/01/2006 15:04:05")
-			created := HistoricoItem{
-				ID:                 0,
-				NomeUsuario:        "Sistema",
-				StatusAnterior:     "",
-				StatusNovo:         "CriaÃ§ão do Processo",
-				StatusComposto:     "CriaÃ§ão do Processo",
-				EtapaAnterior:      "",
-				EtapaNova:          "",
-				SubEtapaAnterior:   "",
-				SubEtapaNova:       "",
-				RelevanciaAnterior: "",
-				RelevanciaNova:     "",
-				Comentario:         "Processo criado",
-				DataMovimentacao:   ts,
-				TipoMovimentacao:   "criacao",
+			if historicos == nil {
+				historicos = make([]HistoricoItem, 0)
 			}
-			historicos = append([]HistoricoItem{created}, historicos...)
-		}
-		c.JSON(http.StatusOK, historicos)
-		return
+			// Prepend criaÃ§ão do processo, se houver
+			var createdAt sql.NullTime
+			if err := database.GormDB_App.Raw(
+				"SELECT data_criacao FROM FT_REQUISICOES WHERE id_requisicao = ?",
+				id,
+			).Row().Scan(&createdAt); err == nil && createdAt.Valid {
+				ts := createdAt.Time.In(time.Local).Format("02/01/2006 15:04:05")
+				created := HistoricoItem{
+					ID:                 0,
+					NomeUsuario:        "Sistema",
+					StatusAnterior:     "",
+					StatusNovo:         "CriaÃ§ão do Processo",
+					StatusComposto:     "CriaÃ§ão do Processo",
+					EtapaAnterior:      "",
+					EtapaNova:          "",
+					SubEtapaAnterior:   "",
+					SubEtapaNova:       "",
+					RelevanciaAnterior: "",
+					RelevanciaNova:     "",
+					Comentario:         "Processo criado",
+					DataMovimentacao:   ts,
+					TipoMovimentacao:   "criacao",
+				}
+				historicos = append([]HistoricoItem{created}, historicos...)
+			}
+			c.JSON(http.StatusOK, historicos)
+			return
 		}
 	}
 
@@ -636,32 +852,32 @@ func GetHistoricoByRequisicaoID(c *gin.Context) {
 				IFNULL(u.nome_usuario, 'Sistema') AS nome_usuario,
 				IFNULL(
 					CASE
-						WHEN COALESCE(h.sub_etapa,'') <> '' THEN CONCAT(IFNULL(h.etapa_anterior,''), ' - ', h.sub_etapa)
-						ELSE IFNULL(h.etapa_anterior,'')
+						WHEN COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),'') <> '' THEN CONCAT(IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),''), ' - ', (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo))
+						ELSE IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),'')
 					END, ''
 				) AS status_anterior,
 				IFNULL(
 					CASE
-						WHEN COALESCE(h.sub_etapa,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa)
-						ELSE IFNULL(h.etapa_nova,'')
+						WHEN COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),'') <> '' THEN CONCAT(IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''), ' - ', (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo))
+						ELSE IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),'')
 					END, ''
 				) AS status_novo,
 				IFNULL(
 					CASE
-						WHEN COALESCE(h.sub_etapa,'') <> '' THEN CONCAT(IFNULL(h.etapa_nova,''), ' - ', h.sub_etapa)
-						ELSE IFNULL(h.etapa_nova,'')
+						WHEN COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),'') <> '' THEN CONCAT(IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''), ' - ', (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo))
+						ELSE IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),'')
 					END, ''
 				) AS status_composto,
-				IFNULL(h.etapa_anterior, '') AS etapa_anterior,
-				IFNULL(h.etapa_nova, '')     AS etapa_nova,
-				IFNULL(h.sub_etapa, '')      AS sub_etapa,
-				IFNULL(CAST(h.relevancia_anterior AS CHAR), '') AS relevancia_anterior,
-				IFNULL(CAST(h.relevancia_nova AS CHAR), '')     AS relevancia_nova,
+				IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior), '') AS etapa_anterior,
+				IFNULL((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova), '')     AS etapa_nova,
+				IFNULL((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), '')      AS sub_etapa,
+				IFNULL('', '') AS relevancia_anterior,
+				IFNULL('', '')     AS relevancia_nova,
 				IFNULL(h.comentario, '')     AS comentario,
 				DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao
 			FROM FT_HISTORICO_MOVIMENTACOES h
 			LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
-			WHERE h.id_requisicao = ?
+			WHERE h.id_processo = ?
 			ORDER BY h.data_movimentacao DESC`
 
 	rows2, err2 := database.GormDB_App.Raw(queryOld, id).Rows()
@@ -815,7 +1031,7 @@ func GetAnexosByRequisicaoID(c *gin.Context) {
 			SELECT id_anexo, nome_arquivo, caminho_arquivo, enviado_por,
 				DATE_FORMAT(data_upload, '%Y-%m-%d %H:%i:%s') AS data_upload
 			FROM FT_ANEXOS
-			WHERE id_requisicao = ?
+			WHERE id_processo = ?
 			ORDER BY data_upload DESC`
 	if rows, err := database.GormDB_App.Raw(qNew, id).Rows(); err == nil {
 		defer rows.Close()
@@ -840,7 +1056,7 @@ func GetAnexosByRequisicaoID(c *gin.Context) {
 	qOld := `
 			SELECT id_anexo, nome_arquivo, caminho_arquivo, enviado_por
 			FROM FT_ANEXOS
-			WHERE id_requisicao = ?`
+			WHERE id_processo = ?`
 	rows2, err2 := database.GormDB_App.Raw(qOld, id).Rows()
 	if err2 != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar anexos"})
@@ -888,6 +1104,8 @@ func GetAllRequisicoes(c *gin.Context) {
 		SubEtapa          string  `json:"sub_etapa"`
 		Triagem           int     `json:"triagem"`
 		ProcessoCriado    int     `json:"processo_criado"`
+		IDUsuario         int     `json:"id_usuario"`
+		Destaque          string  `json:"destaque"`
 		DataCriacao       string  `json:"data_criacao"`
 		DataMudancaStatus string  `json:"data_mudanca_status"`
 	}
@@ -900,17 +1118,20 @@ func GetAllRequisicoes(c *gin.Context) {
 				COALESCE(r.concessionaria,'')        AS concessionaria,
 				COALESCE(r.ressarcimento_estimado,0) AS ressarcimento_estimado,
 				COALESCE(r.endereco_completo,'')     AS endereco_completo,
-				COALESCE(s.status,'Nova Requisição') AS status,
-				COALESCE(e.etapa,'')                 AS etapa,
-				COALESCE(p.sub_etapa,'')             AS sub_etapa,
+				COALESCE(s.nome,'Nova Requisição') AS status,
+				COALESCE(e.nome,'')                 AS etapa,
+				COALESCE('' /* TODO V2: p.sub_etapa removida */,'')             AS sub_etapa,
 				COALESCE(r.triagem,0)                AS triagem,
 				COALESCE(r.processo_criado,0)        AS processo_criado,
+				COALESCE(r.id_usuario,0)             AS id_usuario,
+				CASE WHEN r.descricao_irregularidade LIKE '%[RECUP-ABERTO%' THEN 'laranja'
+				     WHEN r.id_usuario = 1 THEN 'ouro' ELSE '' END AS destaque,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
 				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status
 			FROM FT_REQUISICOES r
-			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+			LEFT JOIN DM_STATUS_REQUISICAO s ON r.id_status = s.id_status
 			LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
-			LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+			LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 			ORDER BY r.data_criacao DESC`
 
 	// Suporte opcional a paginaÃ§ão: ?limit=...&offset=...
@@ -962,6 +1183,8 @@ func GetAllRequisicoes(c *gin.Context) {
 			&it.SubEtapa,
 			&it.Triagem,
 			&it.ProcessoCriado,
+			&it.IDUsuario,
+			&it.Destaque,
 			&it.DataCriacao,
 			&it.DataMudancaStatus,
 		); err != nil {
@@ -1000,6 +1223,8 @@ func GetRequisicoesDepartamento(c *gin.Context) {
 		Status            string  `json:"status"`
 		Triagem           int     `json:"triagem"`
 		ProcessoCriado    int     `json:"processo_criado"`
+		IDUsuario         int     `json:"id_usuario"`
+		Destaque          string  `json:"destaque"`
 		DataCriacao       string  `json:"data_criacao"`
 		DataMudancaStatus string  `json:"data_mudanca_status"`
 	}
@@ -1012,13 +1237,16 @@ func GetRequisicoesDepartamento(c *gin.Context) {
 				COALESCE(r.concessionaria,'')        AS concessionaria,
 				COALESCE(r.ressarcimento_estimado,0) AS ressarcimento_estimado,
 				COALESCE(r.endereco_completo,'')     AS endereco_completo,
-				COALESCE(s.status,'Nova Requisição') AS status,
+				COALESCE(s.nome,'Nova Requisição') AS status,
 				COALESCE(r.triagem,0)                AS triagem,
 				COALESCE(r.processo_criado,0)        AS processo_criado,
+				COALESCE(r.id_usuario,0)             AS id_usuario,
+				CASE WHEN r.descricao_irregularidade LIKE '%[RECUP-ABERTO%' THEN 'laranja'
+				     WHEN r.id_usuario = 1 THEN 'ouro' ELSE '' END AS destaque,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
 				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status
 			FROM FT_REQUISICOES r
-			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status`
+			LEFT JOIN DM_STATUS_REQUISICAO s ON r.id_status = s.id_status`
 
 	orderBy := " ORDER BY r.data_criacao DESC"
 
@@ -1068,6 +1296,8 @@ func GetRequisicoesDepartamento(c *gin.Context) {
 			&it.Status,
 			&it.Triagem,
 			&it.ProcessoCriado,
+			&it.IDUsuario,
+			&it.Destaque,
 			&it.DataCriacao,
 			&it.DataMudancaStatus,
 		); err != nil {
@@ -1124,7 +1354,7 @@ func GetRequisicaoByID(c *gin.Context) {
 				COALESCE(r.concessionaria, '')         AS concessionaria,
 				COALESCE(r.ressarcimento_estimado, 0)  AS ressarcimento_estimado,
 				COALESCE(r.endereco_completo, '')      AS endereco_completo,
-				COALESCE(s.status, 'Nova RequisiÃ§ão')  AS status,
+				COALESCE(s.nome, 'Nova RequisiÃ§ão')  AS status,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
 				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS created_at,
@@ -1133,14 +1363,14 @@ func GetRequisicaoByID(c *gin.Context) {
 				COALESCE(ti.nome, '')                     AS tipo_irregularidade,
 				COALESCE(sti.nome, '')                    AS subtipo_irregularidade,
 				COALESCE(r.link_fatura, '')              AS link_fatura,
-				COALESCE(p.instancia_deferimento, 0)      AS instancia_deferimento,
+				COALESCE(p.id_instancia_atual, 0)         AS instancia_deferimento,
 				COALESCE(di.nome, '')                     AS instancia_deferimento_nome
 			FROM FT_REQUISICOES r
-			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+			LEFT JOIN DM_STATUS_REQUISICAO s ON r.id_status = s.id_status
 			LEFT JOIN DM_TIPO_IRREGULARIDADE ti ON ti.id_tipo = r.id_tipo_irregularidade
 			LEFT JOIN DM_SUBTIPO_IRREGULARIDADE sti ON sti.id_subtipo = r.id_subtipo_irregularidade
 			LEFT JOIN FT_PROCESSOS p ON p.id_processo = r.id_requisicao
-			LEFT JOIN DM_INSTANCIA_DEFERIMENTO di ON di.id_instancia = p.instancia_deferimento
+			LEFT JOIN DM_INSTANCIAS di ON di.id_instancia = p.id_instancia_atual
 			WHERE r.id_requisicao = ?
 			LIMIT 1`
 
@@ -1178,7 +1408,7 @@ func GetRequisicaoByID(c *gin.Context) {
 				COALESCE(r.concessionaria, '')         AS concessionaria,
 				COALESCE(r.ressarcimento_estimado, 0)  AS ressarcimento_estimado,
 				COALESCE(r.endereco_completo, '')      AS endereco_completo,
-				COALESCE(s.status, 'Nova RequisiÃ§ão')  AS status,
+				COALESCE(s.nome, 'Nova RequisiÃ§ão')  AS status,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS data_criacao,
 				DATE_FORMAT(r.data_mudanca_status, '%Y-%m-%d %H:%i:%s') AS data_mudanca_status,
 				DATE_FORMAT(r.data_criacao, '%Y-%m-%d %H:%i:%s') AS created_at,
@@ -1190,7 +1420,7 @@ func GetRequisicaoByID(c *gin.Context) {
 				0                                         AS instancia_deferimento,
 				''                                        AS instancia_deferimento_nome
 			FROM FT_REQUISICOES r
-			LEFT JOIN DM_STATUS s ON r.id_status = s.id_status
+			LEFT JOIN DM_STATUS_REQUISICAO s ON r.id_status = s.id_status
 			WHERE r.id_requisicao = ?
 			LIMIT 1`
 		if err2 := database.GormDB_App.Raw(qFallback, id).Row().Scan(
@@ -1247,7 +1477,7 @@ func GetFaturasSelecionadasByRequisicaoID(c *gin.Context) {
 
 	const q = `SELECT link, COALESCE(mes_ref,''), COALESCE(dt_vencimento,''), valor_total
 				FROM FT_REQUISICOES_FATURAS
-				WHERE id_requisicao = ?
+				WHERE id_processo = ?
 				ORDER BY id ASC`
 	rows, err := database.GormDB_App.Raw(q, id).Rows()
 	if err != nil {
@@ -1435,6 +1665,7 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		if periodosIrregularidadePost != nil {
 			raw := strings.TrimSpace(*periodosIrregularidadePost)
 			if raw != "" {
+				raw = periodosnorm.Normalizar(raw)
 				// atualiza apenas quando o valor parece JSON válido
 				if strings.HasPrefix(raw, "[") || strings.HasPrefix(raw, "{") {
 					if json.Valid([]byte(raw)) {
@@ -1498,32 +1729,25 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 			return
 		}
 		classificacaoUpdated = true
-		// Registrar no histórico (informativo)
-		var etapaAtual, subAtual sql.NullString
-		_ = queryRowGorm(tx, `
-				SELECT e.etapa, p.sub_etapa
-				FROM FT_PROCESSOS p
-				JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
-				WHERE p.id_processo = ?`,
-			id,
-		).Scan(&etapaAtual, &subAtual)
-		statusComp := strings.TrimSpace(etapaAtual.String)
-		if strings.TrimSpace(subAtual.String) != "" {
-			statusComp = statusComp + " - " + strings.TrimSpace(subAtual.String)
-		}
+		// Registrar no histórico (informativo) — V2: grava o snapshot atual do processo (FK)
 		if _, err := execGorm(tx, `
 				INSERT INTO FT_HISTORICO_MOVIMENTACOES
-				(id_requisicao, id_usuario_gestor,
-				status_anterior, status_novo,
-				etapa_anterior, etapa_nova, sub_etapa,
-				comentario, data_movimentacao, tipo_movimentacao)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'classificacao')`,
-			id, gestorID,
-			statusComp, statusComp,
-			etapaAtual.String, etapaAtual.String, subAtual.String,
-			"Classificação atualizada",
+				  (id_processo, id_usuario_gestor,
+				   id_etapa_anterior, id_etapa_nova,
+				   id_instancia_anterior, id_instancia_nova,
+				   id_status_anterior, id_status_novo,
+				   id_aprovacao_anterior, id_aprovacao_nova,
+				   comentario, data_movimentacao, tipo_movimentacao)
+				SELECT p.id_processo, ?,
+				       p.id_etapa_atual, p.id_etapa_atual,
+				       p.id_instancia_atual, p.id_instancia_atual,
+				       p.id_status_atual, p.id_status_atual,
+				       p.id_aprovacao_atual, p.id_aprovacao_atual,
+				       ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'classificacao'
+				  FROM FT_PROCESSOS p WHERE p.id_processo = ?`,
+			gestorID, "Classificação atualizada", id,
 		); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar histórico de classificaÃ§ão"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar histórico de classificação"})
 			return
 		}
 	}
@@ -1535,9 +1759,9 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		// Busca etapa/subetapa vigentes do processo (se existir)
 		var etapaAtual, subAtual sql.NullString
 		_ = queryRowGorm(tx, `
-				SELECT e.etapa, p.sub_etapa
+				SELECT e.nome, '' /* TODO V2: p.sub_etapa removida */
 				FROM FT_PROCESSOS p
-				JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+				JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 				WHERE p.id_processo = ?`,
 			id,
 		).Scan(&etapaAtual, &subAtual)
@@ -1564,15 +1788,20 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 
 		if _, err := execGorm(tx, `
 				INSERT INTO FT_HISTORICO_MOVIMENTACOES
-				(id_requisicao, id_usuario_gestor,
-				status_anterior, status_novo,
-				etapa_anterior, etapa_nova, sub_etapa,
-				comentario, data_movimentacao)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR))`,
-			id, gestorID,
-			status, status,
-			etapaTxt, etapaTxt, subTxt,
-			comentario,
+				  (id_processo, id_usuario_gestor,
+				   id_etapa_anterior, id_etapa_nova,
+				   id_instancia_anterior, id_instancia_nova,
+				   id_status_anterior, id_status_novo,
+				   id_aprovacao_anterior, id_aprovacao_nova,
+				   comentario, data_movimentacao, tipo_movimentacao)
+				SELECT p.id_processo, ?,
+				       p.id_etapa_atual, p.id_etapa_atual,
+				       p.id_instancia_atual, p.id_instancia_atual,
+				       p.id_status_atual, p.id_status_atual,
+				       p.id_aprovacao_atual, p.id_aprovacao_atual,
+				       ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'comentario'
+				  FROM FT_PROCESSOS p WHERE p.id_processo = ?`,
+			gestorID, comentario, id,
 		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar comentário no histórico"})
 			return
@@ -1599,9 +1828,9 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		var tipoAtual sql.NullInt64
 		var subtipoAtual sql.NullInt64
 		_ = queryRowGorm(tx, `
-				SELECT s.status, r.data_mudanca_status, r.id_tipo_irregularidade, r.id_subtipo_irregularidade
+				SELECT s.nome, r.data_mudanca_status, r.id_tipo_irregularidade, r.id_subtipo_irregularidade
 				FROM FT_REQUISICOES r
-				LEFT JOIN DM_STATUS s ON s.id_status = r.id_status
+				LEFT JOIN DM_STATUS_REQUISICAO s ON s.id_status = r.id_status
 				WHERE r.id_requisicao = ?`, id).Scan(&currStatus, &dataMudanca, &tipoAtual, &subtipoAtual)
 
 		if strings.EqualFold(currStatus, "Nova RequisiÃ§ão") && !strings.EqualFold(statusPost, "Nova RequisiÃ§ão") {
@@ -1628,7 +1857,7 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 
 		// Busca id do status
 		var idStatus int
-		if err := queryRowGorm(tx, "SELECT id_status FROM DM_STATUS WHERE status = ?", statusPost).Scan(&idStatus); err != nil {
+		if err := queryRowGorm(tx, "SELECT id_status FROM DM_STATUS_REQUISICAO WHERE nome = ?", statusPost).Scan(&idStatus); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Status informado inválido"})
 			return
 		}
@@ -1644,9 +1873,9 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		var etapaAtual sql.NullString
 		var subAtual sql.NullString
 		_ = queryRowGorm(tx, `
-				SELECT e.etapa, p.sub_etapa
+				SELECT e.nome, '' /* TODO V2: p.sub_etapa removida */
 				FROM FT_PROCESSOS p
-				JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+				JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 				WHERE p.id_processo = ?
 				LIMIT 1`, id).Scan(&etapaAtual, &subAtual)
 
@@ -1684,62 +1913,22 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 		statusNovo := strings.TrimSpace(statusPost)
 		histComentario := strings.Join(commentParts, " | ")
 
-		_, _ = execGorm(tx, `
-				INSERT INTO FT_HISTORICO_MOVIMENTACOES
-				(id_requisicao, id_usuario_gestor,
-				status_anterior, status_novo,
-				etapa_anterior, etapa_nova, sub_etapa,
-				comentario, data_movimentacao, tipo_movimentacao)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL 3 HOUR), 'status')`,
-			id, gestorID,
-			statusAnterior, statusNovo,
-			etapaAtual.String, etapaAtual.String, subAtual.String,
-			histComentario,
-		)
+		// TODO V2: histórico genérico "status" da REQUISIÇÃO desabilitado.
+		// No V2, FT_HISTORICO_MOVIMENTACOES.id_processo só existe após aprovação.
+		// O bloco abaixo (statusPost == 'Aprovado') já registra a entrada na Reclamação · Distribuidora · Aguardando retorno.
+		_ = statusAnterior
+		_ = statusNovo
+		_ = histComentario
+		_ = etapaAtual
+		_ = subAtual
 
-		// Se aprovado, marca triagem e processo_criado=1 e aguarda envio para Ativos
-		if strings.EqualFold(statusPost, "Aprovado") {
-			if _, err := execGorm(tx, "UPDATE FT_REQUISICOES SET triagem = 1, processo_criado = 1 WHERE id_requisicao = ?", id); err != nil {
-				if !strings.Contains(strings.ToLower(err.Error()), "unknown column") {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao marcar triagem"})
-					return
-				}
-			}
-			// Garante etapa/subetapa default do processo aprovado (id 1)
-			subEtapa := "Primeira reclamação da etapa - Em elaboração"
-			if nome, e2 := resolveSubEtapaNameByIDGorm(tx, 1); e2 == nil && nome.Valid {
-				subEtapa = strings.TrimSpace(nome.String)
-			}
-			subID, _ := resolveSubEtapaIDGorm(tx, subEtapa)
-			if !subID.Valid {
-				subID = sql.NullInt64{Int64: 1, Valid: true}
-			}
-			responsavelID := sql.NullInt64{Int64: gestorID, Valid: gestorID > 0}
-			// INSERT ... ON DUPLICATE KEY UPDATE — cria o processo se ainda não
-			// existe (caso da requisição aprovada sem registro em FT_PROCESSOS),
-			// ou atualiza os campos se já existir. Antes era só UPDATE, e quando
-			// o processo não existia o UPDATE afetava 0 linhas silenciosamente,
-			// causando 404 quando o front tentava movimentar o processo depois.
-			if _, err := execGorm(tx,
-				`INSERT INTO FT_PROCESSOS
-				    (id_processo, id_etapa_processo, etapa, sub_etapa, id_sub_etapa_processo,
-				     id_coluna, nome_coluna, id_responsavel, relevancia, ultima_atualizacao)
-				 VALUES (?, 1, 'Distribuidora', ?, ?, 1, 'Ativos', ?, 0, NOW())
-				 ON DUPLICATE KEY UPDATE
-				     id_etapa_processo     = VALUES(id_etapa_processo),
-				     etapa                 = VALUES(etapa),
-				     sub_etapa             = VALUES(sub_etapa),
-				     id_sub_etapa_processo = VALUES(id_sub_etapa_processo),
-				     id_coluna             = VALUES(id_coluna),
-				     nome_coluna           = VALUES(nome_coluna),
-				     id_responsavel        = VALUES(id_responsavel),
-				     ultima_atualizacao    = NOW()`,
-				id, subEtapa, nullIntToIface(subID), nullIntToIface(responsavelID),
-			); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar/atualizar processo: " + err.Error()})
-				return
-			}
-		}
+		// V2: aprovar NÃO cria mais o processo. A aprovação apenas move a requisição para o
+		// status "Aprovado" (coluna APROVADO) — já persistido acima via id_status. A flag
+		// `triagem` permanece 0 e nenhuma linha em FT_PROCESSOS é criada aqui.
+		//
+		// O processo só nasce no passo "Criar processo" (front handleReqCriarProcesso →
+		// POST /api/v2/processos/:id/movimentar), que cria a linha em FT_PROCESSOS quando
+		// ela ainda não existe e marca processo_criado=1.
 	}
 
 	// Anexos (campo: anexosGestor) - apenas para multipart (grava no banco)
@@ -1756,7 +1945,7 @@ func UpdateRequisicaoCompleta(c *gin.Context) {
 			pseudoPath := buildAnexoPath(pidInt, 0, name)
 			if _, err := execGorm(tx,
 				`INSERT INTO FT_ANEXOS
-				(id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
+				(id_processo, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
 				VALUES (?, ?, ?, 'gestor', NOW(), ?, ?, ?)`,
 				id, name, pseudoPath, mimeType, sizeBytes, data); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha ao registrar anexo"})

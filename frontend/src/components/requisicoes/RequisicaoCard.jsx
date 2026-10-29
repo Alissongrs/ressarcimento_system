@@ -41,10 +41,10 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject, scoreData, onScoreLoad }
     pickFirst(requisicao, ['faturas', 'faturas_count', 'qtd_faturas', 'total_faturas', 'faturasTotal'], 0),
   );
   const statusColor =
-    norm(statusLabel).includes('aprov') ? 'text-emerald-500 bg-emerald-500/10 border-emerald-500/30' :
-    norm(statusLabel).includes('rejeit') ? 'text-red-500 bg-red-500/10 border-red-500/30' :
-    norm(statusLabel).includes('analise') ? 'text-amber-500 bg-amber-500/10 border-amber-500/30' :
-    'text-sky-500 bg-sky-500/10 border-sky-500/30';
+    norm(statusLabel).includes('aprov') ? 'text-[var(--success)] bg-[var(--success)]/10 border-[var(--success)]/30' :
+    norm(statusLabel).includes('rejeit') ? 'text-[var(--danger)] bg-[var(--danger)]/10 border-[var(--danger)]/30' :
+    norm(statusLabel).includes('analise') ? 'text-[var(--warning)] bg-[var(--warning)]/10 border-[var(--warning)]/30' :
+    'text-[var(--accent)] bg-[var(--accent)]/10 border-[var(--accent)]/30';
 
   useEffect(() => {
     if (id) onScoreLoad?.(id);
@@ -52,15 +52,24 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject, scoreData, onScoreLoad }
 
   const score = scoreData?.[id];
   const isRejected = norm(statusLabel).includes('rejeit');
+  // Card DOURADO: requisições criadas pelo usuário Alisson (id_usuario 1) — vieram da
+  // conferência de auditoria (parecer verificado no PDF). Ganham brilho dourado.
+  const criadorId = Number(pickFirst(requisicao, ['id_usuario', 'usuario_id', 'id_usuario_gestor', 'criado_por_id'], 0));
+  const isOuro = criadorId === 1 && !isRejected;
 
   return (
     <div
-      className="glass-card gradient-card shadow-medium p-3 rounded-lg border border-[var(--border)] text-[var(--fg)] space-y-2 flex flex-col cursor-pointer"
+      className={`glass-card gradient-card shadow-medium p-3 rounded-lg border text-[var(--fg)] space-y-2 flex flex-col cursor-pointer ${isOuro ? 'req-card-ouro' : 'border-[var(--border)]'}`}
       onClick={() => onOpen?.(requisicao)}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-xs font-bold text-[var(--accent)]">REQ-{String(id).padStart(3, '0')}</div>
+          <div className="text-xs font-bold text-[var(--accent)] flex items-center gap-1">
+            {isOuro && (
+              <span title="Requisição criada por você (conferência de auditoria)" style={{ color: '#7a5c00' }}>★</span>
+            )}
+            REQ-{String(id).padStart(3, '0')}
+          </div>
           <div className="text-[11px] opacity-70">UC {uc}</div>
         </div>
         <div className="flex items-center gap-2">
@@ -70,7 +79,7 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject, scoreData, onScoreLoad }
           <span
             role="button"
             tabIndex={0}
-            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-red-500/10"
+            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-[var(--danger)]/10"
             title="Rejeitar requisição"
             onClick={(e) => {
               e.stopPropagation();
@@ -83,13 +92,13 @@ const RequisicaoCard = ({ requisicao, onOpen, onReject, scoreData, onScoreLoad }
               }
             }}
           >
-            <Trash2 size={12} className="text-red-500 opacity-90" />
+            <Trash2 size={12} className="text-[var(--danger)] opacity-90" />
           </span>
         </div>
       </div>
 
       <div className="text-xs font-semibold truncate">{cliente}</div>
-      <div className="text-xs font-bold text-emerald-500">{formatCurrencyBR(valor)}</div>
+      <div className="text-xs font-bold text-[var(--success)]">{formatCurrencyBR(valor)}</div>
       <div className="flex justify-between items-center text-[11px] opacity-70">
         <span className="flex items-center gap-1"><Clock size={12} /> {calcAprovado.text}</span>
       </div>

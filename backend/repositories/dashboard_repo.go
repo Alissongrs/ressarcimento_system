@@ -22,6 +22,10 @@ type DashFilters struct {
 	GestorID         *int64
 }
 
+// movHumana: movimentação feita por uma pessoa (alias h). Fora: usuário "sistema" (999 / NULL) e e-mails
+// anexados ou ações automáticas — senão um lote de e-mails conta como "movimentação" e esconde processo parado.
+const movHumana = ` h.id_usuario_gestor IS NOT NULL AND h.id_usuario_gestor <> 999 AND COALESCE(h.tipo_movimentacao,'') NOT IN ('EMAIL','E-mail','auto') `
+
 type DashboardRepo struct {
 	db *gorm.DB
 }
@@ -111,7 +115,7 @@ func (r *DashboardRepo) TotalProcessosFiltered(ctx context.Context, f DashFilter
      WHERE 1=1`
 	args := []any{}
 	if !f.IncluirSuspensos {
-		q += " AND COALESCE(p.suspenso,0)=0"
+		q += " AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */"
 	}
 	if f.ApenasRelevantes {
 		q += " AND COALESCE(p.relevancia,0)=1"
@@ -138,7 +142,7 @@ func (r *DashboardRepo) ValorTotalEstimado(ctx context.Context, f DashFilters) (
          WHERE 1=1`
 	args := []any{}
 	if !f.IncluirSuspensos {
-		q += " AND COALESCE(p.suspenso,0)=0"
+		q += " AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */"
 	}
 	if f.ApenasRelevantes {
 		q += " AND COALESCE(p.relevancia,0)=1"
@@ -154,35 +158,32 @@ func (r *DashboardRepo) ValorTotalEstimado(ctx context.Context, f DashFilters) (
 
 // Valor em carteira = Ativos (ressarcimento estimado) + Deferidos (credito simples+dobro), exclui suspensos por padrÃÂ£o.
 func (r *DashboardRepo) CarteiraTotals(ctx context.Context, f DashFilters) (CarteiraTotals, error) {
+	// TODO V2: refactor de nome_coluna/id_coluna/DM_KANBAN_COLUNAS:
+	//   'Ativos'    = pré-deferimento sem indeferimento (id_aprovacao_atual IS NULL/<>2) e etapa em (1,2,3)
+	//   'Deferidos' = pós-deferimento (id_aprovacao_atual=1) e etapa em (4,5)  -- 6=Encerramento já é "Concluído"
+	//   Suspensos (id_status_atual=5) ficam fora.
 	qValor := "SELECT\n" +
 		"  COALESCE((\n" +
 		"    SELECT SUM(COALESCE(ressarcimento_estimado, 0))\n" +
 		"    FROM FT_PROCESSOS\n" +
-		"    WHERE TRIM(nome_coluna) = 'Ativos'\n" +
-		"      AND COALESCE(suspenso, 0) <> 1\n" +
-		"      AND COALESCE(id_etapa_processo, 0) <> 11\n" +
-		"      AND COALESCE(id_sub_etapa_processo, 0) <> 1\n" +
-		"      AND COALESCE(id_coluna, 0) <> 99\n" +
+		"    WHERE (id_etapa_atual IN (1,2) OR (id_etapa_atual = 3 AND COALESCE(id_aprovacao_atual,0) <> 1)) /* Ativos: pré-deferimento */\n" +
+		"      AND COALESCE(id_aprovacao_atual,0) <> 2\n" +
+		"      AND COALESCE(id_status_atual,0) <> 5\n" +
 		"  ), 0)\n" +
 		"  +\n" +
 		"  COALESCE((\n" +
 		"    SELECT SUM(COALESCE(credito_simples, 0) + COALESCE(credito_dobro, 0))\n" +
 		"    FROM FT_PROCESSOS\n" +
-		"    WHERE TRIM(nome_coluna) = 'Deferidos'\n" +
-		"      AND COALESCE(suspenso, 0) <> 1\n" +
-		"      AND COALESCE(id_etapa_processo, 0) <> 11\n" +
-		"      AND COALESCE(id_sub_etapa_processo, 0) <> 1\n" +
-		"      AND COALESCE(id_coluna, 0) <> 99\n" +
+		"    WHERE id_etapa_atual IN (3,4,5) /* Deferidos (Conciliação já deferida, Faturamento, Repasse): vale o crédito */\n" +
+		"      AND id_aprovacao_atual = 1\n" +
+		"      AND COALESCE(id_status_atual,0) <> 5\n" +
 		"  ), 0) AS valor_em_carteira"
 	qCount := "SELECT COUNT(DISTINCT id_processo) AS qtd_processos_em_carteira\n" +
 		"FROM FT_PROCESSOS\n" +
 		"WHERE id_processo IS NOT NULL\n" +
-		"  AND TRIM(CAST(id_processo AS CHAR)) <> ''\n" +
-		"  AND id_coluna IN (\n" +
-		"    SELECT id_coluna FROM DM_KANBAN_COLUNAS\n" +
-		"    WHERE nome_coluna IN ('Ativos', 'Deferidos')\n" +
-		"  )\n" +
-		"  AND COALESCE(suspenso, 0) <> 1"
+		"  AND ( (id_etapa_atual IN (1,2,3) AND COALESCE(id_aprovacao_atual,0)<>2) /* Ativos */\n" +
+		"     OR (id_etapa_atual IN (4,5) AND id_aprovacao_atual=1)                 /* Deferidos */ )\n" +
+		"  AND COALESCE(id_status_atual,0) <> 5 /* TODO V2: era suspenso<>1 */"
 
 	var valor sql.NullFloat64
 	if res := r.db.Raw( qValor).Scan(&valor); res.Error != nil {
@@ -205,18 +206,18 @@ func (r *DashboardRepo) ProcessosCounts(ctx context.Context, f DashFilters) (Pro
 	q := `
         SELECT
           SUM(CASE
-            WHEN p.id_etapa_processo = 11   THEN 0
-            WHEN COALESCE(p.suspenso,0) = 1 THEN 0
-            WHEN p.id_coluna = 1            THEN 1 ELSE 0 END) AS ativos,
-          SUM(CASE WHEN p.id_etapa_processo != 11 AND COALESCE(p.suspenso,0)=0
-                        AND p.id_coluna = 2 THEN 1 ELSE 0 END) AS deferidos,
-          SUM(CASE WHEN p.id_etapa_processo != 11 AND COALESCE(p.suspenso,0)=0
-                        AND p.id_coluna = 3 THEN 1 ELSE 0 END) AS fluxo,
-          SUM(CASE WHEN p.id_etapa_processo != 11 AND COALESCE(p.suspenso,0)=0
-                        AND p.id_coluna = 4 THEN 1 ELSE 0 END) AS faturamento,
-          SUM(CASE WHEN p.id_etapa_processo != 11 AND COALESCE(p.suspenso,0)=0
-                        AND p.id_coluna = 5 THEN 1 ELSE 0 END) AS concluidos,
-          SUM(CASE WHEN p.id_etapa_processo = 11  THEN 1 ELSE 0 END) AS indeferidos
+            WHEN p.id_aprovacao_atual = 2 /* TODO V2: era id_etapa_processo=11 (Indeferido legacy) */   THEN 0
+            WHEN p.id_status_atual = 5 /* TODO V2: era suspenso=1 */ THEN 0
+            WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 1            THEN 1 ELSE 0 END) AS ativos,
+          SUM(CASE WHEN COALESCE(p.id_aprovacao_atual,0) <> 2 /* TODO V2: era id_etapa_processo!=11 */ AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */
+                        AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 2 THEN 1 ELSE 0 END) AS deferidos,
+          SUM(CASE WHEN COALESCE(p.id_aprovacao_atual,0) <> 2 /* TODO V2: era id_etapa_processo!=11 */ AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */
+                        AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 3 THEN 1 ELSE 0 END) AS fluxo,
+          SUM(CASE WHEN COALESCE(p.id_aprovacao_atual,0) <> 2 /* TODO V2: era id_etapa_processo!=11 */ AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */
+                        AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 4 THEN 1 ELSE 0 END) AS faturamento,
+          SUM(CASE WHEN COALESCE(p.id_aprovacao_atual,0) <> 2 /* TODO V2: era id_etapa_processo!=11 */ AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */
+                        AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 5 THEN 1 ELSE 0 END) AS concluidos,
+          SUM(CASE WHEN p.id_aprovacao_atual = 2 /* TODO V2: era id_etapa_processo=11 (Indeferido legacy) */  THEN 1 ELSE 0 END) AS indeferidos
         FROM FT_PROCESSOS p
         LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
         WHERE 1=1
@@ -224,7 +225,7 @@ func (r *DashboardRepo) ProcessosCounts(ctx context.Context, f DashFilters) (Pro
 	args := []any{}
 
 	if !f.IncluirSuspensos {
-		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.suspenso,0)=0", 1)
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */", 1)
 	}
 	if f.ApenasRelevantes {
 		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.relevancia,0)=1", 1)
@@ -246,14 +247,14 @@ func (r *DashboardRepo) ValorEstimadoPorColuna(ctx context.Context, f DashFilter
 	q := `
         SELECT
           CASE
-            WHEN p.id_etapa_processo = 11          THEN 6
-            WHEN COALESCE(p.suspenso,0) = 1        THEN 99
-            WHEN p.id_coluna = 5                   THEN 5
-            WHEN p.id_coluna = 4                   THEN 4
-            WHEN p.id_coluna = 3                   THEN 3
-            WHEN p.id_coluna = 2                   THEN 2
-            WHEN p.id_coluna = 6                   THEN 6
-            WHEN p.id_coluna = 99                  THEN 99
+            WHEN p.id_aprovacao_atual = 2 /* TODO V2: era id_etapa_processo=11 (Indeferido legacy) */          THEN 6
+            WHEN p.id_status_atual = 5 /* TODO V2: era suspenso=1 */        THEN 99
+            WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 5                   THEN 5
+            WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 4                   THEN 4
+            WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 3                   THEN 3
+            WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 2                   THEN 2
+            WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 6                   THEN 6
+            WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 99                  THEN 99
             ELSE                                        1
           END AS col_id,
           COALESCE(SUM(r.ressarcimento_estimado), 0) AS total
@@ -266,7 +267,7 @@ func (r *DashboardRepo) ValorEstimadoPorColuna(ctx context.Context, f DashFilter
 	args := []any{}
 
 	if !f.IncluirSuspensos {
-		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.suspenso,0)=0", 1)
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */", 1)
 	}
 	if f.ApenasRelevantes {
 		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.relevancia,0)=1", 1)
@@ -361,7 +362,7 @@ func (r *DashboardRepo) CreditosTotalsFiltered(ctx context.Context, f DashFilter
 	FROM FT_DEFERIMENTOS d
 	LEFT JOIN FT_PROCESSOS p ON p.id_processo = d.id_processo
 	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-	WHERE 1=1
+	WHERE COALESCE(p.id_aprovacao_atual,0) <> 2 /* indeferido não tem crédito (mesma regra dos Resultados) */
 	`
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
@@ -384,23 +385,30 @@ func (r *DashboardRepo) TempoMedioPorEtapa(ctx context.Context) ([]TempoMedioEta
 }
 
 func (r *DashboardRepo) TempoMedioPorEtapaFiltered(ctx context.Context, f DashFilters) ([]TempoMedioEtapaRow, error) {
+	// Só as trocas de etapa contam: o tempo na etapa vai da entrada nela até a próxima troca (ou até hoje, se o
+	// processo ainda está nela e não está suspenso). Encerramento é a etapa final — não tem "tempo na etapa".
 	q := `
-	WITH movs AS (
+	WITH trocas AS (
 	  SELECT
-	    id_requisicao,
-	    data_movimentacao,
-	    COALESCE(NULLIF(etapa_nova,''), etapa_anterior) AS etapa,
-	    LEAD(data_movimentacao) OVER (PARTITION BY id_requisicao ORDER BY data_movimentacao) AS prox_data
-	  FROM FT_HISTORICO_MOVIMENTACOES
-	  WHERE data_movimentacao IS NOT NULL
+	    h.id_processo,
+	    h.id_etapa_nova,
+	    h.data_movimentacao,
+	    LEAD(h.data_movimentacao) OVER (PARTITION BY h.id_processo ORDER BY h.data_movimentacao, h.id_historico) AS prox_data
+	  FROM FT_HISTORICO_MOVIMENTACOES h
+	  WHERE h.data_movimentacao IS NOT NULL
+	    AND h.id_etapa_nova IS NOT NULL
+	    AND h.id_etapa_nova <> COALESCE(h.id_etapa_anterior, -1)
 	),
 	dwell AS (
 	  SELECT
-	    etapa,
-	    data_movimentacao,
-	    TIMESTAMPDIFF(HOUR, data_movimentacao, prox_data)/24.0 AS dias
-	  FROM movs
-	  WHERE prox_data IS NOT NULL AND etapa IS NOT NULL
+	    e.nome AS etapa,
+	    t.data_movimentacao,
+	    TIMESTAMPDIFF(HOUR, t.data_movimentacao, COALESCE(t.prox_data, NOW()))/24.0 AS dias
+	  FROM trocas t
+	  JOIN DM_ETAPAS e ON e.id_etapa = t.id_etapa_nova
+	  JOIN FT_PROCESSOS p ON p.id_processo = t.id_processo
+	  WHERE t.id_etapa_nova <> 6
+	    AND (t.prox_data IS NOT NULL OR (p.id_etapa_atual = t.id_etapa_nova AND COALESCE(p.id_status_atual,0) <> 5))
 	)
 	SELECT etapa, AVG(dias) AS dias
 	FROM dwell
@@ -435,24 +443,25 @@ func (r *DashboardRepo) Aging(ctx context.Context) (AgingBuckets, error) {
 
 func (r *DashboardRepo) AgingFiltered(ctx context.Context, f DashFilters) (AgingBuckets, error) {
 	// Aging só conta processos ATIVOS na operação:
-	// exclui Concluídos (id_coluna=5), Indeferidos (id_coluna=6 legacy ou id_etapa_processo=11)
+	// exclui Concluídos (id_coluna=5), Indeferidos (id_coluna=6 legacy ou id_etapa_atual=11)
 	// e Suspensos (id_coluna=99 ou suspenso=1).
 	q := `
 	WITH ult AS (
-	  SELECT id_requisicao,
-	         MAX(data_movimentacao) AS ult
-	  FROM FT_HISTORICO_MOVIMENTACOES
-	  GROUP BY id_requisicao
+	  SELECT h.id_processo,
+	         MAX(h.data_movimentacao) AS ult
+	  FROM FT_HISTORICO_MOVIMENTACOES h
+	  WHERE ` + movHumana + `
+	  GROUP BY h.id_processo
 	),
 	age AS (
 	  SELECT
 	    DATEDIFF(CURDATE(), DATE(ult.ult)) AS dias,
 	    ult.ult
 	  FROM ult
-	  INNER JOIN FT_PROCESSOS p ON p.id_processo = ult.id_requisicao
-	  WHERE COALESCE(p.suspenso, 0) = 0
-	    AND COALESCE(p.id_etapa_processo, 0) <> 11
-	    AND COALESCE(p.id_coluna, 1) NOT IN (5, 6, 99)
+	  INNER JOIN FT_PROCESSOS p ON p.id_processo = ult.id_processo
+	  WHERE COALESCE(p.id_status_atual,0) <> 5 /* TODO V2: era suspenso=0 */
+	    AND COALESCE(p.id_aprovacao_atual,0) <> 2 /* TODO V2: era id_etapa_processo<>11 */
+	    AND COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */, 1) NOT IN (5, 6, 99)
 	)
 	SELECT
 	  SUM(dias BETWEEN 0 AND 7)        AS b0_7,
@@ -479,9 +488,9 @@ func (r *DashboardRepo) Tendencia30d(ctx context.Context, f DashFilters) ([]Tend
 	q := `
 	SELECT DATE(h.data_movimentacao) AS d, COUNT(*) AS tot
 	  FROM FT_HISTORICO_MOVIMENTACOES h
-	LEFT JOIN FT_PROCESSOS p     ON p.id_processo = h.id_requisicao
-	LEFT JOIN FT_REQUISICOES rqs ON rqs.id_requisicao = h.id_requisicao
-	 WHERE 1=1`
+	LEFT JOIN FT_PROCESSOS p     ON p.id_processo = h.id_processo
+	LEFT JOIN FT_REQUISICOES rqs ON rqs.id_requisicao = h.id_processo
+	 WHERE ` + movHumana
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
 		q += " AND DATE(h.data_movimentacao) BETWEEN ? AND ?"
@@ -490,7 +499,7 @@ func (r *DashboardRepo) Tendencia30d(ctx context.Context, f DashFilters) ([]Tend
 		q += " AND h.data_movimentacao >= CURDATE() - INTERVAL 30 DAY"
 	}
 	if !f.IncluirSuspensos {
-		q += " AND COALESCE(p.suspenso,0)=0"
+		q += " AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */"
 	}
 	if f.ApenasRelevantes {
 		q += " AND COALESCE(p.relevancia,0)=1"
@@ -531,8 +540,8 @@ func (r *DashboardRepo) HeatmapSemana(ctx context.Context, f DashFilters) ([]Hea
 	       HOUR(h.data_movimentacao)     AS hr,
 	       COUNT(*)                      AS tot
 	  FROM FT_HISTORICO_MOVIMENTACOES h
-	LEFT JOIN FT_PROCESSOS p     ON p.id_processo = h.id_requisicao
-	LEFT JOIN FT_REQUISICOES rqs ON rqs.id_requisicao = h.id_requisicao
+	LEFT JOIN FT_PROCESSOS p     ON p.id_processo = h.id_processo
+	LEFT JOIN FT_REQUISICOES rqs ON rqs.id_requisicao = h.id_processo
 	 WHERE 1=1`
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
@@ -542,7 +551,7 @@ func (r *DashboardRepo) HeatmapSemana(ctx context.Context, f DashFilters) ([]Hea
 		q += " AND h.data_movimentacao >= CURDATE() - INTERVAL 7 DAY"
 	}
 	if !f.IncluirSuspensos {
-		q += " AND COALESCE(p.suspenso,0)=0"
+		q += " AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */"
 	}
 	if f.ApenasRelevantes {
 		q += " AND COALESCE(p.relevancia,0)=1"
@@ -590,15 +599,15 @@ func (r *DashboardRepo) MovimentacoesPeriodo(ctx context.Context, ini, fim time.
 	q := `
     SELECT
       h.data_movimentacao,
-      h.id_requisicao,
+      h.id_processo,
       COALESCE(u.nome_usuario, '') AS usuario_nome,
-      h.etapa_anterior,
-      h.etapa_nova,
+      (SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),
+      (SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),
       h.comentario
     FROM FT_HISTORICO_MOVIMENTACOES h
     LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
     WHERE DATE(h.data_movimentacao) BETWEEN ? AND ?
-    ORDER BY h.data_movimentacao DESC, h.id_requisicao DESC
+    ORDER BY h.data_movimentacao DESC, h.id_processo DESC
     LIMIT 5000;
     `
 	rows, err := r.db.Raw( q, ini.Format("2006-01-02"), fim.Format("2006-01-02")).Rows()
@@ -697,7 +706,7 @@ func (r *DashboardRepo) TopConcessionariasValorFiltered(ctx context.Context, lim
 	q := `
       SELECT concessionaria AS lbl, COALESCE(SUM(ressarcimento_estimado),0) AS tot
       FROM FT_REQUISICOES
-      WHERE 1=1
+      WHERE COALESCE(id_status,0) <> 4 /* rejeitada não entra */
     `
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
@@ -728,17 +737,18 @@ func (r *DashboardRepo) TopClientesValor(ctx context.Context, limit int) ([]Seri
 
 func (r *DashboardRepo) TopClientesValorFiltered(ctx context.Context, limit int, f DashFilters) ([]SeriesRowF, error) {
 	q := `
-      SELECT COALESCE(NULLIF(cliente,''), NULLIF(razao_social_fatura,''), 'N/A') AS lbl,
-             COALESCE(SUM(ressarcimento_estimado),0) AS tot
-      FROM FT_REQUISICOES
-      WHERE 1=1
+      SELECT COALESCE(NULLIF(p.cliente,''), NULLIF(rq.cliente,''), NULLIF(rq.razao_social_fatura,''), 'N/A') AS lbl,
+             COALESCE(SUM(rq.ressarcimento_estimado),0) AS tot
+      FROM FT_REQUISICOES rq
+      LEFT JOIN FT_PROCESSOS p ON p.id_processo = rq.id_requisicao /* nome oficial do cliente fica no processo */
+      WHERE COALESCE(rq.id_status,0) <> 4 /* rejeitada não entra */
     `
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
-		q += " AND DATE(data_criacao) BETWEEN ? AND ?"
+		q += " AND DATE(rq.data_criacao) BETWEEN ? AND ?"
 		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
 	}
-	q += " GROUP BY COALESCE(NULLIF(cliente,''), NULLIF(razao_social_fatura,''), 'N/A') ORDER BY tot DESC LIMIT ?;"
+	q += " GROUP BY lbl ORDER BY tot DESC LIMIT ?;"
 	args = append(args, limit)
 	rows, err := r.db.Raw( q, args...).Rows()
 	if err != nil {
@@ -801,13 +811,15 @@ func (r *DashboardRepo) WIPPorGestor(ctx context.Context, limit int, f DashFilte
       LEFT JOIN DM_USUARIO u ON u.id_usuario = p.id_responsavel
       LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
       WHERE 1=1
+        AND p.id_responsavel IS NOT NULL AND p.id_responsavel <> 999
+        AND COALESCE(p.id_aprovacao_atual,0) <> 2 AND COALESCE(p.id_etapa_atual,1) <> 6
       GROUP BY COALESCE(u.nome_usuario, CONCAT('ID ', p.id_responsavel))
       ORDER BY tot DESC
       LIMIT ?;
     `
 	args := []any{}
 	if !f.IncluirSuspensos {
-		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.suspenso,0)=0", 1)
+		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */", 1)
 	}
 	if f.ApenasRelevantes {
 		q = strings.Replace(q, "WHERE 1=1", "WHERE 1=1 AND COALESCE(p.relevancia,0)=1", 1)
@@ -851,7 +863,7 @@ func (r *DashboardRepo) ValorHistogramFiltered(ctx context.Context, f DashFilter
           ELSE '100k+'
         END AS bucket
         FROM FT_REQUISICOES
-        WHERE 1=1
+        WHERE 1=1 AND COALESCE(id_status,0) <> 4 /* rejeitada não entra */
       ) t
       GROUP BY bucket
       ORDER BY CASE bucket
@@ -893,11 +905,11 @@ func (r *DashboardRepo) SLAResumo30d(ctx context.Context, limiteDias int, f Dash
      LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
          WHERE 1=1
       ), mov AS (
-        SELECT h.id_requisicao,
+        SELECT h.id_processo,
                h.data_movimentacao,
-               LAG(h.data_movimentacao) OVER (PARTITION BY h.id_requisicao ORDER BY h.data_movimentacao) AS prev_mov
+               LAG(h.data_movimentacao) OVER (PARTITION BY h.id_processo ORDER BY h.data_movimentacao) AS prev_mov
           FROM FT_HISTORICO_MOVIMENTACOES h
-          JOIN ids i ON i.id_processo = h.id_requisicao
+          JOIN ids i ON i.id_processo = h.id_processo AND ` + movHumana + `
          WHERE 1=1
       ), dif AS (
         SELECT TIMESTAMPDIFF(DAY, prev_mov, data_movimentacao) AS dd
@@ -908,7 +920,7 @@ func (r *DashboardRepo) SLAResumo30d(ctx context.Context, limiteDias int, f Dash
         FROM dif;`
 	args := []any{limiteDias, limiteDias}
 	if !f.IncluirSuspensos {
-		q = strings.Replace(q, "WHERE 1=1\n      ), mov", "WHERE 1=1 AND COALESCE(p.suspenso,0)=0\n      ), mov", 1)
+		q = strings.Replace(q, "WHERE 1=1\n      ), mov", "WHERE 1=1 AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */\n      ), mov", 1)
 	}
 	if f.ApenasRelevantes {
 		q = strings.Replace(q, "WHERE 1=1\n      ), mov", "WHERE 1=1 AND COALESCE(p.relevancia,0)=1\n      ), mov", 1)
@@ -983,20 +995,22 @@ func (r *DashboardRepo) RepassePorConcessionaria(ctx context.Context, f DashFilt
 func (r *DashboardRepo) TempoMedioConclusaoPorConcessionaria(ctx context.Context, f DashFilters, concessionarias []string) ([]SeriesRowF, error) {
 	q := `
       WITH concl AS (
-        SELECT h.id_requisicao,
+        SELECT h.id_processo,
                MAX(h.data_movimentacao) AS data_conc
         FROM FT_HISTORICO_MOVIMENTACOES h
-        WHERE LOWER(COALESCE(h.etapa_nova, h.etapa_anterior, '')) REGEXP 'conclu|finaliz|encerr|pago|credit'
-        GROUP BY h.id_requisicao
+        WHERE h.id_etapa_nova = 6
+        GROUP BY h.id_processo
       )
       SELECT r.concessionaria AS lbl,
              AVG(DATEDIFF(concl.data_conc, r.data_criacao)) AS dias
       FROM concl
-      JOIN FT_REQUISICOES r  ON r.id_requisicao = concl.id_requisicao
-      JOIN FT_PROCESSOS p    ON p.id_processo   = concl.id_requisicao
+      JOIN FT_REQUISICOES r  ON r.id_requisicao = concl.id_processo
+      JOIN FT_PROCESSOS p    ON p.id_processo   = concl.id_processo
       WHERE r.concessionaria IS NOT NULL AND r.concessionaria <> ''
-        AND p.id_coluna NOT IN (99)
-        AND COALESCE(p.suspenso, 0) = 0
+        AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ NOT IN (99)
+        AND COALESCE(p.id_status_atual,0) <> 5 /* TODO V2: era suspenso=0 */
+        AND p.id_aprovacao_atual = 1 /* só deferidos: indeferido encerrado não é "conclusão" */
+        AND r.data_criacao >= '2024-01-01' /* requisições legadas (desde 2016) distorcem a média */
     `
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
@@ -1033,15 +1047,15 @@ func (r *DashboardRepo) KanbanComposicao(ctx context.Context, f DashFilters, con
 	q := `
       SELECT
         CASE
-          WHEN p.id_etapa_processo = 11        THEN 'Indeferidos'
-          WHEN COALESCE(p.suspenso,0) = 1      THEN 'Suspensos'
-          WHEN p.id_coluna = 5                 THEN 'Concluídos'
-          WHEN p.id_coluna = 4                 THEN 'Faturamento'
-          WHEN p.id_coluna = 3                 THEN 'Fluxo'
-          WHEN p.id_coluna = 2                 THEN 'Deferidos'
-          WHEN p.id_coluna = 1                 THEN 'Ativos'
-          WHEN p.id_coluna = 6                 THEN 'Indeferidos'
-          WHEN p.id_coluna = 99               THEN 'Suspensos'
+          WHEN p.id_aprovacao_atual = 2 /* TODO V2: era id_etapa_processo=11 (Indeferido legacy) */        THEN 'Indeferidos'
+          WHEN p.id_status_atual = 5 /* TODO V2: era suspenso=1 */      THEN 'Suspensos'
+          WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 5                 THEN 'Concluídos'
+          WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 4                 THEN 'Faturamento'
+          WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 3                 THEN 'Repasse'
+          WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 2                 THEN 'Deferidos'
+          WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 1                 THEN 'Ativos'
+          WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 6                 THEN 'Indeferidos'
+          WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ = 99               THEN 'Suspensos'
           ELSE                                      'Ativos'
         END AS lbl,
         COUNT(*) AS tot
@@ -1051,7 +1065,7 @@ func (r *DashboardRepo) KanbanComposicao(ctx context.Context, f DashFilters, con
     `
 	args := []any{}
 	if !f.IncluirSuspensos {
-		q = strings.Replace(q, "WHERE COALESCE(p.descartado,0)=0", "WHERE COALESCE(p.descartado,0)=0 AND COALESCE(p.suspenso,0)=0", 1)
+		q = strings.Replace(q, "WHERE COALESCE(p.descartado,0)=0", "WHERE COALESCE(p.descartado,0)=0 AND COALESCE(p.id_status_atual,0)<>5 /* TODO V2: era suspenso=0 (NOT suspenso) */", 1)
 	}
 	if f.ApenasRelevantes {
 		q = strings.Replace(q, "WHERE COALESCE(p.descartado,0)=0", "WHERE COALESCE(p.descartado,0)=0 AND COALESCE(p.relevancia,0)=1", 1)
@@ -1098,11 +1112,11 @@ func (r *DashboardRepo) TaxaSucessoPorTipo(ctx context.Context, f DashFilters) (
 	SELECT
 	  COALESCE(NULLIF(p.nome_tipo_irregularidade,''), 'Sem tipo') AS tipo,
 	  COUNT(*) AS total,
-	  SUM(CASE WHEN p.id_coluna NOT IN (1, 6, 99) THEN 1 ELSE 0 END) AS sucesso,
-	  ROUND(100.0 * SUM(CASE WHEN p.id_coluna NOT IN (1, 6, 99) THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1) AS taxa_pct
+	  SUM(CASE WHEN p.id_aprovacao_atual = 1 THEN 1 ELSE 0 END) AS sucesso,
+	  ROUND(100.0 * SUM(CASE WHEN p.id_aprovacao_atual = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1) AS taxa_pct
 	FROM FT_PROCESSOS p
 	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-	WHERE 1=1
+	WHERE p.id_aprovacao_atual IN (1, 2) /* só decididos: em andamento não é sucesso nem fracasso */
 	`
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
@@ -1133,7 +1147,7 @@ func (r *DashboardRepo) TicketMedio(ctx context.Context, f DashFilters) (float64
 	FROM FT_PROCESSOS p
 	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
 	WHERE (COALESCE(credito_simples,0) + COALESCE(credito_dobro,0)) > 0
-	  AND p.id_coluna NOT IN (6, 99)
+	  AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ NOT IN (6, 99)
 	`
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
@@ -1148,21 +1162,22 @@ func (r *DashboardRepo) TicketMedio(ctx context.Context, f DashFilters) (float64
 // ============== Taxa de processos Aneel =================
 func (r *DashboardRepo) TaxaAneel(ctx context.Context, f DashFilters) (int64, int64, error) {
 	qAneel := `
-	SELECT COUNT(DISTINCT h.id_requisicao)
-	FROM FT_HISTORICO_MOVIMENTACOES h
-	INNER JOIN FT_PROCESSOS p ON p.id_processo = h.id_requisicao
-	WHERE h.etapa_nova = 'ANEEL'
-	  AND p.id_coluna NOT IN (6, 99)
+	SELECT COUNT(*)
+	FROM FT_PROCESSOS p
+	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+	WHERE (p.id_instancia_atual = 3
+	       OR EXISTS (SELECT 1 FROM FT_HISTORICO_MOVIMENTACOES h WHERE h.id_processo = p.id_processo AND h.id_instancia_nova = 3))
+	  AND (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ NOT IN (6, 99)
 	`
 	qTotal := `
 	SELECT COUNT(*)
 	FROM FT_PROCESSOS p
 	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-	WHERE p.id_coluna NOT IN (6, 99)
+	WHERE (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ NOT IN (6, 99)
 	`
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
-		qAneel += " AND DATE(p.data_criacao) BETWEEN ? AND ?"
+		qAneel += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
 		qTotal += " AND DATE(r.data_criacao) BETWEEN ? AND ?"
 		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
 	}
@@ -1183,14 +1198,15 @@ func (r *DashboardRepo) BacklogCount(ctx context.Context) (int64, error) {
 	SELECT COUNT(DISTINCT p.id_processo)
 	FROM FT_PROCESSOS p
 	LEFT JOIN (
-	  SELECT id_requisicao, MAX(data_movimentacao) AS ult_mov
-	  FROM FT_HISTORICO_MOVIMENTACOES
-	  GROUP BY id_requisicao
-	) ult ON ult.id_requisicao = p.id_processo
-	WHERE COALESCE(p.suspenso, 0) = 0
-	  AND COALESCE(p.id_etapa_processo, 0) <> 11
-	  AND COALESCE(p.id_coluna, 1) NOT IN (5, 6, 99)
-	  AND COALESCE(p.sub_etapa, '') <> 'Aguardando retorno'
+	  SELECT h.id_processo, MAX(h.data_movimentacao) AS ult_mov
+	  FROM FT_HISTORICO_MOVIMENTACOES h
+	  WHERE ` + movHumana + `
+	  GROUP BY h.id_processo
+	) ult ON ult.id_processo = p.id_processo
+	WHERE COALESCE(p.id_status_atual,0) <> 5 /* TODO V2: era suspenso=0 */
+	  AND COALESCE(p.id_aprovacao_atual,0) <> 2 /* TODO V2: era id_etapa_processo<>11 */
+	  AND COALESCE((CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */, 1) NOT IN (5, 6, 99)
+	  AND COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual), '') <> 'Aguardando retorno'
 	  AND (ult.ult_mov IS NULL OR DATEDIFF(CURDATE(), DATE(ult.ult_mov)) > 60)
 	`
 	var n sql.NullInt64
@@ -1208,9 +1224,9 @@ type ResultadosRessarcimentoRow struct {
 func (r *DashboardRepo) ResultadosRessarcimento(ctx context.Context, f DashFilters) (ResultadosRessarcimentoRow, error) {
 	q := `
 	SELECT
-	  COALESCE(SUM(CASE WHEN id_coluna IN (2,3,4,5) THEN COALESCE(credito_simples,0)+COALESCE(credito_dobro,0) ELSE 0 END), 0) AS gerado,
-	  COALESCE(SUM(CASE WHEN id_coluna = 4 THEN COALESCE(credito_simples,0)+COALESCE(credito_dobro,0) ELSE 0 END), 0) AS faturado,
-	  COALESCE(SUM(CASE WHEN id_coluna = 5 THEN COALESCE(credito_simples,0)+COALESCE(credito_dobro,0) ELSE 0 END), 0) AS caixa
+	  COALESCE(SUM(CASE WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */ IN (2,3,4,5) THEN COALESCE(credito_simples,0)+COALESCE(credito_dobro,0) ELSE 0 END), 0) AS gerado,
+	  COALESCE(SUM(CASE WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */ = 4 THEN COALESCE(credito_simples,0)+COALESCE(credito_dobro,0) ELSE 0 END), 0) AS faturado,
+	  COALESCE(SUM(CASE WHEN (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2 */ = 5 THEN COALESCE(credito_simples,0)+COALESCE(credito_dobro,0) ELSE 0 END), 0) AS caixa
 	FROM FT_PROCESSOS p
 	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
 	WHERE 1=1
@@ -1242,7 +1258,7 @@ func (r *DashboardRepo) ResultadosPorCliente(ctx context.Context, f DashFilters,
 	  COALESCE(SUM(COALESCE(p.credito_simples,0) + COALESCE(p.credito_dobro,0)), 0) AS total
 	FROM FT_PROCESSOS p
 	LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-	WHERE p.id_coluna NOT IN (1, 6, 99)
+	WHERE (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ NOT IN (1, 6, 99)
 	  AND (COALESCE(p.credito_simples,0) + COALESCE(p.credito_dobro,0)) > 0
 	`
 	args := []any{}
@@ -1275,21 +1291,20 @@ func (r *DashboardRepo) SucessoPrimeiraAnalise(ctx context.Context, f DashFilter
 	  SELECT DISTINCT p.id_processo
 	  FROM FT_PROCESSOS p
 	  LEFT JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
-	  WHERE p.id_coluna NOT IN (1, 6, 99)
+	  WHERE (CASE WHEN p.id_aprovacao_atual=2 THEN 6 WHEN p.id_status_atual=5 THEN 99 WHEN p.id_etapa_atual=6 THEN 5 WHEN p.id_etapa_atual=5 THEN 3 WHEN p.id_etapa_atual=4 THEN 4 WHEN p.id_aprovacao_atual=1 THEN 2 ELSE 1 END) /* TODO V2: id_coluna derivado */ NOT IN (1, 6, 99)
 	  %FILTRO_DATA%
 	),
 	passou_outra_etapa AS (
-	  SELECT DISTINCT h.id_requisicao
+	  SELECT DISTINCT h.id_processo
 	  FROM FT_HISTORICO_MOVIMENTACOES h
-	  INNER JOIN deferidos d ON d.id_processo = h.id_requisicao
-	  WHERE COALESCE(h.etapa_nova, h.etapa_anterior, '') NOT IN ('Distribuidora', '')
-	    AND COALESCE(h.etapa_nova, h.etapa_anterior, '') <> ''
+	  INNER JOIN deferidos d ON d.id_processo = h.id_processo
+	  WHERE h.id_instancia_nova IN (2, 3, 4) /* saiu da Distribuidora (instância 1) */
 	)
 	SELECT
 	  COUNT(DISTINCT d.id_processo) AS total_deferidos,
-	  COUNT(DISTINCT d.id_processo) - COUNT(DISTINCT p.id_requisicao) AS apenas_distribuidora
+	  COUNT(DISTINCT d.id_processo) - COUNT(DISTINCT p.id_processo) AS apenas_distribuidora
 	FROM deferidos d
-	LEFT JOIN passou_outra_etapa p ON p.id_requisicao = d.id_processo
+	LEFT JOIN passou_outra_etapa p ON p.id_processo = d.id_processo
 	`
 	filtroData := ""
 	args := []any{}
@@ -1316,20 +1331,20 @@ func (r *DashboardRepo) TaxaSucessoPorConcessionaria(ctx context.Context, f Dash
 	SELECT
 	  p.concessionaria,
 	  COUNT(*) AS total,
-	  SUM(CASE WHEN p.id_coluna NOT IN (1, 6, 99) THEN 1 ELSE 0 END) AS deferidos,
-	  ROUND(100.0 * SUM(CASE WHEN p.id_coluna NOT IN (1, 6, 99) THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1) AS taxa_pct
+	  SUM(CASE WHEN p.id_aprovacao_atual = 1 THEN 1 ELSE 0 END) AS deferidos,
+	  ROUND(100.0 * SUM(CASE WHEN p.id_aprovacao_atual = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1) AS taxa_pct
 	FROM FT_PROCESSOS p
 	LEFT JOIN FT_REQUISICOES rq ON rq.id_requisicao = p.id_processo
 	WHERE p.concessionaria IS NOT NULL AND p.concessionaria <> ''
-	  AND p.id_coluna NOT IN (99)
-	  AND COALESCE(p.suspenso, 0) = 0
+	  AND p.id_aprovacao_atual IN (1, 2) /* só decididos: deferidos / (deferidos + indeferidos) */
 	`
 	args := []any{}
 	if f.Ini != nil && f.Fim != nil {
 		q += " AND DATE(rq.data_criacao) BETWEEN ? AND ?"
 		args = append(args, f.Ini.Format("2006-01-02"), f.Fim.Format("2006-01-02"))
 	}
-	q += " GROUP BY p.concessionaria HAVING total >= 2 ORDER BY taxa_pct DESC LIMIT 12;"
+	// as de maior volume (com pelo menos 5 decididos): 2 ou 3 processos davam 100% e tomavam o topo
+	q += " GROUP BY p.concessionaria HAVING total >= 5 ORDER BY total DESC LIMIT 12;"
 
 	rows, err := r.db.Raw(q, args...).Rows()
 	if err != nil {

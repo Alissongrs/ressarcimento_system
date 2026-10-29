@@ -1,0 +1,301 @@
+{
+ "documento": "DANF3E - Família EDP (SP + ES)",
+ "_status": "Layout DANF3E próprio EDP — validado em EDP SP. Assumido idêntico para EDP ES.",
+ "_volume_coberto_total": "~819 faturas",
+ "distribuidoras": {
+  "EDP_SP": {
+   "razao_social": "EDP SP DISTRIB DE ENERGIA SA",
+   "cnpj_emissor": "02.302.100/0001-06",
+   "ie_emissor": "115026474116",
+   "endereco_emissor": "RUA WERNER VON SIEMENS, 111 SALA 1 CJ 22 BL A LAPA DE BAIXO SAO PAULO",
+   "cep_emissor": "05069-900",
+   "uf": "SP",
+   "icms_pct": 18,
+   "_volume": "472+540+10",
+   "_status": "VALIDADO (id 12043)"
+  },
+  "EDP_ES": {
+   "razao_social": "EDP ESPÍRITO SANTO DISTRIBUIÇÃO DE ENERGIA SA",
+   "uf": "ES",
+   "icms_pct": 17,
+   "_volume": "279",
+   "_status": "ASSUMIDO — validar com sample id 11991"
+  }
+ },
+ "observacoes_gerais": {
+  "encoding": "UTF-8",
+  "decimal": "vírgula",
+  "milhar": "ponto",
+  "datas": "DD/MM/AAAA",
+  "particularidades": [
+   "Cabeçalho com 'DANF3E - DOCUMENTO AUXILIAR DA NOTA FISCAL DE ENERGIA ELÉTRICA ELETRÔNICA'",
+   "Itens com CCI codes prefixados em parênteses: 0606, 0699, 0601, 0907, 0999, 0602, 0804, 0805, 0807",
+   "URL chave_acesso: http://dfe-portal.svrs.rs.gov.br/NF3e/consulta (com http://)",
+   "chave_acesso: 44 dígitos CONTÍGUOS (sem espaços) — igual CPFL",
+   "Cliente A4 LIVRE: tem 'Energia ACL Fora Ponta' + 'Dedução de Energia ACL'",
+   "Tem 'Crédito Subvenção Tarifária' + 'Subvenção Tarifária' (par positivo/negativo)",
+   "Tributos PIS/COFINS aparecem em DUAS linhas (alíquotas diferentes — bi-alíquota)",
+   "Histórico tabular de 12 meses bem estruturado",
+   "Roteiro de leitura: 'T30TA01L00059' (formato específico EDP)",
+   "Período de validade da bandeira: 'VERDE : 01/03/2026 a 31/03/2026 - 31 dias'"
+  ]
+ },
+ "distribuidora": {
+  "razao_social": {
+   "anchor": "EDP",
+   "regex": "(EDP\\s+(?:SP|ESPÍRITO SANTO|ES)[A-Z ]*DISTRIB[A-Z .]+SA)",
+   "group": 1
+  },
+  "cnpj_emissor": {
+   "anchor": "CNPJ",
+   "regex": "CNPJ\\s+(\\d{14}|\\d{2}\\.\\d{3}\\.\\d{3}/\\d{4}-\\d{2})",
+   "group": 1,
+   "pos_process": "formatar como XX.XXX.XXX/XXXX-XX"
+  },
+  "ie_emissor": {
+   "anchor": "INSC.ESTADUAL",
+   "regex": "INSC\\.ESTADUAL\\s+(\\d+)",
+   "group": 1
+  },
+  "endereco_emissor": {
+   "anchor": "RUA",
+   "regex": "(RUA\\s+[A-ZÁÉÍÓÚ ,]+[\\d]+\\s+[^\\n]+)",
+   "group": 1
+  },
+  "cep_emissor": {
+   "anchor": "CEP",
+   "regex": "CEP\\s+(\\d{5}-\\d{3})",
+   "group": 1
+  }
+ },
+ "cliente": {
+  "razao_social": {
+   "anchor": "GRUPO CASAS BAHIA",
+   "regex": "^(GRUPO CASAS BAHIA[^\\n]+|VIA VAREJO[^\\n]+|VIA S A|[A-Z][A-Z .&]+S\\.?A\\.?)$",
+   "group": 1,
+   "flags": "MULTILINE"
+  },
+  "endereco": {
+   "anchor": "AV",
+   "regex": "^(AV|R|RUA)\\s+([A-Z .,0-9]+),\\s*\\d+(?: FILIAL \\d+)?$",
+   "group": "1+2",
+   "flags": "MULTILINE"
+  },
+  "cep_municipio_uf": {
+   "anchor": "CEP",
+   "regex": "CEP:\\s*(\\d{5}-\\d{3})",
+   "group": 1
+  },
+  "cnpj": {
+   "anchor": "CNPJ:",
+   "regex": "CNPJ:\\s*(\\d{14})",
+   "group": 1,
+   "pos_process": "formatar"
+  },
+  "ie": {
+   "anchor": "IE:",
+   "regex": "IE:\\s*(\\d+)",
+   "group": 1
+  }
+ },
+ "identificadores_instalacao": {
+  "uc_codigo": {
+   "anchor": "UC formato 12 dígitos com pontuação",
+   "regex": "(0\\.\\d{3}\\.\\d{3}\\.\\d{3}\\.\\d{3}-\\d{2})",
+   "group": 1,
+   "obs": "ex: 0.000.000.243.004-60"
+  },
+  "medidor": {
+   "anchor": "MEDIDOR:",
+   "regex": "MEDIDOR:\\s*(\\d+)",
+   "group": 1
+  },
+  "roteiro": {
+   "anchor": "Roteiro de leitura:",
+   "regex": "Roteiro de leitura:\\s*([A-Z\\d]+)",
+   "group": 1
+  },
+  "cfop": {
+   "anchor": "CÓD.FISCAL DA OPERAÇÃO:",
+   "regex": "CÓD\\.FISCAL DA OPERAÇÃO:\\s*(\\d+)",
+   "group": 1
+  }
+ },
+ "nota_fiscal": {
+  "numero_nf": {
+   "anchor": "NOTA FISCAL N°",
+   "regex": "NOTA FISCAL\\s+N[°º]\\s*([\\d\\.]+)\\s*-\\s*SÉRIE",
+   "group": 1,
+   "pos_process": "remover pontos"
+  },
+  "serie": {
+   "anchor": "SÉRIE",
+   "regex": "SÉRIE\\s+(ACL|\\d+)",
+   "group": 1
+  },
+  "data_emissao": {
+   "anchor": "DATA DE\\s+EMISSÃO:",
+   "regex": "DATA DE\\s+EMISSÃO:\\s*(\\d{2}/\\d{2}/\\d{4})",
+   "group": 1
+  },
+  "chave_acesso": {
+   "anchor": "chave de acesso:",
+   "regex": "chave de acesso:\\s*\\n?\\s*(\\d{44})",
+   "group": 1,
+   "obs": "44 dígitos contíguos sem espaços"
+  },
+  "protocolo_autorizacao": {
+   "anchor": "Protocolo de autorização:",
+   "regex": "Protocolo de autorização:\\s*(\\d+)\\s*-\\s*(\\d{2}/\\d{2}/\\d{4})\\s+ás\\s*(\\d{2}:\\d{2}:\\d{2})",
+   "group": "1+2+3",
+   "obs": "ás (sem acento agudo!)"
+  },
+  "url_consulta": {
+   "anchor": "Consulte pela Chave",
+   "regex": "(http://dfe-portal\\.svrs\\.rs\\.gov\\.br/NF3e/consulta)",
+   "group": 1
+  }
+ },
+ "vencimento_valor": {
+  "valor_total": {
+   "anchor": "Total a Pagar R$",
+   "regex": "(Janeiro|Fevereiro|Março|Abril|Maio|Junho|Julho|Agosto|Setembro|Outubro|Novembro|Dezembro)/(\\d{4})\\s+(\\d{2}/\\d{2}/\\d{4})\\s+R\\$\\s*([\\d\\.]+,\\d{2})",
+   "group": 4
+  },
+  "data_vencimento": {
+   "anchor": "Data Vencimento",
+   "regex": "(Janeiro|Fevereiro|Março|Abril|Maio|Junho|Julho|Agosto|Setembro|Outubro|Novembro|Dezembro)/(\\d{4})\\s+(\\d{2}/\\d{2}/\\d{4})\\s+R\\$\\s*([\\d\\.]+,\\d{2})",
+   "group": 3
+  },
+  "mes_referencia": {
+   "anchor": "Mes referência",
+   "regex": "(Janeiro|Fevereiro|Março|Abril|Maio|Junho|Julho|Agosto|Setembro|Outubro|Novembro|Dezembro)/(\\d{4})",
+   "group": "1+2"
+  }
+ },
+ "ligacao_tecnica": {
+  "classificacao_completa": {
+   "anchor": "linha A A4 VERDE",
+   "regex": "^A\\s+(A[1-4]|B[1-4]|AS)\\s+(VERDE|AZUL|BRANCA|CONVENCIONAL)\\s+([\\d\\.]+)\\s+V\\s*\\n([A-Z]+)\\s*\\n(TRIFÁSICO|BIFÁSICO|MONOFÁSICO)",
+   "group": "1+2+3+4+5",
+   "flags": "MULTILINE"
+  }
+ },
+ "grandezas_contratadas": {
+  "demanda_contratual_kw": {
+   "anchor": "Demanda Contratual-KW",
+   "regex": "Demanda Contratual-KW\\s+(\\d+)",
+   "group": 1
+  }
+ },
+ "tabela_itens_fatura": {
+  "estrategia": "Cada linha começa com CCI (4 dígitos) + descrição. Use os CCIs como âncoras para identificar tipo de item.",
+  "regex_linha": "^(\\d{4})\\s+([A-Z][A-Z a-z\\.\\-]+?)\\s+(kWh|kW|UN|kVAr)?\\s*([\\d\\.,]+)?\\s*([\\d,]+)?\\s+([\\-\\d\\.,]+)\\s+([\\-\\d\\.,]+)?\\s+([\\d\\.,]+)?\\s+(\\d+,\\d{3})?\\s+([\\d\\.,]+)?\\s+([\\d\\.,]+)?$",
+  "colunas_em_ordem": [
+   "cci",
+   "descricao",
+   "unidade",
+   "quantidade",
+   "preco_unit",
+   "valor_rs",
+   "pis_cofins",
+   "base_calc_icms",
+   "aliq_icms",
+   "icms",
+   "tarifa_unit"
+  ],
+  "cci_codes_conhecidos": {
+   "0606": "TUSD - TUS - Energia (Ponta/FPonta Ind./Cap.)",
+   "0699": "Ajuste desc. Res77 (Energia/Demanda/Subvenção)",
+   "0601": "Energia ACL (Fora Ponta/Ponta) ou TUS - ERE Reat Excedente",
+   "0907": "Dedução de Energia ACL",
+   "0999": "Crédito Subvenção Tarifária",
+   "0602": "TUS - Demanda / TUS - Demanda Não Utilizada",
+   "0804": "Juros de Mora",
+   "0805": "Multa",
+   "0807": "CIP - Contribuição Municipal"
+  }
+ },
+ "tributos_resumo": {
+  "_atencao": "PIS/COFINS vêm DUPLICADOS no bloco Tributos com alíquotas diferentes (bi-alíquota)",
+  "pis_linha1": {
+   "anchor": "PIS",
+   "regex": "PIS\\s+([\\d,]+)\\s+([\\d\\.]+)\\s+([\\d,]+)",
+   "group": "1=base 2=aliq 3=valor"
+  },
+  "pis_linha2": {
+   "anchor": "PIS",
+   "regex": "PIS\\s+([\\d\\.]+,\\d{2})\\s+([\\d\\.]+)\\s+([\\d,]+)",
+   "group": "1=base 2=aliq 3=valor",
+   "obs": "Segunda linha de PIS — alíquota maior"
+  },
+  "cofins_linha1": {
+   "anchor": "COFINS",
+   "regex": "COFINS\\s+([\\d,]+)\\s+([\\d\\.]+)\\s+([\\d,]+)",
+   "group": "1=base 2=aliq 3=valor"
+  },
+  "cofins_linha2": {
+   "anchor": "COFINS",
+   "regex": "COFINS\\s+([\\d\\.]+,\\d{2})\\s+([\\d\\.]+)\\s+([\\d,]+)",
+   "group": "1=base 2=aliq 3=valor"
+  }
+ },
+ "historico_consumo": {
+  "estrategia": "Tabela horizontal: 13 linhas (uma por mês) com colunas Mês/Ano | EnergiaPonta | EnergiaFora | ... | Total da Fatura",
+  "regex_linha": "^(\\d{2}/\\d{2})\\s+([\\d\\.,]+)\\s+([\\d\\.,]+)\\s+([\\d\\.,]+)\\s+([\\d\\.,]+)\\s+([\\d\\.,]+)\\s+([\\d\\.,]+)\\s+([\\d\\.,]+)$",
+  "colunas_em_ordem": [
+   "mes_ano",
+   "en_ativa_p",
+   "en_ativa_fp",
+   "en_ativa_fp_ind",
+   "en_ativa_fp_cap",
+   "dem_p",
+   "dem_fp",
+   "total_fatura"
+  ]
+ },
+ "medicao_consumo": {
+  "consumo_ponta_kwh": {
+   "anchor": "Consumo Ponta",
+   "regex": "Consumo Ponta[:]?\\s*(?:R\\$\\s*)?([\\d\\.,]+)",
+   "group": 1,
+   "_auto_patch": true,
+   "_referencia_audit_id": "50266"
+  }
+ },
+ "_not_in_pdf": [
+  "classe_consumidor",
+  "cofins_aliquota",
+  "cofins_valor",
+  "constante_k",
+  "consumo_ativo_fponta_kwh",
+  "data_leitura_anterior",
+  "data_leitura_atual",
+  "demanda_contratada_fponta_kw",
+  "dias_faturados",
+  "grupo_tarifario",
+  "icms_aliquota",
+  "icms_base_calculo",
+  "icms_valor",
+  "leit_ant_ativa_fponta",
+  "leit_ant_ativa_ponta",
+  "leit_atu_ativa_fponta",
+  "leit_atu_ativa_ponta",
+  "modalidade_tarifaria",
+  "pis_aliquota",
+  "pis_valor",
+  "tensao_fornecimento"
+ ],
+ "gd_scee": {
+  "_obs": "EDP SP: TUSD - En. At. Inj (so TUSD p/ nao dobrar c/ TE)",
+  "injecao": {
+   "regex": "TUSD\\s*-\\s*En\\.?\\s*At\\.?\\s*Inj[^\\n]*?kWh\\s+([\\d.]+,\\d+)\\s*-",
+   "group": 1,
+   "multi": true
+  },
+  "saldo_fponta": {
+   "regex": "Saldo\\s+Total[^\\n]*?([\\d.]+,\\d{2})",
+   "group": 1
+  }
+ }
+}

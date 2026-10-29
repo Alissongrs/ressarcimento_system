@@ -1,0 +1,79 @@
+{
+ "documento": "DANFE - Família NEOENERGIA (Cosern + Coelba + Celpe + CEB Brasília)",
+ "_status": "Layout DANFE clássico Neoenergia — validado em COSERN (RN) e COELBA (BA). Assumido idêntico em CELPE/CEB.",
+ "_herda_de": "neoenergia_cosern_extraction_map.json",
+ "_uso": "Use o mapa do Cosern como base. Para cada filial, substitua razão social/CNPJ/IE/endereço/CEP/ICMS conforme tabela abaixo.",
+ "distribuidoras": {
+  "NEOENERGIA_COSERN_RN": {
+   "razao_social": "COMPANHIA ENERGÉTICA DO RIO GRANDE DO NORTE",
+   "cnpj_emissor": "08.324.196/0001-81",
+   "ie_emissor": "20055199-0",
+   "endereco_emissor": "RUA MERMOZ, 150, BALDO, NATAL, RIO GRANDE DO NORTE",
+   "cep_emissor": "59025-250",
+   "uf": "RN",
+   "icms_pct": 20,
+   "url_chave_acesso": "https://dfe-portal.svrs.rs.gov.br/Nf3e/consulta",
+   "_volume": "84",
+   "_status": "VALIDADO"
+  },
+  "NEOENERGIA_COELBA_BA": {
+   "razao_social": "COMPANHIA DE ELETRICIDADE DO ESTADO DA BAHIA",
+   "cnpj_emissor": "15.139.629/0001-94",
+   "ie_emissor": "00478696",
+   "endereco_emissor": "AV.EDGARD SANTOS, 300, CABULA VI, SALVADOR, BAHIA",
+   "cep_emissor": "41181-900",
+   "uf": "BA",
+   "icms_pct": 20.5,
+   "url_chave_acesso": "https://dfe-portal.svrs.rs.gov.br/Nf3e/consulta",
+   "_volume": "536+21",
+   "_status": "VALIDADO (id 12131)",
+   "_diferenca": "Itens adicionais p/ A4 LIVRE: 'Uso Sistema Fio', 'Ult. Uso Sistema Fio', 'Uso Sistema Encar.NP/FP', 'Cob. ICMS Subven-CDE', 'C.ICMSCDE Dif.Ft.Alt', 'Dif. Desc. Ft.Alter.', 'Dif.Des.Ft.Alt-Enca.', 'Imp.Som/Dim-C/Impost'. Demanda contratada chamada 'Montante de Uso Contratado'."
+  },
+  "NEOENERGIA_CELPE_PE": {
+   "razao_social": "COMPANHIA ENERGÉTICA DE PERNAMBUCO",
+   "uf": "PE",
+   "icms_pct": 18,
+   "url_chave_acesso": "https://dfe-portal.svrs.rs.gov.br/Nf3e/consulta",
+   "_volume": "660",
+   "_status": "ASSUMIDO — validar com sample id 12127"
+  },
+  "NEOENERGIA_CEB_DF": {
+   "razao_social": "COMPANHIA ENERGÉTICA DE BRASÍLIA",
+   "uf": "DF",
+   "icms_pct": 18,
+   "url_chave_acesso": "https://dfe-portal.svrs.rs.gov.br/Nf3e/consulta",
+   "_volume": "247+24",
+   "_status": "ASSUMIDO — validar com sample id 32378"
+  }
+ },
+ "_overrides_e_adições_vs_cosern_base": {
+  "tabela_itens_fatura.descricoes_conhecidas_adicionais_A4_LIVRE": [
+   "Uso Sistema Fio (kW)",
+   "Ult. Uso Sistema Fio (kW)",
+   "Uso Sistema Encar.NP (kWh)",
+   "Uso Sistema Encar.FP (kWh)",
+   "Cons.Reat.Exc.NPonta (kVARh)",
+   "Cons.Reat Exc.FPonta (kVARh)",
+   "Cob. ICMS Subven-CDE",
+   "C.ICMSCDE Dif.Ft.Alt",
+   "Dif. Desc. Ft.Alter.",
+   "Dif.Des.Ft.Alt-Enca.",
+   "Imp.Som/Dim-C/Impost",
+   "Demanda Reativa Exc."
+  ],
+  "grandezas_contratadas.aceitar_label_alternativo": "Montante de Uso Contratado (em vez de Demanda Contratada — clientes Livre A4)",
+  "_observacao_importante": "Coelba cobra ICMS sobre subvenção CDE (Parecer Sefaz-BA Nº26110.2013) — isso explica os itens 'Cob. ICMS Subven-CDE' que não aparecem em outras filiais."
+ },
+ "_volume_coberto_total": "~1.572 faturas",
+ "gd_scee": {
+  "_obs": "Coelba/Neoenergia: creditos utilizados; Saldo para o proximo ciclo",
+  "compensada": {
+   "regex": "cr[ée]ditos\\s+utilizados\\s+([\\d.]+)",
+   "group": 1
+  },
+  "saldo_fponta": {
+   "regex": "Sal\\s*do\\s+para\\s+o\\s+pr[óo]ximo\\s+ciclo\\s+([\\d.]+,?\\d*)",
+   "group": 1
+  }
+ }
+}

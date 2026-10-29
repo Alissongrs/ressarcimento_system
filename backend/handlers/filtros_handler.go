@@ -17,10 +17,10 @@ import (
 // @Router /api/v1/filtros/etapas [get]
 func GetEtapasParaFiltro(c *gin.Context) {
 	rows, err := queryGorm(database.GormDB_App, `
-		SELECT DISTINCT etapa
-		  FROM DM_ETAPAS_PROCESSO
-		 WHERE etapa IS NOT NULL AND TRIM(etapa) <> ''
-		 ORDER BY etapa ASC;
+		SELECT DISTINCT nome
+		  FROM DM_ETAPAS
+		 WHERE nome IS NOT NULL AND TRIM(nome) <> ''
+		 ORDER BY nome ASC;
 	`)
 	if err != nil {
 		// Fallback em dev: retorna lista vazia

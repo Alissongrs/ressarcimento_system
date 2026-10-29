@@ -1,4 +1,4 @@
-﻿// handlers/fluxo_ressarcimento_handler.go
+// handlers/fluxo_ressarcimento_handler.go
 package handlers
 
 import (
@@ -170,36 +170,33 @@ func SalvarFluxoRessarcimento(c *gin.Context) {
 	}
 
 	// Resolve sub_etapa: aceita override vindo do JSON e persiste no processo
-	var subAtual sql.NullString
-	_ = queryRowGorm(tx, "SELECT sub_etapa FROM FT_PROCESSOS WHERE id_processo = ?", processoID).Scan(&subAtual)
+	// Lê também a ETAPA ATUAL do processo: gravar o histórico de fluxo com a etapa
+	// real (e não o rótulo "Fluxo de Ressarcimento", que não existe em
+	// DM_ETAPAS e fazia o SincronizarStatusProcesso reverter o processo
+	// para "Distribuidora"). Mesmo padrão do SalvarDeferimentoSimples.
+	var subAtual, etapaAtual sql.NullString
+	_ = queryRowGorm(tx,
+		`SELECT (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual), e.nome
+		   FROM FT_PROCESSOS p
+		   LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
+		  WHERE p.id_processo = ?`, processoID).Scan(&subAtual, &etapaAtual)
 	subTxt := strings.TrimSpace(subAtual.String)
 	if s := strings.TrimSpace(request.SubEtapa); s != "" {
 		subTxt = s
 		subID, _ := resolveSubEtapaIDGorm(tx, subTxt)
-		if _, err := execGorm(tx, "UPDATE FT_PROCESSOS SET sub_etapa = ?, id_sub_etapa_processo = ?, ultima_atualizacao = NOW() WHERE id_processo = ?", subTxt, nullIntToIface(subID), processoID); err != nil {
+		if _, err := execGorm(tx, "UPDATE FT_PROCESSOS SET sub_etapa = ?, id_status_atual /* TODO V2 */ = ?, ultima_atualizacao = NOW() WHERE id_processo = ?", subTxt, nullIntToIface(subID), processoID); err != nil {
 			log.Printf("Erro ao atualizar sub_etapa do processo %d no fluxo: %v", processoID, err)
 		}
 	}
 
-	statusNome := strings.TrimSpace(getStatusNomeByRequisicaoGorm(tx, int64(processoID)))
-	if statusNome == "" {
-		statusNome = "Em andamento"
-	}
-	_, err = execGorm(tx, `
-        INSERT INTO FT_HISTORICO_MOVIMENTACOES 
-        (id_requisicao, id_usuario_gestor,
-         status_anterior, status_novo,
-         etapa_anterior, etapa_nova, sub_etapa,
-         comentario, data_movimentacao)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		processoID, gestorID,
-		statusNome, statusNome,
-		"Fluxo de Ressarcimento", "Fluxo de Ressarcimento", subTxt,
-		histComment, time.Now())
+	// P1-1: histórico no schema V2 (fluxo não muda etapa/status → novo = atual).
+	err = registrarHistoricoV2(tx, processoID, gestorID, "movimentacao", histComment, nil, nil)
 
 	if err != nil {
-		log.Printf("Erro ao registrar no histórico: %v", err)
-		// Não falha a operaÃ§ão por causa do histórico
+		// P1-1: fail-hard — não gravar o fluxo sem trilha de auditoria (defer tx.Rollback desfaz).
+		log.Printf("Erro ao registrar histórico (fluxo) do processo %d: %v", processoID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar histórico do fluxo de ressarcimento"})
+		return
 	}
 
 	// Notificar imediato para atualizar histórico na UI
@@ -322,10 +319,3 @@ func DeletarItemFluxoRessarcimento(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Item deletado com sucesso!"})
 }
-
-
-
-
-
-
-

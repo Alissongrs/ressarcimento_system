@@ -1111,18 +1111,18 @@ func GetProcessoVinculado(c *gin.Context) {
 	query := `
 		SELECT
 			p.id_processo,
-			COALESCE(e.etapa, '') AS etapa,
-			COALESCE(p.sub_etapa, '') AS sub_etapa,
+			COALESCE(e.nome, '') AS etapa,
+			COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = p.id_status_atual), '') AS sub_etapa,
 			COALESCE(
 				(SELECT DATE_FORMAT(MAX(h.data_movimentacao), '%d/%m/%Y %H:%i')
 				 FROM FT_HISTORICO_MOVIMENTACOES h
-				 WHERE h.id_requisicao = p.id_processo),
+				 WHERE h.id_processo = p.id_processo),
 				''
 			) AS ultima_movimentacao,
 			COALESCE(p.periodos_irregularidade, '') AS periodos_irregularidade,
 			COALESCE(p.descricao_irregularidade, '') AS descricao_irregularidade
 		FROM FT_PROCESSOS p
-		LEFT JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+		LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
 		WHERE TRIM(p.uc) = TRIM(?)
 		ORDER BY p.data_criacao DESC
 	`

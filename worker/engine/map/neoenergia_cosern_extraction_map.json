@@ -1,0 +1,385 @@
+{
+  "documento": "DANFE - Neoenergia Cosern (Companhia Energética do Rio Grande do Norte)",
+  "_status": "Layout DANFE clássico — DIFERENTE do Energisa. Várias colunas saem misturadas via pdfplumber: itens da fatura aparecem duas vezes no texto (primeiro bloco resumido sem cabeçalho, depois bloco demonstrativo com leitura/constante). Use extract_tables() ou ancore por palavras-chave do início da linha.",
+  "observacoes_gerais": {
+    "encoding": "UTF-8",
+    "decimal": "vírgula (BR)",
+    "milhar": "ponto",
+    "datas": "DD/MM/AAAA",
+    "estrategia": "Extraia texto com pdfplumber (preferível .extract_text() página por página). Cabeçalho de campos rotulados é vertical à esquerda. Tabela de itens da fatura é colunada — funciona via regex linha-a-linha porque as colunas vêm separadas por espaços simples.",
+    "particularidades": [
+      "É 2ª via padrão (2ª VIA aparece sempre no cabeçalho)",
+      "Classificação aparece no formato 'A4 Horo-sazonal Verde' (separador é espaço, não barra)",
+      "Cliente vem em bloco vertical, sem etiqueta 'CNPJ/CPF:' clara antes",
+      "Histórico vem como gráfico ASCII — não extrair dados numéricos do gráfico",
+      "Banco de débito automático fixo Itaú 341-7 ag 0018",
+      "Bandeira tarifária pode aparecer na lista de itens (linha 'BANDEIRA VERMELHA' isolada — sem valor) ou em quadro próprio"
+    ]
+  },
+  "distribuidora": {
+    "razao_social": {
+      "anchor": "COMPANHIA",
+      "regex": "(COMPANHIA ENERG[ÉE]TICA DO RIO GRANDE DO NORTE)",
+      "group": 1
+    },
+    "cnpj_emissor": {
+      "anchor": "CNPJ",
+      "regex": "CNPJ\\s+(\\d{2}\\.\\d{3}\\.\\d{3}/\\d{4}-\\d{2})",
+      "group": 1
+    },
+    "ie_emissor": {
+      "anchor": "INSCRIÇÃO ESTADUAL",
+      "regex": "INSCRIÇÃO\\s+ESTADUAL\\s+(\\d{8}-\\d)",
+      "group": 1
+    },
+    "endereco_emissor": {
+      "anchor": "RUA",
+      "regex": "(RUA\\s+MERMOZ,\\s*\\d+,\\s*[A-Z]+,\\s*NATAL,\\s*RIO GRANDE DO NORTE)",
+      "group": 1
+    },
+    "cep_emissor": {
+      "anchor": "CEP",
+      "regex": "CEP\\s*(\\d{5}-\\d{3})",
+      "group": 1
+    }
+  },
+  "cliente": {
+    "razao_social": {
+      "anchor": "NOME DO CLIENTE:",
+      "regex": "NOME DO CLIENTE:\\s*\\n\\s*([^\\n]+)",
+      "group": 1
+    },
+    "cnpj": {
+      "anchor": "CNPJ:",
+      "regex": "CNPJ:\\s*([\\d\\*]{2,3}\\.[\\d\\*]{3}\\.[\\d\\*]+/[\\d\\*]+-[\\d\\*]+)",
+      "group": 1,
+      "obs": "vem mascarado com asteriscos"
+    },
+    "ie": {
+      "anchor": "Inscrição Estadual:",
+      "regex": "Inscrição\\s+Estadual:\\s*([\\d\\*]+)",
+      "group": 1
+    },
+    "endereco": {
+      "anchor": "ENDEREÇO:",
+      "regex": "ENDEREÇO:\\s*\\n\\s*([^\\n]+)",
+      "group": 1
+    },
+    "bairro": {
+      "anchor": "linha após endereço",
+      "regex": "ENDEREÇO:\\s*\\n[^\\n]+\\n([^\\n]+)\\n",
+      "group": 1
+    },
+    "cep_municipio_uf": {
+      "anchor": "linha 3 do bloco cliente",
+      "regex": "(\\d{5}-\\d{3})\\s+([A-ZÁÉÍÓÚ ]+)\\s+([A-Z]{2})",
+      "group": "1+2+3"
+    },
+    "tipo_via": {
+      "anchor": "DANFE",
+      "regex": "DANFE[^\\n]*(2ª VIA|1ª VIA|ª VIA)",
+      "group": 1
+    }
+  },
+  "identificadores_instalacao": {
+    "codigo_instalacao": {
+      "anchor": "CÓDIGO DA INSTALAÇÃO",
+      "regex": "CÓDIGO DA INSTALAÇÃO\\s*\\n\\s*(\\d+)",
+      "group": 1,
+      "obs": "7 dígitos típico"
+    },
+    "codigo_cliente": {
+      "anchor": "CÓDIGO DO CLIENTE",
+      "regex": "CÓDIGO DO CLIENTE\\s*\\n\\s*(\\d+)",
+      "group": 1,
+      "obs": "10 dígitos típico"
+    }
+  },
+  "nota_fiscal": {
+    "numero_nf": {
+      "anchor": "NOTA FISCAL N°",
+      "regex": "NOTA FISCAL\\s*N[°º]\\s+(\\d+)",
+      "group": 1
+    },
+    "serie": {
+      "anchor": "SÉRIE",
+      "regex": "SÉRIE\\s+(\\d{3})",
+      "group": 1
+    },
+    "data_emissao": {
+      "anchor": "DATA DE EMISSÃO:",
+      "regex": "DATA DE EMISSÃO:\\s*(\\d{2}/\\d{2}/\\d{4})",
+      "group": 1
+    },
+    "referencia": {
+      "anchor": "REF:MÊS/ANO",
+      "regex": "REF:MÊS/ANO\\s*\\n?\\s*(\\d{2}/\\d{4})",
+      "group": 1,
+      "obs": "formato MM/AAAA — diferente do Energisa que usa nome do mês"
+    },
+    "chave_acesso": {
+      "anchor": "chave de acesso:",
+      "regex": "chave de acesso:\\s*\\n?\\s*((?:\\d{4}\\s){10}\\d{4})",
+      "group": 1,
+      "pos_process": "remover espaços → 44 dígitos"
+    },
+    "protocolo_autorizacao": {
+      "anchor": "Protocolo de autorização:",
+      "regex": "Protocolo de autorização:\\s*(\\d+)\\s*-\\s*(\\d{2}/\\d{2}/\\d{4})\\s*às\\s*(\\d{2}:\\d{2}:\\d{2})",
+      "group": "1+2+3"
+    }
+  },
+  "vencimento_valor": {
+    "data_vencimento": {
+      "anchor": "VENCIMENTO",
+      "regex": "VENCIMENTO\\s*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})",
+      "group": 1
+    },
+    "valor_total": {
+      "anchor": "TOTAL A PAGAR R$",
+      "regex": "TOTAL A PAGAR R\\$\\s*\\n?\\s*([\\d\\.]+,\\d{2})",
+      "group": 1
+    },
+    "banco": {
+      "anchor": "Banco:",
+      "regex": "Banco:\\s*(\\d{3})-?(\\d)?\\s*Agência:\\s*(\\d+)",
+      "group": "1+3"
+    }
+  },
+  "periodo_leitura": {
+    "leitura_anterior": {
+      "anchor": "LEITURA ANTERIOR",
+      "regex": "LEITURA ANTERIOR\\s+(\\d{2}/\\d{2}/\\d{4})\\s+LEITURA ATUAL\\s+(\\d{2}/\\d{2}/\\d{4})\\s+N°\\s+DE DIAS\\s+(\\d+)\\s+PRÓXIMA LEITURA\\s+(\\d{2}/\\d{2}/\\d{4})",
+      "group": 1
+    },
+    "leitura_atual": {
+      "anchor": "LEITURA ATUAL",
+      "regex": "LEITURA ANTERIOR\\s+(\\d{2}/\\d{2}/\\d{4})\\s+LEITURA ATUAL\\s+(\\d{2}/\\d{2}/\\d{4})\\s+N°\\s+DE DIAS\\s+(\\d+)\\s+PRÓXIMA LEITURA\\s+(\\d{2}/\\d{2}/\\d{4})",
+      "group": 2
+    },
+    "dias": {
+      "anchor": "N° DE DIAS",
+      "regex": "LEITURA ANTERIOR\\s+(\\d{2}/\\d{2}/\\d{4})\\s+LEITURA ATUAL\\s+(\\d{2}/\\d{2}/\\d{4})\\s+N°\\s+DE DIAS\\s+(\\d+)\\s+PRÓXIMA LEITURA\\s+(\\d{2}/\\d{2}/\\d{4})",
+      "group": 3
+    },
+    "proxima_leitura": {
+      "anchor": "PRÓXIMA LEITURA",
+      "regex": "LEITURA ANTERIOR\\s+(\\d{2}/\\d{2}/\\d{4})\\s+LEITURA ATUAL\\s+(\\d{2}/\\d{2}/\\d{4})\\s+N°\\s+DE DIAS\\s+(\\d+)\\s+PRÓXIMA LEITURA\\s+(\\d{2}/\\d{2}/\\d{4})",
+      "group": 4
+    }
+  },
+  "ligacao_tecnica": {
+    "classificacao": {
+      "anchor": "CLASSIFICAÇÃO:",
+      "regex": "CLASSIFICAÇÃO:\\s*([^\\n]+)",
+      "group": 1
+    },
+    "subgrupo": {
+      "anchor": "dentro de Classificação",
+      "regex": "(A[1-4]|B[1-4]|AS)\\s+Horo-sazonal",
+      "group": 1
+    },
+    "modalidade": {
+      "anchor": "Horo-sazonal",
+      "regex": "Horo-sazonal\\s+(Verde|Azul|Branca|Convencional)",
+      "group": 1
+    },
+    "classe": {
+      "anchor": "linha 'COMERCIAL -- COMERCIAL'",
+      "regex": "(COMERCIAL|RESIDENCIAL|INDUSTRIAL|RURAL|PODER PUBLICO)\\s*--\\s*(COMERCIAL|RESIDENCIAL|INDUSTRIAL|RURAL|PODER PUBLICO)",
+      "group": 1
+    },
+    "tipo_fornecimento": {
+      "anchor": "TIPO DE FORNECIMENTO:",
+      "regex": "TIPO DE FORNECIMENTO:\\s*(Monofásico|Bifásico|Trifásico)",
+      "group": 1
+    }
+  },
+  "grandezas_contratadas": {
+    "demanda_contratada_unica": {
+      "anchor": "Demanda Contratada",
+      "regex": "Demanda Contratada\\s*(\\d+)",
+      "group": 1,
+      "obs": "Cosern usa 1 valor único de demanda contratada (não separa ponta/FP)"
+    }
+  },
+  "tabela_itens_fatura": {
+    "estrategia": "Linhas começam com descrição textual fixa (Demanda Ativa, Consumo-TUSD, Consumo-TE etc.) seguida por unidade (kW/kWh/kVAr/UN). Use os prefixos como âncoras.",
+    "regex_linha": "^(Demanda Ativa|Demanda Reativa Exc\\.|Consumo-TUSD NPonta|Consumo-TUSD F\\.Ponta|Consumo-TE Na Ponta|Consumo-TE F\\.Ponta|Cons\\.Reat\\.Exc\\.NPonta|Cons\\.Reat Exc\\.FPonta|Demanda Ativa- Lim|Ilum\\. Púb\\. Municipal)\\s+(kW|kWh|kVAr|kVARh|UN)?\\s*([\\d\\.,]+)\\s+([\\d\\.,]+)\\s+([\\d\\.,\\-]+)\\s+([\\d\\.,]+)\\s+([\\d\\.,]+)\\s+([\\d,]+)\\s+([\\d\\.,]+)\\s+([\\d\\.,]+)$",
+    "colunas_em_ordem": [
+      "descricao",
+      "unidade",
+      "quantidade",
+      "preco_unit_com_tributos",
+      "valor_rs",
+      "pis_cofins_rs",
+      "base_calc_icms_rs",
+      "aliq_icms_pct",
+      "icms_rs",
+      "tarifa_unit_rs"
+    ],
+    "regex_iluminacao_publica": "Ilum\\. Púb\\. Municipal\\s+([\\d\\.]+,\\d{2})",
+    "regex_bandeira": "BANDEIRA\\s+(VERDE|AMARELA|VERMELHA)\\s+(?:PATAMAR\\s+(I|II))?",
+    "descricoes_conhecidas_A4_horo_verde": [
+      "Demanda Ativa",
+      "Demanda Reativa Exc.",
+      "Consumo-TUSD NPonta",
+      "Consumo-TUSD F.Ponta",
+      "Consumo-TE Na Ponta",
+      "Consumo-TE F.Ponta",
+      "Cons.Reat.Exc.NPonta",
+      "Cons.Reat Exc.FPonta",
+      "Demanda Ativa- Lim",
+      "Ilum. Púb. Municipal"
+    ]
+  },
+  "totais_tabela_itens": {
+    "valor_total": {
+      "anchor": "TOTAL",
+      "regex": "TOTAL\\s+([\\d\\.]+,\\d{2})",
+      "group": 1
+    }
+  },
+  "tributos_resumo": {
+    "pis": {
+      "base_calculo": {
+        "anchor": "PIS",
+        "regex": "PIS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)\\s+([\\d\\.]+,\\d{2})",
+        "group": 1
+      },
+      "aliquota_pct": {
+        "anchor": "PIS",
+        "regex": "PIS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)\\s+([\\d\\.]+,\\d{2})",
+        "group": 2
+      },
+      "valor": {
+        "anchor": "PIS",
+        "regex": "PIS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)\\s+([\\d\\.]+,\\d{2})",
+        "group": 3
+      }
+    },
+    "cofins": {
+      "base_calculo": {
+        "anchor": "COFINS",
+        "regex": "COFINS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)\\s+([\\d\\.]+,\\d{2})",
+        "group": 1
+      },
+      "aliquota_pct": {
+        "anchor": "COFINS",
+        "regex": "COFINS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)\\s+([\\d\\.]+,\\d{2})",
+        "group": 2
+      },
+      "valor": {
+        "anchor": "COFINS",
+        "regex": "COFINS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)\\s+([\\d\\.]+,\\d{2})",
+        "group": 3
+      }
+    },
+    "icms": {
+      "base_calculo": {
+        "anchor": "ICMS",
+        "regex": "ICMS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)\\s+([\\d\\.]+,\\d{2})",
+        "group": 1
+      },
+      "aliquota_pct": {
+        "anchor": "ICMS",
+        "regex": "ICMS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)\\s+([\\d\\.]+,\\d{2})",
+        "group": 2
+      },
+      "valor": {
+        "anchor": "ICMS",
+        "regex": "ICMS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)\\s+([\\d\\.]+,\\d{2})",
+        "group": 3
+      }
+    }
+  },
+  "medicao_consumo": {
+    "estrategia": "Tabela MEDIDOR | GRANDEZAS | POSTOS HORÁRIOS | LEITURA ANTERIOR | LEITURA ATUAL | CONST. MEDIDOR | CONSUMO kWh. Diferente do Energisa, tem 4 linhas obrigatórias: Energia Ativa Ponta/FP + Demanda Ativa Ponta/FP.",
+    "regex_linha": "^(\\d{7,10})\\s+(Energia Ativa|Demanda Ativa)\\s+(Ponta|Fora Ponta)\\s+([\\d\\.,]+)\\s+([\\d\\.,]+)\\s+([\\d\\.,]+)\\s+([\\d\\.,]+)$",
+    "colunas_em_ordem": [
+      "medidor",
+      "grandeza",
+      "posto_horario",
+      "leitura_anterior",
+      "leitura_atual",
+      "constante_medidor",
+      "consumo_ou_demanda"
+    ],
+    "consumo_ponta_kwh": {
+      "anchor": "Energia Ativa Ponta",
+      "regex": "Energia Ativa Ponta[:]?\\s*(?:R\\$\\s*)?([\\d\\.,]+)",
+      "group": 1,
+      "_auto_patch": true,
+      "_referencia_audit_id": "50280"
+    }
+  },
+  "fator_carga": {
+    "ponta": {
+      "anchor": "Na Ponta:",
+      "regex": "Na Ponta:\\s*([\\d,]+)",
+      "group": 1
+    },
+    "fora_ponta": {
+      "anchor": "Fora de Ponta:",
+      "regex": "Fora de Ponta:\\s*([\\d,]+)",
+      "group": 1
+    }
+  },
+  "perda_transformacao_pct": {
+    "anchor": "Perda de Transformação de:",
+    "regex": "Perda de Transformação de:\\s*([\\d,]+)%",
+    "group": 1
+  },
+  "ciclo_medicao_segundo_bloco": {
+    "obs": "O texto extraído tem o demonstrativo de medição duplicado num segundo bloco com cabeçalhos 'N° MEDIDOR / CICLO / DIAS'.",
+    "numero_medidor": {
+      "anchor": "N° MEDIDOR -",
+      "regex": "N°\\s+MEDIDOR\\s*-\\s*(\\d+)",
+      "group": 1
+    },
+    "ciclo_dt_inicio": {
+      "anchor": "CICLO -",
+      "regex": "CICLO\\s*-\\s*(\\d{2}/\\d{2}/\\d{4})\\s*a\\s*(\\d{2}/\\d{2}/\\d{4})",
+      "group": 1
+    },
+    "ciclo_dt_fim": {
+      "anchor": "CICLO -",
+      "regex": "CICLO\\s*-\\s*(\\d{2}/\\d{2}/\\d{4})\\s*a\\s*(\\d{2}/\\d{2}/\\d{4})",
+      "group": 2
+    },
+    "dias": {
+      "anchor": "DIAS -",
+      "regex": "DIAS\\s*-\\s*(\\d+)",
+      "group": 1
+    }
+  },
+  "bandeira_tarifaria": {
+    "anchor": "Na data da leitura a bandeira em vigor é a",
+    "regex": "Na data da leitura a bandeira em vigor é a\\s+(Verde|Amarela|Vermelha)(?:\\s+Patamar\\s+(I|II))?",
+    "group": "1+2"
+  },
+  "_diferencas_chave_vs_energisa": [
+    "Não tem bloco 'GRANDEZAS CONTRATADAS' com ponta/fora_ponta/TUSDG separados — só 1 valor de demanda",
+    "Histórico de consumo vem em GRÁFICO ASCII, não em tabela tabular — pular ou OCR-imagem",
+    "Não há quadro 'COMPOSIÇÃO DO CONSUMO' (distribuição/transmissão/encargos/impostos)",
+    "Não há quadro INDICADORES DE QUALIDADE com DIC/FIC/DMIC/DICRI — apenas menção textual genérica",
+    "Classificação não tem 'MVF' nem 'MOD. TARIF.' — usa 'A4 Horo-sazonal Verde'",
+    "Mês de referência em formato MM/AAAA (vs Janeiro/2025 do Energisa)"
+  ],
+  "validacoes_pos_extracao": [
+    "soma(itens_fatura.valor_rs) ≈ valor_total ± 0,10 (Cosern tem mais arredondamento)",
+    "icms_total == tributos_resumo.icms.valor",
+    "leitura_atual > leitura_anterior",
+    "chave_acesso tem 44 dígitos",
+    "consumo_kwh_medicao_consumo == quantidade_kwh em itens_fatura (para Consumo-TE e Consumo-TUSD)"
+  ],
+  "_not_in_pdf": [
+    "classe_consumidor",
+    "consumo_ativo_fponta_kwh",
+    "demanda_contratada_fponta_kw",
+    "demanda_contratada_ponta_kw",
+    "grupo_tarifario",
+    "modalidade_tarifaria",
+    "subgrupo_tarifario"
+  ]
+}

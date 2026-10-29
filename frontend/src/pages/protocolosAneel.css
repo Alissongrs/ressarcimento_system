@@ -1,0 +1,7 @@
+.pa-btn {
+  font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--card); color: var(--fg); cursor: pointer; white-space: nowrap;
+}
+.pa-btn:hover:not(:disabled) { border-color: var(--accent); }
+.pa-btn:disabled { opacity: .5; cursor: default; }
+.pa-btn--pri { font-size: 14px; padding: 8px 14px; background: var(--accent); border-color: var(--accent); color: #fff; }

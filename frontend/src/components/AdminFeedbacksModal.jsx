@@ -35,7 +35,7 @@ export default function AdminFeedbacksModal({ open, onClose }) {
           </button>
         </div>
         {loading && <div className="opacity-70 sap-loading">Carregando...</div>}
-        {err && <div className="text-red-600 mb-3">{err}</div>}
+        {err && <div className="text-[var(--danger)] mb-3">{err}</div>}
         <div className="flex-1 overflow-auto space-y-3">
           {items.map((it) => (
             <div key={it.id_feedback} className="sap-card p-3">

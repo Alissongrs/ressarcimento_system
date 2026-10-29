@@ -23,11 +23,11 @@ const ModuloDeferimento = ({ dados = {}, onUpdate }) => {
   };
 
   return (
-    <div className="border-t border-blue-800/50 pt-4 animate-fade-in">
+    <div className="border-t border-[var(--accent)]/50 pt-4 animate-fade-in">
       <h3 className="font-semibold text-[var(--fg)] mb-3 text-sm">DADOS DE DEFERIMENTO</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
         <div>
-          <label className="block text-xs font-semibold text-gray-400 mb-1">Data da Procedência</label>
+          <label className="block text-xs font-semibold text-[color-mix(in_srgb,var(--fg)_55%,transparent)] mb-1">Data da Procedência</label>
           <input
             type="date"
             name="data_procedencia"
@@ -37,7 +37,7 @@ const ModuloDeferimento = ({ dados = {}, onUpdate }) => {
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-400 mb-1">Crédito Simples (R$)</label>
+          <label className="block text-xs font-semibold text-[color-mix(in_srgb,var(--fg)_55%,transparent)] mb-1">Crédito Simples (R$)</label>
           <input
             type="number"
             name="credito_simples"
@@ -47,7 +47,7 @@ const ModuloDeferimento = ({ dados = {}, onUpdate }) => {
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-400 mb-1">Crédito em Dobro (R$)</label>
+          <label className="block text-xs font-semibold text-[color-mix(in_srgb,var(--fg)_55%,transparent)] mb-1">Crédito em Dobro (R$)</label>
           <input
             type="number"
             name="credito_dobro"
@@ -58,7 +58,7 @@ const ModuloDeferimento = ({ dados = {}, onUpdate }) => {
           />
         </div>
         <div className="flex items-end pb-1">
-          <label className="flex items-center gap-2 text-gray-300">
+          <label className="flex items-center gap-2 text-[color-mix(in_srgb,var(--fg)_70%,transparent)]">
             <input
               type="checkbox"
               checked={aplicarDobro}

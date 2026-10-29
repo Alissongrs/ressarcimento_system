@@ -1,0 +1,405 @@
+{
+ "documento": "DANFELEKA - Elektro Redes MS (subsidiária Neoenergia)",
+ "_status": "Layout PROPRIETÁRIO chamado 'DANFELEKA' (Elektro). Extração de texto sai com colunas verticalmente desalinhadas — recomenda-se pdfplumber.extract_tables() pesado OU regex de várias linhas + reconstrução por posição. Algumas linhas vêm com tarifas separadas dos itens (em coluna lateral).",
+ "observacoes_gerais": {
+  "encoding": "UTF-8",
+  "decimal": "vírgula (BR) e PONTO (.) em campos numéricos do bloco de medição (formato 5.06 ao invés de 5,06)",
+  "milhar": "ponto",
+  "datas": "DD/MM/AAAA",
+  "particularidades": [
+   "Cabeçalho 'DANFELEKA (V1.00)' identifica o template",
+   "Inscrição estadual: 'INSC. ESTADUAL 283041269' sem máscara",
+   "URL chave_acesso = SEFAZ-MS (https://nf3e.sefaz.ms.gov.br/ws/NF3eConsulta?wsdl)",
+   "Bloco de medição usa PONTO em vez de vírgula nas leituras (ex: '0.03', '5.06')",
+   "Tem aviso 'DESCONTO SOBRE TARIFA: R$ X' separado dos itens",
+   "Itens duplicados no texto: a primeira metade aparece duas vezes (impressão antes e depois do boleto)",
+   "Tributos PIS/COFINS/ICMS aparecem com alíquotas em formato '0,93%', '4,24%', '17%'",
+   "Demanda contratada vem como 'Montante em Todos os Períodos: X kW' (não há ponta/FP separados)",
+   "Pode haver 'Subsidio Tarifario' como item com sinal positivo (cobrança) e LIQUIDO negativo (estorno)"
+  ]
+ },
+ "distribuidora": {
+  "razao_social_implicita": {
+   "anchor": "DANFELEKA / cabeçalho",
+   "regex": "DANFELEKA\\s*\\(V[\\d\\.]+\\)",
+   "group": 0,
+   "obs": "Razão social NÃO aparece literal no texto principal — extrair pelo CNPJ e cruzar com base ANEEL (CNPJ 02.328.280/0002-78 = Elektro Redes MS / Neoenergia)"
+  },
+  "endereco_emissor": {
+   "anchor": "R Baldomero",
+   "regex": "(R\\s+Baldomero\\s+Leituga,\\s*\\d+\\s*-\\s*[^\\n]+)",
+   "group": 1
+  },
+  "cidade_uf_emissor": {
+   "anchor": "Tres Lagoas",
+   "regex": "Tres Lagoas\\s*\\(Ms\\)\\s*-\\s*(MS)",
+   "group": 1
+  },
+  "cep_emissor": {
+   "anchor": "CEP:",
+   "regex": "CEP:\\s*(\\d{5}-\\d{3})\\s*-\\s*Tres Lagoas",
+   "group": 1
+  },
+  "cnpj_emissor": {
+   "anchor": "CNPJ",
+   "regex": "CNPJ\\s+(\\d{2}\\.\\d{3}\\.\\d{3}/\\d{4}-\\d{2})",
+   "group": 1
+  },
+  "ie_emissor": {
+   "anchor": "INSC. ESTADUAL",
+   "regex": "INSC\\.\\s*ESTADUAL\\s+(\\d+)",
+   "group": 1
+  }
+ },
+ "cliente": {
+  "razao_social": {
+   "anchor": "linha após código",
+   "regex": "^(VIA VAREJO S/?A|GRUPO CASAS BAHIA[^\\n]*|[A-Z][A-Z .&]+S/?A)$",
+   "group": 1,
+   "flags": "MULTILINE"
+  },
+  "cnpj": {
+   "anchor": "CNPJ -",
+   "regex": "CNPJ\\s*-\\s*\\*+(\\d{6})\\s+IE:",
+   "group": 1,
+   "obs": "Vem MASCARADO com asteriscos no início"
+  },
+  "ie": {
+   "anchor": "IE:",
+   "regex": "IE:\\s*([\\d\\*]*)",
+   "group": 1,
+   "obs": "Pode vir vazio ou mascarado"
+  },
+  "endereco": {
+   "anchor": "R PARANAIBA",
+   "regex": "^(R [A-Z .,0-9]+|RUA [A-Z .,0-9]+|AV [A-Z .,0-9]+),\\s*\\d+$",
+   "group": "linha completa",
+   "flags": "MULTILINE"
+  },
+  "bairro": {
+   "anchor": "linha CENTRO",
+   "regex": "^(CENTRO|JD [A-Z]+|VL [A-Z]+|[A-Z ]+)\\s*$",
+   "group": 1,
+   "flags": "MULTILINE"
+  },
+  "cidade_uf_cep": {
+   "anchor": "TRES LAGOAS",
+   "regex": "^([A-Z ]+)\\s*\\((MS|SP|GO)\\)\\s*-\\s*([A-Z]{2})\\s*-\\s*CEP\\s+(\\d{5}-\\d{3})$",
+   "group": "1+3+4",
+   "flags": "MULTILINE"
+  }
+ },
+ "identificadores_instalacao": {
+  "codigo_cliente": {
+   "anchor": "topo da fatura",
+   "regex": "^(\\d{8})\\s*\\n\\s*\\d{6}\\s*\\n",
+   "group": 1,
+   "flags": "MULTILINE",
+   "obs": "Aparece DUAS vezes no texto: cabeçalho e rodapé. 8 dígitos."
+  },
+  "codigo_uc_secundario": {
+   "anchor": "linha 2",
+   "regex": "^\\d{8}\\s*\\n\\s*(\\d{6})\\s*\\n",
+   "group": 1,
+   "flags": "MULTILINE",
+   "obs": "6 dígitos abaixo do código cliente — possível identificador interno"
+  },
+  "medidor": {
+   "anchor": "RM",
+   "regex": "(RM\\d{7})",
+   "group": 1,
+   "obs": "Prefixo RM seguido por 7 dígitos"
+  },
+  "controle": {
+   "anchor": "Controle Nº",
+   "regex": "Controle Nº\\s*\\n?\\s*(\\d{2}-\\d+-\\d+)",
+   "group": 1
+  }
+ },
+ "classificacao": {
+  "_obs": "Vem em UMA linha só: 'COMERCIAL, SERVICOS E OUTRAS ATIVIDADES / COM VAR ESPEC ELETRODOMESTIC AUDIO VIDEO HORÁRIA VERDE / TRIFASICO'",
+  "linha_completa": {
+   "anchor": "linha da classificação",
+   "regex": "^(COMERCIAL[^\\n]+|RESIDENCIAL[^\\n]+|INDUSTRIAL[^\\n]+|RURAL[^\\n]+|PODER[^\\n]+)\\s*/\\s*(MONOFASICO|BIFASICO|TRIFASICO)$",
+   "group": "1+2",
+   "flags": "MULTILINE"
+  },
+  "classe": {
+   "anchor": "linha da classificação",
+   "regex": "^(COMERCIAL|RESIDENCIAL|INDUSTRIAL|RURAL|PODER PUBLICO)",
+   "group": 1,
+   "flags": "MULTILINE"
+  },
+  "modalidade": {
+   "anchor": "HORÁRIA",
+   "regex": "(HORÁRIA\\s+VERDE|HORÁRIA\\s+AZUL|CONVENCIONAL|BRANCA)",
+   "group": 1
+  },
+  "tipo_ligacao": {
+   "anchor": "TRIFASICO",
+   "regex": "(MONOFASICO|BIFASICO|TRIFASICO)$",
+   "group": 1,
+   "flags": "MULTILINE"
+  }
+ },
+ "nota_fiscal": {
+  "numero_nf": {
+   "anchor": "NOTA FISCAL No.",
+   "regex": "NOTA FISCAL\\s+No\\.\\s+(\\d+)",
+   "group": 1
+  },
+  "serie": {
+   "anchor": "SÉRIE",
+   "regex": "SÉRIE\\s+(\\d+)",
+   "group": 1
+  },
+  "data_emissao": {
+   "anchor": "DATA DE EMISSÃO:",
+   "regex": "DATA DE EMISSÃO:\\s*(\\d{2}/\\d{2}/\\d{4})",
+   "group": 1
+  },
+  "chave_acesso": {
+   "anchor": "Chave de Acesso",
+   "regex": "Chave de Acesso\\s*\\n?\\s*((?:\\d{4}\\s){10}\\d{4})",
+   "group": 1,
+   "pos_process": "remover espaços → 44 dígitos"
+  },
+  "protocolo_autorizacao": {
+   "anchor": "Protocolo de Autorização:",
+   "regex": "Protocolo de Autorização:\\s*(\\d+)\\s+(\\d{2}/\\d{2}/\\d{4})\\s+(\\d{2}:\\d{2}:\\d{2})",
+   "group": "1+2+3"
+  },
+  "timezone": {
+   "anchor": "America/Sao_Paulo",
+   "regex": "America/Sao_Paulo",
+   "group": 0
+  },
+  "url_consulta": {
+   "anchor": "Consulte Chave de Acesso em:",
+   "regex": "(https://nf3e\\.sefaz\\.ms\\.gov\\.br[^\\s]+)",
+   "group": 1
+  }
+ },
+ "vencimento_valor": {
+  "data_vencimento": {
+   "anchor": "Próximo Vencimento:",
+   "regex": "Pr[óo]ximo\\s+Vencimento:\\s*(\\d{2}/\\d{2}/\\d{4})",
+   "group": 1
+  },
+  "valor_total": {
+   "anchor": "R$ R$ valor",
+   "regex": "R\\$\\s*R\\$\\s*([\\d\\.]+,\\d{2})",
+   "group": 1
+  },
+  "referencia": {
+   "anchor": "MÊS/ANO",
+   "regex": "(Janeiro|Fevereiro|Março|Abril|Maio|Junho|Julho|Agosto|Setembro|Outubro|Novembro|Dezembro)/(\\d{4})",
+   "group": "1+2"
+  },
+  "banco_debito_auto": {
+   "anchor": "BANCO -",
+   "regex": "BANCO\\s*-\\s*(\\d{3})\\s*-\\s*AGÊNCIA\\s*-\\s*(\\d+)",
+   "group": "1+2"
+  }
+ },
+ "periodo_leitura": {
+  "estrategia": "Labels separados: 'Leitura Anterior:', 'Leitura Atual:', 'Dias do Período:'.",
+  "leitura_anterior": {
+   "anchor": "Leitura Anterior:",
+   "regex": "Leitura\\s+Anterior:\\s*(\\d{2}/\\d{2}/\\d{4})",
+   "group": 1
+  },
+  "leitura_atual": {
+   "anchor": "Leitura Atual:",
+   "regex": "Leitura\\s+Atual:\\s*(\\d{2}/\\d{2}/\\d{4})",
+   "group": 1
+  },
+  "dias": {
+   "anchor": "Dias do Período:",
+   "regex": "Dias\\s+do\\s+Per[íi]odo:\\s*(\\d+)",
+   "group": 1
+  },
+  "proxima_leitura": {
+   "anchor": "linha 4 datas",
+   "regex": "(\\d{2}/\\d{2}/\\d{4})\\s+(\\d{2}/\\d{2}/\\d{4})\\s+(\\d+)\\s+(\\d{2}/\\d{2}/\\d{4})\\s*\\n\\s*NOTA FISCAL",
+   "group": 4,
+   "flags": "DOTALL"
+  }
+ },
+ "grandezas_contratadas": {
+  "demanda_ponta_kw": {
+   "anchor": "Demanda Ponta:",
+   "regex": "Demanda Ponta:\\s+(\\d+)\\s*kW",
+   "group": 1
+  },
+  "demanda_fora_ponta_kw": {
+   "anchor": "Demanda Fora Ponta",
+   "regex": "Demanda Fora Ponta\\s+(\\d+)\\s*kW",
+   "group": 1
+  },
+  "energia_ponta_kwh": {
+   "anchor": "Energia Ponta:",
+   "regex": "Energia Ponta:\\s+(\\d+)\\s*kWh",
+   "group": 1
+  },
+  "energia_fp_kwh": {
+   "anchor": "Energia Fora Ponta:",
+   "regex": "Energia Fora Ponta:\\s+(\\d+)\\s*kWh",
+   "group": 1
+  },
+  "res_capacidade_ponta": {
+   "anchor": "Res. Capacidade Ponta:",
+   "regex": "Res\\.\\s*Capacidade Ponta:\\s+(\\d+)\\s*kW",
+   "group": 1
+  },
+  "res_capacidade_fp": {
+   "anchor": "Res. Capacidade Fora Ponta:",
+   "regex": "Res\\.\\s*Capacidade Fora Ponta:\\s+(\\d+)\\s*kW",
+   "group": 1
+  },
+  "montante_total": {
+   "anchor": "Montante em Todos os Períodos:",
+   "regex": "Montante em Todos os Períodos:\\s+(\\d+)\\s*kW",
+   "group": 1,
+   "obs": "É a demanda contratada agregada quando outras vêm zeradas"
+  }
+ },
+ "tabela_itens_fatura": {
+  "estrategia": "Itens vêm em DUAS COLUNAS no PDF mas extraem em sequência única. Para A4 horosazonal verde TUSD verão TUSD ENERGIA PONTA, TUSD ENERGIA FORA DE PONTA, DEMANDA DE DISTRIBUICAO etc. Atenção: para cada linha pode haver versão 'TUSD' e versão 'TE' separadas.",
+  "regex_linha": "^(TUSD ENERGIA PONTA TUSD|TUSD ENERGIA PONTA TE|TUSD ENERGIA FORA DE PONTA TUSD|TUSD ENERGIA FORA DE PONTA TE|DEMANDA ULTRAP\\.-DISTRIBUICAO TUSD|DEMANDA ULTRAP\\.-DISTRIBUICAO TE|DEMANDA DE DISTRIBUICAO TUSD|DEMANDA DE DISTRIBUICAO TE|SUBSIDIO TARIFARIO TUSD|SUBSIDIO TARIFARIO LIQUIDO|DEVOLUCAO DE AJUSTE DE FATURAMENTO|COBRANCA ILUM PUBLICA PARA A PREFEITURA)\\s+(kWh|kW|UN)?\\s*([\\-\\d\\.,]+)?\\s+([\\d\\.,]+)?\\s+([\\-\\d\\.,]+)?\\s+([\\d\\.,]+)?\\s+([\\d\\.,]+)?\\s+(\\d+%)?\\s+([\\d\\.,]+)?\\s+([\\d\\.,]+)?$",
+  "colunas_em_ordem": [
+   "descricao",
+   "unidade",
+   "quantidade",
+   "tarifa",
+   "valor_rs",
+   "pis_cofins",
+   "base_calc_icms",
+   "aliq_icms",
+   "icms_rs",
+   "tarifa_unit_2"
+  ],
+  "descricoes_conhecidas": [
+   "TUSD ENERGIA PONTA TUSD",
+   "TUSD ENERGIA PONTA TE",
+   "TUSD ENERGIA FORA DE PONTA TUSD",
+   "TUSD ENERGIA FORA DE PONTA TE",
+   "DEMANDA ULTRAP.-DISTRIBUICAO TUSD",
+   "DEMANDA ULTRAP.-DISTRIBUICAO TE",
+   "DEMANDA DE DISTRIBUICAO TUSD",
+   "DEMANDA DE DISTRIBUICAO TE",
+   "SUBSIDIO TARIFARIO TUSD",
+   "SUBSIDIO TARIFARIO LIQUIDO (negativo)",
+   "DEVOLUCAO DE AJUSTE DE FATURAMENTO",
+   "COBRANCA ILUM PUBLICA PARA A PREFEITURA"
+  ],
+  "atencao": "SUBSIDIO TARIFARIO TUSD é COBRANÇA, SUBSIDIO TARIFARIO LIQUIDO é o líquido (geralmente negativo). Manter sinal."
+ },
+ "tributos_resumo": {
+  "estrategia": "Bloco vertical: ICMS COFINS PIS com colunas Base, Alíquota%, Valor (alíquota com símbolo %).",
+  "icms": {
+   "base_calculo": {
+    "anchor": "ICMS",
+    "regex": "ICMS\\s+([\\d\\.]+,\\d{2})\\s+(\\d+%)\\s+([\\d\\.]+,\\d{2})",
+    "group": 1
+   },
+   "aliquota_pct": {
+    "anchor": "ICMS",
+    "regex": "ICMS\\s+([\\d\\.]+,\\d{2})\\s+(\\d+)%\\s+([\\d\\.]+,\\d{2})",
+    "group": 2
+   },
+   "valor": {
+    "anchor": "ICMS",
+    "regex": "ICMS\\s+([\\d\\.]+,\\d{2})\\s+(?:\\d+%)\\s+([\\d\\.]+,\\d{2})",
+    "group": 2
+   }
+  },
+  "cofins": {
+   "base_calculo": {
+    "anchor": "COFINS",
+    "regex": "COFINS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)%\\s+([\\d\\.]+,\\d{2})",
+    "group": 1
+   },
+   "aliquota_pct": {
+    "anchor": "COFINS",
+    "regex": "COFINS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)%\\s+([\\d\\.]+,\\d{2})",
+    "group": 2
+   },
+   "valor": {
+    "anchor": "COFINS",
+    "regex": "COFINS\\s+([\\d\\.]+,\\d{2})\\s+(?:[\\d,]+)%\\s+([\\d\\.]+,\\d{2})",
+    "group": 2
+   }
+  },
+  "pis": {
+   "base_calculo": {
+    "anchor": "PIS",
+    "regex": "PIS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)%\\s+([\\d\\.]+,\\d{2})",
+    "group": 1
+   },
+   "aliquota_pct": {
+    "anchor": "PIS",
+    "regex": "PIS\\s+([\\d\\.]+,\\d{2})\\s+([\\d,]+)%\\s+([\\d\\.]+,\\d{2})",
+    "group": 2
+   },
+   "valor": {
+    "anchor": "PIS",
+    "regex": "PIS\\s+([\\d\\.]+,\\d{2})\\s+(?:[\\d,]+)%\\s+([\\d\\.]+,\\d{2})",
+    "group": 2
+   }
+  }
+ },
+ "medicao_consumo": {
+  "estrategia": "Bloco MEDIDOR | GRANDEZA | POSTO | LEITURA_ANT | LEITURA_ATUAL | CONSTANTE | VALOR. Para o ELEKTRO usa PT/FP/TP. CUIDADO: leituras vêm com PONTO (e.g. 5.06) em vez de vírgula.",
+  "regex_linha": "^(RM\\d{7})\\s+(CONSUMO kWh|DEMANDA kW|ENERGIA REAT EXC|TUSD DEMANDA)\\s+(PT|FP|TP)\\s+(\\d+)\\s+(\\d+)\\s+([\\d\\.]+)\\s+(\\d+|[\\d\\.]+)$",
+  "colunas_em_ordem": [
+   "medidor",
+   "grandeza",
+   "posto",
+   "leitura_anterior",
+   "leitura_atual",
+   "constante",
+   "registrado"
+  ],
+  "atencao": "Constante e Registrado usam '.' (5.06, 35.06) — usar parse_float que troque '.' por '.' (manter como está em vez do 'remover ponto, trocar vírgula')"
+ },
+ "_diferencas_chave_vs_energisa": [
+  "Razão social não aparece literal (deduzir do CNPJ 02.328.280/0002-78 = Elektro Redes MS)",
+  "ICMS 17% (MS) em vez de 18%",
+  "Leituras de medidor com PONTO decimal em vez de vírgula",
+  "Grandezas com códigos PT/FP/TP (Ponta/Fora Ponta/Todos Postos) em vez de Ponta/Fora Ponta literal",
+  "Tem 'SUBSIDIO TARIFARIO' com par bruto/líquido (estorno) — único nessa distribuidora",
+  "Itens da fatura aparecem DUPLICADOS no texto (1ª via + boleto)",
+  "Banco débito automático 341 idêntico (Itaú)",
+  "Tem 'DESCONTO SOBRE TARIFA: R$ X' separado dos itens",
+  "Tem 'Esta Fatura está paga!' aparece quando já quitada"
+ ],
+ "validacoes_pos_extracao": [
+  "soma(itens_fatura.valor_rs) considerando subsidios negativos ≈ valor_total ± 0,10",
+  "leitura_atual >= leitura_anterior (em algumas é igual quando consumo zero)",
+  "aliquota_icms == 17 (MS)",
+  "chave_acesso tem 44 dígitos",
+  "Itens duplicados: pegar primeira ocorrência ou de-duplicar antes de somar"
+ ],
+ "_not_in_pdf": [
+  "classe_consumidor",
+  "dias_faturados",
+  "grupo_tarifario",
+  "mes_referencia",
+  "numero_fatura",
+  "subgrupo_tarifario",
+  "tensao_fornecimento",
+  "valor_total_fatura"
+ ],
+ "gd_scee": {
+  "_obs": "Elektro: Saldo Mes Ponta / F Ponta",
+  "saldo_fponta": {
+   "regex": "Saldo\\s+Mes\\s+F\\s*Ponta\\s+([\\d.]+)",
+   "group": 1
+  },
+  "saldo_ponta": {
+   "regex": "Saldo\\s+Mes\\s+Ponta\\s+([\\d.]+)",
+   "group": 1
+  }
+ }
+}

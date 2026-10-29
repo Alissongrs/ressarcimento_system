@@ -75,9 +75,9 @@ func AddAnexoByRequisicaoID(c *gin.Context) {
 		if err := os.MkdirAll(filepath.Dir(fullPath), os.ModePerm); err == nil {
 			_ = os.WriteFile(fullPath, data, 0644)
 		}
-		_, err = execGorm(tx, 
+		_, err = execGorm(tx,
 			`INSERT INTO FT_ANEXOS
-			  (id_requisicao, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
+			  (id_processo, nome_arquivo, caminho_arquivo, enviado_por, data_upload, mime_type, tamanho_bytes, arquivo_blob)
 			  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			reqID, filename, pseudoPath, userName, time.Now(), mimeType, sizeBytes, data,
 		)
@@ -119,8 +119,8 @@ func DeleteAnexoByRequisicaoID(c *gin.Context) {
 		return
 	}
 
-	res, err := execGorm(database.GormDB_App, 
-		"DELETE FROM FT_ANEXOS WHERE id_anexo = ? AND id_requisicao = ?",
+	res, err := execGorm(database.GormDB_App,
+		"DELETE FROM FT_ANEXOS WHERE id_anexo = ? AND id_processo = ?",
 		anexoID, reqID,
 	)
 	if err != nil {

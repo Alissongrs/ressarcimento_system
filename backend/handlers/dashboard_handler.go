@@ -151,14 +151,14 @@ func (h *DashboardHandler) MovimentacoesUltimas24h(c *gin.Context) {
 	rows, err := queryGorm(database.GormDB_App, `
 		SELECT
 			h.id_historico,
-			h.id_requisicao,
+			h.id_processo,
 			h.id_usuario_gestor,
 			u.nome_usuario AS usuario_nome,
-			h.status_anterior,
-			h.status_novo,
-			h.etapa_anterior,
-			h.etapa_nova,
-			h.sub_etapa,
+			(SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_anterior),
+			(SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),
+			(SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),
+			(SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),
+			(SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),
 			h.comentario,
 			h.data_movimentacao,
 			GROUP_CONCAT(LOWER(TRIM(dc.nome)) ORDER BY dc.nome SEPARATOR ',') AS canais_csv
@@ -169,14 +169,14 @@ func (h *DashboardHandler) MovimentacoesUltimas24h(c *gin.Context) {
 		WHERE h.data_movimentacao >= NOW() - INTERVAL 24 HOUR
 		GROUP BY
 			h.id_historico,
-			h.id_requisicao,
+			h.id_processo,
 			h.id_usuario_gestor,
 			u.nome_usuario,
-			h.status_anterior,
-			h.status_novo,
-			h.etapa_anterior,
-			h.etapa_nova,
-			h.sub_etapa,
+			(SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_anterior),
+			(SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),
+			(SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),
+			(SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),
+			(SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),
 			h.comentario,
 			h.data_movimentacao
 		ORDER BY h.data_movimentacao DESC, h.id_historico DESC;

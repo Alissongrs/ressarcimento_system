@@ -1,0 +1,75 @@
+{
+  "instancias": [
+    { "id": 1, "nome": "Distribuidora" },
+    { "id": 2, "nome": "Ouvidoria" },
+    { "id": 3, "nome": "ANEEL" },
+    { "id": 4, "nome": "SMA" }
+  ],
+  "etapas": [
+    { "id": 1, "nome": "Reclamação", "ordem": 1 },
+    { "id": 2, "nome": "Contestação", "ordem": 2 },
+    { "id": 3, "nome": "Conciliação", "ordem": 3 },
+    { "id": 4, "nome": "Faturamento", "ordem": 4 },
+    { "id": 5, "nome": "Repasse", "ordem": 5 },
+    { "id": 6, "nome": "Encerramento", "ordem": 6 }
+  ],
+  "status": [
+    { "id": 1, "nome": "Em análise" },
+    { "id": 2, "nome": "Em elaboração" },
+    { "id": 3, "nome": "Aguardando retorno" },
+    { "id": 4, "nome": "Pendente" },
+    { "id": 5, "nome": "Suspenso" },
+    { "id": 6, "nome": "Cancelado" },
+    { "id": 7, "nome": "Encerrado" }
+  ],
+  "aprovacoes": [
+    { "id": 1, "nome": "Deferido" },
+    { "id": 2, "nome": "Indeferido" }
+  ],
+  "prioridades": [
+    { "id": 1, "nome": "Alta", "cor": "#dc2626" },
+    { "id": 2, "nome": "Média", "cor": "#d97706" },
+    { "id": 3, "nome": "Normal", "cor": "#6a7384" },
+    { "id": 4, "nome": "Baixa", "cor": "#16a34a" }
+  ],
+  "formas_devolucao": [
+    { "id": 1, "nome": "PIX", "requer_dados_bancarios": true },
+    { "id": 2, "nome": "TED", "requer_dados_bancarios": true },
+    { "id": 3, "nome": "Crédito em fatura", "requer_dados_bancarios": false },
+    { "id": 4, "nome": "Cheque", "requer_dados_bancarios": false },
+    { "id": 5, "nome": "Boleto", "requer_dados_bancarios": false }
+  ],
+  "distribuidoras": [
+    { "id": 1, "nome": "CEMIG", "cnpj": "06.981.180/0001-16" },
+    { "id": 2, "nome": "Light", "cnpj": "60.444.437/0001-46" },
+    { "id": 3, "nome": "Enel SP", "cnpj": "61.695.227/0001-93" },
+    { "id": 4, "nome": "Enel Distribuição Ceará (COELCE)", "cnpj": "07.047.251/0001-70" },
+    { "id": 5, "nome": "Enel Rio", "cnpj": "33.050.071/0001-58" },
+    { "id": 6, "nome": "Equatorial GO", "cnpj": "01.543.032/0001-04" },
+    { "id": 7, "nome": "CPFL Paulista", "cnpj": "33.050.196/0001-88" },
+    { "id": 8, "nome": "CPFL Piratininga", "cnpj": "04.172.213/0001-51" },
+    { "id": 9, "nome": "EDP SP", "cnpj": "02.302.100/0001-06" },
+    { "id": 10, "nome": "Energisa MT", "cnpj": "03.467.321/0001-99" },
+    { "id": 11, "nome": "Neoenergia Brasília", "cnpj": "07.522.669/0001-92" },
+    { "id": 12, "nome": "Copel", "cnpj": "76.483.817/0001-20" },
+    { "id": 13, "nome": "Cosern", "cnpj": "08.324.196/0001-81" }
+  ],
+  "tipos_irregularidade": [
+    { "id": 1, "nome": "Cobrança indevida" },
+    { "id": 2, "nome": "Tributação ICMS/PIS/COFINS" },
+    { "id": 3, "nome": "Demanda" },
+    { "id": 4, "nome": "Bandeira tarifária" },
+    { "id": 5, "nome": "GD/SCEE" },
+    { "id": 6, "nome": "Religação/Disponibilidade" }
+  ],
+  "subtipos_irregularidade": [
+    { "id": 1, "id_tipo": 2, "nome": "ICMS sobre TUSD (Tema 986)" },
+    { "id": 2, "id_tipo": 2, "nome": "PIS/COFINS sobre TUSD" },
+    { "id": 3, "id_tipo": 3, "nome": "Demanda ultrapassagem sem aviso" },
+    { "id": 4, "id_tipo": 3, "nome": "Demanda em UC inoperante" },
+    { "id": 5, "id_tipo": 4, "nome": "Bandeira fora do período oficial" },
+    { "id": 6, "id_tipo": 5, "nome": "Créditos GD não compensados" },
+    { "id": 7, "id_tipo": 6, "nome": "Religação cobrada indevidamente" },
+    { "id": 8, "id_tipo": 1, "nome": "Cobrança duplicada" }
+  ]
+}

@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Protocolos ANEEL — esboço v2</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--ink:#1d2433;--ink2:#5b6476;--muted:#8a93a5;--line:#e3e7ee;--pri:#1f5fbf;--pri-soft:#e8f0fc;--ok:#1d8a4e;--ok-soft:#e5f5ec;--warn:#b26a00;--warn-soft:#fdf2e0;--bad:#c0392b;--bad-soft:#fbe9e7}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.top{display:flex;align-items:center;gap:16px;background:#14213d;color:#fff;padding:10px 20px;position:sticky;top:0;z-index:5;flex-wrap:wrap}
+.top b{font-size:16px;letter-spacing:.5px}.top nav{display:flex;gap:4px;flex-wrap:wrap}
+.top nav button{background:none;border:0;color:#c9d3e6;padding:6px 10px;border-radius:6px;cursor:pointer;font:inherit}
+.top nav button.on{background:#ffffff1f;color:#fff}
+.bell{margin-left:auto;position:relative;cursor:pointer;font-size:18px}
+.bell i{position:absolute;top:-6px;right:-10px;background:var(--bad);color:#fff;font-style:normal;font-size:11px;border-radius:10px;padding:0 5px}
+.wrap{max-width:1200px;margin:0 auto;padding:20px 16px 80px}
+.tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;background:var(--pri-soft);color:var(--pri);font-weight:600;white-space:nowrap}
+.tag.ok{background:var(--ok-soft);color:var(--ok)}.tag.warn{background:var(--warn-soft);color:var(--warn)}.tag.bad{background:var(--bad-soft);color:var(--bad)}.tag.gray{background:#eef0f4;color:var(--ink2)}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:22px 0 10px}.sub{color:var(--ink2);margin:0 0 16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}.kpi small{color:var(--ink2)}.kpi div{font-size:24px;font-weight:700;margin-top:2px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px;overflow-x:auto}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+input,select{font:inherit;padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.btn{font:inherit;border:1px solid var(--line);background:#fff;border-radius:6px;padding:6px 12px;cursor:pointer}
+.btn.pri{background:var(--pri);border-color:var(--pri);color:#fff}.btn.sm{padding:3px 8px;font-size:12px}
+table{width:100%;border-collapse:collapse}th{font-size:12px;text-align:left;color:var(--ink2);font-weight:600;border-bottom:1px solid var(--line);padding:8px;white-space:nowrap}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}tr.chg td{background:#fffaf0}
+th.new,td.new{background:#eef4ff}
+.mono{font-family:ui-monospace,Consolas,monospace}.muted{color:var(--muted);font-size:12px}
+.sweep{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block}
+.toast{position:fixed;right:20px;bottom:20px;width:360px;max-width:calc(100vw - 32px);background:#fff;border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:10px;box-shadow:0 8px 30px #0002;padding:12px 14px;z-index:9}
+.toast b{display:block;margin-bottom:2px}.toast .x{float:right;cursor:pointer;color:var(--muted)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:860px){.grid2{grid-template-columns:1fr}}
+.tl{border-left:2px solid var(--line);margin-left:6px;padding-left:14px}.tl p{margin:0 0 12px;position:relative}.tl p:before{content:"";position:absolute;left:-20px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--pri)}
+.tl p.aneel:before{background:var(--warn)}
+.diff{background:#f7f8fa;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px}
+.diff del{color:var(--bad)}.diff ins{color:var(--ok);text-decoration:none}
+ol.plan li{margin-bottom:10px}.note{background:var(--warn-soft);border:1px solid #f1d9a8;border-radius:8px;padding:10px 12px;margin:10px 0}
+.hint{background:var(--pri-soft);border:1px solid #c9dbf6;border-radius:8px;padding:8px 12px;margin:0 0 12px;font-size:13px}
+.page{display:none}.page.on{display:block}
+.search{display:flex;gap:8px;flex-wrap:wrap}.search input{flex:1;min-width:240px;font-size:16px;padding:10px 12px}
+.res{border:1px solid var(--line);border-radius:10px;padding:14px;margin-top:14px}
+.res dl{display:grid;grid-template-columns:170px 1fr;gap:6px 12px;margin:10px 0}.res dt{color:var(--ink2)}.res dd{margin:0}
+@media(max-width:600px){.res dl{grid-template-columns:1fr}}
+.pill{border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.hist-aneel{border-left:3px solid var(--warn)}
+</style>
+</head>
+<body>
+<div class="top">
+  <b>SURE</b>
+  <nav id="nav">
+    <button data-p="controle" class="on">① Controle de Processos</button>
+    <button data-p="historico">② Histórico do processo</button>
+    <button data-p="consulta">③ Consultar protocolo</button>
+    <button data-p="tarefas">④ Tarefas</button>
+    <button data-p="plano">⑤ Plano</button>
+  </nav>
+  <span class="bell" title="Alertas" onclick="go('tarefas')">🔔<i>3</i></span>
+</div>
+
+<div class="wrap">
+
+<!-- ① CONTROLE DE PROCESSOS -->
+<section class="page on" id="controle">
+  <h1>Controle de Processos</h1>
+  <p class="sub">A tela que já existe, com duas colunas novas (em azul): <b>Protocolo ANEEL</b> e <b>Situação na ANEEL</b>.</p>
+  <div class="card sweep">
+    <span class="dot"></span> Protocolos ANEEL conferidos às <b>14:00</b> (1.107 de 1.107) · próxima conferência às 15:00
+    <span class="tag warn">3 mudaram</span>
+    <label style="margin-left:auto"><input type="checkbox"> mostrar só processos com mudança na ANEEL</label>
+  </div>
+  <div class="card">
+    <div class="bar">
+      <input placeholder="Buscar processo, cliente, UC ou protocolo ANEEL" style="flex:1;min-width:240px">
+      <select><option>Situação ANEEL: todas</option><option>Aguardando distribuidora</option><option>Resposta da distribuidora</option><option>Prazo vencido</option><option>Encerrado</option><option>Sem protocolo</option></select>
+      <button class="btn">Exportar</button>
+    </div>
+    <table>
+      <thead><tr><th>Processo</th><th>Cliente</th><th>Distribuidora</th><th>Etapa</th><th class="new">Protocolo ANEEL</th><th class="new">Situação na ANEEL</th><th>Responsável</th></tr></thead>
+      <tbody>
+        <tr class="chg"><td><a href="#" onclick="go('historico')">#17514</a></td><td>CLARO S.A.</td><td>Enel RJ</td><td>ANEEL</td>
+          <td class="new mono">010.665.84026-55</td>
+          <td class="new"><span class="tag warn">Resposta da distribuidora</span><br><span class="muted">mudou hoje 13:47</span></td><td>Eliane</td></tr>
+        <tr class="chg"><td>#18489</td><td>VIA S.A.</td><td>CEMIG</td><td>ANEEL</td>
+          <td class="new mono">010.665.80626-17</td>
+          <td class="new"><span class="tag bad">Prazo da distribuidora vencido</span><br><span class="muted">mudou hoje 11:02</span></td><td>Paulo</td></tr>
+        <tr class="chg"><td>#18351</td><td>HOSPITAL ISRAELITA ALBERT EINSTEIN</td><td>Enel SP</td><td>ANEEL</td>
+          <td class="new mono">010.665.79026-89</td>
+          <td class="new"><span class="tag ok">Encerrado pela ANEEL</span><br><span class="muted">mudou hoje 09:15</span></td><td>Luana</td></tr>
+        <tr><td>#18324</td><td>CLARO S.A.</td><td>Light</td><td>ANEEL</td>
+          <td class="new mono">010.665.78226-50</td>
+          <td class="new"><span class="tag gray">Encaminhado à distribuidora</span><br><span class="muted">desde 23/10</span></td><td>Eliane</td></tr>
+        <tr><td>#18210</td><td>VIA S.A.</td><td>Copel</td><td>Ouvidoria</td>
+          <td class="new"><span class="muted">—</span> <button class="btn sm" onclick="go('consulta')">+ vincular</button></td>
+          <td class="new"><span class="muted">sem protocolo</span></td><td>Luana</td></tr>
+        <tr><td>#17682</td><td>CLARO S.A.</td><td>Coelba</td><td>ANEEL</td>
+          <td class="new mono">010.665.55726-14<br><span class="muted">+1 protocolo</span></td>
+          <td class="new"><span class="tag gray">Encaminhado à distribuidora</span><br><span class="muted">desde 20/10</span></td><td>Paulo</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ② HISTÓRICO -->
+<section class="page" id="historico">
+  <h1>Processo #17514 — CLARO S.A. · Enel RJ</h1>
+  <p class="sub">É o histórico que <b>já existe</b> dentro do processo. Muda só isto: cada mudança da ANEEL entra sozinha como movimentação (em laranja), e ao lado aparece o quadro "Protocolos ANEEL deste processo".</p>
+  <div class="grid2">
+    <div class="card">
+      <h2 style="margin-top:0">Histórico</h2>
+      <div class="tl">
+        <p class="aneel"><b>hoje 14:00 — 🏛️ ANEEL: Resposta da distribuidora</b><br>
+          Protocolo 010.665.84026-55 · <span class="muted">Encaminhado à distribuidora → Resposta da distribuidora</span><br>
+          <span class="muted">automático · tarefa criada</span></p>
+        <p><b>24/10 10:12 — Eliane</b><br>Cliente enviou documentos complementares.</p>
+        <p class="aneel"><b>24/10 09:10 — 🏛️ ANEEL: Encaminhado à distribuidora</b><br><span class="muted">automático</span></p>
+        <p><b>23/10 16:55 — Eliane</b><br>Enviamos para ANEEL - Protocolo 010.665.84026-55<br><span class="muted">protocolo reconhecido e vinculado ao processo</span></p>
+      </div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">Protocolos ANEEL deste processo</h2>
+      <table>
+        <tr><td class="mono">010.665.84026-55</td><td><span class="tag warn">Resposta da distribuidora</span><br><span class="muted">resp.: Eliane</span></td><td><button class="btn sm" onclick="go('consulta')">Consultar agora</button></td></tr>
+        <tr><td class="mono">010.665.51126-13</td><td><span class="tag ok">Encerrado</span></td><td><button class="btn sm" onclick="go('consulta')">Consultar agora</button></td></tr>
+      </table>
+      <div class="bar" style="margin-top:12px">
+        <input class="mono" placeholder="000.000.00000-00" style="width:180px">
+        <button class="btn pri">Vincular protocolo</button>
+      </div>
+      <p class="muted">Quando alguém escreve "Protocolo 010.665…" numa movimentação, o sistema já vincula o protocolo a este processo.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ③ CONSULTAR -->
+<section class="page" id="consulta">
+  <h1>Consultar protocolo ANEEL</h1>
+  <p class="sub">Digite o protocolo: o sistema consulta no site da ANEEL e mostra o resultado aqui. Se ele ainda não estiver em nenhum processo, dá para vincular.</p>
+  <div class="card">
+    <div class="search">
+      <input class="mono" id="q" value="010.665.91234-26" placeholder="000.000.00000-00">
+      <button class="btn pri" onclick="document.getElementById('res').style.display='block'">Consultar na ANEEL</button>
+    </div>
+    <p class="muted" style="margin:6px 0 0">Também abre por atalho: no chat, escrever "protocolo 010.665.91234-26".</p>
+
+    <div class="res" id="res">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <b class="mono" style="font-size:16px">010.665.91234-26</b>
+        <span class="tag warn">Resposta da distribuidora</span>
+        <span class="muted" style="margin-left:auto">consultado na ANEEL agora · 14:22</span>
+      </div>
+      <dl>
+        <dt>Distribuidora</dt><dd>Enel RJ</dd>
+        <dt>Assunto</dt><dd>Ressarcimento de danos / cobrança indevida</dd>
+        <dt>Instalação / UC</dt><dd class="mono">4012345</dd>
+        <dt>Aberto em</dt><dd>10/10/2026</dd>
+        <dt>Último andamento</dt><dd>24/10/2026 — Distribuidora enviou resposta à ANEEL</dd>
+      </dl>
+      <div class="note" style="margin:8px 0">⚠️ Este protocolo <b>não está em nenhum processo</b>.</div>
+      <b>Vincular a um processo</b>
+      <div class="pill">
+        <span>Sugestão pela UC 4012345:</span>
+        <b>#18412 — CLARO S.A. · Enel RJ</b>
+        <button class="btn pri" onclick="this.outerHTML='<span class=&quot;tag ok&quot;>Vinculado ao #18412</span>'">Vincular</button>
+      </div>
+      <div class="pill">
+        <span>Outro processo:</span><input placeholder="nº do processo" style="width:140px">
+        <button class="btn">Vincular</button>
+        <span class="muted">ou</span>
+        <button class="btn">Só acompanhar (sem processo)</button>
+      </div>
+      <b style="display:block;margin-top:14px">Analista responsável</b>
+      <div class="pill">
+        <select id="resp"><option value="">— escolher —</option><option>Eliane</option><option>Paulo</option><option>Luana</option></select>
+        <button class="btn pri" onclick="const s=document.getElementById('resp');if(!s.value){s.focus();return}this.outerHTML='<span class=&quot;tag ok&quot;>Responsável: '+s.value+'</span>'">Salvar</button>
+        <span class="muted">recebe as tarefas e os alertas quando este protocolo mudar na ANEEL</span>
+      </div>
+    </div>
+  </div>
+  <h2>Se o protocolo já estiver vinculado</h2>
+  <div class="card">
+    <div class="pill" style="margin-top:0"><b class="mono">010.665.84026-55</b><span class="tag warn">Resposta da distribuidora</span>
+      <span>já está no processo <a href="#" onclick="go('historico')">#17514 — CLARO · Enel RJ</a></span>
+      <button class="btn sm" onclick="go('historico')">Abrir processo</button></div>
+  </div>
+</section>
+
+<!-- ④ TAREFAS -->
+<section class="page" id="tarefas">
+  <h1>Tarefas geradas pelos protocolos</h1>
+  <p class="sub">Cada mudança na ANEEL vira uma tarefa. Por enquanto você direciona para um analista; depois entra a regra automática por tipo de mudança.</p>
+  <div class="kpis">
+    <div class="kpi"><small>Sem responsável</small><div style="color:var(--bad)">3</div></div>
+    <div class="kpi"><small>Com analista</small><div>12</div></div>
+    <div class="kpi"><small>Concluídas (7 dias)</small><div>21</div></div>
+  </div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Tarefa</th><th>O que mudou</th><th>Processo</th><th>Criada</th><th>Direcionar para</th><th></th></tr></thead>
+      <tbody>
+        <tr><td><b>Analisar resposta da distribuidora</b></td>
+          <td><div class="diff"><del>Encaminhado à distribuidora</del> → <ins>Resposta da distribuidora</ins></div><span class="muted mono">010.665.84026-55</span></td>
+          <td>#17514<br><span class="muted">CLARO · Enel RJ</span></td><td>hoje 14:00</td>
+          <td><select><option value="">— escolher —</option><option>Eliane</option><option>Paulo</option><option>Luana</option></select></td>
+          <td><button class="btn pri" onclick="atribuir(this)">Direcionar</button></td></tr>
+        <tr><td><b>Cobrar distribuidora</b></td>
+          <td><div class="diff"><del>Encaminhado à distribuidora</del> → <ins>Prazo da distribuidora vencido</ins></div><span class="muted mono">010.665.80626-17</span></td>
+          <td>#18489<br><span class="muted">VIA · CEMIG</span></td><td>hoje 11:05</td>
+          <td><select><option value="">— escolher —</option><option>Eliane</option><option>Paulo</option><option>Luana</option></select></td>
+          <td><button class="btn pri" onclick="atribuir(this)">Direcionar</button></td></tr>
+        <tr><td><b>Registrar encerramento</b></td>
+          <td><div class="diff"><del>Resposta da distribuidora</del> → <ins>Encerrado pela ANEEL</ins></div><span class="muted mono">010.665.79026-89</span></td>
+          <td>#18351<br><span class="muted">EINSTEIN · Enel SP</span></td><td>hoje 09:15</td>
+          <td><select><option value="">— escolher —</option><option>Eliane</option><option>Paulo</option><option>Luana</option></select></td>
+          <td><button class="btn pri" onclick="atribuir(this)">Direcionar</button></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="hint">Depois de direcionada, a tarefa aparece no 🔔 do analista e em <b>Minhas tarefas</b>, com os botões <i>Abrir processo</i> e <i>Concluir</i> (o comentário de conclusão vai para o histórico).</div>
+</section>
+
+<!-- ⑤ PLANO -->
+<section class="page" id="plano">
+  <h1>Plano</h1>
+  <p class="sub">O histórico dos processos tem <b>1.107 protocolos ANEEL</b> em <b>693 processos</b>, e o sistema já recebeu <b>1.149 e-mails</b> da ANEEL.</p>
+  <div class="note"><b>Ponto de atenção:</b> o site da ANEEL tem uma verificação anti-robô (Cloudflare) na entrada. A consulta automática no site (passos 3 e 4) só funciona se a ANEEL liberar o acesso do nosso servidor; não vamos burlar essa verificação. Enquanto isso, os e-mails da ANEEL já dão boa parte das mudanças.</div>
+  <ol class="plan">
+    <li><b>Guardar os protocolos</b> ✅ — tabela nova ligada ao processo, com analista responsável. Importados 1.107 protocolos de 693 processos do histórico; 27 aparecem em mais de um processo e ficam para você confirmar.</li>
+    <li><b>Mostrar no Controle de Processos e no Histórico</b> — colunas "Protocolo ANEEL" e "Situação na ANEEL", filtro "só com mudança", e cada mudança entra no histórico do processo sozinha.</li>
+    <li><b>Consultar protocolo no sistema</b> — tela de consulta: o sistema busca no site da ANEEL e mostra o resultado; se o protocolo não estiver em processo, sugere um (pela UC) e deixa vincular.</li>
+    <li><b>Conferência automática a cada 1h</b> — o servidor consulta todos os protocolos em aberto na ANEEL, compara com a última leitura e registra o que mudou.</li>
+    <li><b>Leitura dos e-mails da ANEEL a cada 1h</b> — complementa o site e já funciona hoje: tira o protocolo do assunto e registra o andamento.</li>
+    <li><b>Tarefas e alertas</b> — mudança → tarefa sem responsável + alerta na tela. Você direciona para Eliane, Paulo ou Luana. Depois: regra automática por tipo de mudança.</li>
+    <li><b>Depois</b> — aviso por WhatsApp a partir do mesmo evento.</li>
+  </ol>
+  <p class="muted">A senha da ANEEL fica só no arquivo de configuração do servidor, nunca no código nem no banco.</p>
+</section>
+
+</div>
+
+<div class="toast" id="toast">
+  <span class="x" onclick="this.parentNode.remove()">✕</span>
+  <b>🔔 Protocolo ANEEL mudou</b>
+  010.665.84026-55 · processo #17514 (CLARO · Enel RJ)<br>
+  <span class="muted">Encaminhado à distribuidora → <b>Resposta da distribuidora</b></span><br>
+  <button class="btn pri" style="margin-top:8px" onclick="go('tarefas')">Ver tarefa</button>
+</div>
+
+<script>
+function go(p){document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on',s.id===p));document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));scrollTo(0,0)}
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>go(b.dataset.p));
+function atribuir(btn){const s=btn.closest('tr').querySelector('select');if(!s.value){s.focus();return}btn.outerHTML='<span class="tag ok">Com '+s.value+'</span>';s.disabled=true}
+</script>
+</body>
+</html>

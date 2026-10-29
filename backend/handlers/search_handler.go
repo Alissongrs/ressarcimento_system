@@ -14,7 +14,7 @@ import (
 
 type SearchHit struct {
 	IDHistorico      int64  `json:"id_historico"`
-	ProcessoID       int64  `json:"processo_id"`
+	ProcessoID       int64  `json:"id_processo"`
 	DataMovimentacao string `json:"data_movimentacao"`
 	UsuarioNome      string `json:"usuario_nome"`
 	Comentario       string `json:"comentario"`
@@ -61,7 +61,7 @@ func SearchGlobal(c *gin.Context) {
 		processID = n
 	}
 	whereParts := []string{
-		"LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa,''), COALESCE(r.cliente,''))) LIKE ?",
+		"LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''), NULLIF((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),''), ''), COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),''), COALESCE(r.cliente,''))) LIKE ?",
 		`EXISTS (
                 SELECT 1 
                 FROM FT_HISTORICO_CANAIS hc2
@@ -81,16 +81,16 @@ func SearchGlobal(c *gin.Context) {
 	rows, err := queryGorm(database.GormDB_App, `
         SELECT
             COALESCE(h.id_historico, 0) AS id_historico,
-            r.id_requisicao AS processo_id,
+            r.id_requisicao AS id_processo,
             DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao,
             COALESCE(u.nome_usuario, '') AS usuario_nome,
             COALESCE(h.comentario, '') AS comentario,
-            CONCAT_WS(' - ', COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa, '')) AS status_composto,
+            CONCAT_WS(' - ', COALESCE(NULLIF((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''), NULLIF((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),''), ''), COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), '')) AS status_composto,
             COALESCE(GROUP_CONCAT(LOWER(TRIM(dc.nome)) ORDER BY dc.nome SEPARATOR ','), '') AS canais_csv,
             COALESCE(r.cliente, '') AS nome_cliente,
             COALESCE(r.uc, '') AS uc
         FROM FT_REQUISICOES r
-        LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = r.id_requisicao
+        LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_processo = r.id_requisicao
         LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
         LEFT JOIN FT_HISTORICO_CANAIS hc ON hc.id_historico = h.id_historico
         LEFT JOIN DM_CANAIS_COMUNICACAO dc ON dc.id_canal = hc.id_canal
@@ -98,15 +98,15 @@ func SearchGlobal(c *gin.Context) {
         GROUP BY
             r.id_requisicao,
             h.id_historico,
-            h.id_requisicao,
+            h.id_processo,
             h.data_movimentacao,
             u.nome_usuario,
             h.comentario,
-            h.status_anterior,
-            h.status_novo,
-            h.etapa_anterior,
-            h.etapa_nova,
-            h.sub_etapa,
+            h.id_status_anterior,
+            h.id_status_novo,
+            (SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),
+            (SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),
+            (SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),
             r.cliente,
             r.uc
         ORDER BY h.data_movimentacao DESC, h.id_historico DESC
@@ -116,7 +116,7 @@ func SearchGlobal(c *gin.Context) {
 		log.Printf("[SearchGlobal] primary query error: %v\n", err)
 		// Fallback: sem canais (sem joins/exists), evita 500 em ambientes sem tabelas auxiliares
 		fallbackWhereParts := []string{
-			"LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa,''), COALESCE(r.cliente,''))) LIKE ?",
+			"LOWER(CONCAT_WS(' ', COALESCE(h.comentario,''), COALESCE(u.nome_usuario,''), COALESCE(NULLIF((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''), NULLIF((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),''), ''), COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo),''), COALESCE(r.cliente,''))) LIKE ?",
 			"LOWER(COALESCE(r.uc,'')) LIKE ?",
 		}
 		fallbackArgs := []any{like, like}
@@ -128,16 +128,16 @@ func SearchGlobal(c *gin.Context) {
 		rows, err = queryGorm(database.GormDB_App, `
             SELECT
                 COALESCE(h.id_historico, 0) AS id_historico,
-                r.id_requisicao AS processo_id,
+                r.id_requisicao AS id_processo,
                 DATE_FORMAT(h.data_movimentacao, '%Y-%m-%d %H:%i:%s') AS data_movimentacao,
                 COALESCE(u.nome_usuario, '') AS usuario_nome,
                 COALESCE(h.comentario, '') AS comentario,
-                CONCAT_WS(' - ', COALESCE(NULLIF(h.etapa_nova,''), NULLIF(h.etapa_anterior,''), ''), COALESCE(h.sub_etapa, '')) AS status_composto,
+                CONCAT_WS(' - ', COALESCE(NULLIF((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_nova),''), NULLIF((SELECT nome FROM DM_ETAPAS WHERE id_etapa = h.id_etapa_anterior),''), ''), COALESCE((SELECT nome FROM DM_STATUS_PROCESSO WHERE id_status = h.id_status_novo), '')) AS status_composto,
                 '' AS canais_csv,
                 COALESCE(r.cliente, '') AS nome_cliente,
                 COALESCE(r.uc, '') AS uc
             FROM FT_REQUISICOES r
-            LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_requisicao = r.id_requisicao
+            LEFT JOIN FT_HISTORICO_MOVIMENTACOES h ON h.id_processo = r.id_requisicao
             LEFT JOIN DM_USUARIO u ON u.id_usuario = h.id_usuario_gestor
             `+fallbackWhereSQL+`
             ORDER BY h.data_movimentacao DESC, h.id_historico DESC

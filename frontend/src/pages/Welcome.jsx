@@ -53,7 +53,7 @@ export default function Welcome() {
         className="absolute inset-0 -z-10 opacity-60"
         style={{
           background:
-            'radial-gradient(1000px 400px at top left, var(--accent) 0%, transparent 60%), radial-gradient(800px 300px at bottom right, var(--accent-2, #4f46e5) 0%, transparent 60%)',
+            'radial-gradient(1000px 400px at top left, var(--accent) 0%, transparent 60%), radial-gradient(800px 300px at bottom right, var(--accent-2) 0%, transparent 60%)',
         }}
       />
 
@@ -115,12 +115,16 @@ export default function Welcome() {
             <div
               key={i}
               className={`rounded-xl border p-4 shadow-sm ${
-                b.bad ? 'border-red-500/30 bg-red-500/5' : 'border-emerald-500/30 bg-emerald-500/5'
+                b.bad
+                  ? 'border-[color-mix(in_srgb,var(--danger)_30%,transparent)] bg-[color-mix(in_srgb,var(--danger)_5%,transparent)]'
+                  : 'border-[color-mix(in_srgb,var(--success)_30%,transparent)] bg-[color-mix(in_srgb,var(--success)_5%,transparent)]'
               }`}
             >
               <div
                 className={`inline-flex items-center gap-2 px-2 py-1 rounded-md text-xs mb-2 ${
-                  b.bad ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'
+                  b.bad
+                    ? 'bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] text-[var(--danger)]'
+                    : 'bg-[color-mix(in_srgb,var(--success)_10%,transparent)] text-[var(--success)]'
                 }`}
               >
                 {b.icon}

@@ -84,7 +84,7 @@ func updateColunaByData(tx *gorm.DB, processoID int, userID int64) error {
 		// Quando entra em Deferidos, promove sub-etapa "Em contestacao - X" / "Primeira reclamacao - X"
 		// para "Em Conciliacao - X" mantendo o sufixo de estado (Em elaboracao / Aguardando retorno / etc).
 		var curSubID sql.NullInt64
-		_ = queryRowGorm(tx, `SELECT id_sub_etapa_processo FROM FT_PROCESSOS WHERE id_processo = ?`, processoID).
+		_ = queryRowGorm(tx, `SELECT id_status_atual /* TODO V2 */ FROM FT_PROCESSOS WHERE id_processo = ?`, processoID).
 			Scan(&curSubID)
 		if curSubID.Valid {
 			if novo, ok := deferimentoSubetapaMap[curSubID.Int64]; ok && novo.NovoID != curSubID.Int64 {
@@ -95,7 +95,7 @@ func updateColunaByData(tx *gorm.DB, processoID int, userID int64) error {
 	default:
 		// Fallback por etapa/subetapa
 		var etapa, sub sql.NullString
-		_ = queryRowGorm(tx, `SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo WHERE p.id_processo = ?`, processoID).
+		_ = queryRowGorm(tx, `SELECT e.etapa, '' /* TODO V2: removida */ FROM FT_PROCESSOS p JOIN DM_ETAPAS e ON e.id_etapa_atual /* TODO V2 */ = p.id_etapa_atual /* TODO V2 */ WHERE p.id_processo = ?`, processoID).
 			Scan(&etapa, &sub)
 		et := strings.TrimSpace(etapa.String)
 		sb := strings.TrimSpace(sub.String)
@@ -117,7 +117,7 @@ func updateColunaByData(tx *gorm.DB, processoID int, userID int64) error {
 		_ = queryRowGorm(tx, `
 			SELECT k.id_coluna, k.nome_coluna
 			  FROM FT_PROCESSOS p
-			  JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo
+			  JOIN DM_ETAPAS e ON e.id_etapa_atual /* TODO V2 */ = p.id_etapa_atual /* TODO V2 */
 			  JOIN DM_KANBAN_COLUNAS k ON k.id_coluna = e.id_coluna_kanban
 			 WHERE p.id_processo = ?`, processoID).
 			Scan(&colID, &colNome)
@@ -145,7 +145,7 @@ func updateColunaByData(tx *gorm.DB, processoID int, userID int64) error {
 
 	if targetSubID > 0 {
 		// UPDATE estendido: coluna + sub-etapa (promocao pos-deferimento)
-		if _, err := execGorm(tx, `UPDATE FT_PROCESSOS SET id_coluna = ?, nome_coluna = ?, id_sub_etapa_processo = ?, sub_etapa = ?, ultima_atualizacao = NOW() WHERE id_processo = ?`, targetCol, targetName, targetSubID, targetSubNome, processoID); err != nil {
+		if _, err := execGorm(tx, `UPDATE FT_PROCESSOS SET id_coluna = ?, nome_coluna = ?, id_status_atual /* TODO V2 */ = ?, sub_etapa = ?, ultima_atualizacao = NOW() WHERE id_processo = ?`, targetCol, targetName, targetSubID, targetSubNome, processoID); err != nil {
 			return err
 		}
 	} else if !mesmaColuna {
@@ -156,38 +156,61 @@ func updateColunaByData(tx *gorm.DB, processoID int, userID int64) error {
 	}
 
 	if userID > 0 {
-		var etapa, sub sql.NullString
-		_ = queryRowGorm(tx, `SELECT e.etapa, p.sub_etapa FROM FT_PROCESSOS p JOIN DM_ETAPAS_PROCESSO e ON e.id_etapa_processo = p.id_etapa_processo WHERE p.id_processo = ?`, processoID).
-			Scan(&etapa, &sub)
-		statusNovo := strings.TrimSpace(etapa.String)
-		if s := strings.TrimSpace(sub.String); s != "" {
-			statusNovo = statusNovo + " - " + s
-		}
+		// P1-1: histórico no schema V2. Esta rotina só muda a COLUNA (kanban),
+		// não a etapa/status → novo = atual. A transição de sub-etapa fica no comentário.
 		comentario := "Atualização automática de coluna para " + targetName
-		statusAnterior := statusNovo
 		if targetSubID > 0 {
-			// Promocao de sub-etapa pos-deferimento: status_anterior reflete a sub-etapa antiga
-			// pra rastrear a transicao no historico.
-			etapaTxt := strings.TrimSpace(etapa.String)
-			// Tenta inverter o mapping pra recuperar a sub_etapa anterior (heuristica: troca "Em Conciliação"/"Em conciliação" por "Em contestação")
-			subAnterior := strings.Replace(targetSubNome, "Em Conciliação", "Em contestação", 1)
-			subAnterior = strings.Replace(subAnterior, "Em conciliação", "Em contestação", 1)
-			statusAnterior = etapaTxt + " - " + subAnterior
-			comentario = "Atualização automática: coluna -> " + targetName + " | sub-etapa: " + subAnterior + " -> " + targetSubNome
+			comentario = "Atualização automática: coluna -> " + targetName + " | sub-etapa: " + targetSubNome
 		}
-		_, _ = execGorm(tx, `
-			INSERT INTO FT_HISTORICO_MOVIMENTACOES
-			  (id_requisicao, id_usuario_gestor, status_anterior, status_novo,
-			   etapa_anterior, etapa_nova, sub_etapa,
-			   comentario, data_movimentacao, tipo_movimentacao)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'auto')`,
-			processoID, userID,
-			statusAnterior, statusNovo,
-			etapa.String, etapa.String, sub.String,
-			comentario,
-		)
+		_ = registrarHistoricoV2(tx, processoID, int64(userID), "auto", comentario, nil, nil)
 	}
 	return nil
+}
+
+// registrarHistoricoV2 grava uma movimentação em FT_HISTORICO_MOVIMENTACOES no schema V2 (P1-1).
+// O lado "anterior" vem do snapshot atual do processo; o "novo" também, exceto os ponteiros
+// passados explicitamente (novoEtapa/novoStatus != nil, para transições reais de etapa/status).
+// gestorID <= 0 grava id_usuario_gestor = NULL. Retorna o erro; o chamador decide se falha ou loga.
+//
+// É a fonte única que substitui os INSERTs V1 quebrados (id_requisicao/status_anterior/etapa_anterior),
+// que erravam 1054 silenciosamente e impediam SincronizarStatusProcesso de derivar o estado.
+func registrarHistoricoV2(tx *gorm.DB, processoID int, gestorID int64,
+	tipo, comentario string, novoEtapa, novoStatus *int) error {
+
+	var curEtapa, curStatus, curInst, curAprov sql.NullInt64
+	_ = queryRowGorm(tx, `SELECT id_etapa_atual, id_status_atual, id_instancia_atual, id_aprovacao_atual
+	                        FROM FT_PROCESSOS WHERE id_processo = ?`, processoID).
+		Scan(&curEtapa, &curStatus, &curInst, &curAprov)
+
+	novEtapa := curEtapa
+	if novoEtapa != nil {
+		novEtapa = sql.NullInt64{Int64: int64(*novoEtapa), Valid: true}
+	}
+	novStatus := curStatus
+	if novoStatus != nil {
+		novStatus = sql.NullInt64{Int64: int64(*novoStatus), Valid: true}
+	}
+
+	var gestorIface interface{}
+	if gestorID > 0 {
+		gestorIface = gestorID
+	}
+	if strings.TrimSpace(tipo) == "" {
+		tipo = "movimentacao"
+	}
+
+	_, err := execGorm(tx, `
+		INSERT INTO FT_HISTORICO_MOVIMENTACOES
+		  (id_processo, id_usuario_gestor,
+		   id_etapa_anterior, id_instancia_anterior, id_status_anterior, id_aprovacao_anterior,
+		   id_etapa_nova,     id_instancia_nova,     id_status_novo,     id_aprovacao_nova,
+		   tipo_movimentacao, comentario, data_movimentacao)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+		processoID, gestorIface,
+		curEtapa, curInst, curStatus, curAprov,
+		novEtapa, curInst, novStatus, curAprov,
+		tipo, comentario)
+	return err
 }
 
 // SincronizarStatusProcesso mantem FT_PROCESSOS coerente com a ULTIMA movimentacao
@@ -198,12 +221,17 @@ func updateColunaByData(tx *gorm.DB, processoID int, userID int64) error {
 // de como/onde o INSERT foi feito (movimentacao, comentario, admin, importacao).
 //
 // Protecoes (espelham trigger_sync_ft_processos.sql):
-//   - So considera movimentacoes cuja etapa_nova existe em DM_ETAPAS_PROCESSO.
+//   - So considera movimentacoes cuja etapa_nova existe em DM_ETAPAS.
 //   - So atualiza se a movimentacao for MAIS RECENTE que FT_PROCESSOS.data_movimentacao
 //     (nunca regride para movimentacao antiga/retroativa; empate => mantem atual).
 //   - NAO toca processos suspensos (suspenso=1).
 //   - sub_etapa do historico so sobrescreve se nao for vazia/NULL.
-//   - Mapeia id_coluna/nome_coluna via DM_ETAPAS_PROCESSO.id_coluna_kanban + DM_KANBAN_COLUNAS.
+//   - Mapeia id_coluna/nome_coluna via DM_ETAPAS.id_coluna_kanban + DM_KANBAN_COLUNAS.
+//   - NAO REBAIXA a coluna kanban: se a coluna ATUAL do processo (data-driven) ja for
+//     >= a coluna derivada da etapa, preserva a atual (resolve bug onde salvar deferimento
+//     em processo com etapa "Distribuidora" voltava coluna de "Deferidos" para "Ativos",
+//     porque "Distribuidora" mapeia para "Ativos"). Etapa/sub_etapa/data_movimentacao
+//     continuam vindo do historico — so a coluna nao regride.
 //
 // Best-effort: o erro e retornado para log, mas o chamador normalmente ignora
 // (a movimentacao no historico ja foi gravada — a sync nao deve reverter isso).
@@ -211,20 +239,18 @@ func SincronizarStatusProcesso(tx *gorm.DB, processoID int) error {
 	_, err := execGorm(tx, `
 		UPDATE FT_PROCESSOS p
 		JOIN (
-			SELECT h.id_requisicao, h.etapa_nova, h.sub_etapa, h.data_movimentacao,
-			       d.id_etapa_processo, d.id_coluna_kanban, kc.nome_coluna
+			SELECT h.id_processo,
+			       h.id_etapa_nova, h.id_instancia_nova, h.id_status_novo, h.id_aprovacao_nova,
+			       h.data_movimentacao
 			  FROM FT_HISTORICO_MOVIMENTACOES h
-			  JOIN DM_ETAPAS_PROCESSO d ON TRIM(LOWER(d.etapa)) = TRIM(LOWER(h.etapa_nova))
-			  JOIN DM_KANBAN_COLUNAS  kc ON kc.id_coluna = d.id_coluna_kanban
-			 WHERE h.id_requisicao = ?
+			 WHERE h.id_processo = ?
 			 ORDER BY h.data_movimentacao DESC, h.id_historico DESC
 			 LIMIT 1
-		) u ON u.id_requisicao = p.id_processo
-		SET p.etapa              = u.etapa_nova,
-		    p.id_etapa_processo  = u.id_etapa_processo,
-		    p.sub_etapa          = COALESCE(NULLIF(TRIM(u.sub_etapa), ''), p.sub_etapa),
-		    p.id_coluna          = u.id_coluna_kanban,
-		    p.nome_coluna        = u.nome_coluna,
+		) u ON u.id_processo = p.id_processo
+		SET p.id_etapa_atual     = COALESCE(u.id_etapa_nova, p.id_etapa_atual),
+		    p.id_instancia_atual = COALESCE(u.id_instancia_nova, p.id_instancia_atual),
+		    p.id_status_atual    = COALESCE(u.id_status_novo, p.id_status_atual),
+		    p.id_aprovacao_atual = COALESCE(u.id_aprovacao_nova, p.id_aprovacao_atual),
 		    p.data_movimentacao  = u.data_movimentacao,
 		    p.ultima_atualizacao = NOW()
 		WHERE p.id_processo = ?

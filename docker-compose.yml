@@ -126,8 +126,19 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      CORS_ALLOW_ORIGINS: "http://sure.app.br,http://sure.app.br:8080,https://sure.app.br,http://localhost,http://localhost:80,http://localhost:5173,http://127.0.0.1"
-      COOKIE_SECURE: "false"
+      # P0-3: ativa os guardrails de produção (JWT_SECRET obrigatório/forte em auth/jwt.go)
+      GO_ENV: "${GO_ENV:-production}"
+      # P0-1: TLS na conexão com o RDS. Default "skip-verify" = tráfego CRIPTOGRAFADO (TLSv1.3),
+      # sem validar a cadeia do certificado. Fecha o crítico de dados em texto puro na internet.
+      # Testado: o RDS apresenta cert legítimo Amazon RDS us-east-2; a validação plena falha no
+      # OpenSSL do Python por rigidez de cadeia. Para LIGAR o verify completo (recomendado), rode
+      # da VPS um ping com DB_APP_TLS=rds (bundle em backend/certs/global-bundle.pem já é copiado
+      # no Dockerfile) e, confirmando, troque para "rds".
+      DB_APP_TLS: "${DB_APP_TLS:-skip-verify}"
+      # CORS: prioriza HTTPS. Origens http de localhost mantidas só p/ dev.
+      CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-https://sure.app.br,http://localhost,http://localhost:5173,http://127.0.0.1}"
+      # P0-6: cookie Secure por padrão (exige HTTPS/Caddy TLS ativo). Em dev HTTP puro, defina COOKIE_SECURE=false.
+      COOKIE_SECURE: "${COOKIE_SECURE:-true}"
       LOG_FORMAT: "json"
       TZ: "America/Sao_Paulo"
 
@@ -147,11 +158,15 @@ services:
 
       AUDITTA_RAG_INDEX: "/app/data/catalogo.txt"
       UPLOAD_DIR: "/app/uploads"
+      # WhatsApp da empresa conectado por QR code (sessão no volume whatsapp_data)
+      WHATSAPP_DIR: "/app/whatsapp_sessao"
 
       # Redis (rate limiting distribuído)
       REDIS_URL: "redis://redis:6379"
     ports:
-      - "8080:8080"
+      # P0-6: expõe só no loopback do host (scripts locais em localhost:8080 seguem funcionando;
+      # acesso externo é bloqueado — o tráfego real chega via rede docker frontend/nginx/Caddy).
+      - "127.0.0.1:8080:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -162,6 +177,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - uploads_data:/app/uploads
+      - whatsapp_data:/app/whatsapp_sessao
       - ./backend/data/catalogo.txt:/app/data/catalogo.txt
       - ./backend/data/regras_aisure.txt:/app/data/regras_aisure.txt:ro
       - ./backend/data/prompt_confirmar.txt:/app/data/prompt_confirmar.txt:ro
@@ -184,9 +200,10 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    # Porta 80 exposta apenas internamente — acesso externo via Caddy
-    expose:
-      - "80"
+    # Publicado no LOOPBACK do host (127.0.0.1:8090) p/ o Apache do host fazer reverse-proxy.
+    # (Neste VPS o Apache é o front de vários sites *.amee.com.br; o Caddy fica desativado.)
+    ports:
+      - "127.0.0.1:8090:80"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1 >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -196,28 +213,40 @@ services:
     networks:
       - frontend
 
-  # TLS terminator — expõe HTTP(:80) e HTTPS(:443) para o mundo externo
-  # Em prod: defina CADDY_DOMAIN no .env (ex: sure.app.br) para cert Let's Encrypt automático
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      frontend:
-        condition: service_healthy
-    networks:
-      - frontend
+  # ====================================================================
+  # CADDY DESATIVADO neste VPS (30/07/2026).
+  # O front público aqui é o APACHE DO HOST, que já termina TLS p/ vários
+  # sites (email-api / monitoramento / ti .amee.com.br) e não pode ceder a
+  # 80/443. O Apache faz reverse-proxy do domínio do ressarcimento p/ os
+  # containers: /  -> frontend (127.0.0.1:8090)  |  /api -> backend (127.0.0.1:8080).
+  # Ver docker/apache/ressarcimento-ssl.conf. Para voltar a usar Caddy (outro
+  # ambiente sem Apache na frente), descomente este bloco.
+  # ====================================================================
+  # caddy:
+  #   image: caddy:2-alpine
+  #   restart: unless-stopped
+  #   environment:
+  #     CADDY_DOMAIN: "${CADDY_DOMAIN:-}"
+  #     CADDY_EMAIL: "${CADDY_EMAIL:-}"
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy_data:/data
+  #     - caddy_config:/config
+  #   depends_on:
+  #     frontend:
+  #       condition: service_healthy
+  #   networks:
+  #     - frontend
 
 volumes:
   db_data:
     driver: local
   uploads_data:
+    driver: local
+  whatsapp_data:
     driver: local
   caddy_data:
     driver: local

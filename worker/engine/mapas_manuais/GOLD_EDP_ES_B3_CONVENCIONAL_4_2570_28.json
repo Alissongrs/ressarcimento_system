@@ -1,0 +1,99 @@
+{
+  "_meta": {
+    "arquivo_pdf": "4_2570_28.pdf",
+    "fatura_id": 66830,
+    "distribuidora": "EDP Espírito Santo",
+    "layout": "edp_es_danf3e (NF/Conta simples — distinto do DANF3E EDP SP)",
+    "cod_empresa": 4,
+    "criado_em": "2026-05-27",
+    "fonte": "extração manual visual do usuário (gold standard)",
+    "observacoes": [
+      "Tributos no formato 'LABEL BASE X ALIQ% = VALOR' (ex: PIS 8.899,13 X 0,28% = 24,92) — distinto do EDP SP",
+      "Itens SEM CCI codes em parênteses (ao contrário do EDP SP)",
+      "ICMS 25% (ES), não 17% como assumido no mapa antigo",
+      "nome cliente vem triplicado no PDF: 'VIA VAREJO S A VAREJO S A VAREJO S/A' — normalizar p/ VIA VAREJO S/A",
+      "CNPJ cliente sem máscara: 33041260183498"
+    ]
+  },
+  "distribuidora": {
+    "razao_social": "EDP ESPIRITO SANTO DISTRIBUIÇÃO DE ENERGIA S.A",
+    "cnpj_emissor": "28.152.650/0001-71",
+    "ie_emissor": "080.250.16-5",
+    "endereco_emissor": "Rua Florentino Faller, nº 80 - 1º, 2º e 3º Andar, Salas 101, 102, 201, 202, 301 e 302 - Edifício Maxxi I",
+    "bairro_emissor": "Enseada do Suá",
+    "cidade_uf_emissor": "Vitória/ES",
+    "cep_emissor": "29050-310"
+  },
+  "cliente": {
+    "razao_social": "VIA VAREJO S/A",
+    "cnpj_cliente": "33.041.260/1834-98",
+    "ie_cliente": "083580891",
+    "endereco_entrega": "AV CARLOS LINDENBERG 723, ESCRITORIO 1, ED RIBATEJO",
+    "cep_entrega": "29122-355",
+    "bairro_entrega": "GLORIA",
+    "municipio_uf_entrega": "VILA VELHA/ES"
+  },
+  "identificadores_instalacao": {
+    "numero_instalacao": "1065508",
+    "codigo_identificacao": "450778415",
+    "roteiro_leitura": "B39VV48A00379",
+    "numero_medidor": "ECY09296"
+  },
+  "nota_fiscal": {
+    "numero_nf": "040.311.546",
+    "cod_fiscal_operacao": "5253",
+    "tipo_documento": "SEGUNDA-VIA"
+  },
+  "ligacao_tecnica": {
+    "grupo": "B",
+    "subgrupo": "B3",
+    "classe": "COMERCIAL",
+    "subclasse": "OUTROS SERVIÇOS E OUTRAS ATIVIDADES",
+    "tipo_fornecimento": "TRIFÁSICO",
+    "modalidade_tarifaria": "CONVENCIONAL",
+    "tensao_nominal": "220 / 127 V"
+  },
+  "periodo_faturamento": {
+    "data_emissao": "15/01/2020",
+    "leitura_anterior": "16/12/2019",
+    "leitura_atual": "15/01/2020",
+    "proxima_leitura_prevista": "13/02/2020",
+    "dias_faturados": 30,
+    "mes_referencia": "01/2020"
+  },
+  "vencimento_valor": {
+    "data_vencimento": "28/01/2020",
+    "valor_total_a_pagar": 11909.48,
+    "consumo_mes_kwh": 16244
+  },
+  "bandeiras_tarifarias": {
+    "bandeira_vigente": "AMARELA",
+    "dias_bandeira_amarela": 30,
+    "periodo": "17/12/2019 a 15/01/2020"
+  },
+  "descricao_consumo": {
+    "numero_medidor": "ECY09296",
+    "leitura_anterior": 40032,
+    "leitura_atual": 56276,
+    "constante_multiplicacao": 1.0,
+    "quantidade_kwh_mes": 16244.0
+  },
+  "itens_fatura": [
+    {"descricao": "Fornecimento de energia elétrica", "valor_total": 11865.50},
+    {"descricao": "Consumo", "quantidade": 16244.0, "unidade": "KWH", "tarifa_unitaria": 0.52581, "valor_total": 8541.25},
+    {"descricao": "Adicional Bandeira Amarela", "valor_total": 218.16},
+    {"descricao": "Contribuição de Ilum. Pública - Lei Municipal", "valor_total": 43.98}
+  ],
+  "tributos": {
+    "pis": {"base_calculo": 8899.13, "aliquota_pct": 0.28, "valor": 24.92},
+    "cofins": {"base_calculo": 8899.13, "aliquota_pct": 1.29, "valor": 114.80},
+    "icms": {"base_calculo": 11865.50, "aliquota_pct": 25.00, "valor": 2966.37}
+  },
+  "totais": {
+    "fornecimento_energia_eletrica": 11865.50,
+    "consumo": 8541.25,
+    "adicional_bandeira_amarela": 218.16,
+    "contribuicao_iluminacao_publica": 43.98,
+    "valor_total_a_pagar": 11909.48
+  }
+}

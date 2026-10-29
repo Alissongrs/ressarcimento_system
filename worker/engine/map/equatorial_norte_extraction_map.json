@@ -1,0 +1,511 @@
+{
+ "documento": "DANF3E - Família EQUATORIAL Norte-Nordeste-Sul (PA + MA + MAR + AL + PI + CEEE RS)",
+ "_status": "Layout DANF3E padronizado Equatorial Energia moderno. Validado em EQUATORIAL Pará (id 18041). Assumido idêntico nas outras 5 filiais.",
+ "_volume_coberto_total": "~1.104 faturas",
+ "distribuidoras": {
+  "EQUATORIAL_PARA": {
+   "razao_social": "Equatorial Pará Distribuidora de Energia S.A.",
+   "cnpj_emissor": "04.895.728/0001-80",
+   "ie_emissor": "150.744.80-3",
+   "endereco_emissor": "Rodovia Augusto Montenegro, km 8,5 - Coqueiro",
+   "cep_emissor": "66.823-010",
+   "cidade_uf_emissor": "Belém - PA",
+   "uf": "PA",
+   "icms_pct": 19,
+   "_volume": "332+6+6",
+   "_status": "VALIDADO (id 18041)"
+  },
+  "EQUATORIAL_MARANHAO": {
+   "razao_social": "Equatorial Maranhão Distribuidora de Energia S.A.",
+   "uf": "MA",
+   "icms_pct": 22,
+   "_volume": "147+22+5",
+   "_status": "ASSUMIDO — validar com sample id 16131/48490"
+  },
+  "EQUATORIAL_ALAGOAS": {
+   "razao_social": "Equatorial Alagoas Distribuidora de Energia S.A.",
+   "uf": "AL",
+   "icms_pct": 17,
+   "_volume": "185",
+   "_status": "ASSUMIDO — validar com sample id 17814"
+  },
+  "EQUATORIAL_PIAUI": {
+   "razao_social": "Equatorial Piauí Distribuidora de Energia S.A.",
+   "uf": "PI",
+   "icms_pct": 21,
+   "_volume": "112",
+   "_status": "ASSUMIDO — validar com sample id 18031"
+  },
+  "EQUATORIAL_CEEE_RS": {
+   "razao_social": "Companhia Estadual de Distribuição de Energia Elétrica - CEEE Equatorial",
+   "uf": "RS",
+   "icms_pct": 17,
+   "_volume": "188+5",
+   "_status": "ASSUMIDO — validar com sample id 17020 (Equatorial adquiriu CEEE-D em 2021)"
+  }
+ },
+ "observacoes_gerais": {
+  "encoding": "UTF-8",
+  "decimal": "vírgula",
+  "milhar": "ponto",
+  "datas": "DD/MM/AAAA",
+  "particularidades": [
+   "Cabeçalho 'DANF3E - DOCUMENTO AUXILIAR DA NOTA FISCAL DE ENERGIA ELÉTRICA ELETRÔNICA'",
+   "Aviso 'Incidirão sobre a conta paga após o vencimento multa de 2%, juros de mora de 0,0333% ao dia' (Lei 10.438/02)",
+   "URL chave_acesso: dfe-portal.svrs.rs.gov.br/NFE/Consulta (NFE não NF3E!)",
+   "chave_acesso: 44 dígitos contíguos",
+   "Banco BANCO DO BRASIL 001-9 (NÃO é Itaú 341 — único caso na base!)",
+   "Tem 'CCI Descrição' codes nas linhas dos itens (vocabulário diferente do EDP)",
+   "Tem 'Fator de Potência' explícito",
+   "Tem 'Perdas de Transformação / Ramal' em %",
+   "Tipo de Tarifa: 'A4_LVVD' (Livre Verde) ou similar",
+   "Histórico tabular bem rico no 'Histórico do Faturamento'",
+   "Tem 'Benefício Tarifário Bruto / Líquido' em itens financeiros",
+   "Bloco 'Grandezas Contratadas' detalhado com múltiplos campos (Demanda Contratada Única, Ponta, Fora Ponta, Reserva de Capacidade, Geração, Distribuição)"
+  ]
+ },
+ "distribuidora": {
+  "razao_social": {
+   "anchor": "Equatorial",
+   "regex": "(Equatorial\\s+(?:Pará|Maranhão|Alagoas|Piauí|CEEE)[A-Za-záé .]+S\\.?A\\.?)",
+   "group": 1
+  },
+  "cnpj_emissor": {
+   "anchor": "CNPJ:",
+   "regex": "CNPJ:\\s*(\\d{2}\\.\\d{3}\\.\\d{3}/\\d{4}-\\d{2})",
+   "group": 1
+  },
+  "ie_emissor": {
+   "anchor": "Insc. Estadual:",
+   "regex": "Insc\\.\\s*Estadual:\\s*([\\d\\.]+-\\d)",
+   "group": 1
+  },
+  "endereco_emissor": {
+   "anchor": "Rodovia|Avenida",
+   "regex": "((?:Rodovia|Avenida|Rua)\\s+[^\\n]+)",
+   "group": 1
+  },
+  "cep_emissor": {
+   "anchor": "CEP:",
+   "regex": "CEP:\\s*(\\d{2}\\.\\d{3}-\\d{3})",
+   "group": 1,
+   "pos_process": "remover ponto"
+  }
+ },
+ "cliente": {
+  "razao_social": {
+   "chain": [
+    {
+     "regex": "(GRUPO CASAS BAHIA\\s+S\\.?A\\.?)\\s+Leituras",
+     "group": 1
+    },
+    {
+     "regex": "(VIA VAREJO\\s+S\\.?/?A\\.?)\\s+Leituras",
+     "group": 1
+    },
+    {
+     "regex": "^(GRUPO CASAS BAHIA\\s+S\\.?A\\.?|VIA VAREJO\\s+S\\.?/?A\\.?|VIA S\\.?\\s*A\\.?)\\s*$",
+     "group": 1,
+     "flags": "MULTILINE"
+    },
+    {
+     "regex": "Próxima Leitura\\s*\\|\\s*([A-Z][A-Z .&\\-/]+?S\\.?\\s*A\\.?)\\s+Leituras",
+     "group": 1
+    }
+   ]
+  },
+  "instalacao_codigo": {
+   "anchor": "INSTALAÇÃO:",
+   "regex": "INSTALAÇÃO:\\s*(\\d+)",
+   "group": 1
+  },
+  "cnpj": {
+   "anchor": "CNPJ:",
+   "regex": "CNPJ:\\s*([\\d\\*\\.\\/-]+)",
+   "group": 1,
+   "obs": "Pode vir parcial mascarado: '**.***.260/201*-**'"
+  },
+  "endereco_uc": {
+   "anchor": "linha do endereço",
+   "regex": "^(RD|RUA|AV|R)\\s+[A-Z .,]+,?\\s*(?:S/?N)?(?:,\\s*LOJA\\s+[A-Z]+)?$",
+   "group": 0,
+   "flags": "MULTILINE"
+  },
+  "cep_municipio": {
+   "anchor": "CEP:",
+   "regex": "CEP:\\s*(\\d{5}-\\d{3})\\s+([A-Z]+(?:[A-Z ]*)?)\\s*-?\\s*([A-Z]+)\\s*-\\s*([A-Z]{2})",
+   "group": "1+2+3+4"
+  }
+ },
+ "nota_fiscal": {
+  "numero_nf": {
+   "anchor": "NOTA FISCAL Nº",
+   "regex": "NOTA FISCAL\\s+Nº\\s+(\\d+)",
+   "group": 1
+  },
+  "serie": {
+   "anchor": "SÉRIE",
+   "regex": "SÉRIE\\s+(\\d{3})",
+   "group": 1
+  },
+  "data_emissao": {
+   "anchor": "DATA DE EMISSÃO:",
+   "regex": "DATA DE EMISSÃO:\\s*(\\d{2}/\\d{2}/\\d{4})",
+   "group": 1
+  },
+  "chave_acesso": {
+   "anchor": "chave de acesso:",
+   "regex": "chave de acesso:\\s*\\n?\\s*(\\d{44})",
+   "group": 1
+  },
+  "protocolo_autorizacao": {
+   "anchor": "Protocolo de autorização:",
+   "regex": "Protocolo de autorização:\\s*(\\d+)\\s*-\\s*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})\\s+às\\s*(\\d{2}:\\d{2}:\\d{2})",
+   "group": "1+2+3"
+  },
+  "url_consulta": {
+   "anchor": "Consulte pela Chave",
+   "regex": "(https://dfe-portal\\.svrs\\.rs\\.gov\\.br/NFE/Consulta)",
+   "group": 1
+  },
+  "parceiro_negocio": {
+   "anchor": "Parceiro de Negócio",
+   "regex": "Parceiro de Negócio\\s*\\n?\\s*(\\d+)",
+   "group": 1
+  },
+  "conta_contrato": {
+   "anchor": "Conta Contrato",
+   "regex": "Conta Contrato\\s*\\n?\\s*(\\d+)",
+   "group": 1
+  }
+ },
+ "vencimento_valor": {
+  "data_vencimento": {
+   "chain": [
+    {
+     "regex": "Conta Mês\\s+Vencimento\\s+Total a Pagar[^\\n]*\\n\\s*\\d{2}/\\d{4}\\s+(\\d{2}/\\d{2}/\\d{4})\\s+R\\$",
+     "group": 1
+    },
+    {
+     "regex": "Vencimento\\s*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})",
+     "group": 1
+    }
+   ]
+  },
+  "valor_total": {
+   "chain": [
+    {
+     "regex": "Conta Mês\\s+Vencimento\\s+Total a Pagar[^\\n]*\\n\\s*\\d{2}/\\d{4}\\s+\\d{2}/\\d{2}/\\d{4}\\s+R\\$\\s*([\\d\\.]+,\\d{2})",
+     "group": 1
+    },
+    {
+     "regex": "Total a Pagar[\\s\\S]{0,80}?R\\$\\s*([\\d\\.]+,\\d{2})",
+     "group": 1
+    }
+   ]
+  },
+  "data_apresentacao": {
+   "anchor": "Apresentação",
+   "regex": "Apresentação\\s*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})",
+   "group": 1
+  },
+  "mes_referencia": {
+   "chain": [
+    {
+     "regex": "Fatura do mês\\s+(\\d{2}/\\d{4})",
+     "group": 1
+    },
+    {
+     "regex": "Conta Mês\\s+Vencimento\\s+Total a Pagar[^\\n]*\\n\\s*(\\d{2}/\\d{4})\\s+\\d{2}/\\d{2}/\\d{4}\\s+R\\$",
+     "group": 1
+    },
+    {
+     "regex": "Conta Mês\\s*\\n?\\s*(\\d{2}/\\d{4})",
+     "group": 1
+    }
+   ],
+   "_obs": "Bank reference is 1 month before bill month. Use 'Fatura do mês' first."
+  },
+  "banco_codigo": {
+   "anchor": "BANCO DO BRASIL",
+   "regex": "BANCO DO BRASIL\\s+(\\d{3}-\\d)",
+   "group": 1,
+   "obs": "001-9 (NÃO Itaú 341!)"
+  }
+ },
+ "periodo_leitura": {
+  "_obs": "Layout A: 'Data das Leitura Anterior Leitura Atual Nº de Dias Próxima Leitura | CLIENTE Leituras DD/MM/AAAA DD/MM/AAAA NN DD/MM/AAAA'. Layout B: simplificado.",
+  "leitura_anterior": {
+   "chain": [
+    {
+     "regex": "Leituras\\s+(\\d{2}/\\d{2}/\\d{4})\\s+\\d{2}/\\d{2}/\\d{4}\\s+\\d{1,3}\\s+\\d{2}/\\d{2}/\\d{4}",
+     "group": 1
+    },
+    {
+     "regex": "Leitura Anterior[^\\n]*\\n[^\\n]*?(\\d{2}/\\d{2}/\\d{4})\\s+\\d{2}/\\d{2}/\\d{4}",
+     "group": 1
+    }
+   ]
+  },
+  "leitura_atual": {
+   "chain": [
+    {
+     "regex": "Leituras\\s+\\d{2}/\\d{2}/\\d{4}\\s+(\\d{2}/\\d{2}/\\d{4})\\s+\\d{1,3}\\s+\\d{2}/\\d{2}/\\d{4}",
+     "group": 1
+    },
+    {
+     "regex": "Leitura Atual[^\\n]*\\n[^\\n]*?\\d{2}/\\d{2}/\\d{4}\\s+(\\d{2}/\\d{2}/\\d{4})",
+     "group": 1
+    }
+   ]
+  },
+  "dias_consumo": {
+   "chain": [
+    {
+     "regex": "Leituras\\s+\\d{2}/\\d{2}/\\d{4}\\s+\\d{2}/\\d{2}/\\d{4}\\s+(\\d{1,3})\\s+\\d{2}/\\d{2}/\\d{4}",
+     "group": 1
+    },
+    {
+     "regex": "Nº de Dias[^\\n]*\\n[^\\n]*?\\s(\\d{1,3})\\s+\\d{2}/\\d{2}/\\d{4}",
+     "group": 1
+    }
+   ]
+  },
+  "proxima_leitura": {
+   "chain": [
+    {
+     "regex": "Leituras\\s+\\d{2}/\\d{2}/\\d{4}\\s+\\d{2}/\\d{2}/\\d{4}\\s+\\d{1,3}\\s+(\\d{2}/\\d{2}/\\d{4})",
+     "group": 1
+    }
+   ]
+  }
+ },
+ "ligacao_tecnica": {
+  "tipo_fornecimento": {
+   "anchor": "Tipo de Fornecimento:",
+   "regex": "Tipo de Fornecimento:\\s*(TRIFÁSICO|BIFÁSICO|MONOFÁSICO)",
+   "group": 1
+  },
+  "tensao_nominal": {
+   "anchor": "Tensão Nominal Disp:",
+   "regex": "Tensão Nominal Disp:\\s*([\\d\\.]+)\\s*Lim Min:\\s*([\\d\\.]+)\\s*V\\s*Lim Max:\\s*([\\d\\.]+)\\s*V",
+   "group": "1+2+3"
+  },
+  "tipo_tarifa": {
+   "anchor": "Tipo de Tarifa:",
+   "regex": "Tipo de Tarifa:\\s*(A4_[A-Z]+|B[1-4]_[A-Z]+|[A-Z_]+)",
+   "group": 1
+  },
+  "classificacao": {
+   "anchor": "Classificação:",
+   "regex": "Classificação:\\s*([^\\n-]+)\\s*-\\s*Tipo de Fornecimento:",
+   "group": 1
+  },
+  "perdas_transf": {
+   "anchor": "PERDAS DE TRANSFORMAÇÃO",
+   "regex": "PERDAS DE TRANSFORMAÇÃO / RAMAL:\\s*([\\d,]+)\\s*%",
+   "group": 1
+  },
+  "fator_potencia": {
+   "anchor": "FATOR DE POTÊNCIA:",
+   "regex": "FATOR DE POTÊNCIA:\\s*([\\d,\\.]+)",
+   "group": 1
+  }
+ },
+ "grandezas_contratadas": {
+  "demanda_unica_kw": {
+   "anchor": "Demanda Contratada Única",
+   "regex": "Demanda Contratada Única\\s*\\(kW\\):\\s*([\\d,]+)",
+   "group": 1
+  },
+  "demanda_ponta_kw": {
+   "anchor": "Demanda Contratada Ponta",
+   "regex": "Demanda Contratada Ponta\\s*\\(kW\\):\\s*([\\d,]+)?",
+   "group": 1
+  },
+  "demanda_fp_kw": {
+   "anchor": "Demanda Contratada Fora Ponta",
+   "regex": "Demanda Contratada Fora Ponta\\s*\\(kW\\):\\s*([\\d,]+)?",
+   "group": 1
+  },
+  "dem_reserva_cap": {
+   "anchor": "Dem. Reserva Cap. Única",
+   "regex": "Dem\\. Reserva Cap\\. Única\\s*\\(kW\\):\\s*([\\d,]+)?",
+   "group": 1
+  },
+  "dem_geracao_kw": {
+   "anchor": "Dem. de Geração",
+   "regex": "Dem\\. de Geração\\s*\\(kW\\):\\s*([\\d,]+)?",
+   "group": 1
+  },
+  "dem_dist_unica_kw": {
+   "anchor": "Dem. de Dist. Única",
+   "regex": "Dem\\. de Dist\\. Única\\s*\\(kW\\):\\s*([\\d,]+)",
+   "group": 1
+  }
+ },
+ "informacoes_consumo": {
+  "consumo_diario": {
+   "anchor": "Consumo Médio Diário",
+   "regex": "Consumo Médio Diário\\s*\\(kWh\\):\\s*([\\d,]+)",
+   "group": 1
+  },
+  "media_12_meses": {
+   "anchor": "Média dos 12 meses",
+   "regex": "Média dos 12 meses\\s*\\(kWh\\):\\s*([\\d,\\.]+)",
+   "group": 1
+  },
+  "dem_max_fp": {
+   "anchor": "Dem. Máx. F. Ponta",
+   "regex": "Dem\\. Máx\\. F\\. Ponta\\s*\\(kW\\):\\s*([\\d,]+)",
+   "group": 1
+  },
+  "dem_max_p": {
+   "anchor": "Dem. Máx. Ponta",
+   "regex": "Dem\\. Máx\\. Ponta\\s*\\(kW\\):\\s*([\\d,]+)",
+   "group": 1
+  }
+ },
+ "tabela_itens_fatura": {
+  "estrategia": "Linhas com descrição + unidade entre parênteses no fim do nome (kW)/(kWh)/(kVAr). Não tem CCI codes.",
+  "regex_linha": "^(Demanda Distrib\\.?\\s*(?:Isenta ICMS)?|TUSD Energia (?:Fora Ponta|Ponta)|Demanda Distribuição|Consumo Reativo Excedente (?:FP|NP)|Encargo Escassez Hídrica|Benefício Tarifário (?:Bruto|Líquido)|Cobrança de ajuste|Cip-Ilum Pub Pref Munic|Multa|Correção Monetária|Juros)\\s*\\((kWh|kW|kVAr)\\)?\\s*([\\d\\.,]+)?\\s+([\\d,]+)?\\s+([\\d,]+)?\\s+([\\d\\.,\\-]+)\\s+([\\d\\.,\\-]+)?\\s+([\\d\\.,\\-]+)?\\s+([\\d\\.,\\-]+)?\\s+([\\d\\.,\\-]+)?$",
+  "colunas_em_ordem": [
+   "descricao",
+   "unidade",
+   "quantidade",
+   "preco_unit_com_tributos",
+   "tarifa_unit",
+   "pis_cofins",
+   "icms",
+   "valor_rs"
+  ]
+ },
+ "medicao_consumo": {
+  "estrategia": "Tabela 'Medidor | Grandeza | Posto Horário | Leitura Anterior | Leitura Atual | Const Medidor | Consumo' — 8 linhas (4 ativa + 4 reativa).",
+  "regex_linha": "^(\\d{11})\\s+(TUSD Energia|Demanda Distribuição|Demanda DMCR|Reat\\. Exced\\.|Dem\\. Reat\\. Exced\\.)\\s+([\\w\\s\\.-]+?)\\s+(Reg|Inst)\\s+(\\d+(?:\\.\\d+)?)\\s+(\\d+(?:\\.\\d+)?)\\s+([\\d,\\.]+)\\s+([\\d\\.,]+)\\s+(kWh|kW|kVAr)$",
+  "colunas_em_ordem": [
+   "medidor",
+   "grandeza",
+   "descricao_grandeza",
+   "tipo",
+   "leitura_anterior",
+   "leitura_atual",
+   "constante",
+   "consumo",
+   "unidade"
+  ],
+  "fator_potencia": {
+   "anchor": "Fator de Potência",
+   "regex": "Fator de Potência[:]?\\s*(?:R\\$\\s*)?([\\d\\.,]+)",
+   "group": 1,
+   "_auto_patch": true,
+   "_referencia_audit_id": "50262"
+  }
+ },
+ "tributos_resumo": {
+  "icms": {
+   "base_calculo": {
+    "anchor": "ICMS",
+    "regex": "ICMS\\s+([\\d\\.,]+)\\s+[\\d,\\.]+\\s+[\\d\\.,]+",
+    "group": 1
+   },
+   "aliquota_pct": {
+    "anchor": "ICMS",
+    "regex": "ICMS\\s+[\\d\\.,]+\\s+([\\d,\\.]+)\\s+[\\d\\.,]+",
+    "group": 1
+   },
+   "valor": {
+    "anchor": "ICMS",
+    "regex": "ICMS\\s+[\\d\\.,]+\\s+[\\d,\\.]+\\s+([\\d\\.,]+)",
+    "group": 1
+   }
+  },
+  "pis": {
+   "base_calculo": {
+    "anchor": "PIS",
+    "regex": "PIS\\s+([\\d\\.,]+)\\s+[\\d,\\.]+\\s+[\\d,\\.]+",
+    "group": 1
+   },
+   "aliquota_pct": {
+    "anchor": "PIS",
+    "regex": "PIS\\s+[\\d\\.,]+\\s+([\\d,\\.]+)\\s+[\\d,\\.]+",
+    "group": 1
+   },
+   "valor": {
+    "anchor": "PIS",
+    "regex": "PIS\\s+[\\d\\.,]+\\s+[\\d,\\.]+\\s+([\\d,\\.]+)",
+    "group": 1
+   }
+  },
+  "cofins": {
+   "base_calculo": {
+    "anchor": "COFINS",
+    "regex": "COFINS\\s+([\\d\\.,]+)\\s+[\\d,\\.]+\\s+[\\d,\\.]+",
+    "group": 1
+   },
+   "aliquota_pct": {
+    "anchor": "COFINS",
+    "regex": "COFINS\\s+[\\d\\.,]+\\s+([\\d,\\.]+)\\s+[\\d,\\.]+",
+    "group": 1
+   },
+   "valor": {
+    "anchor": "COFINS",
+    "regex": "COFINS\\s+[\\d\\.,]+\\s+[\\d,\\.]+\\s+([\\d,\\.]+)",
+    "group": 1
+   }
+  }
+ },
+ "_diferencas_chave_vs_equatorial_goias": [
+  "Banco BANCO DO BRASIL 001-9 (Goiás usa Itaú 341 via Via Varejo)",
+  "URL: dfe-portal.svrs.rs.gov.br/NFE/Consulta (Goiás usa /NF3e/consulta)",
+  "Não tem 'CELG' no nome",
+  "Sem postos HR/Reservado — só Ponta e Fora Ponta",
+  "Tem 'Fator de Potência' e 'Perdas de Transformação' explícitos",
+  "Tem 'Tipo de Tarifa: A4_LVVD' codificado",
+  "Cliente CNPJ vem mascarado: '**.***.260/201*-**'",
+  "Grandezas contratadas detalhadas (Única, Ponta, Fora Ponta, Reserva, Geração, Distribuição)",
+  "Tem 'Apresentação' como data separada"
+ ],
+ "identificadores_instalacao": {
+  "medidor": {
+   "chain": [
+    {
+     "regex": "^(\\d{11})\\s+(?:TUSD|Demanda|Reat\\.|Dem\\.)",
+     "group": 1,
+     "flags": "MULTILINE"
+    },
+    {
+     "regex": "MEDIDOR[:]?\\s*(\\d{8,})",
+     "group": 1
+    }
+   ],
+   "_auto_patch": true,
+   "_referencia_audit_id": "50258"
+  }
+ },
+ "_not_in_pdf": [
+  "classe_consumidor",
+  "grupo_tarifario",
+  "modalidade_tarifaria",
+  "subgrupo_tarifario"
+ ],
+ "gd_scee": {
+  "_obs": "Equatorial AL/PA: Consumo Compensado (kWh); Energia Inj. oUC (kWh); Saldo Acumulado Geral Ponta/Fora Ponta",
+  "compensada": {
+   "regex": "Consumo\\s+Compensado\\s*\\(kWh\\)\\s+([\\d.]+)",
+   "group": 1
+  },
+  "injecao": {
+   "regex": "Energia\\s+Inj\\.?\\s*oUC[^\\n]*?\\(kWh\\)\\s+([\\d.]+)",
+   "group": 1
+  },
+  "saldo_ponta": {
+   "regex": "Saldo\\s+Acumulado\\s+Geral\\s+Ponta:\\s*([\\d.]+,?\\d*)",
+   "group": 1
+  },
+  "saldo_fponta": {
+   "regex": "Saldo\\s+Acumulado\\s+Geral\\s+Fora\\s+Ponta:\\s*([\\d.]+,?\\d*)",
+   "group": 1
+  }
+ }
+}

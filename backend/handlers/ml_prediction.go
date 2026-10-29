@@ -42,8 +42,8 @@ func PredictStatusML(c *gin.Context) {
 	}
 	// permite incluir id do processo como feature
 	if pid := c.Param("id"); pid != "" {
-		if _, ok := req.Features["processo_id"]; !ok {
-			req.Features["processo_id"] = pid
+		if _, ok := req.Features["id_processo"]; !ok {
+			req.Features["id_processo"] = pid
 		}
 	}
 	resp, err := callMLService("/predict/status", req)

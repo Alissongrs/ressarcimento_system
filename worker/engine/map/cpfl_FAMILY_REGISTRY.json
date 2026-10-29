@@ -1,0 +1,68 @@
+{
+  "documento": "DANF3E - Família CPFL (Santa Cruz/Jaguari + Paulista + Piratininga + RGE)",
+  "_status": "Layout DANF3E padrão CPFL — validado em CPFL Paulista (A4 LIVRE) e Santa Cruz (B3 convencional).",
+  "_herda_de": "cpfl_santacruz_extraction_map.json",
+  "_uso": "Mesmo template DANF3E em toda a família. Cada filial muda razão/CNPJ/IE/endereço/UF.",
+
+  "distribuidoras": {
+    "CPFL_SANTA_CRUZ_JAGUARI": {
+      "razao_social": "COMPANHIA JAGUARI DE ENERGIA S.A.",
+      "cnpj_emissor": "53.859.112/0001-69",
+      "ie_emissor": "395.088.376.114",
+      "endereco_emissor": "RUA VIGATO, 1620 - TÉRREO - JAGUARIÚNA",
+      "cep_emissor": "13916-070",
+      "uf": "SP", "icms_pct": 18,
+      "_volume": "69", "_status": "VALIDADO B3 (id 32634), Grupo A nao baixado"
+    },
+    "CPFL_PAULISTA": {
+      "razao_social": "COMPANHIA PAULISTA DE FORÇA E LUZ",
+      "cnpj_emissor": "33.050.196/0001-88",
+      "ie_emissor": "244.163.955.115",
+      "endereco_emissor": "RUA JORGE DE FIGUEIREDO CORREA, 1632 - JD. PROF. TARCÍLIA - CAMPINAS - SP",
+      "cep_emissor": "13087-397",
+      "uf": "SP", "icms_pct": 18,
+      "_volume": "816+881", "_status": "VALIDADO A4 LIVRE (id 39522)",
+      "_itens_A4_LIVRE_adicionais": [
+        "USD Consumo Reativo Ponta/Fora Ponta",
+        "Uso Sist. Distr. (com Desc/Ult Uso Sist)",
+        "Tusd Enc Cons F Ponta/Ponta [kWh]",
+        "Energia ACL - Ponta/Fora de Ponta",
+        "CDE-COVID Ponta/Fora Ponta [kWh]",
+        "Subvenção Tarifaria - TUSD - Com ICMS / Sem ICMS",
+        "Devol. TUSD Mês MM/AA",
+        "Desc Energia ACL Ponta/Fora Ponta",
+        "Devolução",
+        "Crédito Subvenção Tarifaria - TUSD"
+      ]
+    },
+    "CPFL_PIRATININGA": {
+      "razao_social": "COMPANHIA PIRATININGA DE FORÇA E LUZ",
+      "cnpj_emissor": "04.172.213/0001-51",
+      "uf": "SP", "icms_pct": 18,
+      "_volume": "996+1078", "_status": "ASSUMIDO — mesmo template Paulista"
+    },
+    "RGE": {
+      "razao_social": "RIO GRANDE ENERGIA S.A.",
+      "uf": "RS", "icms_pct": 17,
+      "_volume": "154+13",
+      "_status": "ASSUMIDO — RGE pertence ao grupo Equatorial-Energia hoje, mas usa template CPFL/Equatorial. Validar com sample do Grupo B id 32124."
+    }
+  },
+
+  "_caracteristicas_universais_familia_CPFL": {
+    "chave_acesso_formato": "44 dígitos CONTÍGUOS (sem espaços) — característica única da família CPFL",
+    "protocolo_separador_data": "PONTO (DD.MM.AAAA às HH:MM:SS) — diferente de outras famílias",
+    "banco_debito_auto": "Itaú 341 ag 0018 (padrão cliente Via Varejo)",
+    "itens_com_mes_sufixado": "Cada item da fatura traz mês de referência: 'Consumo Uso Sistema [KWh]-TUSD NOV/25'",
+    "footer_template": "DANF3E/Nota Fiscal — Conta de Energia Elétrica",
+    "historico_consumo": "Gráfico ASCII com barras 'l...llllll' — não extrair valores",
+    "tributos_resumo_nomes": ["ICMS", "PIS/PASEP", "COFINS"]
+  },
+
+  "_overrides_e_adições_vs_santa_cruz_base": {
+    "_atencao_classificacao": "Santa Cruz B3 era 'Convencional B3 Comercial Outros Serviços'. CPFL Paulista A4 LIVRE é 'Tarifa Verde Livre-A4 Comercial Atacadista / Varejista'",
+    "tabela_itens_regex_estender": "Adicionar variantes A4: TUSD-TE-TUS, Energia ACL, Subvenção Tarifaria"
+  },
+
+  "_volume_coberto_total": "~4.007 faturas (volume gigante)"
+}

@@ -60,7 +60,7 @@ const ProcessoCard = memo(function ProcessoCard({ row, onOpen, onIndeferir }) {
         <div className="flex items-center gap-2">
           {hasSeqError && (
             <span
-              className="text-[10px] px-1.5 py-0.5 rounded border border-red-500 text-red-500"
+              className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--danger)] text-[var(--danger)]"
               title="Sequência incompleta: Fluxo/Faturamento sem Deferidos"
             >
               Sequência
@@ -69,7 +69,7 @@ const ProcessoCard = memo(function ProcessoCard({ row, onOpen, onIndeferir }) {
           <span
             role="button"
             tabIndex={0}
-            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-red-500/10"
+            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-[var(--danger)]/10"
             title="Indeferir processo"
             onClick={(e) => {
               e.stopPropagation();
@@ -82,7 +82,7 @@ const ProcessoCard = memo(function ProcessoCard({ row, onOpen, onIndeferir }) {
               }
             }}
           >
-            <Trash2 size={12} className="text-red-500 opacity-90" />
+            <Trash2 size={12} className="text-[var(--danger)] opacity-90" />
           </span>
           <div className="text-[11px] px-2 py-0.5 rounded-full bg-[var(--muted)]/70 opacity-90">
             {category}

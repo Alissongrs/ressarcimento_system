@@ -181,7 +181,7 @@ type Tag struct {
 // Alerta representa uma notificação para um usuário.
 type Alerta struct {
 	ID          int64         `json:"id"`
-	ProcessoID  sql.NullInt64 `json:"processo_id" swaggertype:"integer"`
+	ProcessoID  sql.NullInt64 `json:"id_processo" swaggertype:"integer"`
 	Mensagem    string        `json:"mensagem"`
 	Lido        bool          `json:"lido"`
 	DataCriacao time.Time     `json:"data_criacao"`
@@ -252,6 +252,7 @@ type EmailProcesso struct {
 	DataEnvio          time.Time      `json:"data_envio"`
 	Tipo               string         `json:"tipo"`
 	ReadBy             []string       `json:"read_by,omitempty"`
+	GraphMessageID     sql.NullString `json:"graph_message_id,omitempty"`
 }
 
 // Departamento representa a estrutura da tabela DM_DEPARTAMENTO.

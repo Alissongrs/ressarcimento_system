@@ -1,0 +1,22 @@
+{
+  "_meta": {
+    "distribuidora": "EDP SP",
+    "grupo": "A",
+    "modalidade": "Verde",
+    "fonte_calibracao": "_modelo_edp_sp_a_11825.pdf",
+    "data_calibracao": "2026-05-20",
+    "observacoes": "VERDE aparece em 2 posições (0.775,0.131 e 0.462,0.221). Usa bbox amplo capturando a linha 'A A4 VERDE 13.200 V'."
+  },
+  "campos": {
+    "subgrupo": {
+      "bbox": [0.25, 0.215, 0.32, 0.235, 0],
+      "regex": "(A[1-4][Aa]?|AS|B[1-4])",
+      "_anchor": "A4 em 'A A4 VERDE 13.200 V'"
+    },
+    "modalidade_tarifaria": {
+      "bbox": [0.30, 0.215, 0.55, 0.235, 0],
+      "regex": "(VERDE|AZUL|CONVENCIONAL|BRANCA)",
+      "_anchor": "VERDE após A4 na mesma linha"
+    }
+  }
+}

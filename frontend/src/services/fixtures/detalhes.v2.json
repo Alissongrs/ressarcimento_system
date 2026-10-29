@@ -1,0 +1,250 @@
+{
+  "extras": {
+    "1": {
+      "id_processo_origem": 16609,
+      "endereco_uc": "Av. Brasil, 100",
+      "cep_uc": "30100-000",
+      "municipio_uc": "Belo Horizonte",
+      "uf_uc": "MG",
+      "grupo_subgrupo": "B3",
+      "modalidade_tarifaria": "Convencional",
+      "tipo_irregularidade": { "id": 2, "nome": "Tributação ICMS/PIS/COFINS" },
+      "subtipo_irregularidade": { "id": 1, "nome": "ICMS sobre TUSD (Tema 986)" },
+      "tese_juridica": "Tributação indevida de ICMS sobre TUSD (Tema 986/STJ)",
+      "motivo_objeto": "Cobrança indevida de ICMS sobre TUSD em fatura de janeiro/2026. Cliente solicita ressarcimento em dobro conforme jurisprudência STJ.",
+      "numero_protocolo": "CEMIG-2026-28491-A",
+      "data_alerta": "2026-06-30",
+      "historico": [
+        { "id_movimentacao": 1001, "data_movimentacao": "2026-06-21T14:22:00Z", "tipo_movimentacao": "manual", "usuario": { "id": 4, "nome": "Ana Paula Silva" }, "de": { "etapa": { "id": 1, "nome": "Reclamação" }, "instancia": { "id": 1, "nome": "Distribuidora" }, "status": { "id": 2, "nome": "Em elaboração" }, "aprovacao": null }, "para": { "etapa": { "id": 1, "nome": "Reclamação" }, "instancia": { "id": 1, "nome": "Distribuidora" }, "status": { "id": 1, "nome": "Em análise" }, "aprovacao": null }, "comentario": "Distribuidora confirmou recebimento do protocolo nº 28491-A. Aguardando análise técnica." },
+        { "id_movimentacao": 1002, "data_movimentacao": "2026-06-17T09:30:00Z", "tipo_movimentacao": "sistema", "usuario": { "id": 0, "nome": "Sistema" }, "de": null, "para": { "etapa": { "id": 1, "nome": "Reclamação" }, "instancia": { "id": 1, "nome": "Distribuidora" }, "status": { "id": 2, "nome": "Em elaboração" }, "aprovacao": null }, "comentario": "Aberto a partir da reclamação CEMIG Atende." }
+      ],
+      "anexos": [
+        { "id_anexo": 11, "nome_arquivo": "protocolo_cemig_28491A.pdf", "tamanho_bytes": 127000, "mime_type": "application/pdf", "url_download": "/api/v2/anexos/11/download", "uploaded_by": { "id": 4, "nome": "Ana Paula Silva" }, "uploaded_at": "2026-06-21T14:22:00Z" },
+        { "id_anexo": 12, "nome_arquivo": "calculo_ressarcimento.xlsx", "tamanho_bytes": 46000, "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "url_download": "/api/v2/anexos/12/download", "uploaded_by": { "id": 4, "nome": "Ana Paula Silva" }, "uploaded_at": "2026-06-19T10:08:00Z" }
+      ]
+    },
+    "9": {
+      "endereco_uc": "Rua Visconde, 200",
+      "cep_uc": "22000-000",
+      "municipio_uc": "Rio de Janeiro",
+      "uf_uc": "RJ",
+      "grupo_subgrupo": "A4",
+      "modalidade_tarifaria": "Verde",
+      "tipo_irregularidade": { "id": 2, "nome": "Tributação ICMS/PIS/COFINS" },
+      "subtipo_irregularidade": { "id": 1, "nome": "ICMS sobre TUSD (Tema 986)" },
+      "tese_juridica": "Tema 986/STJ — ICMS sobre TUSD",
+      "motivo_objeto": "Distribuidora aceitou a procedência e abriu negociação de conciliação.",
+      "numero_protocolo": "LIGHT-2026-9921",
+      "data_alerta": "2026-07-01",
+      "deferimento": {
+        "id_deferimento": 901,
+        "aprovacao": { "id": 1, "nome": "Deferido" },
+        "instancia": { "id": 1, "nome": "Distribuidora" },
+        "data_procedencia": "2026-06-19",
+        "credito_simples": 15181.78,
+        "credito_dobro": 30363.56,
+        "data_credito_dobro": "2026-06-25",
+        "observacoes": "Light aceitou valor simples R$ 15.181,78. Em dobro R$ 30.363,56."
+      },
+      "historico": [
+        { "id_movimentacao": 2001, "data_movimentacao": "2026-06-19T11:30:00Z", "tipo_movimentacao": "manual", "usuario": { "id": 1, "nome": "Alisson Rodrigues" }, "de": null, "para": null, "comentario": "Light aceitou valor simples R$ 15.181,78. Em dobro R$ 30.363,56." },
+        { "id_movimentacao": 2002, "data_movimentacao": "2026-06-10T16:45:00Z", "tipo_movimentacao": "manual", "usuario": { "id": 6, "nome": "Carlos Mendonça" }, "de": { "etapa": { "id": 2, "nome": "Contestação" }, "instancia": { "id": 1, "nome": "Distribuidora" }, "status": { "id": 3, "nome": "Aguardando retorno" }, "aprovacao": null }, "para": { "etapa": { "id": 3, "nome": "Conciliação" }, "instancia": { "id": 1, "nome": "Distribuidora" }, "status": { "id": 1, "nome": "Em análise" }, "aprovacao": { "id": 1, "nome": "Deferido" } }, "comentario": "Light abriu negociação após contestação." }
+      ],
+      "anexos": [
+        { "id_anexo": 91, "nome_arquivo": "termo_conciliacao_light.pdf", "tamanho_bytes": 234000, "mime_type": "application/pdf", "url_download": "/api/v2/anexos/91/download", "uploaded_by": { "id": 6, "nome": "Carlos Mendonça" }, "uploaded_at": "2026-06-19T11:30:00Z" }
+      ]
+    },
+    "13": {
+      "endereco_uc": "Rua Visconde, 200",
+      "cep_uc": "22000-000",
+      "municipio_uc": "Rio de Janeiro",
+      "uf_uc": "RJ",
+      "grupo_subgrupo": "A4",
+      "modalidade_tarifaria": "Verde",
+      "tipo_irregularidade": { "id": 2, "nome": "Tributação ICMS/PIS/COFINS" },
+      "subtipo_irregularidade": { "id": 1, "nome": "ICMS sobre TUSD (Tema 986)" },
+      "tese_juridica": "Tema 986/STJ — ICMS sobre TUSD",
+      "motivo_objeto": "Deferimento concluído em PR-2026-00466. NF em elaboração.",
+      "deferimento": {
+        "id_deferimento": 1301,
+        "aprovacao": { "id": 1, "nome": "Deferido" },
+        "instancia": { "id": 1, "nome": "Distribuidora" },
+        "data_procedencia": "2026-06-15",
+        "credito_simples": 15181.78,
+        "credito_dobro": 30363.56,
+        "data_credito_dobro": "2026-06-25",
+        "observacoes": "Light aceitou valor simples R$ 15.181,78."
+      },
+      "faturamento": [
+        {
+          "id_faturamento": 1301,
+          "numero_nf": "28491",
+          "serie_nf": "U",
+          "data_emissao": "2026-06-16",
+          "data_envio_distribuidora": null,
+          "data_vencimento": "2026-07-16",
+          "data_pagamento": null,
+          "valor_faturado": 15181.78,
+          "status_nf": "em_elaboracao",
+          "observacoes": "NF em emissão"
+        }
+      ],
+      "historico": [
+        { "id_movimentacao": 3001, "data_movimentacao": "2026-06-16T09:15:00Z", "tipo_movimentacao": "manual", "usuario": { "id": 7, "nome": "Daniela Souza" }, "de": { "etapa": { "id": 3, "nome": "Conciliação" }, "instancia": { "id": 1, "nome": "Distribuidora" }, "status": { "id": 1, "nome": "Em análise" }, "aprovacao": { "id": 1, "nome": "Deferido" } }, "para": { "etapa": { "id": 4, "nome": "Faturamento" }, "instancia": null, "status": { "id": 2, "nome": "Em elaboração" }, "aprovacao": { "id": 1, "nome": "Deferido" } }, "comentario": "NF em elaboração." }
+      ],
+      "anexos": [
+        { "id_anexo": 131, "nome_arquivo": "minuta_nf.pdf", "tamanho_bytes": 45000, "mime_type": "application/pdf", "url_download": "/api/v2/anexos/131/download", "uploaded_by": { "id": 7, "nome": "Daniela Souza" }, "uploaded_at": "2026-06-16T09:15:00Z" }
+      ]
+    },
+    "16": {
+      "endereco_uc": "Av. Brasil, 100",
+      "cep_uc": "30100-000",
+      "municipio_uc": "Belo Horizonte",
+      "uf_uc": "MG",
+      "grupo_subgrupo": "B3",
+      "modalidade_tarifaria": "Convencional",
+      "tipo_irregularidade": { "id": 2, "nome": "Tributação ICMS/PIS/COFINS" },
+      "subtipo_irregularidade": { "id": 1, "nome": "ICMS sobre TUSD (Tema 986)" },
+      "tese_juridica": "Tema 986/STJ",
+      "motivo_objeto": "Pagamento confirmado pela CEMIG. Em repasse ao cliente.",
+      "deferimento": {
+        "id_deferimento": 1601,
+        "aprovacao": { "id": 1, "nome": "Deferido" },
+        "instancia": { "id": 1, "nome": "Distribuidora" },
+        "data_procedencia": "2026-05-10",
+        "credito_simples": 21450.10,
+        "credito_dobro": 42900.20,
+        "data_credito_dobro": null,
+        "observacoes": null
+      },
+      "faturamento": [
+        {
+          "id_faturamento": 1601,
+          "numero_nf": "27845",
+          "serie_nf": "U",
+          "data_emissao": "2026-05-15",
+          "data_envio_distribuidora": "2026-05-16",
+          "data_vencimento": "2026-06-15",
+          "data_pagamento": "2026-05-28",
+          "valor_faturado": 21450.10,
+          "status_nf": "paga",
+          "observacoes": null
+        }
+      ],
+      "repasse": [
+        {
+          "id_repasse": 1601,
+          "forma_devolucao": { "id": 2, "nome": "TED" },
+          "valor_repasse": 21450.10,
+          "data_repasse": "2026-06-01",
+          "banco_destino": "Banco 341",
+          "agencia": "0001",
+          "conta": "12345-6",
+          "observacoes": null
+        }
+      ],
+      "historico": [
+        { "id_movimentacao": 4001, "data_movimentacao": "2026-06-01T15:00:00Z", "tipo_movimentacao": "manual", "usuario": { "id": 4, "nome": "Ana Paula Silva" }, "de": { "etapa": { "id": 4, "nome": "Faturamento" }, "instancia": null, "status": { "id": 3, "nome": "Aguardando retorno" }, "aprovacao": { "id": 1, "nome": "Deferido" } }, "para": { "etapa": { "id": 5, "nome": "Repasse" }, "instancia": null, "status": { "id": 3, "nome": "Aguardando retorno" }, "aprovacao": { "id": 1, "nome": "Deferido" } }, "comentario": "Pagamento confirmado pela CEMIG." }
+      ],
+      "anexos": [
+        { "id_anexo": 161, "nome_arquivo": "comprovante_ted_cemig.pdf", "tamanho_bytes": 67000, "mime_type": "application/pdf", "url_download": "/api/v2/anexos/161/download", "uploaded_by": { "id": 4, "nome": "Ana Paula Silva" }, "uploaded_at": "2026-05-28T10:00:00Z" }
+      ]
+    },
+    "18": {
+      "endereco_uc": "Rua Goiás, 50",
+      "cep_uc": "74000-000",
+      "municipio_uc": "Goiânia",
+      "uf_uc": "GO",
+      "grupo_subgrupo": "A4",
+      "modalidade_tarifaria": "Verde",
+      "tipo_irregularidade": { "id": 2, "nome": "Tributação ICMS/PIS/COFINS" },
+      "subtipo_irregularidade": { "id": 1, "nome": "ICMS sobre TUSD (Tema 986)" },
+      "tese_juridica": "ICMS diferido (Art. 30-F RICMS/GO)",
+      "motivo_objeto": "Repasse concluído. Processo encerrado.",
+      "deferimento": {
+        "id_deferimento": 1801,
+        "aprovacao": { "id": 1, "nome": "Deferido" },
+        "instancia": { "id": 2, "nome": "Ouvidoria" },
+        "data_procedencia": "2026-04-10",
+        "credito_simples": 16006.79,
+        "credito_dobro": 32013.58,
+        "data_credito_dobro": null,
+        "observacoes": "Acordado via ouvidoria."
+      },
+      "faturamento": [
+        {
+          "id_faturamento": 1801,
+          "numero_nf": "26120",
+          "serie_nf": "U",
+          "data_emissao": "2026-04-20",
+          "data_envio_distribuidora": "2026-04-21",
+          "data_vencimento": "2026-05-20",
+          "data_pagamento": "2026-05-15",
+          "valor_faturado": 16006.79,
+          "status_nf": "paga",
+          "observacoes": null
+        }
+      ],
+      "repasse": [
+        {
+          "id_repasse": 1801,
+          "forma_devolucao": { "id": 1, "nome": "PIX" },
+          "valor_repasse": 16006.79,
+          "data_repasse": "2026-06-05",
+          "banco_destino": null,
+          "agencia": null,
+          "conta": null,
+          "observacoes": "Repassado via PIX."
+        }
+      ],
+      "encerramento": {
+        "id_encerramento": 1801,
+        "data_encerramento": "2026-06-10",
+        "motivo": "repasse_concluido",
+        "aprovacao_final": { "id": 1, "nome": "Deferido" },
+        "parecer_final": "Ressarcimento concluído. Cliente recebeu em dobro conforme Art. 42 CDC."
+      },
+      "historico": [
+        { "id_movimentacao": 5001, "data_movimentacao": "2026-06-10T17:30:00Z", "tipo_movimentacao": "manual", "usuario": { "id": 7, "nome": "Daniela Souza" }, "de": { "etapa": { "id": 5, "nome": "Repasse" }, "instancia": null, "status": { "id": 3, "nome": "Aguardando retorno" }, "aprovacao": { "id": 1, "nome": "Deferido" } }, "para": { "etapa": { "id": 6, "nome": "Encerramento" }, "instancia": null, "status": { "id": 7, "nome": "Encerrado" }, "aprovacao": { "id": 1, "nome": "Deferido" } }, "comentario": "Processo encerrado." }
+      ],
+      "anexos": [
+        { "id_anexo": 181, "nome_arquivo": "recibo_final.pdf", "tamanho_bytes": 34000, "mime_type": "application/pdf", "url_download": "/api/v2/anexos/181/download", "uploaded_by": { "id": 7, "nome": "Daniela Souza" }, "uploaded_at": "2026-06-10T17:30:00Z" }
+      ]
+    },
+    "19": {
+      "endereco_uc": "Av. Paulista, 1000",
+      "cep_uc": "01310-000",
+      "municipio_uc": "São Paulo",
+      "uf_uc": "SP",
+      "grupo_subgrupo": "A3a",
+      "modalidade_tarifaria": "Azul",
+      "tipo_irregularidade": { "id": 4, "nome": "Bandeira tarifária" },
+      "subtipo_irregularidade": { "id": 5, "nome": "Bandeira fora do período oficial" },
+      "tese_juridica": "Bandeira tarifária irregular",
+      "motivo_objeto": "Indeferido em todas as instâncias. Processo encerrado sem ressarcimento.",
+      "deferimento": {
+        "id_deferimento": 1901,
+        "aprovacao": { "id": 2, "nome": "Indeferido" },
+        "instancia": { "id": 3, "nome": "ANEEL" },
+        "data_procedencia": "2026-05-22",
+        "credito_simples": 0,
+        "credito_dobro": 0,
+        "data_credito_dobro": null,
+        "observacoes": "ANEEL manteve indeferimento."
+      },
+      "encerramento": {
+        "id_encerramento": 1901,
+        "data_encerramento": "2026-05-22",
+        "motivo": "indeferido_sem_recurso",
+        "aprovacao_final": { "id": 2, "nome": "Indeferido" },
+        "parecer_final": "Indeferido em todas as instâncias. Sem novos recursos cabíveis."
+      },
+      "historico": [
+        { "id_movimentacao": 6001, "data_movimentacao": "2026-05-22T16:00:00Z", "tipo_movimentacao": "manual", "usuario": { "id": 7, "nome": "Daniela Souza" }, "de": { "etapa": { "id": 2, "nome": "Contestação" }, "instancia": { "id": 3, "nome": "ANEEL" }, "status": { "id": 1, "nome": "Em análise" }, "aprovacao": { "id": 2, "nome": "Indeferido" } }, "para": { "etapa": { "id": 6, "nome": "Encerramento" }, "instancia": null, "status": { "id": 7, "nome": "Encerrado" }, "aprovacao": { "id": 2, "nome": "Indeferido" } }, "comentario": "ANEEL manteve indeferimento. Sem novos recursos." }
+      ],
+      "anexos": [
+        { "id_anexo": 191, "nome_arquivo": "parecer_final_aneel.pdf", "tamanho_bytes": 156000, "mime_type": "application/pdf", "url_download": "/api/v2/anexos/191/download", "uploaded_by": { "id": 7, "nome": "Daniela Souza" }, "uploaded_at": "2026-05-22T16:00:00Z" }
+      ]
+    }
+  }
+}

@@ -94,7 +94,7 @@ const RequisicaoCard = ({ requisicao, onUpdate }) => {
       </Link>
       <p className="text-xs opacity-70">UC: {requisicao.uc?.String || 'N/A'}</p>
       <p className="text-xs opacity-70">Criado por: {criador || 'N/A'}</p>
-      <div className={`flex justify-between items-center text-xs ${calcPrazo.isOverdue ? 'text-red-400' : 'opacity-70'}`}>
+      <div className={`flex justify-between items-center text-xs ${calcPrazo.isOverdue ? 'text-[var(--danger)]' : 'opacity-70'}`}>
         <span className="flex items-center gap-1"><Clock size={14} /> Prazo:</span>
         <span className="font-bold">{calcPrazo.text}</span>
       </div>

@@ -26,12 +26,12 @@ export default function NavBell() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="relative p-2 rounded-xl hover:bg-neutral-800/40 transition"
+        className="relative p-2 rounded-xl hover:bg-[color-mix(in_srgb,var(--fg)_10%,transparent)] transition"
         title="Alertas"
       >
         <Bell className="w-5 h-5" />
         {count > 0 && (
-          <span className="absolute -top-1 -right-1 text-xs px-1.5 py-0.5 rounded-full bg-red-600 text-white">
+          <span className="absolute -top-1 -right-1 text-xs px-1.5 py-0.5 rounded-full bg-[var(--danger)] text-white">
             {count}
           </span>
         )}
