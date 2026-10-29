@@ -27,7 +27,7 @@ lucide-react, DOMPurify. Tema por CSS vars (`theme.css` + `context/ThemeContext.
 | `/Requisicoes` | `Requisicoes` | gestor/admin |
 | `/gestao` | `GestaoRequisicoes` | gestor/admin |
 | `/processos`, `/controle-processos-v2` | `ControleProcessosV2` | gestor/admin |
-| `/processos/:id` | `ProcessoDetalhePage` | gestor/admin |
+| `/processos/:id` | `ProcessoDetalhePage` (aceita `?aba=historico` e `?protocolo=…`) | gestor/admin |
 | `/analise-desvio` (`/:id`) | `AnaliseDesvio` | gestor/admin |
 | `/ocr-lote` | `OcrLote` | gestor/admin |
 | `/regras` | `Regras` | gestor/admin |
@@ -114,7 +114,9 @@ mailService, assistenteService, solicitacoesService, chatService, alertaService�
 - Alertas: `GlobalNewProcessNotifier`, `AlertTicker`, `NavBell`, `Toast`.
 - **`AvisosBell`** — sininho do topo (portal por cima de tudo, abre no "Histórico de
   protocolos"): nome de quem recebeu a tarefa em negrito, **Ciente** só para o responsável,
-  **Assumir** em tarefa sem responsável; aba "Meus avisos" com Ciente um por vez.
+  **Assumir** em tarefa sem responsável; aba "Meus avisos" com Ciente um por vez. Clicar no aviso abre
+  `/processos/{id}?aba=historico&protocolo=…` (processo na aba Histórico, protocolo destacado) ou, sem
+  processo, `/protocolos-aneel?protocolo=…` — ver [10](10-protocolos-aneel-tarefas-avisos.md).
 - **`GlobalChatWidget`**: se há uma confirmação sim/não pendente e chega outro pedido
   (`#sistema` ou ≥4 palavras), a pendência é descartada e o novo pedido segue (antes travava
   em "Não entendi. Digite sim…").

@@ -48,23 +48,51 @@ Ajustes de 29/10 para o pipeline ficar verde: 7 erros de lint (um era bug real �
 
 ### Como disparar
 
-**Jeito mais simples (um comando só):** no PowerShell do PC, na pasta `ressarcimento_system`:
+**Jeito padrão — `deploy.ps1` (um comando só, aprovação no terminal).** No PowerShell do PC (com o `gh`
+logado), na pasta `ressarcimento_system`:
 ```powershell
 .\deploy.ps1
 ```
-O script dispara o workflow no `dev`, acompanha os testes, mostra o commit e **pergunta no próprio terminal**
-"Aprovar o deploy em producao? (s/n)". Com `s`, aprova pela API do GitHub (mesma aprovação do botão) e acompanha o
-deploy até o healthcheck; com `n`, cancela sem tocar na VPS. Se o PowerShell bloquear script:
-`powershell -ExecutionPolicy Bypass -File .\deploy.ps1`.
+Saída típica:
+```
+Disparando o deploy do branch dev...
+Execucao 40953731469  (commit 36fd0fa deploy.ps1: dispara, acompanha e aprova o deploy pelo terminal)
+https://github.com/Alissongrs/ressarcimento_system/actions/runs/40953731469
+Rodando testes e build (~10 min)...
 
-**Manual:**
+Testes OK. O deploy esta esperando a sua aprovacao.
+Commit: 36fd0fa  deploy.ps1: dispara, acompanha e aprova o deploy pelo terminal
+Aprovar o deploy em producao? (s/n): s
+Aprovado. Fazendo o deploy na VPS (build + subir containers, ~5 min)...
+Deploy concluido e saudavel (commit 36fd0fa).
+```
+O que o script faz:
+1. `gh workflow run ci.yml --ref dev` e acha a execução **nova** (compara com a última `workflow_dispatch` que já
+   existia) — mostra o nº da execução, o commit e o link;
+2. a cada 20 s confere o andamento; se a execução terminar antes do deploy (teste quebrou), para e mostra o link;
+3. quando o job **Deploy VPS** fica `waiting`, mostra o commit e pergunta **"Aprovar o deploy em producao? (s/n)"**:
+   - `s` → aprova pela API (`POST /actions/runs/{id}/pending_deployments`, ambiente `production` — a mesma
+     aprovação do botão "Review deployments"; precisa ser o aprovador cadastrado no ambiente);
+   - `n` → cancela a execução; nada muda na VPS;
+4. acompanha o deploy até o fim: "Deploy concluido e saudavel" ou mostra as linhas de erro/rollback do log.
+
+Detalhes: falha de rede passageira com o GitHub (`error connecting to api.github.com`) não interrompe — a rodada
+seguinte tenta de novo. O script é só ASCII de propósito (o PowerShell 5.1 lê `.ps1` sem BOM como ANSI) e lê o
+JSON do `gh` no próprio PowerShell (o 5.1 estraga aspas dentro de argumentos de programas externos). Se o
+PowerShell bloquear script: `powershell -ExecutionPolicy Bypass -File .\deploy.ps1`. Branch diferente:
+`.\deploy.ps1 -Branch outro`.
+
+1º deploy pelo `deploy.ps1`: 29/10/2026, commit `36fd0fa`, execução `40953731469` — OK.
+
+**Manual (alternativa):**
 
 ```powershell
 gh workflow run ci.yml --ref dev -R Alissongrs/ressarcimento_system
 ```
 (ou, depois de trocar o branch padrão para `dev`: Actions → CI/CD Pipeline → **Run workflow** → `dev`).
-Depois dos testes (~10 min) o job **Deploy VPS** espera aprovação: **Review deployments** →
-`production` → **Approve and deploy**.
+Depois dos testes (~10 min) o job **Deploy VPS** espera aprovação. **Qual aprovar:** em Actions → CI/CD
+Pipeline, a execução do topo marcada **workflow_dispatch** (as de *push* nunca fazem deploy), com a faixa amarela
+**Review deployments** → marcar `production` → **Approve and deploy**.
 
 ### O que o deploy faz na VPS
 
@@ -122,9 +150,11 @@ O deploy não mexe neles; podem ser desligados depois.
   mão na VPS colide com o Git; usar `git reset --hard origin/dev` (arquivos fora do Git ficam).
 - **`gh … not a git repository`** → rodar dentro da pasta do projeto ou passar
   `-R Alissongrs/ressarcimento_system`.
-- **`Load key ... error in libcrypto`** → chave colada com quebras de linha do Windows (CRLF). O workflow
-  já remove os `
-` e valida a chave antes de usar ("VPS_SSH_KEY inválida"); se ainda falhar, colar
+- **`Load key ... error in libcrypto`** / **"VPS_SSH_KEY inválida"** → chave colada com quebras de linha do
+  Windows ou incompleta. O workflow já remove os `\r` e valida a chave antes de usar. O jeito seguro de gravar é
+  direto do arquivo, sem área de transferência:
+  `cmd /c "gh secret set VPS_SSH_KEY --env production -R Alissongrs/ressarcimento_system < %USERPROFILE%\.ssh\sure_deploy"`
+  (o mesmo vale para o `ENV_FILE`). Mensagem antiga ("VPS_SSH_KEY inválida"); se ainda falhar, colar
   de novo a chave inteira, com as linhas BEGIN/END.
 - **Deploy rodou sem pedir aprovação** → o ambiente `production` está sem *Required reviewers*.
 - **Re-run de uma execução de push não faz deploy** — o job de deploy só roda em disparo manual.

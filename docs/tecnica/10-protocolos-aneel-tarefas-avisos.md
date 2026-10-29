@@ -97,6 +97,27 @@ Mensagens: tarefa automática → "Nova tarefa para você: Protocolo ANEEL … c
 (processo #N)"; direcionada → "Nova tarefa para você: …". Exemplo visual em
 `docs/exemplo_notificacao_tarefa.html`.
 
+### Clicar no aviso → processo, na aba Histórico (29/10)
+
+Cada item das duas abas mostra o nº do protocolo e um link **"Abrir processo #N →"** (ou "Abrir protocolo →").
+Clicar no item:
+
+| Tem processo? | Vai para | O que aparece |
+|---------------|----------|---------------|
+| sim | `/processos/{id}?aba=historico&protocolo=010.xxx.xxxxx-xx` | página do processo **já na aba Histórico**; no quadro "Protocolos ANEEL deste processo" a linha do protocolo do aviso fica **destacada** (fundo amarelo + marca "aviso") e a página rola até ela; abaixo, o histórico de movimentações |
+| não | `/protocolos-aneel?protocolo=…` | página Protocolos ANEEL com o protocolo já consultado |
+
+- **Histórico de protocolos**: usa `id_processo` e `protocolo_num` da própria tarefa.
+- **Meus avisos**: `FT_ALERTAS` não guarda processo; o destino sai do texto do aviso — `processo #N` /
+  `processos #N / #M` (pega o primeiro) e o nº `010.xxx.xxxxx-xx`. Aviso sem nenhum dos dois não é clicável.
+  Por isso as mensagens de tarefa devem sempre trazer "processo #N" e o nº do protocolo formatado.
+- Clicar **não** dá ciente — ciente só no botão. O botão (Ciente / Assumir) é separado da área clicável.
+
+Código: `components/AvisosBell.jsx` (`abrir`, `destinoDoTexto`, `fmtProtocolo`); `pages/ProcessoDetalhePage.jsx` lê
+`?aba=` e passa `abaInicial` ao `ProcessoDrawer` (`components/ProcessoDrawer/index.jsx`);
+`ProcessoDrawer/ProtocolosAneelProcesso.jsx` lê `?protocolo=`, destaca e rola (classe `cpv2-aneel-row--destaque`
+em `pages/controleProcessosV2.css`). A rota `/processos/:id` é de gestor/admin.
+
 ## WhatsApp do departamento (`backend/whatsapp/`, página `/whatsapp`)
 
 - Um número só, conectado por **QR code** (biblioteca whatsmeow = mesma conexão do WhatsApp Web, não a

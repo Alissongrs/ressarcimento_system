@@ -2,7 +2,8 @@
 
 ## Deploy
 
-Desde 29/10/2026 o deploy é pelo **GitHub Actions** (botão/`gh workflow run`, com aprovação):
+Desde 29/10/2026 o deploy é pelo **GitHub Actions**, disparado do PC com **`.\deploy.ps1`** (dispara, acompanha
+e pede a aprovação no próprio terminal) — ou pelo `gh workflow run` + aprovação no site:
 `.env` vindo do segredo `ENV_FILE`, `git pull`, build, healthcheck e rollback automático. Passo a
 passo, segredos e o alinhamento da VPS em [11 — GitHub, CI/CD e deploy](11-github-cicd-deploy.md).
 
