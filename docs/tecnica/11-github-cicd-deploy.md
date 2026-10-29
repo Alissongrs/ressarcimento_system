@@ -48,6 +48,17 @@ Ajustes de 29/10 para o pipeline ficar verde: 7 erros de lint (um era bug real �
 
 ### Como disparar
 
+**Jeito mais simples (um comando só):** no PowerShell do PC, na pasta `ressarcimento_system`:
+```powershell
+.\deploy.ps1
+```
+O script dispara o workflow no `dev`, acompanha os testes, mostra o commit e **pergunta no próprio terminal**
+"Aprovar o deploy em producao? (s/n)". Com `s`, aprova pela API do GitHub (mesma aprovação do botão) e acompanha o
+deploy até o healthcheck; com `n`, cancela sem tocar na VPS. Se o PowerShell bloquear script:
+`powershell -ExecutionPolicy Bypass -File .\deploy.ps1`.
+
+**Manual:**
+
 ```powershell
 gh workflow run ci.yml --ref dev -R Alissongrs/ressarcimento_system
 ```
@@ -112,7 +123,8 @@ O deploy não mexe neles; podem ser desligados depois.
 - **`gh … not a git repository`** → rodar dentro da pasta do projeto ou passar
   `-R Alissongrs/ressarcimento_system`.
 - **`Load key ... error in libcrypto`** → chave colada com quebras de linha do Windows (CRLF). O workflow
-  já remove os `` e valida a chave antes de usar ("VPS_SSH_KEY inválida"); se ainda falhar, colar
+  já remove os `
+` e valida a chave antes de usar ("VPS_SSH_KEY inválida"); se ainda falhar, colar
   de novo a chave inteira, com as linhas BEGIN/END.
 - **Deploy rodou sem pedir aprovação** → o ambiente `production` está sem *Required reviewers*.
 - **Re-run de uma execução de push não faz deploy** — o job de deploy só roda em disparo manual.
