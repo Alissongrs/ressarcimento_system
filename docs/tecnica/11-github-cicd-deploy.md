@@ -8,9 +8,8 @@ Organizado em 29/10/2026. Até então o código ia para a VPS copiado à mão; a
 - `github.com/Alissongrs/ressarcimento_system` — **privado** (estava público até 29/10; foi fechado no
   mesmo dia, sem nenhuma senha publicada).
 - Branch de trabalho e de produção: **`dev`** (a VPS usa `dev`). O `main` está parado num commit antigo.
-- ⚠️ O branch **padrão** do repositório ainda é `main`; por isso o botão "Run workflow" não aparece no
-  site. Trocar em Settings → General → Default branch → `dev`. Até lá, disparar por linha de comando
-  (ver abaixo).
+- Branch **padrão** do repositório: `dev` (trocado em 29/10; antes era `main`, e por isso o botão
+  "Run workflow" não aparecia no site).
 
 ### O que fica fora do Git (de propósito)
 
@@ -89,7 +88,7 @@ PowerShell bloquear script: `powershell -ExecutionPolicy Bypass -File .\deploy.p
 ```powershell
 gh workflow run ci.yml --ref dev -R Alissongrs/ressarcimento_system
 ```
-(ou, depois de trocar o branch padrão para `dev`: Actions → CI/CD Pipeline → **Run workflow** → `dev`).
+(ou no site: Actions → CI/CD Pipeline → **Run workflow** → `dev`).
 Depois dos testes (~10 min) o job **Deploy VPS** espera aprovação. **Qual aprovar:** em Actions → CI/CD
 Pipeline, a execução do topo marcada **workflow_dispatch** (as de *push* nunca fazem deploy), com a faixa amarela
 **Review deployments** → marcar `production` → **Approve and deploy**.

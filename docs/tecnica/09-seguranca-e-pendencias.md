@@ -75,7 +75,6 @@ comentário: mover a água para `30 2 * * 2,4`.
 Até 28/10 o código ia para a VPS copiado à mão e muita coisa ficava pendente de deploy. Desde
 29/10 tudo está no GitHub (`dev`) e a VPS foi alinhada; o deploy é pelo Actions
 ([11](11-github-cicd-deploy.md)). Pendências ligadas ao deploy:
-- trocar o branch padrão do GitHub para `dev` (para o botão "Run workflow" aparecer);
 - escolher o grupo de avisos em `/whatsapp` (sem isso nada sai pelo WhatsApp);
 - desligar os containers antigos `ollama`, `ocr`, `llama-agent` (fora do compose, sem uso);
 - `backend/.env` na VPS estava `664` → deixar `600` (o deploy já grava assim).
