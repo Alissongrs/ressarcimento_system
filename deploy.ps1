@@ -16,7 +16,9 @@ $Repo = 'Alissongrs/ressarcimento_system'
 
 function Get-DeployJobStatus($runId) {
     # JSON tratado aqui (o PowerShell 5.1 estraga aspas dentro de argumentos de programas externos)
-    $r = (gh run view $runId -R $Repo --json status,conclusion,jobs) -join "`n" | ConvertFrom-Json
+    # falha de rede passageira: devolve "sem resposta" e o laco tenta de novo na proxima rodada
+    try { $r = (gh run view $runId -R $Repo --json status,conclusion,jobs 2>$null) -join "`n" | ConvertFrom-Json } catch { $r = $null }
+    if (-not $r) { return @('', '', '') }
     $deploy = @($r.jobs | Where-Object { $_.name -like '*Deploy*' } | ForEach-Object { $_.status }) -join ','
     return @($r.status, [string]$r.conclusion, $deploy)
 }
