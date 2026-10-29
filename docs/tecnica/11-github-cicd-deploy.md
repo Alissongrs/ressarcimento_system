@@ -1,7 +1,7 @@
 # 11 — GitHub, CI/CD e Deploy
 
 Organizado em 29/10/2026. Até então o código ia para a VPS copiado à mão; a partir daqui o caminho é
-**PC → GitHub (branch `dev`) → Actions testa → deploy pelo botão → VPS**.
+**PC → GitHub (branch `dev`) → Actions testa → `.deploy.ps1` (aprovação no terminal) → VPS**.
 
 ## Repositório
 
