@@ -1,6 +1,12 @@
 # 08 — Operação, Infra e Workers
 
-## Deploy — `docker-compose.yml`
+## Deploy
+
+Desde 29/10/2026 o deploy é pelo **GitHub Actions** (botão/`gh workflow run`, com aprovação):
+`.env` vindo do segredo `ENV_FILE`, `git pull`, build, healthcheck e rollback automático. Passo a
+passo, segredos e o alinhamento da VPS em [11 — GitHub, CI/CD e deploy](11-github-cicd-deploy.md).
+
+## `docker-compose.yml`
 
 Serviços ativos:
 
@@ -8,18 +14,20 @@ Serviços ativos:
 |---------|----------------|------------------------|-------|
 | `db` | `mysql:8.0` | `127.0.0.1:3306:3306` | utf8mb4, tz `-03:00`, healthcheck, volume `db_data`, init em `./docker/mysql/init` |
 | `redis` | `redis:7-alpine` | interno | rate-limit; sem persistência; maxmemory 128mb LRU |
-| `backend` | build `./backend/Dockerfile` | `127.0.0.1:8080:8080` | Go API; `env_file: ./backend/.env`; `GO_ENV=production`, `COOKIE_SECURE=true`, `LOG_FORMAT=json` |
+| `backend` | build `./backend/Dockerfile` | `127.0.0.1:8080:8080` | Go API; `env_file: ./backend/.env`; `GO_ENV=production`, `COOKIE_SECURE=true`, `LOG_FORMAT=json`; volume `whatsapp_data:/app/whatsapp_sessao` (sessão do WhatsApp) |
 | `frontend` | build `./frontend/Dockerfile` | `127.0.0.1:8090:80` | build React → nginx 1.27-alpine |
 
 Desativados no compose: `ollama`, `ocr`, `llama-agent` (LLM passou a Anthropic Haiku a
 partir do backend; OCR via Tesseract) e `caddy`. **TLS público é feito pelo Apache do
 host** (reverse-proxy `/`→frontend:8090, `/api`→backend:8080).
 
-**Build do backend** (`backend/Dockerfile`): multi-stage Go 1.24-alpine (binário estático
+**Build do backend** (`backend/Dockerfile`): multi-stage Go 1.26-alpine (binário estático
 `CGO_ENABLED=0` + geração do swagger) → runtime `python:3.11-slim` (glibc p/ PyMuPDF/
 opencv). Também compila 3 binários usados pelo cron: `auditados`, `inconclusivos`,
 `executor_solicitacoes`. Empacota `ocr_prod/` (pip), define `SKIP_SEFAZ=1`, roda como
-usuário não-root `app`.
+usuário não-root `app`. ⚠️ `backend/ocr_prod/` **não está no Git** (tem senha no código): o build
+na VPS usa a cópia que já existe lá; no CI um diretório vazio substitui. O Swagger é gerado no
+build (`swag init`).
 
 ### Migrations no boot
 `database/migrations.go:RunMigrations()` roda no startup → `runAdditiveMigrations()`

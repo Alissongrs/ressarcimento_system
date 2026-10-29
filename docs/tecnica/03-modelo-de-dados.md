@@ -176,6 +176,27 @@ dados sensíveis; não despejar.
 
 ---
 
+## Protocolos ANEEL, tarefas e avisos — [C] (migrações aditivas)
+
+Detalhe em [10](10-protocolos-aneel-tarefas-avisos.md).
+
+| Tabela | Papel |
+|--------|-------|
+| `FT_PROTOCOLOS_ANEEL` | protocolo × processo, situação, `status_vinculo` (`ok`/`sem_processo`/`confirmar`), responsável, `ultima_fonte` |
+| `FT_PROTOCOLO_EVENTOS` | linha do tempo do protocolo (texto completo do andamento) |
+| `FT_TAREFAS` | tarefa por mudança de protocolo: responsável, `direcionado_por/em`, `ciente_em`, `status`, conclusão |
+| `FT_TAREFAS_REGRAS` | regra tipo→analista (não usada desde 27/10) |
+| `FT_ALERTAS` | avisos do sininho; colunas novas `ciente_em`, `hora_alerta`, `criado_por` |
+| `FT_WHATSAPP_CONFIG` / `FT_WHATSAPP_MENSAGENS` | grupo de avisos e mensagens monitoradas |
+| `FT_ROTINAS` / `FT_ROTINA_EXECUCOES` / `FT_ROTINA_EVENTOS` | rotinas e lembretes criados no chat (`#rotina`) |
+| `FATURA_AGUA_CONFERENCIA` | conferência visual dos apontamentos de água (causa, evidência, recalcular) |
+
+⚠️ Fuso: DATETIME (`criado_em`, `direcionado_em`, `ciente_em` das tarefas) em horário de Brasília;
+`FT_ALERTAS.data_criacao` é TIMESTAMP.
+
+`FT_SOLICITACOES`: coluna nova `perfil_solicitante`; `resultado` passa a **`MEDIUMTEXT`** no boot
+(TEXT limitava em 64 KB; relatórios de até 3000 linhas).
+
 ## Outras tabelas confirmadas — [C]
 `AGENTE_RECEPCAO_LOG` (log do Agente de Recepção de e-mails órfãos; `dedup_key` sha256),
 `PROCESSO_COBRANCA_CACHE` (sugestão de cobrança/SR por processo),

@@ -44,6 +44,23 @@ certificado não é validada**. Mover para `DB_APP_TLS=rds` (verificação compl
 `MYSQL_ROOT_PASSWORD`/`MYSQL_PASSWORD` têm literais de fallback no `docker-compose.yml` —
 devem ser sobrescritos por env em produção.
 
+### 7. Senhas escritas no código (descoberto em 29/10)
+53 arquivos Python têm a senha do banco no código: `backend/_*.py` (scripts avulsos),
+`backend/ocr_prod/` (4), `backend/ocr_service/` (26), `worker/engine/` (3). **Ficaram fora do
+GitHub** por isso. Ação: trocar por leitura do `.env`/variável de ambiente e então versionar;
+rotacionar a senha.
+
+### 8. Repositório esteve público
+Até 29/10 o repositório no GitHub era **público**. Foi fechado no mesmo dia; antes do envio foi
+feita varredura de segredos (nenhum publicado). Histórico antigo (antes de 29/10) não foi
+auditado em profundidade — recomendável rodar um scanner de segredos no histórico
+(ex.: gitleaks) e rotacionar o que aparecer.
+
+### 9. Dependências com CVE
+`govulncheck`: `github.com/xuri/excelize/v2@v2.10.0` com CVEs corrigidas só em commits sem
+versão publicada — atualizar quando sair a v2.11.x. O Go da imagem/CI é o 1.26 mais recente
+(corrige as CVEs da biblioteca padrão).
+
 ## Pendências operacionais
 
 ### CRON_TOKEN
@@ -54,7 +71,20 @@ no `backend/.env` e no env do backend. Sem ele, a aplicação diária de regras 
 `job_agua` e `job_pdf_pipeline` colidem na **quinta 02:00**. Sugestão no próprio
 comentário: mover a água para `30 2 * * 2,4`.
 
-### Deploy pendente (feature de água + outros)
+### Deploy
+Até 28/10 o código ia para a VPS copiado à mão e muita coisa ficava pendente de deploy. Desde
+29/10 tudo está no GitHub (`dev`) e a VPS foi alinhada; o deploy é pelo Actions
+([11](11-github-cicd-deploy.md)). Pendências ligadas ao deploy:
+- trocar o branch padrão do GitHub para `dev` (para o botão "Run workflow" aparecer);
+- escolher o grupo de avisos em `/whatsapp` (sem isso nada sai pelo WhatsApp);
+- desligar os containers antigos `ollama`, `ocr`, `llama-agent` (fora do compose, sem uso);
+- `backend/.env` na VPS estava `664` → deixar `600` (o deploy já grava assim).
+
+### Swagger
+O Swagger (`/swagger`, gerado no build por `swag init`) só cobre as rotas com anotação
+`@Router` nos handlers. Ver a seção de Swagger em [01](01-arquitetura-backend.md).
+
+### Histórico: deploy pendente (até 28/10)
 Vários módulos aparecem na memória do projeto como **UNCOMMITTED / pendentes de deploy**.
 A documentação descreve o **código no disco**, não necessariamente o que roda em PROD.
 Itens conhecidos aguardando deploy (confirmar antes de assumir que estão no ar):
@@ -82,3 +112,7 @@ Itens conhecidos aguardando deploy (confirmar antes de assumir que estão no ar)
 6. [ ] Sobrescrever senhas default do MySQL no compose de produção.
 7. [ ] Definir `CRON_TOKEN` para ativar a aplicação de regras.
 8. [ ] Resolver colisão de cron água × pdf_pipeline (quinta 02:00).
+9. [ ] Tirar senhas do código dos 53 arquivos Python e versioná-los; rotacionar a senha.
+10. [ ] Varredura de segredos no histórico do Git (repo esteve público).
+11. [ ] 2FA na conta do GitHub + ambiente `production` com aprovação obrigatória.
+12. [ ] Atualizar excelize quando sair versão com as correções.

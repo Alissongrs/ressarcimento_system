@@ -33,6 +33,9 @@ lucide-react, DOMPurify. Tema por CSS vars (`theme.css` + `context/ThemeContext.
 | `/regras` | `Regras` | gestor/admin |
 | `/claro` | `ConsultaClaro` | gestor/admin |
 | `/caixa-de-email` | `CaixaDeEmail` | gestor/admin |
+| `/protocolos-aneel` | `ProtocolosAneel` | todos os logados (ações de admin dentro da página) |
+| `/whatsapp` | `WhatsappEmpresa` | admin |
+| `/rotinas` | `AdminRotinas` | admin |
 | `/historico` | `HistoricoFixed` | **só admin** |
 | `/dashboard` | `Relatorios` → `RelatoriosMetricas` | **só admin** |
 | `/admin/feedbacks` | `AdminFeedbacks` | admin |
@@ -66,7 +69,12 @@ mailService, assistenteService, solicitacoesService, chatService, alertaService�
 - **`ProcessoDetalhePage`** (`/processos/:id`) — detalhe dedicado do processo.
 - **`Prazos`** — SLA de processos "Aguardando retorno" perto/depois do prazo; envia
   cobrança por e-mail.
-- **`RelatoriosMetricas`** — dashboard de métricas (KPIs recharts, composição do Kanban).
+- **`RelatoriosMetricas`** — dashboard de métricas (KPIs recharts, composição do Kanban); no fim,
+  **tempo de resposta aos protocolos ANEEL** (`TempoRespostaProtocolos`) — visível só para
+  Alisson, Luana e Eduardo (a seção some quando o servidor responde 403).
+- **`ProtocolosAneel`** — protocolos da Ouvidoria ANEEL: Consultar / Tarefas / Todos / A confirmar;
+  "Consultar no site da ANEEL" (extensão). Ver [10](10-protocolos-aneel-tarefas-avisos.md).
+- **`WhatsappEmpresa`** — QR do número do departamento, monitor de conversas, grupo de avisos.
 - **`Solicitacoes`** — fila de pedidos "#sistema" (gated ao aprovador) → `SolicitacoesPanel`.
 - **`CaixaDeEmail`** — cliente de e-mail completo (Graph): pastas, ler/responder/
   encaminhar, anexar a processo, compor (ReactQuill), render com DOMPurify.
@@ -104,6 +112,12 @@ mailService, assistenteService, solicitacoesService, chatService, alertaService�
 - **`InformativoModal`** — janelinha de novidades (ver abaixo).
 - **`GlobalChatWidget`** — chat global flutuante com acesso ao banco (gestor/admin).
 - Alertas: `GlobalNewProcessNotifier`, `AlertTicker`, `NavBell`, `Toast`.
+- **`AvisosBell`** — sininho do topo (portal por cima de tudo, abre no "Histórico de
+  protocolos"): nome de quem recebeu a tarefa em negrito, **Ciente** só para o responsável,
+  **Assumir** em tarefa sem responsável; aba "Meus avisos" com Ciente um por vez.
+- **`GlobalChatWidget`**: se há uma confirmação sim/não pendente e chega outro pedido
+  (`#sistema` ou ≥4 palavras), a pendência é descartada e o novo pedido segue (antes travava
+  em "Não entendi. Digite sim…").
 - `charts/*` (Donut, Funnel, LineChart, Sparkline, Pareto, Heatmap…), `ui/*`
   (shadcn-style), `ErrorBoundary`, `SureLogo`.
 

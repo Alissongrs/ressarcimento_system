@@ -26,7 +26,9 @@ gocron em horário local. Tarefas: leitura IMAP a cada 1min (**só se `IMAP_ENAB
 default off), verificação de pendências de fluxo (a cada 10 dias), informativo
 semanal (sex 18:00), checagem de prazos de requisições/processos (de hora em hora),
 cache de cobrança (horário), e-mails de alerta (diário 08:00/08:05), resumos de
-processo (1min, lote de 20), refresh do CSV de ML + treino do modelo de score (horário).
+processo (1min, lote de 20), refresh do CSV de ML + treino do modelo de score (horário),
+**rotinas do chat** (`rotinas.RodarDevidas`, 1min), **protocolos ANEEL**
+(`protocolos.RodarAgendado`, **a cada 15 min**) e conexão do **WhatsApp** (`whatsapp.Iniciar`).
 
 > ⚠️ Em produção, o agendamento "oficial" é o **cron da VPS**
 > ([08](08-ops-infra-workers.md)). O gocron in-process **também** roda — atenção para
@@ -61,7 +63,7 @@ GlobalRateLimit → Gzip
 | **Público** | — | qualquer um | health, SSE (`AuthOrQueryToken`), `/register`, `/login` (`AuthRateLimit`), `/logout`, `/whoami`, download de anexo por token |
 | **authRequired** | `AuthMiddleware` | **qualquer autenticado, incl. solicitante** | filtros, **solicitações** (chat→fila), chat/histórico, informativo (GET), lookups de UC, **requisições** (criar + próprias), **faturas** (superfície enorme: FDE, fichas F01–F14, auditar/rejeitar apontamento, água-análise, acer, claro, desvio), busca global, feedback, dashboard (leitura) |
 | **gestorRequired** | `AuthMiddleware` + `GestorMiddleware` | gestor ou admin | triagem de requisições, **processos/fluxo** (kanban, movimentar, deferimento, suspender, prazos, backlog), fluxo-ressarcimento, faturamento, **mail/** (Graph), documento DOCX, admin/processos (planilha), score, regras CRUD, fichas-regras + "Testar" |
-| **adminOnly** | `AuthMiddleware` + `StrictAdminMiddleware` | **só admin** | `/historico` global, `/relatorios/metricas`, `/relatorios/kanban-composicao`, `PUT /informativo` |
+| **adminOnly** | `AuthMiddleware` + `StrictAdminMiddleware` | **só admin** | `/historico` global, `/relatorios/metricas`, `/relatorios/kanban-composicao`, `/relatorios/tempo-resposta-protocolos` (+ filtro por usuário: só ids 1, 1000, 1004), `PUT /informativo` |
 | **Cron** | header `X-Cron-Token == CRON_TOKEN` | job da VPS | `POST /rules/aplicar-agendadas` |
 
 ### `/api/v2`
@@ -73,6 +75,9 @@ Rotas públicas de auth, depois um grupo com **apenas `AuthMiddleware()`** →
 > repasse, encerramento, metas) estão sob `AuthMiddleware()` **sem `GestorMiddleware`**.
 > Em tese um `solicitante` autenticado não é barrado estruturalmente nessas rotas —
 > diferente do v1. Ver [09 — Segurança](09-seguranca-e-pendencias.md).
+
+Rotas do módulo de protocolos/tarefas/sininho/WhatsApp (todas em `authRequired`; checagem de
+papel dentro do handler onde preciso): ver [10](10-protocolos-aneel-tarefas-avisos.md).
 
 ## Middleware (`middleware/`)
 
@@ -120,6 +125,12 @@ o bug de carimbo +3h UTC). TLS por conexão: `DB_*_TLS` ∈ `skip-verify`|`rds`|
 
 > Ver [memória do projeto: deploy não roda migração]. Para adicionar coluna/tabela
 > nova sem quebrar o deploy, adicione a chamada aditiva em `migrations_additive.go`.
+
+## Validação de entrada (`utils/validate.go`)
+
+`BindAndValidate` faz bind + validação e responde 400 com mensagens em português. Desde 29/10 o
+nome do campo nas mensagens é o do **JSON** (`id_departamento é obrigatório`), via
+`RegisterTagNameFunc` no validator do Gin.
 
 ## SSE (`sse/` + `handlers/sse_handler.go`)
 

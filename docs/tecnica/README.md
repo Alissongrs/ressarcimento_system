@@ -2,7 +2,8 @@
 
 > Conjunto de documentação técnica do sistema **SURE** (AM Energia) — gestão de
 > ressarcimento de energia elétrica e água. Gerado a partir de varredura do
-> código em **2026-10-13**. Para a versão ilustrada (não-técnica), veja o site HTML
+> código em **2026-10-13**, atualizado em **2026-10-29** (protocolos ANEEL,
+> tarefas/sininho, WhatsApp, GitHub + CI/CD + deploy). Para a versão ilustrada (não-técnica), veja o site HTML
 > que acompanha esta entrega.
 
 ## Como ler
@@ -21,6 +22,8 @@ Cada arquivo cobre um módulo. A ordem recomendada para quem está chegando:
 | 07 | [Frontend](07-frontend.md) | Páginas, componentes, roteamento por perfil, assistente, SSE |
 | 08 | [Operação, infra e workers](08-ops-infra-workers.md) | Docker, VPS, cron, worker `claude -p`, backups, integrações |
 | 09 | [Segurança e pendências](09-seguranca-e-pendencias.md) | Achados de segurança, dívidas técnicas, itens de deploy |
+| 10 | [Protocolos ANEEL, tarefas, sininho e WhatsApp](10-protocolos-aneel-tarefas-avisos.md) | Monitor da Ouvidoria ANEEL (e-mail 15 min + extensão), tarefas com responsável, Ciente/Assumir, avisos no grupo, métricas e relatórios de protocolos |
+| 11 | [GitHub, CI/CD e deploy](11-github-cicd-deploy.md) | Repositório, o que fica fora do Git, Actions, deploy pelo botão, segredos/`ENV_FILE`, chave SSH, rollback |
 
 ## Convenções
 
