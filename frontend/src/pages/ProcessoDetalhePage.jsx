@@ -3,7 +3,7 @@
 // Reaproveita o ProcessoDrawer em modo inline (sem portal/backdrop).
 
 import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import ProcessoDrawer from '../components/ProcessoDrawer/index.jsx';
@@ -13,6 +13,9 @@ import './controleProcessosV2.css';
 
 export default function ProcessoDetalhePage() {
   const { id } = useParams();
+  // ?aba=historico (aviso do sininho abre direto no histórico, onde fica o quadro de protocolos ANEEL)
+  const [params] = useSearchParams();
+  const abaUrl = params.get('aba') || 'resumo';
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -66,8 +69,10 @@ export default function ProcessoDetalhePage() {
         </header>
 
         <ProcessoDrawer
+          key={`${idProcesso}:${abaUrl}`}
           inline
           idProcesso={idProcesso}
+          abaInicial={abaUrl}
           onMovimentar={(proc) => setMovProc(proc)}
           onToast={(t) => setToast(t)}
         />

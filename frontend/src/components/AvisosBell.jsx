@@ -7,9 +7,24 @@ import api from '../services/api';
 // Sininho do topo. "Meus avisos" = avisos pessoais (ex.: movimentação no protocolo ANEEL que você cuida),
 // com bolinha vermelha até a pessoa apertar "Ciente" em cada aviso; "Histórico" = todas as movimentações de protocolo, para a equipe toda.
 // O sininho abre no Histórico. Lá, só quem recebeu a tarefa vê o botão "Ciente"; tarefa sem responsável tem "Assumir".
+// Clicar num aviso abre o processo direto na aba Histórico, com o protocolo destacado no quadro "Protocolos ANEEL";
+// sem processo, abre a página Protocolos ANEEL nesse protocolo. Clicar não dá ciente (isso é só no botão).
 // Atualiza a cada minuto e na hora em que o App recebe um aviso pelo SSE (evento 'avisos:changed').
 
 const STATUS = { aberta: 'Aberta', concluida: 'Concluída', em_andamento: 'Em andamento' };
+
+// "0106671242658" ou "010.667.12426-58" → "010.667.12426-58"
+function fmtProtocolo(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  return d.length === 13 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 11)}-${d.slice(11)}` : '';
+}
+
+// destino de um aviso pessoal: o texto traz "processo #N" e/ou o nº do protocolo
+function destinoDoTexto(msg) {
+  const proc = /processos?\s*#(\d+)/i.exec(msg || '');
+  const prot = /0?10\.\d{3}\.\d{5}-\d{2}/.exec(msg || '');
+  return { idProcesso: proc ? Number(proc[1]) : null, protocolo: prot ? prot[0] : '' };
+}
 
 function quando(iso) {
   if (!iso) return '';
@@ -96,6 +111,13 @@ export default function AvisosBell() {
     setEnviando(null);
   };
 
+  const abrir = ({ idProcesso, protocolo }) => {
+    const prot = fmtProtocolo(protocolo);
+    setAberto(false);
+    if (idProcesso) navigate(`/processos/${idProcesso}?aba=historico${prot ? `&protocolo=${encodeURIComponent(prot)}` : ''}`);
+    else navigate(prot ? `/protocolos-aneel?protocolo=${encodeURIComponent(prot)}` : '/protocolos-aneel');
+  };
+
   const n = dados.nao_lidos;
   return (
     <div ref={caixa} className="relative">
@@ -157,13 +179,29 @@ export default function AvisosBell() {
                   className="mt-1.5 shrink-0 w-2 h-2 rounded-full"
                   style={{ background: a.lido ? 'transparent' : 'var(--danger, #dc2626)' }}
                 />
-                <span className="min-w-0 flex-1">
-                  <span className={`block text-sm ${a.lido ? 'opacity-70' : 'font-semibold'}`}>{a.mensagem}</span>
-                  <span className="block text-xs opacity-55 mt-0.5">
-                    {quando(a.data_criacao)}
-                    {a.lido && (a.ciente_em ? ` · Ciente em ${quando(a.ciente_em)}` : ' · Ciente')}
-                  </span>
-                </span>
+                {(() => {
+                  const dest = destinoDoTexto(a.mensagem);
+                  const temDestino = !!(dest.idProcesso || dest.protocolo);
+                  const conteudo = (
+                    <>
+                      <span className={`block text-sm ${a.lido ? 'opacity-70' : 'font-semibold'}`}>{a.mensagem}</span>
+                      <span className="block text-xs opacity-55 mt-0.5">
+                        {quando(a.data_criacao)}
+                        {a.lido && (a.ciente_em ? ` · Ciente em ${quando(a.ciente_em)}` : ' · Ciente')}
+                      </span>
+                      {temDestino && (
+                        <span className="block text-xs font-semibold mt-1" style={{ color: 'var(--accent, #2563eb)' }}>
+                          {dest.idProcesso ? `Abrir processo #${dest.idProcesso} →` : 'Abrir protocolo →'}
+                        </span>
+                      )}
+                    </>
+                  );
+                  return temDestino ? (
+                    <button type="button" onClick={() => abrir(dest)} className="min-w-0 flex-1 text-left" title="Abrir o processo, no histórico">
+                      {conteudo}
+                    </button>
+                  ) : <span className="min-w-0 flex-1">{conteudo}</span>;
+                })()}
                 {!a.lido && (
                   <button
                     type="button"
@@ -197,9 +235,9 @@ export default function AvisosBell() {
                 >
                   <button
                     type="button"
-                    onClick={() => { setAberto(false); navigate('/protocolos-aneel'); }}
+                    onClick={() => abrir({ idProcesso: h.id_processo, protocolo: h.protocolo_num })}
                     className="min-w-0 flex-1 text-left"
-                    title="Abrir a página Protocolos ANEEL"
+                    title={h.id_processo ? 'Abrir o processo, no histórico' : 'Abrir o protocolo na página Protocolos ANEEL'}
                   >
                     <span className="block text-sm font-medium">{h.titulo}</span>
                     {/* quem recebeu a tarefa, em destaque */}
@@ -207,11 +245,15 @@ export default function AvisosBell() {
                       {h.responsavel ? `Para ${minha ? `você (${h.responsavel})` : h.responsavel}` : 'Sem responsável'}
                     </span>
                     <span className="block text-xs opacity-65 mt-0.5">
+                      {fmtProtocolo(h.protocolo_num) ? `Protocolo ${fmtProtocolo(h.protocolo_num)} · ` : ''}
                       {h.id_processo ? `Processo #${h.id_processo} · ` : ''}
                       {STATUS[h.status] || h.status}
                       {h.ciente_em ? ` · Ciente em ${quando(h.ciente_em)}` : ''}
                     </span>
                     <span className="block text-xs opacity-50 mt-0.5">{quando(h.criado_em)}</span>
+                    <span className="block text-xs font-semibold mt-1" style={{ color: 'var(--accent, #2563eb)' }}>
+                      {h.id_processo ? `Abrir processo #${h.id_processo} →` : 'Abrir protocolo →'}
+                    </span>
                     {erroTarefa?.id === h.id_tarefa && (
                       <span className="block text-xs mt-1" style={{ color: 'var(--danger, #dc2626)' }}>{erroTarefa.msg}</span>
                     )}

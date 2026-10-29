@@ -683,6 +683,7 @@
 /* Protocolos ANEEL deste processo (topo do histórico) */
 .cpv2-aneel-box { border: 1px solid var(--cpv2-border); border-left: 3px solid var(--cpv2-warning); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
 .cpv2-aneel-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 0; }
+.cpv2-aneel-row--destaque { background: color-mix(in srgb, var(--cpv2-warning) 14%, transparent); border-radius: 6px; padding: 4px 6px; margin: 0 -6px; font-weight: 600; }
 .cpv2-aneel-row input, .cpv2-aneel-resp select { font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--cpv2-border); border-radius: 5px; background: var(--cpv2-surface, #fff); color: inherit; }
 .cpv2-aneel-resp { margin-left: auto; font-size: 12px; color: var(--cpv2-text-muted); }
 .cpv2-tl-item__head {

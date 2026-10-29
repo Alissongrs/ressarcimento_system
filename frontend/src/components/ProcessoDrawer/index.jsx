@@ -103,8 +103,9 @@ export default function ProcessoDrawer({
   onMovimentar,
   onToast,
   inline = false, // true = renderiza como página (sem portal/backdrop/posição fixa)
+  abaInicial = 'resumo', // ex.: 'historico' quando se chega pelo aviso do sininho
 }) {
-  const [aba, setAba] = useState('resumo');
+  const [aba, setAba] = useState(abaInicial);
   const qc = useQueryClient();
 
   // Esc fecha (apenas no modo drawer/modal)

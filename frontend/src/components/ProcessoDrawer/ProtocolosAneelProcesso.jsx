@@ -1,7 +1,7 @@
 // Quadro "Protocolos ANEEL deste processo" no topo do histórico: situação e data de cada protocolo
 // (só a data — o site da ANEEL não informa horário) e campo para vincular um protocolo novo.
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../services/apiClient.js';
 import { fmtDataBR } from '../../utils/dateBR.js';
@@ -21,6 +21,13 @@ export default function ProtocolosAneelProcesso({ idProcesso, onToast }) {
   const [novo, setNovo] = useState('');
   const [salvando, setSalvando] = useState(false);
   const itens = data?.itens || [];
+  // ?protocolo=… (vindo do aviso do sininho): destaca a linha e rola até ela
+  const [params] = useSearchParams();
+  const destaque = (params.get('protocolo') || '').replace(/\D/g, '');
+  const linhaDestaque = useRef(null);
+  useEffect(() => {
+    if (destaque && linhaDestaque.current) linhaDestaque.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [destaque, itens.length]);
 
   const recarregar = () => {
     qc.invalidateQueries({ queryKey: ['protocolos-aneel'] });
@@ -52,8 +59,15 @@ export default function ProtocolosAneelProcesso({ idProcesso, onToast }) {
           Nenhum protocolo ANEEL ainda. Quando alguém escreve "Protocolo 010.…" numa movimentação, ele aparece aqui sozinho.
         </div>
       )}
-      {itens.map((p) => (
-        <div key={p.id} className="cpv2-aneel-row">
+      {itens.map((p) => {
+        const marcado = destaque && String(p.protocolo || '').replace(/\D/g, '') === destaque;
+        return (
+        <div
+          key={p.id}
+          ref={marcado ? linhaDestaque : undefined}
+          className={`cpv2-aneel-row${marcado ? ' cpv2-aneel-row--destaque' : ''}`}
+          title={marcado ? 'Protocolo do aviso que você abriu' : undefined}
+        >
           <Link to={`/protocolos-aneel?protocolo=${encodeURIComponent(p.protocolo)}`} className="cpv2-mono">
             {p.protocolo}
           </Link>
@@ -71,8 +85,10 @@ export default function ProtocolosAneelProcesso({ idProcesso, onToast }) {
               a confirmar
             </span>
           )}
+          {marcado && <span className="cpv2-chip cpv2-chip--warning">aviso</span>}
         </div>
-      ))}
+        );
+      })}
       <div className="cpv2-aneel-row">
         <input
           className="cpv2-mono"

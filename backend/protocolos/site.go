@@ -190,7 +190,11 @@ func vincularPorEndereco(db *gorm.DB, num, endereco string) bool {
 	if len(procs) == 1 {
 		resp = UltimoAlterador(db, procs[0])
 	} else {
-		alvo = fmt.Sprintf("processos %v (confirmar qual)", procs)
+		ids := make([]string, len(procs))
+		for i, p := range procs {
+			ids[i] = fmt.Sprintf("#%d", p)
+		}
+		alvo = "processos " + strings.Join(ids, " / ") + " (confirmar qual)"
 	}
 	titulo := fmt.Sprintf("Protocolo ANEEL %s vinculado ao %s — conferir", Formatar(num), alvo)
 	desc := fmt.Sprintf("Protocolo estava sem processo no SURE; vinculado pelo campo Endereço do site da ANEEL (%s). "+
