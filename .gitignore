@@ -32,6 +32,9 @@ Thumbs.db
 !*.env.example
 backend/.env
 backend/.env.local
+.env.novo
+**/.env.novo
+.env_backups/
 
 # ========================================
 # Backend Go — artifacts/binários/logs

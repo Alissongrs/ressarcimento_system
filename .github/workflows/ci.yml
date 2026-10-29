@@ -194,13 +194,16 @@ jobs:
   # ============================================================================
   # Job 5: Deploy na VPS  (MANUAL — só via "Actions > Run workflow"; NÃO roda em push/PR)
   # ----------------------------------------------------------------------------
-  # Fica INERTE até você configurar os Secrets do repositório:
-  #   VPS_HOST     -> IP/host da VPS (ex.: 179.127.26.37)
-  #   VPS_USER     -> usuário SSH
-  #   VPS_SSH_KEY  -> chave privada SSH (conteúdo)
-  #   VPS_APP_DIR  -> caminho do projeto na VPS (ex.: /opt/ressarcimento_system)
-  # Lembrete: p/ HTTPS + cookie seguro, defina CADDY_DOMAIN no .env da VPS
-  # (senão use COOKIE_SECURE=false), senão o login quebra.
+  # Secrets do ambiente "production" (Settings > Environments > production):
+  #   VPS_HOST        -> IP/host da VPS (ex.: 179.127.26.37)
+  #   VPS_USER        -> usuário SSH
+  #   VPS_SSH_KEY     -> chave privada SSH (conteúdo)
+  #   VPS_APP_DIR     -> caminho do projeto na VPS (ex.: /opt/ressarcimento_system)
+  #   ENV_FILE        -> conteúdo inteiro do backend/.env (opcional: vazio = mantém o .env que já está na VPS)
+  #   ENV_FILE_RAIZ   -> conteúdo inteiro do .env da raiz, usado pelo docker compose (opcional)
+  # A cada deploy o .env anterior vai para .env_backups/ na VPS (guarda os 10 últimos); se o healthcheck
+  # falhar, volta o código E o .env anterior.
+  # Lembrete: p/ HTTPS + cookie seguro, defina CADDY_DOMAIN no .env (senão COOKIE_SECURE=false), senão o login quebra.
   # ============================================================================
   deploy:
     name: Deploy VPS (manual)
@@ -209,6 +212,35 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     environment: production
     steps:
+      # o conteúdo vai pelo stdin do ssh: não aparece em log nem em linha de comando
+      - name: Enviar .env (ENV_FILE / ENV_FILE_RAIZ) para a VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          ENV_FILE_RAIZ: ${{ secrets.ENV_FILE_RAIZ }}
+        run: |
+          set -e
+          if [ -z "$ENV_FILE" ] && [ -z "$ENV_FILE_RAIZ" ]; then
+            echo "ENV_FILE não configurado: o .env da VPS fica como está."
+            exit 0
+          fi
+          umask 077
+          mkdir -p ~/.ssh
+          cat <<<"$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          SSH="ssh -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=accept-new $VPS_USER@$VPS_HOST"
+          if [ -n "$ENV_FILE" ]; then
+            cat <<<"$ENV_FILE" | $SSH "umask 077; cat > '$VPS_APP_DIR/backend/.env.novo'"
+            echo "backend/.env novo enviado."
+          fi
+          if [ -n "$ENV_FILE_RAIZ" ]; then
+            cat <<<"$ENV_FILE_RAIZ" | $SSH "umask 077; cat > '$VPS_APP_DIR/.env.novo'"
+            echo ".env da raiz novo enviado."
+          fi
+          rm -f ~/.ssh/deploy_key
+
       - name: Deploy via SSH com gate de healthcheck
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -220,6 +252,22 @@ jobs:
             cd "${{ secrets.VPS_APP_DIR }}"
             PREV=$(git rev-parse HEAD)
             echo "Commit atual: $PREV"
+
+            # troca o .env pelo que veio do GitHub, guardando o anterior
+            STAMP=$(date +%Y%m%d_%H%M%S)
+            mkdir -p .env_backups && chmod 700 .env_backups
+            TROCOU=""
+            for alvo in backend/.env .env; do
+              if [ -f "$alvo.novo" ]; then
+                nome=$(echo "$alvo" | tr '/' '_')
+                [ -f "$alvo" ] && cp -p "$alvo" ".env_backups/${nome}.$STAMP"
+                mv "$alvo.novo" "$alvo" && chmod 600 "$alvo"
+                TROCOU="$TROCOU $alvo"
+                echo "$alvo atualizado (anterior em .env_backups/${nome}.$STAMP)"
+              fi
+            done
+            ls -1t .env_backups/* 2>/dev/null | tail -n +21 | xargs -r rm -f
+
             git fetch --all --prune
             git checkout "${{ github.ref_name }}"
             git pull --ff-only
@@ -235,6 +283,10 @@ jobs:
 
             if [ "$ok" != "1" ]; then
               echo "❌ HEALTHCHECK FALHOU — rollback para $PREV"
+              for alvo in $TROCOU; do
+                nome=$(echo "$alvo" | tr '/' '_')
+                [ -f ".env_backups/${nome}.$STAMP" ] && cp -p ".env_backups/${nome}.$STAMP" "$alvo" && echo "$alvo restaurado"
+              done
               git reset --hard "$PREV"
               docker compose build backend frontend
               docker compose up -d
