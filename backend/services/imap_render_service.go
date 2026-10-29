@@ -1,4 +1,4 @@
-﻿// backend/services/imap_service.go
+// backend/services/imap_service.go
 
 package services
 

@@ -1,4 +1,4 @@
-﻿// backend/handlers/alertas_stream.go
+// backend/handlers/alertas_stream.go
 package handlers
 
 import (

@@ -1,4 +1,4 @@
-﻿// handlers/faturamento_handler.go
+// handlers/faturamento_handler.go
 package handlers
 
 import (

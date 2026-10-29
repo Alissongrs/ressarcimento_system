@@ -1,4 +1,4 @@
-﻿// handlers/ocr_handler.go
+// handlers/ocr_handler.go
 package handlers
 
 import (

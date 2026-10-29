@@ -1,4 +1,4 @@
-﻿// backend/handlers/email_handler.go
+// backend/handlers/email_handler.go
 // Package handlers contém os controladores HTTP da aplicação.
 package handlers
 

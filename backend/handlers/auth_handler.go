@@ -1,4 +1,4 @@
-﻿// ressarcimento-backend/handlers/auth.go
+// ressarcimento-backend/handlers/auth.go
 package handlers
 
 import (

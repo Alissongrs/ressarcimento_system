@@ -1,4 +1,4 @@
-﻿// handlers/deferimento_handler.go
+// handlers/deferimento_handler.go
 package handlers
 
 //
