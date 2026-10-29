@@ -77,7 +77,7 @@ export default function AguaPanel() {
       setErro(e?.response?.data?.error || 'Falha ao carregar faturas de água.');
     } finally { setLoading(false); }
   }
-  useEffect(() => { carregar(); /* eslint-disable-next-line */ }, [empresa]);
+  useEffect(() => { carregar();   }, [empresa]);
 
   async function rejeitar(id) {
     const motivo = window.prompt('Motivo da rejeição deste apontamento de água:');

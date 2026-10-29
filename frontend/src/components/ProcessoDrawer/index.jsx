@@ -57,7 +57,6 @@ function editavelPorAba(abaKey, etapaAtualId, aprovacaoAtualId) {
 // Usuário sempre CONSEGUE clicar e VER (readonly) — o gating aqui é só pra manter
 // simetria com editavelPorAba. Se quisermos desabilitar cliques, mudar pra false.
 function abaAcessivel(abaKey /*, etapaAtualId, aprovacaoAtualId */) {
-  // eslint-disable-next-line no-unused-vars
   return true;
 }
 

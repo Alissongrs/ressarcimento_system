@@ -7003,7 +7003,7 @@ export default function Requisicoes({ forceViewMode = 'requisicoes', hideViewTog
 
                 <div className={`p-4 ${reqHistoricoOpen ? 'grid grid-cols-1 lg:grid-cols-[1fr_12px_1.4fr] gap-0' : 'space-y-4'}`}>
                   <div className={reqHistoricoOpen ? 'h-full overflow-auto pr-4 space-y-4' : 'space-y-4'}>
-                  {true && (
+                  {(
                   <div className="sap-card border panel-border p-3">
                     <div className="flex items-center justify-between gap-2 mb-2">
                       <div className="text-xs font-semibold">Informações</div>

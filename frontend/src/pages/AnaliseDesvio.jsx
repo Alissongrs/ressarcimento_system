@@ -2384,7 +2384,7 @@ export default function AnaliseDesvio() {
       })
       .catch(() => { if (!cancel) setModalFatura({ id: Number(idParam) }); });
     return () => { cancel = true; };
-  }, [idParam]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [idParam]);  
 
   // ⭐ Paginação server-side: PAGE_SIZE alinhado com limitAtual (100) — cada
   // página buscada é a página exibida (sem paginação client-side em cima).

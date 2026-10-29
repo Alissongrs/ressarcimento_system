@@ -109,12 +109,8 @@ export const magicRequest = async (email) => {
 
 // /me — GET /api/v2/auth/me (autenticado)
 export const me = async () => {
-  try {
-    const response = await authApi.get('/auth/me');
-    return response.data;
-  } catch (error) {
-    throw error;
-  }
+  const response = await authApi.get('/auth/me');
+  return response.data;
 };
 
 // Departamentos — ainda no /api/v1 (não migrado pro v2 ainda)

@@ -177,7 +177,6 @@ const hardReloadNoCache = async () => {
 };
 
 if (import.meta?.env?.DEV) {
-  // eslint-disable-next-line no-console
   console.info('[apiClient] baseURL =', api.defaults.baseURL);
 }
 

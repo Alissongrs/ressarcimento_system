@@ -160,7 +160,7 @@ export const fixMojibake = (v) => {
   }
 
   // normalize NBSP -> space (common after copy/paste)
-  s = s.replace(/ /g, ' ');
+  s = s.split(String.fromCharCode(160)).join(' ');
 
   return s;
 };

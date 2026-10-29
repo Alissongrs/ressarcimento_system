@@ -108,7 +108,6 @@ const AssistentePage = () => {
       api.post('/chat/conversas/msg', { sessao: garantirSessao(), role: sr.role, conteudo: sr.conteudo, modo: 'assistente' })
         .catch(() => { /* offline: segue */ });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msgs]);
   const carregarConversas = async () => {
     setConversas(null);

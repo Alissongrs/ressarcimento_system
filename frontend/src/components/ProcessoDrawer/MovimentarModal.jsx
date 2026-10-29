@@ -231,7 +231,6 @@ export default function MovimentarModal({
           await uploadAnexo(processo.id_processo, file, 'Anexo da movimentação');
         } catch (e) {
           // anexo é opcional; reporta soft
-          // eslint-disable-next-line no-console
           console.warn('Falha ao subir anexo da movimentação:', e);
         }
       }

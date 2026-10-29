@@ -1598,7 +1598,7 @@ const CaixaDeEmail = () => {
   const sanitizedBodyHtml = useMemo(() => {
     if (!bodyHtml) return '';
     return DOMPurify.sanitize(bodyHtml, {
-      ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+      ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
       ADD_TAGS: ['style'],
       ADD_ATTR: ['target', 'rel'],
       FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form'],

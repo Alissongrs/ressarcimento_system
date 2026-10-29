@@ -612,7 +612,6 @@ export default function GlobalChatWidget() {
         })
         .catch((e) => {
           vozNeuralRef.current = false; // até recarregar a página, usa a do navegador
-          // eslint-disable-next-line no-console
           console.warn('[voz] voz neural indisponível, usando a do navegador:', e?.response?.status || e?.message);
           falarNavegador();
         });
@@ -2290,7 +2289,6 @@ export default function GlobalChatWidget() {
                         msg.role === 'error' ? 'var(--danger)' : 'rgba(255,255,255,0.88)',
                       wordBreak: 'break-word',
                     }}
-                    // eslint-disable-next-line react/no-danger
                     dangerouslySetInnerHTML={{ __html: sanitizeChat(renderMarkdown(msg.content)) }}
                   />
                   {msg.role === 'assistant' && msg.context && (

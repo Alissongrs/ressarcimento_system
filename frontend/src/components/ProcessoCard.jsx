@@ -8,6 +8,8 @@ import {
   retomarProcesso,
   getRequisicaoById,
   buscarFaturasPorUnidadeMeses,
+  criarAlertaProcesso,
+  salvarDataAlerta,
 } from '../services/requisicaoService';
 import api from '../services/api';
 import { withAuthToken } from '../services/apiClient';

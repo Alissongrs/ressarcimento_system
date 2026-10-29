@@ -3,11 +3,26 @@ package utils
 import (
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
 )
+
+// As mensagens de validação usam o nome do campo no JSON (ex.: "id_departamento"), que é o que o cliente envia.
+func init() {
+	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
+		v.RegisterTagNameFunc(func(f reflect.StructField) string {
+			nome := strings.SplitN(f.Tag.Get("json"), ",", 2)[0]
+			if nome == "" || nome == "-" {
+				return f.Name
+			}
+			return nome
+		})
+	}
+}
 
 // BindAndValidate faz ShouldBindJSON + validação e escreve 400 formatado.
 // Retorna true se houve erro (caller deve fazer return).

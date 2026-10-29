@@ -108,12 +108,10 @@ const fixMojibake = (v) => {
     // Converte "caracteres latin1" em bytes e decodifica como utf-8
     const bytes = Uint8Array.from([...s].map((ch) => ch.charCodeAt(0) & 0xff));
     // TextDecoder existe na maioria dos browsers modernos
-    // eslint-disable-next-line no-undef
     return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
   } catch {
     // Fallback (legado)
     try {
-      // eslint-disable-next-line no-undef
       return decodeURIComponent(escape(s));
     } catch {
       return s;
