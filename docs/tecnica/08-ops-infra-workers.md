@@ -19,7 +19,18 @@ Serviços ativos:
 | `frontend` | build `./frontend/Dockerfile` | `127.0.0.1:8090:80` | build React → nginx 1.27-alpine |
 
 Desativados no compose: `ollama`, `ocr`, `llama-agent` (LLM passou a Anthropic Haiku a
-partir do backend; OCR via Tesseract) e `caddy`. **TLS público é feito pelo Apache do
+partir do backend; OCR via Tesseract) e `caddy`.
+
+⚠️ **Situação real na VPS (29/10/2026):** os containers antigos dessas três peças continuavam rodando, fora do
+compose. Levantamento pelos logs de 30 dias:
+- `ocr` — só recebia o próprio health check (`GET /ping`) → **parado** (`docker stop` + `--restart=no`);
+- `ollama` — o backend nem alcança (outra rede) → **parado**;
+- `llama-agent` — **em uso**: `POST /train/score` de hora em hora e `POST /predict/score` (modelo de score dos
+  processos, `services/score_model_service.go` e `handlers/score_handler.go`, via `LLAMA_AGENT_URL`) → **mantido**.
+  Risco: roda fora do compose e o código está em `ia/` (fora do Git) — um `docker compose up --remove-orphans`
+  derruba e uma VPS nova não o sobe. Pendente: trazer de volta ao compose/Git.
+Voltar os parados: `docker start ressarcimento_system-ollama-1 ressarcimento_system-ocr-1`. O health check que o
+Docker/deploy usam (`/api/v1/healthz`) não depende do OCR; só o `/health` detalhado o mostra indisponível. **TLS público é feito pelo Apache do
 host** (reverse-proxy `/`→frontend:8090, `/api`→backend:8080).
 
 **Build do backend** (`backend/Dockerfile`): multi-stage Go 1.26-alpine (binário estático

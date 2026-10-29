@@ -141,8 +141,9 @@ Alinhamento feito:
   `ocr_service`, worker com senha) ficaram intactos.
 - Desfazer: `git reset --hard backup-vps-20261029`.
 
-Containers antigos ainda no ar (fora do compose atual, não usados): `ollama`, `ocr`, `llama-agent`.
-O deploy não mexe neles; podem ser desligados depois.
+Containers antigos fora do compose: `ollama` e `ocr` foram **parados** em 29/10 (sem uso);
+`llama-agent` continua no ar porque o modelo de score usa (ver [08](08-ops-infra-workers.md)). O deploy não mexe
+neles — e não usar `docker compose up --remove-orphans`, que derrubaria o `llama-agent`.
 
 ## Problemas conhecidos / dicas
 

@@ -76,7 +76,8 @@ Até 28/10 o código ia para a VPS copiado à mão e muita coisa ficava pendente
 29/10 tudo está no GitHub (`dev`) e a VPS foi alinhada; o deploy é pelo Actions
 ([11](11-github-cicd-deploy.md)). Pendências ligadas ao deploy:
 - escolher o grupo de avisos em `/whatsapp` (sem isso nada sai pelo WhatsApp);
-- desligar os containers antigos `ollama`, `ocr`, `llama-agent` (fora do compose, sem uso);
+- containers antigos: `ollama` e `ocr` **parados em 29/10** (sem uso); `llama-agent` **mantido** (modelo de
+  score) — trazer de volta ao `docker-compose.yml` e ao Git (hoje roda órfão; código em `ia/`);
 - `backend/.env` na VPS estava `664` → deixar `600` (o deploy já grava assim).
 
 ### Swagger
