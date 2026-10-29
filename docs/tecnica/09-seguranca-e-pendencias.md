@@ -81,8 +81,9 @@ Até 28/10 o código ia para a VPS copiado à mão e muita coisa ficava pendente
 - `backend/.env` na VPS estava `664` → deixar `600` (o deploy já grava assim).
 
 ### Swagger
-O Swagger (`/swagger`, gerado no build por `swag init`) só cobre as rotas com anotação
-`@Router` nos handlers. Ver a seção de Swagger em [01](01-arquitetura-backend.md).
+Resolvido em 29/10: todas as rotas no Swagger (anotações geradas + checagem no CI). Ver
+[01](01-arquitetura-backend.md#swagger-swagger). Pendente só melhorar descrições/corpos das rotas
+antigas (hoje o corpo aparece como objeto genérico).
 
 ### Histórico: deploy pendente (até 28/10)
 Vários módulos aparecem na memória do projeto como **UNCOMMITTED / pendentes de deploy**.

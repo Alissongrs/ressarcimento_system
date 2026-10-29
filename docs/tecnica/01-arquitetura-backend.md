@@ -126,6 +126,22 @@ o bug de carimbo +3h UTC). TLS por conexão: `DB_*_TLS` ∈ `skip-verify`|`rds`|
 > Ver [memória do projeto: deploy não roda migração]. Para adicionar coluna/tabela
 > nova sem quebrar o deploy, adicione a chamada aditiva em `migrations_additive.go`.
 
+## Swagger (`/swagger`)
+
+Gerado no build da imagem (`swag init -g main.go -o docs`, no `Dockerfile`) a partir das
+anotações `// @Router` dos handlers. `BasePath` é `/` porque as anotações usam o caminho completo
+(`/api/v1/...`, `/api/v2/...`). Acesso atrás do `SwaggerGuard()`.
+
+Desde 29/10 **todas** as rotas registradas aparecem (371 caminhos / 404 operações):
+- rotas com anotação no próprio handler (~130) usam essa anotação;
+- as demais vêm de `handlers/zz_swagger_rotas_gen.go`, **gerado** por
+  `python scripts/gen_swagger_rotas.py` (na pasta `backend/`), que lê `routes/routes.go` e
+  `handlers/v2/routes_v2.go` e escreve resumo, tag, parâmetros de caminho, segurança e o nível de
+  acesso (público / autenticado / gestor / admin).
+- **Rota nova** → rodar o script e fazer commit do arquivo gerado. O CI (job Backend, passo
+  "Swagger cobre todas as rotas") falha se esquecer. Para descrever melhor uma rota, anotar o
+  próprio handler (ou acrescentar no dicionário `RESUMO` do script) e rodar de novo.
+
 ## Validação de entrada (`utils/validate.go`)
 
 `BindAndValidate` faz bind + validação e responde 400 com mensagens em português. Desde 29/10 o

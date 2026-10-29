@@ -55,6 +55,17 @@ jobs:
         working-directory: backend
         run: go vet ./...
 
+      # Swagger em dia: toda rota registrada precisa de anotação (gerada por scripts/gen_swagger_rotas.py)
+      - name: Swagger cobre todas as rotas
+        working-directory: backend
+        run: |
+          python3 scripts/gen_swagger_rotas.py
+          if ! git diff --quiet -- handlers/zz_swagger_rotas_gen.go; then
+            echo "::error::Rotas novas sem Swagger. Rode 'python scripts/gen_swagger_rotas.py' na pasta backend e faça commit do resultado."
+            git diff --stat -- handlers/zz_swagger_rotas_gen.go
+            exit 1
+          fi
+
       - name: Run tests
         working-directory: backend
         env:

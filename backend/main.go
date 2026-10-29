@@ -1,7 +1,7 @@
 // @title SURE API
 // @version 1.0
 // @description API do sistema de ressarcimento (SURE)
-// @BasePath /api/v1
+// @BasePath /
 // @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
