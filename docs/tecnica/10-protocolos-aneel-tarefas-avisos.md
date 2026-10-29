@@ -29,6 +29,22 @@ pelo **sininho** do topo e pelo **grupo do WhatsApp** do departamento.
 
 Na 1ª rodada e para e-mails com mais de 72h **não** se cria tarefa (evita avalanche de histórico).
 
+### Protocolo sem processo → vínculo pela UC do campo "Endereço" (extensão 1.1.0, 29/10)
+
+O detalhe do protocolo no site traz, no campo **Endereço**, empresa + UC + endereço (ex.:
+`JACESA -585359105940 - Presidente Dutra - (RJ)`, `CLARO - UC 90569563 - … (PR)`). A extensão manda esse campo;
+`protocolos.vincularPorEndereco` (`site.go`) tira os números de 6+ dígitos (sem CEP, sem zeros à esquerda) e procura
+a UC em `FT_REQUISICOES.uc` / `FT_PROCESSOS.uc` / `uc_atual`:
+- **1 processo** → vincula e cria tarefa `protocolo_vinculo` para **quem fez a última alteração no processo**
+  (`UltimoAlterador`: movimentação no histórico ou edição em `FT_AUDIT_EDICAO`, a mais recente; "sistema" não conta),
+  com aviso no sininho. Ninguém → tarefa sem responsável (alguém assume).
+- **2–3 processos** → vincula a todos como "confirmar" (aba A confirmar), tarefa sem responsável.
+- nenhum / mais de 3 → continua sem processo.
+
+A lista que a extensão consulta (`/site/abertos`) passou a incluir também os protocolos **sem processo**, mesmo
+concluídos. Em 29/10 a leitura manual dos 19 que estavam sem processo vinculou 11 (backups
+`backups/protocolo_12426_18442_luana_20261029.json` e `backups/protocolos_sem_processo_vinculo_20261029.json`).
+
 ## Tabelas
 
 | Tabela | Papel |

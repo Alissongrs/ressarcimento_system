@@ -72,6 +72,8 @@
               ultima_mov: datas[0] || '',
               entrada: g(/Entrada:\s*([\d/]+)/),
               resposta: respostaCompleta(d),
+              // "Endereço" costuma trazer empresa, UC e endereço: o SURE usa a UC para achar o processo
+              endereco: g(/Endere[cç]o:\s*(.+)/),
             });
           }
           if (/não encontrou resultado/.test(tx)) return acabar({ erro: 'nao_encontrado' });

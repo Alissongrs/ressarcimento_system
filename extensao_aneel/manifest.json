@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SURE — Consulta ANEEL",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Depois que você entra na Ouvidoria da ANEEL, lê a situação dos protocolos abertos e devolve ao SURE.",
   "permissions": ["storage"],
   "host_permissions": ["https://www2.aneel.gov.br/faleconosco/*"],

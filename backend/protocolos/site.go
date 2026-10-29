@@ -6,8 +6,13 @@ package protocolos
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+
+	"ressarcimento-backend/rotinas"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -31,6 +36,7 @@ type ItemSite struct {
 	UltimaMov string `json:"ultima_mov"` // dd/mm/aaaa da última linha do histórico
 	Entrada   string `json:"entrada"`    // dd/mm/aaaa
 	Resposta  string `json:"resposta"`   // trecho da resposta ao consumidor
+	Endereco  string `json:"endereco"`   // campo "Endereço" do detalhe: costuma trazer empresa, UC e endereço
 }
 
 type ResultadoSite struct {
@@ -40,6 +46,7 @@ type ResultadoSite struct {
 	Concluidos    int `json:"concluidos"`
 	Desconhecidos int `json:"desconhecidos"`
 	Tarefas       int `json:"tarefas"`
+	Vinculados    int `json:"vinculados"` // protocolos sem processo vinculados pela UC do campo Endereço
 }
 
 // RotuloSite converte o status do site no rótulo do SURE.
@@ -54,7 +61,8 @@ func RotuloSite(status string) string {
 	return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
 }
 
-// AbertosNoSite lista os protocolos que ainda valem consultar (não concluídos no site);
+// AbertosNoSite lista os protocolos que ainda valem consultar (não concluídos no site, ou ainda sem
+// processo — o detalhe traz a UC no campo Endereço, que vincula o processo);
 // com todos=true, lista todos os ativos (para reler o texto completo das respostas).
 func AbertosNoSite(todos bool) []string {
 	var out []string
@@ -63,7 +71,7 @@ func AbertosNoSite(todos bool) []string {
 		return out
 	}
 	gdb().Raw(`SELECT DISTINCT protocolo FROM FT_PROTOCOLOS_ANEEL
-		WHERE ativo = 1 AND COALESCE(situacao,'') <> ? ORDER BY protocolo`, SitConcluidaSite).Scan(&out)
+		WHERE ativo = 1 AND (COALESCE(situacao,'') <> ? OR id_processo IS NULL) ORDER BY protocolo`, SitConcluidaSite).Scan(&out)
 	return out
 }
 
@@ -105,6 +113,9 @@ func ImportarSite(itens []ItemSite) ResultadoSite {
 		res := db.Exec(`UPDATE FT_PROTOCOLOS_ANEEL SET situacao = ?, ultimo_andamento = ?, ultima_mudanca_em = ?,
 			ultima_fonte = 'site', ultima_verificacao_em = NOW() WHERE protocolo_num = ? AND ativo = 1`, sit, andamento, quando, num)
 		r.Atualizados += int(res.RowsAffected)
+		if !temProcesso(db, num) && vincularPorEndereco(db, num, it.Endereco) {
+			r.Vinculados++
+		}
 		if sit != SitConcluidaSite || anterior == sit {
 			continue
 		}
@@ -128,4 +139,85 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
+}
+
+// reNumeroEndereco: números do campo Endereço do site ("JACESA -585359105940 - Presidente Dutra - (RJ)",
+// "CLARO - UC 90569563 - ..."); pontos, traços e barras fazem parte do número.
+var reNumeroEndereco = regexp.MustCompile(`\d[\d.\-/]*\d`)
+
+// UCsDoEndereco devolve os números do Endereço que podem ser UC (só dígitos, sem zeros à esquerda, 6+ dígitos;
+// CEP fica de fora).
+func UCsDoEndereco(endereco string) []string {
+	var out []string
+	visto := map[string]bool{}
+	semCEP := regexp.MustCompile(`(?i)CEP:?\s*[\d.\-]+`).ReplaceAllString(endereco, "")
+	for _, m := range reNumeroEndereco.FindAllString(semCEP, -1) {
+		d := strings.TrimLeft(regexp.MustCompile(`\D`).ReplaceAllString(m, ""), "0")
+		if len(d) >= 6 && !visto[d] {
+			visto[d] = true
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// vincularPorEndereco: protocolo sem processo cujo Endereço no site traz a UC de um processo. Vincula (UC em mais
+// de um processo → "confirmar", o admin decide) e, com um processo só, a tarefa vai para quem fez a última
+// alteração no processo (pedido do Alisson, 29/10/2026). Ninguém → tarefa sem responsável (alguém assume no sininho).
+func vincularPorEndereco(db *gorm.DB, num, endereco string) bool {
+	var procs []int64
+	for _, uc := range UCsDoEndereco(endereco) {
+		var achados []int64
+		_ = db.Raw(`SELECT DISTINCT p.id_processo FROM FT_PROCESSOS p JOIN FT_REQUISICOES r ON r.id_requisicao = p.id_processo
+			WHERE TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(r.uc,''),'.',''),'-',''),' ',''),'/','')) = ?
+			   OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(p.uc,''),'.',''),'-',''),' ',''),'/','')) = ?
+			   OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(p.uc_atual,''),'.',''),'-',''),' ',''),'/','')) = ?
+			LIMIT 4`, uc, uc, uc).Scan(&achados).Error
+		if len(achados) > 0 && len(achados) <= 3 { // UC em muitos processos não identifica nada
+			procs = achados
+			break
+		}
+	}
+	if len(procs) == 0 {
+		return false
+	}
+	agora := time.Now()
+	for _, p := range procs {
+		VincularSeNovo(db, num, p, "site", nil, 0, &agora)
+	}
+	alvo := fmt.Sprintf("processo #%d", procs[0])
+	var resp *int64
+	if len(procs) == 1 {
+		resp = UltimoAlterador(db, procs[0])
+	} else {
+		alvo = fmt.Sprintf("processos %v (confirmar qual)", procs)
+	}
+	titulo := fmt.Sprintf("Protocolo ANEEL %s vinculado ao %s — conferir", Formatar(num), alvo)
+	desc := fmt.Sprintf("Protocolo estava sem processo no SURE; vinculado pelo campo Endereço do site da ANEEL (%s). "+
+		"Responsável: quem fez a última alteração no processo.", strings.TrimSpace(endereco))
+	db.Exec(`INSERT INTO FT_TAREFAS (tipo, titulo, descricao, id_processo, protocolo_num, id_usuario_responsavel, direcionado_em)
+		VALUES ('protocolo_vinculo', ?, ?, ?, ?, ?, IF(? IS NULL, NULL, NOW()))`, titulo, desc, procs[0], num, resp, resp)
+	if resp != nil {
+		db.Exec("UPDATE FT_PROTOCOLOS_ANEEL SET id_usuario_responsavel = ? WHERE protocolo_num = ? AND id_processo = ?", *resp, num, procs[0])
+		rotinas.NotificarNoSistema(db, *resp, "Nova tarefa para você: "+titulo)
+	}
+	return true
+}
+
+// UltimoAlterador: quem fez a última alteração no processo — movimentação no histórico ou edição registrada em
+// FT_AUDIT_EDICAO, a mais recente. Só usuário ativo de verdade ("sistema" não conta); nil se ninguém.
+func UltimoAlterador(db *gorm.DB, idProcesso int64) *int64 {
+	var id int64
+	err := db.Raw(`SELECT x.id_usuario FROM (
+			SELECT id_usuario_gestor AS id_usuario, data_movimentacao AS quando FROM FT_HISTORICO_MOVIMENTACOES
+			 WHERE id_processo = ? AND id_usuario_gestor IS NOT NULL
+			UNION ALL
+			SELECT id_usuario, data_edicao FROM FT_AUDIT_EDICAO
+			 WHERE entidade = 'FT_PROCESSOS' AND id_entidade = ? AND id_usuario IS NOT NULL
+		) x JOIN DM_USUARIO u ON u.id_usuario = x.id_usuario AND u.usuario_ativo = 1 AND u.nome_usuario <> 'sistema'
+		ORDER BY x.quando DESC LIMIT 1`, idProcesso, idProcesso).Row().Scan(&id)
+	if err != nil || id <= 0 {
+		return nil
+	}
+	return &id
 }
