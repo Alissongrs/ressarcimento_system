@@ -7,7 +7,8 @@ Organizado em 29/10/2026. Até então o código ia para a VPS copiado à mão; a
 
 - `github.com/Alissongrs/ressarcimento_system` — **privado** (estava público até 29/10; foi fechado no
   mesmo dia, sem nenhuma senha publicada).
-- Branch de trabalho e de produção: **`dev`** (a VPS usa `dev`). O `main` está parado num commit antigo.
+- Branch de trabalho e de produção: **`dev`** (a VPS usa `dev`) — é o único branch. O `main` antigo foi
+  apagado em 29/10 (não tinha nenhum commit fora do `dev`).
 - Branch **padrão** do repositório: `dev` (trocado em 29/10; antes era `main`, e por isso o botão
   "Run workflow" não aparecia no site).
 
