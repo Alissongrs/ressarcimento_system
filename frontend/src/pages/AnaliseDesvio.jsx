@@ -9,6 +9,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import ModalFaturaMontada from '../components/ModalFaturaMontada';
 import AuditoriaRankings from '../components/AuditoriaRankings';
 import AguaPanel from '../components/AguaPanel';
+import UsinasPanel from '../components/UsinasPanel';
 import AcerPanel from '../components/AcerPanel';
 import CatalogoFichasModal from '../components/CatalogoFichasModal';
 import { fichaTooltip } from '../data/fichasCatalogo';
@@ -151,6 +152,7 @@ const TABS = [
   { id: 'rejeitados',    label: 'Rejeitados',     cor: 'var(--danger)', sub: 'REFUTADO' },
   { id: 'agua',          label: '💧 Água',        cor: '#2b8fd6', sub: 'desvio de consumo m³' },
   { id: 'acer',          label: '🅰️ Acer',        cor: '#7c6f9c', sub: 'empresa 2028 — base própria' },
+  { id: 'usinas',        label: '⚡ Usinas',      cor: '#d97706', sub: 'F01–F05 nas faturas das usinas' },
 ];
 
 const STATUS_POR_TAB = {
@@ -2947,7 +2949,7 @@ export default function AnaliseDesvio() {
 
       <CatalogoFichasModal open={catalogoFichas} onClose={() => setCatalogoFichas(false)} />
 
-      {tab === 'agua' ? <AguaPanel /> : tab === 'acer' ? <AcerPanel /> : (<>
+      {tab === 'agua' ? <AguaPanel /> : tab === 'acer' ? <AcerPanel /> : tab === 'usinas' ? <UsinasPanel /> : (<>
       {/* Filtros do topo: Empresa (select, substitui as pills) + Ordenação (maiores apontamentos).
           As empresas vêm do backend em empresasDisponiveis (com contagem por status). */}
       <div className="flex gap-3 flex-wrap items-center text-xs">

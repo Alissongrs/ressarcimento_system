@@ -466,6 +466,12 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.GET("/claro/faturas", handlers.GetClaroFaturas)
 			authRequired.GET("/claro/uc-cobertura", handlers.GetClaroCoberturaUC)
 			// 💧 Auditoria de Faturas de ÁGUA (fase 1 — sobre FATURA_AGUA_DADOS + snapshot)
+			// ⚡ Auditoria das faturas das USINAS (Thopen) — motor F01–F05 ao vivo sobre FATURA_USINA* (somente leitura)
+			authRequired.GET("/usinas/apontamentos", handlers.GetUsinasApontamentos)
+			authRequired.GET("/usinas/uc-historico", handlers.GetUsinasUCHistorico)
+			authRequired.GET("/regras-conjunto/:conjunto", handlers.GetRegrasConjunto)
+			authRequired.PUT("/regras-conjunto/:conjunto", handlers.SalvarRegrasConjunto)
+			authRequired.GET("/parametros/aneel/status", handlers.StatusANEEL)
 			authRequired.GET("/faturas/agua-analise", handlers.ListAguaAnalise)
 			authRequired.GET("/faturas/agua-analise/resumo", handlers.GetAguaResumo)
 			authRequired.GET("/faturas/agua/:id/historico", handlers.GetAguaHistorico)
@@ -717,11 +723,15 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/fichas-regras/testes/:id", handlers.StatusTesteRegra)
 			gestorRequired.POST("/fichas-regras/testes/:id/cancelar", handlers.CancelarTesteRegra)
 			gestorRequired.POST("/fichas-regras/testes/:id/salvar", handlers.SalvarTesteRegra)
+			// Parâmetros da ANEEL (tarifas/bandeiras) — "Atualizar agora" na aba ⚡ Usinas
+			gestorRequired.POST("/parametros/aneel/importar", handlers.ImportarANEELManual)
 		}
 
 		// Aplicação agendada das regras (chamada pelo CRON às 00:00; protegida por
 		// header X-Cron-Token == env CRON_TOKEN, sem JWT pois o cron não tem sessão).
 		apiV1.POST("/rules/aplicar-agendadas", handlers.AplicarRegrasAgendadas)
+		// Importação diária das tarifas/bandeiras da ANEEL (cron da VPS, mesmo X-Cron-Token)
+		apiV1.POST("/parametros/aneel/importar-cron", handlers.ImportarANEELCron)
 		// Áudio da voz do chat por id aleatório e temporário (5 min). Público porque o elemento
 		// <audio> não envia o header Authorization; quem gera o áudio é a rota autenticada /voz/falar.
 		apiV1.GET("/voz/audio/:id", handlers.AudioVoz)

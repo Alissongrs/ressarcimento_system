@@ -44,3 +44,6 @@ W=/opt/ressarcimento/ressarcimento_system/worker
 
 # 6) Aplicar Regras "passadas ao banco" — todo dia 00:00  (precisa CRON_TOKEN no backend/.env)
 0 0 * * *    $W/job_regras.sh >/dev/null 2>&1
+
+# 7) Tarifas homologadas e bandeiras da ANEEL (dados abertos) — todo dia 05:30  (precisa CRON_TOKEN)
+30 5 * * *   $W/job_aneel.sh >/dev/null 2>&1
