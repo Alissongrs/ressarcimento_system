@@ -2,7 +2,7 @@
 #
 #   .\deploy.ps1
 #
-# 0) mostra os arquivos alterados/novos, pergunta quais enviar e a mensagem, e faz commit + push
+# 0) gera o Swagger das rotas novas (o CI exige), mostra os arquivos alterados/novos, pergunta quais enviar e a mensagem, e faz commit + push
 #    (lista = arquivos ja versionados que mudaram + arquivos novos de codigo .go/.jsx/.js/.css/.sh/.sql/.yml;
 #     apagados, scripts "_*", OCR local, .py/.exe/.xlsx/.bak novos ficam de fora - esses so com git add manual);
 # 1) dispara o workflow "CI/CD Pipeline" no branch dev;
@@ -31,6 +31,13 @@ function Get-DeployJobStatus($runId) {
 Set-Location $PSScriptRoot
 $atual = (git rev-parse --abbrev-ref HEAD).Trim()
 if ($atual -ne $Branch) { Write-Host "Voce esta no branch '$atual', nao em '$Branch'. Troque de branch antes." -ForegroundColor Red; exit 1 }
+
+# o CI exige Swagger para toda rota: gera aqui (rota nova -> zz_swagger_rotas_gen.go entra na lista abaixo)
+Push-Location backend
+python -X utf8 scripts/gen_swagger_rotas.py | Out-Null
+$okSwagger = ($LASTEXITCODE -eq 0)
+Pop-Location
+if (-not $okSwagger) { Write-Host 'Nao consegui gerar o Swagger (python scripts/gen_swagger_rotas.py na pasta backend).' -ForegroundColor Red; exit 1 }
 
 # lista com -z: caminhos com espaco/acento vem inteiros; renomeado = "R  novo\0antigo\0"
 $partes = ((git -c core.quotepath=false status --porcelain -z -uall) -join '') -split "`0"

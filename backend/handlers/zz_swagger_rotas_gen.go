@@ -1512,6 +1512,60 @@ func swaggerRotaGet_api_v1_claro_faturas() {}
 // @Router /api/v1/claro/uc-cobertura [get]
 func swaggerRotaGet_api_v1_claro_uc_cobertura() {}
 
+// @Summary Get usinas apontamentos
+// @Description Qualquer usuário autenticado. Handler: handlers.GetUsinasApontamentos.
+// @Tags usinas
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/usinas/apontamentos [get]
+func swaggerRotaGet_api_v1_usinas_apontamentos() {}
+
+// @Summary Get usinas uc historico
+// @Description Qualquer usuário autenticado. Handler: handlers.GetUsinasUCHistorico.
+// @Tags usinas
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/usinas/uc-historico [get]
+func swaggerRotaGet_api_v1_usinas_uc_historico() {}
+
+// @Summary Get regras conjunto
+// @Description Qualquer usuário autenticado. Handler: handlers.GetRegrasConjunto.
+// @Tags regras-conjunto
+// @Produce json
+// @Param conjunto path string true "conjunto"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/regras-conjunto/{conjunto} [get]
+func swaggerRotaGet_api_v1_regras_conjunto__conjunto_() {}
+
+// @Summary Salvar regras conjunto
+// @Description Qualquer usuário autenticado. Handler: handlers.SalvarRegrasConjunto.
+// @Tags regras-conjunto
+// @Accept json
+// @Produce json
+// @Param conjunto path string true "conjunto"
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/regras-conjunto/{conjunto} [put]
+func swaggerRotaPut_api_v1_regras_conjunto__conjunto_() {}
+
+// @Summary Status aneel
+// @Description Qualquer usuário autenticado. Handler: handlers.StatusANEEL.
+// @Tags parametros
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/parametros/aneel/status [get]
+func swaggerRotaGet_api_v1_parametros_aneel_status() {}
+
 // @Summary List agua analise
 // @Description Qualquer usuário autenticado. Handler: handlers.ListAguaAnalise.
 // @Tags Faturas
@@ -2493,6 +2547,18 @@ func swaggerRotaPost_api_v1_fichas_regras_testes__id__cancelar() {}
 // @Router /api/v1/fichas-regras/testes/{id}/salvar [post]
 func swaggerRotaPost_api_v1_fichas_regras_testes__id__salvar() {}
 
+// @Summary Importar aneel manual
+// @Description Gestor ou admin. Handler: handlers.ImportarANEELManual.
+// @Tags parametros
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/parametros/aneel/importar [post]
+func swaggerRotaPost_api_v1_parametros_aneel_importar() {}
+
 // @Summary Aplicar regras agendadas
 // @Description Pública. Handler: handlers.AplicarRegrasAgendadas.
 // @Tags Regras
@@ -2502,6 +2568,16 @@ func swaggerRotaPost_api_v1_fichas_regras_testes__id__salvar() {}
 // @Success 200 {object} map[string]interface{}
 // @Router /api/v1/rules/aplicar-agendadas [post]
 func swaggerRotaPost_api_v1_rules_aplicar_agendadas() {}
+
+// @Summary Importar aneel cron
+// @Description Pública. Handler: handlers.ImportarANEELCron.
+// @Tags parametros
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/parametros/aneel/importar-cron [post]
+func swaggerRotaPost_api_v1_parametros_aneel_importar_cron() {}
 
 // @Summary Audio voz
 // @Description Pública. Handler: handlers.AudioVoz.
