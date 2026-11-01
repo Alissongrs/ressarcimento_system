@@ -116,3 +116,5 @@ frontend/public/flowtory-craft-main/
 .mcp.json
 ressarcimento_system_old_*/
 FATURA_DADOS_EXTRAIDOS_LOG.json
+
+/deploy.ps1
