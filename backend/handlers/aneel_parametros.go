@@ -195,20 +195,38 @@ func AneelBaseDaAPI(db *sql.DB) (*aneelBase, error) {
 	return novaBase(t, b), nil
 }
 
-// distribuidoras que aparecem nas faturas das usinas
+// distribuidoras que aparecem nas faturas das usinas e da Acer (na Acer, o CNPJ do emitente sai da chave de
+// acesso da NF3e, posições 7–20)
 func cnpjsDistribuidoras(db *sql.DB) ([]string, error) {
 	rows, err := db.Query(`SELECT DISTINCT REGEXP_REPLACE(distribuidora_cnpj,'[^0-9]','') FROM FATURA_USINA
 		WHERE distribuidora_cnpj IS NOT NULL AND distribuidora_cnpj <> ''`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	vistos := map[string]bool{}
 	var out []string
 	for rows.Next() {
 		var c string
-		if rows.Scan(&c) == nil && len(c) == 14 {
+		if rows.Scan(&c) == nil && len(c) == 14 && !vistos[c] {
+			vistos[c] = true
 			out = append(out, c)
 		}
+	}
+	rows.Close()
+	// Acer: tabela pode não existir em outro ambiente — sem ela, segue só com as usinas
+	if ar, err := db.Query(`SELECT SUBSTRING(REGEXP_REPLACE(COALESCE(
+			JSON_UNQUOTE(JSON_EXTRACT(extracao_raw_json,'$.bert.QR_CODE_CHAVE_ACESSO')),
+			JSON_UNQUOTE(JSON_EXTRACT(extracao_raw_json,'$.normalization.QR_CODE_CHAVE_ACESSO')),''),'[^0-9]',''), 7, 14) AS cnpj,
+			COUNT(*) FROM ` + acerTabela + ` GROUP BY cnpj HAVING COUNT(*) >= 5`); err == nil {
+		for ar.Next() {
+			var c string
+			var n int
+			if ar.Scan(&c, &n) == nil && len(c) == 14 && !vistos[c] {
+				vistos[c] = true
+				out = append(out, c)
+			}
+		}
+		ar.Close()
 	}
 	return out, nil
 }

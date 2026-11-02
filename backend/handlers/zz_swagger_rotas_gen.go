@@ -1566,6 +1566,16 @@ func swaggerRotaPut_api_v1_regras_conjunto__conjunto_() {}
 // @Router /api/v1/parametros/aneel/status [get]
 func swaggerRotaGet_api_v1_parametros_aneel_status() {}
 
+// @Summary Get acer regras achados
+// @Description Qualquer usuário autenticado. Handler: handlers.GetAcerRegrasAchados.
+// @Tags acer
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/acer/regras-achados [get]
+func swaggerRotaGet_api_v1_acer_regras_achados() {}
+
 // @Summary List agua analise
 // @Description Qualquer usuário autenticado. Handler: handlers.ListAguaAnalise.
 // @Tags Faturas

@@ -214,7 +214,8 @@ func AuditarValoresFatura(c *gin.Context) {
 func RejeitarApontamento(c *gin.Context) {
 	id := c.Param("id")
 	var body struct {
-		Motivo string `json:"motivo"`
+		Motivo string   `json:"motivo"`
+		Regras []string `json:"regras"` // regras que estavam apontando (rejeição por regra)
 	}
 	_ = c.ShouldBindJSON(&body)
 	sqlDB, err := database.GormDB_App.DB()
@@ -235,10 +236,11 @@ func RejeitarApontamento(c *gin.Context) {
 	// Persiste a rejeição como reanálise (recomendacao='REJEITADO'). A lista da Auditoria
 	// exclui faturas que tenham esse registro — sem coluna nova no schema.
 	if _, err := sqlDB.Exec(`INSERT INTO FATURA_REANALISES
-		(fatura_id, modelo, justificativa, recomendacao, resposta_crua, confianca_final, pdf_anexado, usuario_id, usuario_nome, criado_em)
-		VALUES (?, 'rejeicao_manual', ?, 'REJEITADO', ?, 0, 0, ?, ?, NOW())`,
+		(fatura_id, modelo, justificativa, recomendacao, resposta_crua, confianca_final, pdf_anexado, usuario_id, usuario_nome,
+		 regras_rejeitadas, criado_em)
+		VALUES (?, 'rejeicao_manual', ?, 'REJEITADO', ?, 0, 0, ?, ?, ?, NOW())`,
 		id, truncarIA("Apontamento rejeitado pelo analista. Motivo: "+body.Motivo, 4000),
-		"REJEITADO: "+body.Motivo, uid, uname); err != nil {
+		"REJEITADO: "+body.Motivo, uid, uname, regrasDaRejeicao(sqlDB, id, body.Regras)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

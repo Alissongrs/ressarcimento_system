@@ -417,7 +417,8 @@ func RejeitarFaturaFDEHandler(c *gin.Context) {
 	}
 
 	var body struct {
-		Motivo string `json:"motivo"`
+		Motivo string   `json:"motivo"`
+		Regras []string `json:"regras"` // regras que estavam apontando (rejeição por regra)
 	}
 	_ = c.ShouldBindJSON(&body)
 	motivo := strings.TrimSpace(body.Motivo)
@@ -473,10 +474,12 @@ func RejeitarFaturaFDEHandler(c *gin.Context) {
 	// ONDE A LISTA (Análise de Desvio / Auditoria / Inconclusivos) filtra os rejeitados
 	// (NOT EXISTS ... FATURA_REANALISES). Sem isto a rejeição ficava só em
 	// fichas_apontadas.decisao_final e a fatura REAPARECIA na lista após refresh.
+	uidUser, uname := usuarioIA(c)
 	if _, e := sqlDB.Exec(`INSERT INTO FATURA_REANALISES
-		(fatura_id, modelo, justificativa, recomendacao, resposta_crua, confianca_final, pdf_anexado, usuario_id, usuario_nome, criado_em)
-		VALUES (?, 'humano-ui', ?, 'REJEITADO', '', NULL, 0, NULL, 'usuario', NOW())`,
-		id, motivo); e != nil {
+		(fatura_id, modelo, justificativa, recomendacao, resposta_crua, confianca_final, pdf_anexado, usuario_id, usuario_nome,
+		 regras_rejeitadas, criado_em)
+		VALUES (?, 'humano-ui', ?, 'REJEITADO', '', NULL, 0, ?, ?, ?, NOW())`,
+		id, motivo, uidUser, uname, regrasDaRejeicao(sqlDB, idStr, body.Regras)); e != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("rejeição não persistida em FATURA_REANALISES: %v", e)})
 		return
 	}

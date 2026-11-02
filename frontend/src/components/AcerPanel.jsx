@@ -4,6 +4,7 @@ import {
   ResponsiveContainer, ComposedChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, Cell, CartesianGrid,
 } from 'recharts';
 import ModalFaturaMontada from './ModalFaturaMontada';
+import { RegrasModal } from './UsinasPanel';
 
 // 🅰️ Aba ACER (empresa 2028) — dentro de /analise-desvio.
 // Fonte: FATURA_ACER_DADOS_EXTRAIDOS (normalizador JSON). Mesmo motor F01–F05 do resto,
@@ -22,6 +23,90 @@ const parseBR = (s) => {
   return t.includes(',') ? (Number(t.replace(/\./g, '').replace(',', '.')) || 0) : (Number(t) || 0);
 };
 const ACER_COD_EMPRESA = 2028;
+const SEM_ACHADOS = [];
+
+// Regras do botão ⚙ Regras (ANEEL F28/F41/F42/F58 e CIP F51) — o que acharam na base da Acer.
+// F01–F05 seguem na tabela principal; aqui ficam só as regras escolhidas no botão.
+function OutrasRegrasAcer({ versao, onRegras }) {
+  const [dados, setDados] = useState(null);
+  const [erro, setErro] = useState('');
+  const [alertas, setAlertas] = useState(false);
+  const [aberta, setAberta] = useState(null);
+  // o servidor calcula em segundo plano (minutos): enquanto responde {calculando:true}, pergunta de novo a cada 15 s
+  const timer = React.useRef(null);
+  const carregar = useCallback((refresh) => {
+    setErro('');
+    clearTimeout(timer.current);
+    apiClient.get('/api/v1/acer/regras-achados', { params: refresh ? { refresh: 1 } : {} })
+      .then(({ data }) => {
+        if (data?.calculando) timer.current = setTimeout(() => carregar(false), 15000);
+        else setDados(data);
+      })
+      .catch((e) => setErro(e?.response?.data?.error || e.message));
+  }, []);
+  useEffect(() => { setDados(null); carregar(versao > 0); return () => clearTimeout(timer.current); }, [carregar, versao]);
+  const itens = useMemo(() => (dados?.itens || SEM_ACHADOS).filter((i) => alertas || i.erros > 0), [dados, alertas]);
+  const extras = (dados?.selecionadas || SEM_ACHADOS).filter((c) => !/^F0[1-5]$/.test(c));
+  const resumo = (m) => Object.entries(m || {}).map(([k, v]) => `${k} ${v}`).join(' · ') || '—';
+  return (
+    <div className="rounded-lg border border-[var(--cpv2-border)] bg-[var(--cpv2-surface)] p-3">
+      <div className="flex flex-wrap items-center gap-3 mb-2">
+        <div className="font-semibold text-sm">Outras regras (tarifa/bandeira da ANEEL e CIP)</div>
+        <button onClick={onRegras} className="cpv2-btn cpv2-btn--ghost" title="Escolher as regras do catálogo que rodam na Acer">⚙ Regras</button>
+        {dados && (
+          <span className="text-xs opacity-70">
+            {extras.length ? `regras: ${extras.join(', ')}` : 'nenhuma regra extra marcada — clique em ⚙ Regras'}
+            {' · '}erros: {resumo(dados.por_regra)} · alertas: {resumo(dados.por_alerta)} · {brl(dados.valor_estimado)} nos erros
+            {!dados.aneel_importado && ' · tarifas da ANEEL ainda não importadas'}
+            {' · '}calculado {dados.gerado_em}
+          </span>
+        )}
+        <label className="text-xs flex items-center gap-1 ml-auto">
+          <input type="checkbox" checked={alertas} onChange={(e) => setAlertas(e.target.checked)} /> mostrar alertas
+        </label>
+        <button onClick={() => { setDados(null); carregar(true); }} className="cpv2-btn cpv2-btn--ghost" title="Recalcular agora">↻</button>
+      </div>
+      {erro && <div className="text-xs text-[var(--danger)]">{erro}</div>}
+      {!dados && !erro && <div className="text-xs opacity-60">calculando… (lê as 68 mil faturas, pode levar alguns minutos)</div>}
+      {dados && (itens.length === 0 ? <div className="text-xs opacity-60">nada apontado{!alertas && ' com erro (marque "mostrar alertas")'}.</div> : (
+        <div className="max-h-[420px] overflow-auto">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-[var(--cpv2-surface)]">
+              <tr className="text-left opacity-70">
+                <th className="p-1">UC</th><th className="p-1">Distribuidora</th><th className="p-1">Município</th>
+                <th className="p-1">Mês</th><th className="p-1">Regras</th><th className="p-1 text-right">Valor (erros)</th><th className="p-1">Fatura</th>
+              </tr>
+            </thead>
+            <tbody>
+              {itens.slice(0, 1000).map((i) => (
+                <React.Fragment key={i.id}>
+                  <tr className="border-t border-[var(--cpv2-border)] cursor-pointer hover:bg-[var(--cpv2-hover,rgba(0,0,0,.03))]"
+                    onClick={() => setAberta(aberta === i.id ? null : i.id)}>
+                    <td className="p-1">{i.uc}</td><td className="p-1">{i.distribuidora}</td><td className="p-1">{i.cidade}</td>
+                    <td className="p-1">{i.mes_referencia}</td>
+                    <td className="p-1">{[...new Set(i.achados.map((a) => `${a.codigo}${a.nivel === 'ALERTA' ? ' (alerta)' : ''}`))].join(', ')}</td>
+                    <td className="p-1 text-right">{i.valor_estimado ? brl(i.valor_estimado) : '—'}</td>
+                    <td className="p-1">{i.link_fatura ? <a href={pdfLink(i.link_fatura)} target="_blank" rel="noreferrer" className="text-[var(--accent)]"
+                      onClick={(e) => e.stopPropagation()}>PDF</a> : '—'}</td>
+                  </tr>
+                  {aberta === i.id && (
+                    <tr><td colSpan={7} className="p-2 bg-[color-mix(in_srgb,var(--fg)_4%,transparent)]">
+                      {i.achados.map((a, k) => (
+                        <div key={k} className="mb-1"><b style={{ color: a.nivel === 'ERRO' ? 'var(--danger)' : '#d97706' }}>{a.codigo} {a.nivel}</b>
+                          {' '}{a.detalhe}{a.valor ? ` — ${brl(a.valor)}` : ''}</div>
+                      ))}
+                    </td></tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+          {itens.length > 1000 && <div className="text-xs opacity-60 mt-1">mostrando 1.000 de {num(itens.length)}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const FICHAS = ['', 'F01', 'F02', 'F04', 'F05'];
 
@@ -51,6 +136,8 @@ export default function AcerPanel() {
   const [detalhe, setDetalhe] = useState(null); // UC em análise (modal gráfico + faturas)
   const [feitas, setFeitas] = useState(() => new Set()); // ids que já viraram requisição (some da lista)
   const [okMsg, setOkMsg] = useState('');
+  const [regrasAberto, setRegrasAberto] = useState(false);
+  const [versaoRegras, setVersaoRegras] = useState(0); // muda ao salvar as regras → recalcula
 
   useEffect(() => {
     let vivo = true;
@@ -123,6 +210,8 @@ export default function AcerPanel() {
           </div>
         )}
       </div>
+
+      <OutrasRegrasAcer versao={versaoRegras} onRegras={() => setRegrasAberto(true)} />
 
       {/* Filtros */}
       <div className="flex gap-3 items-center text-xs flex-wrap">
@@ -209,6 +298,11 @@ export default function AcerPanel() {
 
       {modalFatura && (
         <ModalFaturaMontada row={modalFatura} onClose={() => setModalFatura(null)} />
+      )}
+
+      {regrasAberto && (
+        <RegrasModal conjunto="acer" titulo="Regras aplicadas às faturas da Acer" onClose={() => setRegrasAberto(false)}
+          onSalvo={() => { setRegrasAberto(false); setVersaoRegras((v) => v + 1); }} />
       )}
     </div>
   );

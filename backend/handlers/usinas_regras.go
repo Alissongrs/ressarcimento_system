@@ -9,6 +9,7 @@ package handlers
 //   fatura     dá para concluir só com a fatura (F13 F14 F15 F17 F27 F35 F36 F52) — implementadas aqui
 //   historico  precisa do histórico da UC, que está no banco (F53 F54 F55) — implementadas aqui
 //   aneel      usa a tarifa/bandeira homologada importada da ANEEL (F28 F41 F42 F58) — aneel_parametros.go
+//   pares      compara com as outras UCs do mesmo município/classe/mês (F51 — CIP/COSIP)
 //   parametro  precisa de valor de fora ainda sem fonte (alíquota, CIP do município...) — cadastro por planilha
 //   pendente   ainda não implementada
 // Critérios: os do texto da regra no catálogo (ERRO / ALERTA), com as tolerâncias que ele fixa.
@@ -34,7 +35,7 @@ var regrasSituacao = map[string]string{
 	"F53": "historico", "F54": "historico", "F55": "historico",
 	"F28": "aneel", "F41": "aneel", "F42": "aneel", "F58": "aneel", "F31": "parametro", "F32": "parametro", "F39": "parametro", "F40": "parametro",
 	"F43": "parametro", "F44": "parametro", "F45": "parametro",
-	"F46": "parametro", "F51": "parametro", "F56": "parametro",
+	"F46": "parametro", "F51": "pares", "F56": "parametro",
 }
 
 // o que falta para as regras que dependem de parâmetro (mostrado na lista)
@@ -45,7 +46,6 @@ var regrasPrecisa = map[string]string{
 	"F39": "alíquotas de ICMS por UF/classe e PIS/COFINS", "F40": "isenções/benefícios de ICMS por UF",
 	"F43": "dias de cada bandeira no ciclo (rateio por dias)", "F44": "valor da bandeira + alíquotas",
 	"F45": "valor homologado da CDE Covid", "F46": "vigência da CDE Escassez Hídrica",
-	"F51": "valor da CIP/COSIP por município, classe e faixa de consumo",
 	"F56": "TUSD Fio B e percentual de transição (Lei 14.300)",
 }
 
@@ -114,11 +114,11 @@ func GetRegrasConjunto(c *gin.Context) {
 	base, _ := baseAneel(db)
 	var out []regraConjunto
 	for _, f := range catalogoRegras(db) {
-		s := regrasSituacao[f.Codigo]
-		if s == "" {
-			s = "pendente"
-		}
+		s := situacaoConjunto(conj, f.Codigo)
 		pr := regrasPrecisa[f.Codigo]
+		if s == "nao_ligada" {
+			pr = "roda nas usinas; ainda não ligada à base da Acer"
+		}
 		if s == "aneel" && base == nil {
 			pr += " (aguardando a 1ª importação)"
 		}
@@ -172,8 +172,8 @@ func SalvarRegrasConjunto(c *gin.Context) {
 	}
 	n := 0
 	for _, cod := range b.Codigos {
-		s := regrasSituacao[cod]
-		if s != "motor" && s != "fatura" && s != "historico" && s != "aneel" {
+		s := situacaoConjunto(conj, cod)
+		if s != "motor" && s != "fatura" && s != "historico" && s != "aneel" && s != "pares" {
 			continue // parâmetro/pendente ainda não rodam
 		}
 		if _, err := tx.Exec(`INSERT INTO DM_REGRAS_CONJUNTO (conjunto, codigo, ativa, atualizado_por, atualizado_em)
@@ -191,6 +191,7 @@ func SalvarRegrasConjunto(c *gin.Context) {
 	usinasCacheMu.Lock()
 	usinasCache = nil // próxima leitura recalcula com a seleção nova
 	usinasCacheMu.Unlock()
+	limparCacheRegras(conj)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "ativas": n})
 }
 
@@ -213,6 +214,9 @@ type uFat struct {
 	id, chave, mes, grupo, subgrupo, fornecimento string
 	cnpj, modalidade, lant, latu                  string
 	pisCofins                                     float64 // soma das alíquotas de PIS e COFINS impressas (fração)
+	cidade, classe                                string  // município e classe da UC (para a CIP — F51)
+	cip                                           float64 // CIP/COSIP cobrada
+	kwhRef                                        float64 // consumo total da fatura, quando a base tem (Acer: kwh_total)
 	total                                         float64
 	itens                                         []uItem
 	meds                                          []uMed
@@ -238,7 +242,10 @@ func carregarFaturasUsinas(db *sql.DB) (map[string]*uFat, error) {
 		COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.unidade_consumidora.tipo_fornecimento')),''),
 		REGEXP_REPLACE(COALESCE(f.distribuidora_cnpj,''),'[^0-9]',''), COALESCE(f.modalidade_tarifaria,''),
 		COALESCE(DATE_FORMAT(f.leitura_anterior,'%Y-%m-%d'),''), COALESCE(DATE_FORMAT(f.leitura_atual,'%Y-%m-%d'),''),
-		COALESCE(JSON_EXTRACT(f.dados_json,'$.tributos'),'[]') ` + base)
+		COALESCE(JSON_EXTRACT(f.dados_json,'$.tributos'),'[]'),
+		UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.titular.cidade')),''))),
+		UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.unidade_consumidora.classe')),''))),
+		COALESCE(f.cosip,0) ` + base)
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +253,7 @@ func carregarFaturasUsinas(db *sql.DB) (map[string]*uFat, error) {
 		f := &uFat{}
 		var trib string
 		if rows.Scan(&f.id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.total, &f.fornecimento, &f.cnpj, &f.modalidade,
-			&f.lant, &f.latu, &trib) == nil {
+			&f.lant, &f.latu, &trib, &f.cidade, &f.classe, &f.cip) == nil {
 			var ts []struct {
 				Tributo  string   `json:"tributo"`
 				Aliquota *float64 `json:"aliquota"`
@@ -691,7 +698,7 @@ func regrasHistorico(fats map[string]*uFat, sel map[string]bool) map[string][]Ac
 func AplicarRegrasUsinas(db *sql.DB, sel map[string]bool) (map[string][]Achado, error) {
 	precisa := false
 	for c := range sel {
-		if s := regrasSituacao[c]; s == "fatura" || s == "historico" || s == "aneel" {
+		if s := regrasSituacao[c]; s == "fatura" || s == "historico" || s == "aneel" || s == "pares" {
 			precisa = true
 		}
 	}
@@ -710,6 +717,11 @@ func AplicarRegrasUsinas(db *sql.DB, sel map[string]bool) (map[string][]Achado, 
 	}
 	for id, a := range regrasHistorico(fats, sel) {
 		out[id] = append(out[id], a...)
+	}
+	if sel["F51"] {
+		for id, a := range regraCIPPares(fats) {
+			out[id] = append(out[id], a...)
+		}
 	}
 	if sel["F28"] || sel["F41"] || sel["F42"] || sel["F58"] {
 		base, err := baseAneel(db)
@@ -926,6 +938,16 @@ func regrasAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 				conhecidos++
 			}
 		}
+		// F41: a cor de qualquer dia do ciclo vale — inclui o mês da leitura anterior, que mesesCiclo pula
+		// quando a leitura é no fim do mês (ex.: 28/11–12/12 cobra a vermelha de novembro proporcional)
+		if len(f.lant) >= 7 {
+			if bd, ok := b.bandeiras[f.lant[:7]]; ok {
+				oficiais[bd.Cor] = true
+				if strings.HasPrefix(bd.Cor, "VERMELHA") {
+					oficiais["VERMELHA"] = true
+				}
+			}
+		}
 		if conhecidos == len(meses) && conhecidos > 0 {
 			for _, it := range f.itens {
 				if it.comp != "BANDEIRA" || nv(it.valor) <= 0 {
@@ -983,4 +1005,141 @@ func regrasAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 		}
 	}
 	return out
+}
+
+// ---------------------------------------------------------------- F51 — CIP/COSIP comparada entre UCs
+
+// consumoCIP — consumo da UC no mês para a faixa da CIP: o medido (energia ativa) ou, sem medição, o das linhas
+// de consumo da fatura. Em GD a CIP segue o consumo bruto, não o que sobrou depois da compensação.
+func consumoCIP(f *uFat) float64 {
+	med := 0.0
+	for _, m := range f.meds {
+		g := strings.ToUpper(sem(m.grandeza))
+		if strings.Contains(g, "ATIV") && !strings.Contains(g, "INJ") && !strings.Contains(g, "GER") &&
+			strings.HasPrefix(strings.ToUpper(m.unid), "KWH") && nv(m.cons) > 0 {
+			med += nv(m.cons)
+		}
+	}
+	if f.kwhRef > med { // consumo total gravado na base (na GD a linha de consumo é só o resíduo)
+		med = f.kwhRef
+	}
+	if c := consumoAtivo(f); c > med {
+		return c
+	}
+	return med
+}
+
+// regraCIPPares — a CIP é lei municipal (valor por faixa de consumo ou % de uma tarifa) e não há base nacional.
+// Por isso compara a fatura com as outras UCs do MESMO município, distribuidora, classe, grupo e mês:
+//   - "degrau" = valor de CIP pago por 2+ UCs diferentes (é a tabela do município vista nas faturas);
+//   - ALERTA se 2+ UCs com consumo maior (≥ 5%) pagam um degrau menor — faixa de consumo trocada;
+//     o valor estimado é a diferença para o maior degrau pago por essas UCs.
+// Fica em ALERTA: sem a lei não dá para afirmar a faixa (pode haver subclasse, isenção, rural).
+func regraCIPPares(fats map[string]*uFat) map[string][]Achado {
+	type ponto struct {
+		f   *uFat
+		kwh float64
+	}
+	grupos := map[string][]ponto{}
+	for _, f := range fats {
+		if f.cip <= 0 || f.cidade == "" || f.cidade == "NULL" {
+			continue
+		}
+		g := "B"
+		if !grupoB(f) {
+			g = "A"
+		}
+		k := f.cnpj + "|" + sem(f.cidade) + "|" + sem(f.classe) + "|" + g + "|" + f.mes
+		grupos[k] = append(grupos[k], ponto{f, consumoCIP(f)})
+	}
+	igual := func(a, b float64) bool { return math.Abs(a-b) <= math.Max(0.05, 0.005*b) }
+	out := map[string][]Achado{}
+	for _, ps := range grupos {
+		if len(ps) < 4 {
+			continue
+		}
+		// degraus: valores pagos por 2+ UCs diferentes
+		var degraus []float64
+		for _, p := range ps {
+			ucs := map[string]bool{}
+			for _, q := range ps {
+				if igual(q.f.cip, p.f.cip) {
+					ucs[q.f.chave] = true
+				}
+			}
+			if len(ucs) >= 2 {
+				novo := true
+				for _, d := range degraus {
+					if igual(d, p.f.cip) {
+						novo = false
+					}
+				}
+				if novo {
+					degraus = append(degraus, p.f.cip)
+				}
+			}
+		}
+		if len(degraus) < 2 {
+			continue
+		}
+		maxDeg := 0.0
+		for _, d := range degraus {
+			maxDeg = math.Max(maxDeg, d)
+		}
+		ucsGrupo := map[string]bool{}
+		marcadas := map[string]bool{}
+		var cand []Achado
+		var candID []string
+		for _, p := range ps {
+			ucsGrupo[p.f.chave] = true
+			// valor pago por uma UC só NÃO é apontado: com poucas UCs por município, faixa legítima aparece uma vez
+			// (teste nas usinas: 130 alertas assim, quase todos degraus reais da tabela da Light)
+			if p.kwh <= 0 {
+				continue
+			}
+			// CIP muito acima da maior faixa do município, ou mais que metade da conta: erro de extração, não de faixa
+			if p.f.cip > 3*maxDeg || (p.f.total > 0 && p.f.cip > 0.5*p.f.total) {
+				continue
+			}
+			n, maior := 0, 0.0
+			for _, q := range ps {
+				if q.f.chave != p.f.chave && q.kwh >= p.kwh*1.05+5 && q.f.cip < p.f.cip && !igual(q.f.cip, p.f.cip) {
+					n++
+					if q.f.cip > maior {
+						maior = q.f.cip
+					}
+				}
+			}
+			if n >= 2 {
+				marcadas[p.f.chave] = true
+				candID = append(candID, p.f.id)
+				cand = append(cand, Achado{"F51", "ALERTA", fmt.Sprintf(
+					"CIP R$ %.2f com %.0f kWh — %d UC(s) de %s com consumo maior pagam menos (até R$ %.2f) em %s; degraus vistos: %s",
+					p.f.cip, p.kwh, n, p.f.cidade, maior, p.f.mes, fmtDegraus(degraus)), rnd2(p.f.cip - maior), 0})
+			}
+		}
+		// muitas UCs "fora da ordem" = o município não cobra por faixa do consumo bruto (ex.: % sobre o consumo
+		// faturado depois da compensação GD, valor por classe/subclasse) — a comparação não vale ali
+		if float64(len(marcadas)) > 0.15*float64(len(ucsGrupo)) {
+			continue
+		}
+		for i, id := range candID {
+			out[id] = append(out[id], cand[i])
+		}
+	}
+	return out
+}
+
+func fmtDegraus(d []float64) string {
+	c := append([]float64(nil), d...)
+	sort.Float64s(c)
+	var s []string
+	for i, v := range c {
+		if i == 8 {
+			s = append(s, "…")
+			break
+		}
+		s = append(s, fmt.Sprintf("%.2f", v))
+	}
+	return strings.Join(s, " · ")
 }

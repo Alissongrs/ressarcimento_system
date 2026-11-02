@@ -2473,6 +2473,7 @@ export default function AnaliseDesvio() {
       const rejId = confirmReject.id;
       await apiClient.post(`/api/v1/faturas/${rejId}/rejeitar-fde`, {
         motivo: 'rejeitado pela tela AnaliseDesvio',
+        regras: extractFichas(confirmReject.fichas_aplicadas), // rejeição vale para estas regras
       });
       setConfirmReject(null);
       // Atualização LOCAL (sem reload da lista toda): marca só esta linha como rejeitada

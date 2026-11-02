@@ -50,12 +50,15 @@ const SITUACAO = {
   fatura: { rot: 'pronta — só com a fatura', cor: '#1f9d6b', ok: true },
   historico: { rot: 'pronta — com o histórico da UC', cor: '#1f9d6b', ok: true },
   aneel: { rot: 'pronta — tarifa/bandeira homologada da ANEEL', cor: '#1f9d6b', ok: true },
+  pares: { rot: 'pronta — comparada com as outras UCs do município', cor: '#1f9d6b', ok: true },
+  nao_ligada: { rot: 'ainda não ligada a esta base', cor: '#6b7280', ok: false },
   parametro: { rot: 'precisa de parâmetro (etapa 2)', cor: '#d97706', ok: false },
   pendente: { rot: 'ainda não implementada', cor: '#6b7280', ok: false },
 };
 const valorOutras = (a) => (a.achados || []).reduce((s, x) => s + (x.nivel === 'ERRO' ? x.valor || 0 : 0), 0);
 
-function RegrasModal({ onClose, onSalvo }) {
+// conjunto: 'usinas' | 'acer' — a seleção de cada aba fica separada (DM_REGRAS_CONJUNTO)
+export function RegrasModal({ onClose, onSalvo, conjunto = 'usinas', titulo = 'Regras aplicadas às faturas das usinas' }) {
   const [regras, setRegras] = useState(null);
   const [marcadas, setMarcadas] = useState({});
   const [erro, setErro] = useState('');
@@ -79,18 +82,18 @@ function RegrasModal({ onClose, onSalvo }) {
     }
   };
   useEffect(() => {
-    apiClient.get('/api/v1/regras-conjunto/usinas')
+    apiClient.get(`/api/v1/regras-conjunto/${conjunto}`)
       .then(({ data }) => {
         setRegras(data.regras || SEM_DADOS);
         setMarcadas(Object.fromEntries((data.regras || SEM_DADOS).filter((r) => r.selecionada).map((r) => [r.codigo, true])));
       })
       .catch((e) => setErro(e?.response?.data?.error || e.message));
-  }, []);
+  }, [conjunto]);
   const salvar = async () => {
     setSalvando(true);
     setErro('');
     try {
-      await apiClient.put('/api/v1/regras-conjunto/usinas', { codigos: Object.keys(marcadas).filter((c) => marcadas[c]) });
+      await apiClient.put(`/api/v1/regras-conjunto/${conjunto}`, { codigos: Object.keys(marcadas).filter((c) => marcadas[c]) });
       onSalvo();
     } catch (e) {
       setErro(e?.response?.data?.error || e.message);
@@ -110,7 +113,7 @@ function RegrasModal({ onClose, onSalvo }) {
         onClick={(e) => e.stopPropagation()}>
         <div className="p-4 border-b border-[var(--cpv2-border)] flex items-start justify-between gap-4">
           <div>
-            <div className="text-lg font-bold">Regras aplicadas às faturas das usinas</div>
+            <div className="text-lg font-bold">{titulo}</div>
             <div className="text-xs opacity-70">Marque as regras do catálogo que devem rodar nesta aba. As que precisam de parâmetro
               (tarifa, alíquota, CIP do município) ficam bloqueadas até a etapa 2.</div>
           </div>

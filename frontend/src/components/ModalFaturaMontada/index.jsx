@@ -1096,7 +1096,11 @@ export default function ModalFaturaMontada({ row, onClose, onRejeitado, onEncami
     if (!idFatura || !motivo) return;
     setRejeitando(true); setRejeitarAberto(false);
     apiClient
-      .post(`/api/v1/faturas/${idFatura}/rejeitar-apontamento`, { motivo })
+      .post(`/api/v1/faturas/${idFatura}/rejeitar-apontamento`, {
+        motivo,
+        // rejeição vale para as regras que estavam apontando
+        regras: String(row?.fichas_aplicadas || fatura?.fichas_aplicadas || '').match(/F\d{2}/gi) || [],
+      })
       .then(() => { onRejeitado?.(idFatura); onClose?.(); })
       .catch((e) => window.alert('Falha ao rejeitar: ' + (e?.response?.data?.error || e.message)))
       .finally(() => setRejeitando(false));

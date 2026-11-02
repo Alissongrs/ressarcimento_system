@@ -86,6 +86,11 @@ func runAdditiveMigrations(db *sql.DB) error {
 	addColumnIfMissing(db, "FATURA_AGUA_CONFERENCIA", "evidencia", "VARCHAR(30) NULL")
 	addColumnIfMissing(db, "FATURA_AGUA_CONFERENCIA", "texto_aviso", "VARCHAR(255) NULL")
 
+	// ── Rejeição por regra — 02/11/2026 ─────────────────────────────────────
+	// regras que o analista rejeitou ("F02,F05"); NULL = rejeição antiga, vale para F01–F05.
+	// Regra nova que aponte outra coisa na fatura faz ela voltar à lista (handlers/rejeicao_regras.go).
+	addColumnIfMissing(db, "FATURA_REANALISES", "regras_rejeitadas", "VARCHAR(255)")
+
 	// ── Rotinas (#rotina no chat) + lembretes com hora — 21/10/2026 ─────────
 	// Rotina nasce aguardando aprovação do admin; usuário desligado → desativada (nunca apagada).
 	createTableIfNotExists(db, "FT_ROTINAS", `
