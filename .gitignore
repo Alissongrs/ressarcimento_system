@@ -122,3 +122,4 @@ FATURA_DADOS_EXTRAIDOS_LOG.json
 # estado das tarefas em segundo plano do worker/run_jobs.py (VPS)
 worker/.jobs_em_andamento/
 worker/engine/_work/
+.deploy_backups/

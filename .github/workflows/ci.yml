@@ -291,6 +291,51 @@ jobs:
           ls -1t .env_backups/* 2>/dev/null | tail -n +21 | xargs -r rm -f
 
           git fetch --all --prune
+
+          # Arquivos do repositório alterados direto na VPS (fora do Git) travariam o pull.
+          # Se o arquivo local já é IGUAL ao da versão nova (conteúdo e permissão) ou foi só apagado,
+          # nada se perde: volta ao do Git. Se tem conteúdo diferente, guarda uma cópia e PARA,
+          # mostrando quais são — nunca sobrescreve trabalho feito na VPS.
+          ALVO="origin/$REF"
+          CONFLITO=""
+          while IFS= read -r arq; do
+            [ -z "$arq" ] && continue
+            if [ ! -e "$arq" ]; then
+              echo "↺ $arq foi apagado na VPS — volta ao do Git"
+              git restore --staged --worktree --source="$ALVO" -- "$arq" 2>/dev/null || git restore --staged --worktree -- "$arq"
+              continue
+            fi
+            blob_alvo=$(git rev-parse -q --verify "$ALVO:$arq" 2>/dev/null || true)
+            modo_alvo=$(git ls-tree "$ALVO" -- "$arq" | awk '{print $1}')
+            modo_local=100644; [ -x "$arq" ] && modo_local=100755
+            if [ -n "$blob_alvo" ] && [ "$(git hash-object -- "$arq")" = "$blob_alvo" ] && [ "$modo_local" = "$modo_alvo" ]; then
+              echo "↺ $arq alterado na VPS, mas já igual à versão nova — volta ao do Git"
+              git restore --staged --worktree -- "$arq"
+            else
+              CONFLITO="$CONFLITO $arq"
+            fi
+          done < <(git diff --name-only HEAD --)
+
+          if [ -n "$CONFLITO" ]; then
+            BK=".deploy_backups/vps_local_$STAMP"
+            mkdir -p "$BK"
+            git diff HEAD -- $CONFLITO > "$BK/alteracoes.patch" || true
+            for arq in $CONFLITO; do mkdir -p "$BK/$(dirname "$arq")"; cp -p "$arq" "$BK/$arq"; done
+            echo "❌ DEPLOY PARADO: estes arquivos foram alterados direto na VPS e são diferentes da versão nova:"
+            for arq in $CONFLITO; do echo "   - $arq"; done
+            echo "--- resumo das alterações locais ---"
+            git diff --stat HEAD -- $CONFLITO || true
+            echo "Cópia guardada em $1/$BK (alteracoes.patch + arquivos)."
+            echo "Para resolver: leve a alteração para um commit no repositório (se for para manter) ou, na VPS,"
+            echo "  git restore --staged --worktree --$CONFLITO"
+            echo "e rode o deploy de novo. Nada foi alterado: os containers seguem na versão $PREV."
+            for alvo in $TROCOU; do
+              nome=$(echo "$alvo" | tr '/' '_')
+              [ -f ".env_backups/${nome}.$STAMP" ] && cp -p ".env_backups/${nome}.$STAMP" "$alvo" && echo "$alvo restaurado"
+            done
+            exit 1
+          fi
+
           git checkout "$REF"
           git pull --ff-only
           docker compose build backend frontend
