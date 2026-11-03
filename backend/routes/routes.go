@@ -481,6 +481,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.GET("/faturas/agua/:id/historico", handlers.GetAguaHistorico)
 			authRequired.GET("/faturas/agua/:id/pdf", handlers.GetAguaFaturaPDF)
 			authRequired.GET("/faturas/agua/:id/dossie", handlers.GetAguaDossie)
+			// dossiê do apontamento de energia (abas Energia, Acer, Usinas): conta, regra, histórico e a fatura marcada
+			authRequired.GET("/dossie/:base/:id", handlers.GetDossieEnergia)
 			authRequired.POST("/faturas/agua/:id/rejeitar", handlers.RejeitarAguaApontamento)
 			authRequired.GET("/faturas/fde-analise/empresas", handlers.ListEmpresasFDEAnalise)
 			authRequired.GET("/faturas/fde-analise/rankings", handlers.GetRankingsFDEAnalise)

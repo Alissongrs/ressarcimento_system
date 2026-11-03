@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell, ReferenceLine } from 'recharts';
 import apiClient from '../services/apiClient';
+import { abrirDossie } from './dossieApontamento';
 
 // ⚡ Auditoria das faturas das USINAS (Thopen) — aba dentro de /analise-desvio.
 // Somente leitura: o backend roda o mesmo motor F01–F05 da Auditoria sobre FATURA_USINA* (ao vivo, cache 10 min).
@@ -406,7 +407,9 @@ export default function UsinasPanel() {
                   <td className="p-2 text-right font-semibold">{a.estimativa_nao_compensada ? brl(a.estimativa_nao_compensada) : '—'}</td>
                   <td className="p-2 text-right">{valorOutras(a) ? brl(valorOutras(a)) : '—'}</td>
                   <td className="p-2" onClick={(e) => e.stopPropagation()}>
-                    <LinkFatura link={a.link_drive} rotulo="PDF" /></td>
+                    <LinkFatura link={a.link_drive} rotulo="PDF" />
+                    <button type="button" className="ml-2 text-[var(--accent)]" title="Dossiê do apontamento (PDF): como foi feito, o que foi pego, histórico e a fatura com os valores marcados"
+                        onClick={async () => { const m = await abrirDossie('usinas', a.id_fatura); if (m) setErro(m); }}>📑 Dossiê</button></td>
                 </tr>
               );
             })}

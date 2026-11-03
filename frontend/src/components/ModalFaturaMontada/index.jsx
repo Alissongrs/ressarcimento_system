@@ -1290,9 +1290,17 @@ export default function ModalFaturaMontada({ row, onClose, onRejeitado, onEncami
     } else {
       fd.append('fatura_id', String(idFatura ?? ''));
     }
+    // dossiê do apontamento (abas Energia/Acer): o backend gera e anexa à requisição
+    if (row?.dossie_base && row?.id != null) {
+      fd.append('dossie_base', row.dossie_base);
+      fd.append('dossie_id', String(row.id));
+    }
 
     apiClient.post('/api/v1/requisicoes', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
-      .then((res) => { setReqOk(res?.data?.id ? `Requisição #${res.data.id} criada.` : 'Requisição criada.'); })
+      .then((res) => {
+        const dossie = row?.dossie_base ? ' O dossiê do apontamento será anexado em instantes.' : '';
+        setReqOk(res?.data?.id ? `Requisição #${res.data.id} criada.${dossie}` : `Requisição criada.${dossie}`);
+      })
       .catch((e) => {
         const a = e?.response?.data;
         setReqErro(a?.error ? (a.missing_fields ? `${a.error}: ${a.missing_fields.join(', ')}` : a.error) : 'Falha ao criar requisição.');

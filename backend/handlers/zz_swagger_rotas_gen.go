@@ -1649,6 +1649,18 @@ func swaggerRotaGet_api_v1_faturas_agua__id__pdf() {}
 // @Router /api/v1/faturas/agua/{id}/dossie [get]
 func swaggerRotaGet_api_v1_faturas_agua__id__dossie() {}
 
+// @Summary Get dossie energia
+// @Description Qualquer usuário autenticado. Handler: handlers.GetDossieEnergia.
+// @Tags dossie
+// @Produce json
+// @Param base path string true "base"
+// @Param id path string true "id"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/dossie/{base}/{id} [get]
+func swaggerRotaGet_api_v1_dossie__base___id_() {}
+
 // @Summary Rejeitar agua apontamento
 // @Description Qualquer usuário autenticado. Handler: handlers.RejeitarAguaApontamento.
 // @Tags Faturas

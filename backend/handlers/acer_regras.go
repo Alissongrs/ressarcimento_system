@@ -130,6 +130,14 @@ func subgrupoAcer(sg, grupo, classe string) string {
 }
 
 func carregarFaturasAcer(db *sql.DB) (map[string]*uFat, error) {
+	return carregarFaturasAcerOnde(db, "")
+}
+
+// carregarFaturasAcerOnde — idem, só com as faturas que passam no filtro extra (ex.: uma UC, para o dossiê)
+func carregarFaturasAcerOnde(db *sql.DB, onde string, args ...any) (map[string]*uFat, error) {
+	if onde != "" {
+		onde = " AND (" + onde + ")"
+	}
 	rows, err := db.Query(`SELECT id, COALESCE(NULLIF(TRIM(numero_instalacao),''), codigo_uc, ''), LEFT(mes_referencia,7),
 		COALESCE(grupo_tarifario,''), COALESCE(subgrupo_tarifario,''), COALESCE(modalidade_tarifaria,''),
 		COALESCE(DATE_FORMAT(data_leitura_anterior,'%Y-%m-%d'),''), COALESCE(DATE_FORMAT(data_leitura_atual,'%Y-%m-%d'),''),
@@ -137,7 +145,7 @@ func carregarFaturasAcer(db *sql.DB) (map[string]*uFat, error) {
 		energia_injetada_kwh, energia_compensada_kwh, COALESCE(dias_faturados,0), COALESCE(numero_medidor,''),
 		COALESCE(indicacao_troca_medidor,0) = 1,
 		(COALESCE(indicador_leitura_estimativa,0) = 1 OR COALESCE(flag_faturamento_media,0) = 1 OR COALESCE(indicacao_impedimento_leitura,0) = 1)
-		FROM ` + acerTabela + ` WHERE mes_referencia REGEXP '^[0-9]{4}-[0-9]{2}'`)
+		FROM `+acerTabela+` WHERE mes_referencia REGEXP '^[0-9]{4}-[0-9]{2}'`+onde, args...)
 	if err != nil {
 		return nil, err
 	}

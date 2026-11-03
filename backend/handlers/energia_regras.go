@@ -157,17 +157,25 @@ type itemFDE struct {
 }
 
 func carregarFaturasEnergia(db *sql.DB, cn *cnpjAneel, comItens bool) (map[string]*uFat, error) {
+	return carregarFaturasEnergiaOnde(db, cn, comItens, "")
+}
+
+// carregarFaturasEnergiaOnde — idem, só com as faturas que passam no filtro extra (ex.: uma UC, para o dossiê)
+func carregarFaturasEnergiaOnde(db *sql.DB, cn *cnpjAneel, comItens bool, onde string, args ...any) (map[string]*uFat, error) {
+	if onde != "" {
+		onde = " AND (" + onde + ")"
+	}
 	itens := `'[]'`
 	if comItens {
 		itens = `COALESCE(itens_cobrados,'[]')`
 	}
-	rows, err := db.Query(`SELECT id, COALESCE(NULLIF(TRIM(numero_instalacao),''), codigo_uc, ''), ` + energiaMesSQL + `,
+	rows, err := db.Query(`SELECT id, COALESCE(NULLIF(TRIM(numero_instalacao),''), codigo_uc, ''), `+energiaMesSQL+`,
 		UPPER(COALESCE(grupo_tarifario,'')), UPPER(COALESCE(subgrupo_tarifario,'')), COALESCE(modalidade_tarifaria,''),
 		REGEXP_REPLACE(COALESCE(cnpj_distribuidora_filial,''),'[^0-9]',''),
 		COALESCE(DATE_FORMAT(data_leitura_anterior,'%Y-%m-%d'),''), COALESCE(DATE_FORMAT(data_leitura_atual,'%Y-%m-%d'),''),
 		COALESCE(pis_aliquota,0), COALESCE(cofins_aliquota,0), LEFT(REGEXP_REPLACE(COALESCE(cep_uc,''),'[^0-9]',''),5),
 		UPPER(TRIM(COALESCE(classe_consumidor,''))), COALESCE(cip_iluminacao_publica_rs, valor_cip_cosip, 0),
-		COALESCE(valor_total_fatura,0), COALESCE(kwh_total,0), ` + itens + `,
+		COALESCE(valor_total_fatura,0), COALESCE(kwh_total,0), `+itens+`,
 		COALESCE(tipo_ligacao,''), COALESCE(numero_medidor,''), constante_k,
 		leit_ant_ativa_fponta, leit_atu_ativa_fponta, leit_ant_ativa_ponta, leit_atu_ativa_ponta,
 		leit_ant_reativa, leit_atu_reativa, leit_demanda_ponta, leit_demanda_fponta, fator_potencia,
@@ -177,7 +185,7 @@ func carregarFaturasEnergia(db *sql.DB, cn *cnpjAneel, comItens bool) (map[strin
 		COALESCE(dias_faturados,0), COALESCE(indicacao_troca_medidor,0) = 1,
 		(COALESCE(indicador_leitura_estimativa,0) = 1 OR COALESCE(flag_faturamento_media,0) = 1 OR COALESCE(indicacao_impedimento_leitura,0) = 1),
 		COALESCE(fio_b_sefaz_rs,0), COALESCE(custo_disponib_sefaz_rs,0)
-		FROM FATURA_DADOS_EXTRAIDOS WHERE ` + energiaFiltroEmpresa + ` AND (` + energiaMesSQL + `) IS NOT NULL`)
+		FROM FATURA_DADOS_EXTRAIDOS WHERE `+energiaFiltroEmpresa+` AND (`+energiaMesSQL+`) IS NOT NULL`+onde, args...)
 	if err != nil {
 		return nil, err
 	}

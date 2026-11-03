@@ -530,6 +530,14 @@ func createRequisicaoPersistente(c *gin.Context) {
 	if json.Unmarshal([]byte(get("analise_ia")), &analiseAgua) == nil && analiseAgua.Origem == "agua" && analiseAgua.FaturaAguaID != "" {
 		go anexarDossieAgua(pid, analiseAgua.FaturaAguaID.String())
 	}
+	// Energia (abas Energia/Acer da Auditoria): anexa o dossiê do apontamento — como foi feito, o que foi pego e a
+	// fatura com os valores marcados. O modal manda dossie_base + dossie_id; sem eles, uma requisição com fatura_id
+	// da FDE tenta o dossiê da aba Energia (se a fatura estiver entre os apontamentos calculados).
+	if db, did := strings.TrimSpace(get("dossie_base")), strings.TrimSpace(get("dossie_id")); db != "" && did != "" {
+		go anexarDossieEnergia(pid, db, did)
+	} else if fid := strings.TrimSpace(get("fatura_id")); fid != "" && !isAgua {
+		go anexarDossieEnergia(pid, "energia", fid)
+	}
 
 	// Dispara cálculo de score em background para o novo processo
 	go func(reqID int) {

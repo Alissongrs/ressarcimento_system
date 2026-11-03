@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import apiClient from '../services/apiClient';
 import ModalFaturaMontada from './ModalFaturaMontada';
 import { RegrasModal } from './UsinasPanel';
+import { abrirDossie } from './dossieApontamento';
 
 // ⚡ Aba ENERGIA da Auditoria de Faturas no formato da aba Usinas (FATURA_DADOS_EXTRAIDOS).
 // Backend: GET /api/v1/energia/apontamentos — motor F01–F05 + regras do botão ⚙ Regras (conjunto "energia":
@@ -245,7 +246,7 @@ export default function EnergiaPanel({ admin = false, base = 'energia' }) {
               return (
                 <React.Fragment key={a.id}>
                   <tr onClick={() => setModalFatura({ id: a.id, UC: a.uc, fichas_aplicadas: [...fs, ...(a.alertas || SEM)].join(','),
-                      fonte: ehAcer ? 'acer' : undefined, link_fatura: a.link_fatura, numero_instalacao: a.uc })}
+                      fonte: ehAcer ? 'acer' : undefined, link_fatura: a.link_fatura, numero_instalacao: a.uc, dossie_base: base })}
                     className="border-t border-[var(--cpv2-border)] cursor-pointer hover:bg-[var(--cpv2-surface)]">
                     <td className="p-2" onClick={(e) => { e.stopPropagation(); setAberta(aberta === a.id ? null : a.id); }}
                       title="ver o detalhe das regras">{aberta === a.id ? '▾' : '▸'}</td>
@@ -269,7 +270,9 @@ export default function EnergiaPanel({ admin = false, base = 'energia' }) {
                       {temF02 && a.estimativa_f02 ? `${brl(a.estimativa_f02)}${a.estimativa_auditada ? ' ✔' : ''}` : '—'}</td>
                     <td className="p-2 text-right">{a.valor_outras_regras ? brl(a.valor_outras_regras) : '—'}</td>
                     <td className="p-2" onClick={(e) => e.stopPropagation()}>
-                      {a.link_fatura ? <a href={pdfLink(a.link_fatura)} target="_blank" rel="noreferrer" className="text-[var(--accent)]">PDF</a> : '—'}</td>
+                      {a.link_fatura ? <a href={pdfLink(a.link_fatura)} target="_blank" rel="noreferrer" className="text-[var(--accent)]">PDF</a> : '—'}
+                      <button type="button" className="ml-2 text-[var(--accent)]" title="Dossiê do apontamento (PDF): como foi feito, o que foi pego, histórico e a fatura com os valores marcados"
+                        onClick={async () => { const m = await abrirDossie(base, a.id); if (m) setErro(m); }}>📑 Dossiê</button></td>
                   </tr>
                   {aberta === a.id && (
                     <tr><td colSpan={14} className="p-2 bg-[color-mix(in_srgb,var(--fg)_4%,transparent)]">

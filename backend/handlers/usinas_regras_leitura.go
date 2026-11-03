@@ -133,6 +133,8 @@ var (
 	reDisponib = regexp.MustCompile(`(?i)DISPONIB`)
 	reMinimo   = regexp.MustCompile(`(?i)CONSUMO\s*M[IÍ]NIMO|COMPLEMENTO`)
 	reFioB     = regexp.MustCompile(`(?i)FIO\s*-?\s*B\b`)
+	// linha de bandeira ("Adicional Bandeira Vermelha", "Adic. B. Amarela"…)
+	reBandeiraItem = regexp.MustCompile(`(?i)BANDEIRA|ADIC\.?\s*B\.?\s*(AMAR|VERM|ESCASS)|\bB\.?\s*(AMARELA|VERMELHA)`)
 )
 
 // regrasLeitura — F06 F07 F08 F33 F34 F57 (as que precisam do histórico olham as faturas vizinhas da UC)
@@ -483,6 +485,18 @@ func regraF57(f *uFat) (Achado, bool) {
 	}
 	sefaz := false
 	if (disp <= 0 || fioB <= 0) && f.fioBSefaz > 0 && f.dispSefaz > 0 {
+		// O "Fio B" da SEFAZ às vezes é outra coisa: na Energisa MT era a SOMA DAS BANDEIRAS (amarela 1,17 +
+		// vermelha 3,42 = 4,59), conferido no dossiê da fatura 64239 em 03/11/2026. Não vale quando os itens
+		// impressos fecham com o total e nenhum é Fio B, nem quando o valor bate com as linhas de bandeira.
+		band := 0.0
+		for _, it := range f.itens {
+			if reBandeiraItem.MatchString(it.desc) && nv(it.valor) > 0 {
+				band += nv(it.valor)
+			}
+		}
+		if f.itensOK || (band > 0 && math.Abs(band-f.fioBSefaz) <= 0.02) {
+			return Achado{}, false
+		}
 		disp, fioB, minimo, sefaz, fonte = f.dispSefaz, f.fioBSefaz, false, true, "nota fiscal (NF3e) na SEFAZ"
 	}
 	if disp <= 0 || fioB <= 0 {
@@ -500,7 +514,9 @@ func regraF57(f *uFat) (Achado, bool) {
 	nivel := "ERRO"
 	if minimo {
 		nivel, det = "ALERTA", det+" — a linha de \"consumo mínimo\" pode ser só o complemento até o mínimo"
-	} else if f.extraida && !sefaz {
+	} else if sefaz {
+		nivel, det = "ALERTA", det+" — a fatura impressa não discrimina o Fio B: confira na fatura se há essa linha"
+	} else if f.extraida {
 		nivel, det = "ALERTA", det+" — confira as duas linhas na fatura"
 	}
 	if nivel == "ALERTA" {

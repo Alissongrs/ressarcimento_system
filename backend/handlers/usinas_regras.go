@@ -223,6 +223,9 @@ type uFat struct {
 	// extraida: base de extração automática (Energia/Acer) — itens, grupo e leituras às vezes lidos errado;
 	// as regras de valor só acusam quando os itens fecham com o total (itensOK)
 	extraida, itensOK bool
+	// variasFaturas: base extraída cujo PDF trazia mais de uma fatura e a extração juntou os itens (soma dos itens
+	// acima de 1,5× o total — dossiê da fatura 220110 da Celesc, 03/11/2026: agosto verde + setembro vermelha)
+	variasFaturas bool
 	totalSefaz        float64 // total da NF3e na SEFAZ (2ª fonte do total), quando a base tem
 	// ciclo e leitura (F06 F07 F08 F33 F34)
 	dias         int    // dias do ciclo pelas datas de leitura DA BASE (0 = sem as duas datas)
@@ -248,9 +251,18 @@ type Achado struct {
 }
 
 func carregarFaturasUsinas(db *sql.DB) (map[string]*uFat, error) {
+	return carregarFaturasUsinasOnde(db, "")
+}
+
+// carregarFaturasUsinasOnde — idem, só com as faturas que passam no filtro extra sobre FATURA_USINA f
+// (ex.: uma UC, para o dossiê). O filtro entra nas 4 consultas; args vale para cada uma.
+func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string]*uFat, error) {
 	base := `FROM FATURA_USINA f WHERE f.duplicata_de IS NULL
 	           AND COALESCE(f.tipo_documento,'fatura_energia') NOT LIKE 'demonstrativo%'
 	           AND f.mes_referencia REGEXP '^[0-9]{4}-[0-9]{2}' AND COALESCE(f.uc,'') <> ''`
+	if onde != "" {
+		base += " AND (" + onde + ")"
+	}
 	fats := map[string]*uFat{}
 	rows, err := db.Query(`SELECT f.id_fatura, ` + usinaChaveUC + `, LEFT(f.mes_referencia,7), COALESCE(f.grupo,''),
 		COALESCE(f.subgrupo,''), COALESCE(f.total_a_pagar,0),
@@ -260,7 +272,7 @@ func carregarFaturasUsinas(db *sql.DB) (map[string]*uFat, error) {
 		COALESCE(JSON_EXTRACT(f.dados_json,'$.tributos'),'[]'),
 		UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.titular.cidade')),''))),
 		UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.unidade_consumidora.classe')),''))),
-		COALESCE(f.cosip,0), COALESCE(f.dias_faturados,0) ` + base)
+		COALESCE(f.cosip,0), COALESCE(f.dias_faturados,0) ` + base, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +303,7 @@ func carregarFaturasUsinas(db *sql.DB) (map[string]*uFat, error) {
 	ir, err := db.Query(`SELECT i.id_fatura, COALESCE(i.descricao,''), COALESCE(i.componente,''), COALESCE(i.posto,''),
 		COALESCE(i.unidade,''), i.quantidade_faturada, i.tarifa_com_tributos, i.valor, i.tarifa_sem_tributos
 		FROM FATURA_USINA_ITENS i JOIN FATURA_USINA f ON f.id_fatura = i.id_fatura ` + strings.Replace(base, "FROM FATURA_USINA f ", "", 1) +
-		` ORDER BY i.id_fatura, i.ordem`)
+		` ORDER BY i.id_fatura, i.ordem`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +319,7 @@ func carregarFaturasUsinas(db *sql.DB) (map[string]*uFat, error) {
 		COALESCE(m.unidade,''), m.leitura_anterior, m.leitura_atual, m.constante, m.consumo, m.fator_potencia,
 		COALESCE(m.leitura_arredondada,0)
 		FROM FATURA_USINA_MEDICOES m JOIN FATURA_USINA f ON f.id_fatura = m.id_fatura ` + strings.Replace(base, "FROM FATURA_USINA f ", "", 1) +
-		` ORDER BY m.id_fatura, m.ordem`)
+		` ORDER BY m.id_fatura, m.ordem`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +333,7 @@ func carregarFaturasUsinas(db *sql.DB) (map[string]*uFat, error) {
 	mr.Close()
 	gr, err := db.Query(`SELECT g.id_fatura, COALESCE(g.tipo,''), COALESCE(g.posto,''), g.kwh
 		FROM FATURA_USINA_GD g JOIN FATURA_USINA f ON f.id_fatura = g.id_fatura ` + strings.Replace(base, "FROM FATURA_USINA f ", "", 1) +
-		` AND g.tipo <> 'rateio'`)
+		` AND g.tipo <> 'rateio'`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -409,6 +421,13 @@ func conferirItensExtraidos(f *uFat) {
 	if f.total <= 0 || len(f.itens) == 0 {
 		return
 	}
+	somaPos := 0.0
+	for _, it := range f.itens {
+		if v := nv(it.valor); v > 0 && it.comp != "OUTRO" {
+			somaPos += v
+		}
+	}
+	f.variasFaturas = somaPos > 1.5*f.total
 	soma := 0.0
 	rep := map[float64]int{}
 	for _, it := range f.itens {
@@ -909,6 +928,21 @@ func tetoTarifa(hom, pisCofins float64) float64 {
 const pisCofinsMax = 0.0925
 
 func regrasAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
+	out := regrasAneelFatura(f, b, sel)
+	if !f.variasFaturas {
+		return out
+	}
+	// itens de mais de uma fatura juntos: a cor/tarifa pode ser da outra fatura do mesmo PDF — só alerta
+	for i := range out {
+		if out[i].Nivel == "ERRO" {
+			out[i].Nivel, out[i].Valor = "ALERTA", 0
+			out[i].Detalhe += " — atenção: a extração juntou itens de mais de uma fatura neste PDF; confira se a linha é da fatura deste mês"
+		}
+	}
+	return out
+}
+
+func regrasAneelFatura(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 	var out []Achado
 	if len(f.cnpj) != 14 {
 		return nil
