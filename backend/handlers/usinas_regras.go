@@ -218,9 +218,14 @@ type uFat struct {
 	cip                                           float64 // CIP/COSIP cobrada
 	kwhRef                                        float64 // consumo total da fatura, quando a base tem (Acer: kwh_total)
 	total                                         float64
-	itens                                         []uItem
-	meds                                          []uMed
-	gd                                            []uGD
+	grupoInferido                                 bool // grupo/subgrupo deduzido da classe (a base não trazia)
+	// extraida: base de extração automática (Energia/Acer) — itens, grupo e leituras às vezes lidos errado;
+	// as regras de valor só acusam quando os itens fecham com o total (itensOK)
+	extraida, itensOK bool
+	totalSefaz        float64 // total da NF3e na SEFAZ (2ª fonte do total), quando a base tem
+	itens             []uItem
+	meds              []uMed
+	gd                []uGD
 }
 
 // Achado de uma regra numa fatura
@@ -382,14 +387,66 @@ var reRetroativo = regexp.MustCompile(`(?i)retro|parc|anterior|ref\.?\s*\d\d/|\d
 
 // ---------------------------------------------------------------- regras "só com a fatura"
 
+// conferirItensExtraidos — base extraída: os itens valem para as regras de valor só quando fecham com o total
+// (±R$ 0,10), sem o mesmo valor repetido em 3+ linhas (valor de uma coluna copiado em todas) e sem linha maior
+// que o próprio total (linha de "Total" lida como item)
+func conferirItensExtraidos(f *uFat) {
+	f.extraida = true
+	if f.total <= 0 || len(f.itens) == 0 {
+		return
+	}
+	soma := 0.0
+	rep := map[float64]int{}
+	for _, it := range f.itens {
+		v := nv(it.valor)
+		soma += v
+		if v > 0 {
+			rep[v]++
+			if v > f.total*1.001 && len(f.itens) > 1 {
+				return
+			}
+		}
+	}
+	for _, n := range rep {
+		if n >= 3 {
+			return
+		}
+	}
+	f.itensOK = math.Abs(f.total-soma) <= 0.10
+}
+
+// potencia10 — a/b perto de 10, 100, 1000 (ou o inverso): separador de milhar/decimal lido errado
+func potencia10(a, b float64) bool {
+	if a <= 0 || b <= 0 {
+		return false
+	}
+	r := math.Log10(a / b)
+	k := math.Round(r)
+	return k != 0 && math.Abs(r-k) < 0.01
+}
+
 func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 	var out []Achado
 	soma := 0.0
 	for _, it := range f.itens {
 		soma += nv(it.valor)
 	}
+	// base extraída: itens que não fecham com o total não sustentam achado de valor
+	valorOK := !f.extraida || f.itensOK
+	// F35 (base extraída) — o total impresso acima do total da NF3e na SEFAZ: a soma dos itens extraídos não serve
+	// (linha não lida ≠ cobrança a mais)
+	if sel["F35"] && f.extraida {
+		if d := f.total - f.totalSefaz; f.totalSefaz > 0 && d > 0.10 {
+			if d > 0.5*f.total { // diferença do tamanho da fatura: a NF3e consultada pode ser outra nota
+				out = append(out, Achado{"F35", "ALERTA", fmt.Sprintf("total a pagar R$ %.2f × total da nota fiscal na SEFAZ R$ %.2f — confira se a NF3e é desta fatura", f.total, f.totalSefaz), 0, 0})
+			} else {
+				out = append(out, Achado{"F35", "ERRO", fmt.Sprintf("total a pagar R$ %.2f acima do total da nota fiscal na SEFAZ R$ %.2f", f.total, f.totalSefaz),
+					rnd2(d), 0})
+			}
+		}
+	}
 	// F35 — Total a Pagar − soma dos itens > R$ 0,10
-	if sel["F35"] && len(f.itens) > 0 {
+	if sel["F35"] && len(f.itens) > 0 && !f.extraida {
 		if d := f.total - soma; d > 0.10 {
 			out = append(out, Achado{"F35", "ERRO", fmt.Sprintf("total a pagar R$ %.2f − soma dos itens R$ %.2f = R$ %.2f", f.total, soma, d), rnd2(d), 0})
 		} else if d >= 0.01 {
@@ -397,7 +454,7 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 		}
 	}
 	// F36 — valor do item − quantidade × tarifa (com tributos) > R$ 0,10 (+ arredondamento da tarifa impressa)
-	if sel["F36"] {
+	if sel["F36"] && valorOK {
 		tot, n, pior := 0.0, 0, ""
 		totA, nA := 0.0, 0
 		for _, it := range f.itens {
@@ -407,6 +464,11 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 			}
 			d := v - q*t
 			if d <= 0.10 {
+				continue
+			}
+			// base extraída: casa decimal errada, tarifa SEM tributos no lugar da com tributos (valor ≈ 1,2–1,5 ×
+			// quantidade × tarifa) ou coluna trocada — diferença de mais de 5% do item não é cobrança a mais
+			if f.extraida && (potencia10(v, q*t) || d > 0.05*v) {
 				continue
 			}
 			if d > 0.001*v { // acima do arredondamento da tarifa impressa
@@ -420,14 +482,16 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 				nA++
 			}
 		}
-		if n > 0 {
+		if n > 0 && f.extraida { // descrição de duas linhas coladas, quantidade com a casa errada… — conferir na fatura
+			out = append(out, Achado{"F36", "ALERTA", fmt.Sprintf("%d item(ns) acima de quantidade × tarifa (R$ %.2f) — confira na fatura. Ex.: %s", n, tot, pior), 0, 0})
+		} else if n > 0 {
 			out = append(out, Achado{"F36", "ERRO", fmt.Sprintf("%d item(ns) cobrado(s) acima de quantidade × tarifa (R$ %.2f). Ex.: %s", n, tot, pior), rnd2(tot), 0})
 		} else if nA > 0 {
 			out = append(out, Achado{"F36", "ALERTA", fmt.Sprintf("%d item(ns) com diferença de R$ %.2f (até 0,1%% do item — pode ser arredondamento da tarifa impressa)", nA, totA), 0, 0})
 		}
 	}
 	// F13 — ativo zero com reativo excedente cobrado ou demanda medida > 0 (GD com compensação afasta)
-	if sel["F13"] && consumoAtivo(f) == 0 && !temCompensacao(f) {
+	if sel["F13"] && valorOK && consumoAtivo(f) == 0 && !temCompensacao(f) && !(f.extraida && f.kwhRef > 0) {
 		reat, dem := 0.0, 0.0
 		for _, it := range f.itens {
 			if it.comp == "REATIVO_EXCEDENTE" && nv(it.valor) > 0 {
@@ -462,6 +526,9 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 				continue // demanda/excedente não são registradores acumulativos
 			}
 			la, lb := m.lant.Float64, m.latu.Float64
+			if f.extraida && la < 100 {
+				continue // registrador de 1–2 dígitos: quase sempre outra coluna lida como leitura
+			}
 			if lb < la {
 				dig := math.Pow(10, math.Floor(math.Log10(math.Max(la, 1)))+1)
 				if la >= 0.9*dig && lb < 0.1*dig {
@@ -470,6 +537,8 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 				nivel, obs := "ERRO", ""
 				if lb == 0 || lb < 0.5*la || strings.Contains(g, "INJ") || strings.Contains(g, "GERA") || strings.Contains(g, "DATA") {
 					nivel, obs = "ALERTA", " — queda grande, leitura zerada ou registrador de geração: pode ser troca de medidor (F08) ou leitura não extraída"
+				} else if f.extraida {
+					nivel, obs = "ALERTA", " — confira as leituras na fatura (a extração pode ter trocado anterior/atual ou o posto)"
 				}
 				out = append(out, Achado{"F14", nivel, fmt.Sprintf("%s %s: leitura atual %.0f < anterior %.0f (medidor %s)%s", m.grandeza, m.posto, lb, la, m.medidor, obs), 0, 0})
 				break
@@ -477,7 +546,7 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 		}
 	}
 	// F15 — Grupo A, FP ≥ 0,92 no posto e UFER cobrada (só quando o FP está impresso/extraído)
-	if sel["F15"] && !grupoB(f) {
+	if sel["F15"] && valorOK && !grupoB(f) {
 		ufer := 0.0
 		for _, it := range f.itens {
 			if it.comp == "REATIVO_EXCEDENTE" && nv(it.valor) > 0 {
@@ -487,26 +556,33 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 		if ufer > 0 {
 			for _, m := range f.meds {
 				if m.fp.Valid && m.fp.Float64 >= 0.92 && m.fp.Float64 <= 1 {
-					out = append(out, Achado{"F15", "ERRO", fmt.Sprintf("fator de potência %.3f (≥ 0,92) e UFER cobrada R$ %.2f", m.fp.Float64, ufer), rnd2(ufer), 0})
+					if f.extraida { // um FP só por fatura (média do mês/posto); a UFER é apurada hora a hora
+						out = append(out, Achado{"F15", "ALERTA", fmt.Sprintf("fator de potência %.3f (≥ 0,92) e UFER cobrada R$ %.2f — confira o FP de cada posto na fatura", m.fp.Float64, ufer), 0, 0})
+					} else {
+						out = append(out, Achado{"F15", "ERRO", fmt.Sprintf("fator de potência %.3f (≥ 0,92) e UFER cobrada R$ %.2f", m.fp.Float64, ufer), rnd2(ufer), 0})
+					}
 					break
 				}
 			}
 		}
 	}
 	// F17 — Grupo B com reativo excedente cobrado
-	if sel["F17"] && grupoB(f) {
+	// base extraída: Grupo B com reativo/demanda quase sempre é o grupo lido errado (UC do Grupo A) — vira alerta
+	if sel["F17"] && valorOK && grupoB(f) && !f.grupoInferido {
 		v := 0.0
 		for _, it := range f.itens {
 			if it.comp == "REATIVO_EXCEDENTE" && nv(it.valor) > 0 {
 				v += nv(it.valor)
 			}
 		}
-		if v > 0 {
+		if v > 0 && f.extraida {
+			out = append(out, Achado{"F17", "ALERTA", fmt.Sprintf("Grupo B (%s) com reativo excedente cobrado R$ %.2f — confira o grupo tarifário na fatura (a extração pode ter lido B numa UC do Grupo A)", f.subgrupo, v), 0, 0})
+		} else if v > 0 {
 			out = append(out, Achado{"F17", "ERRO", fmt.Sprintf("Grupo B (%s) com reativo excedente cobrado R$ %.2f", f.subgrupo, v), rnd2(v), 0})
 		}
 	}
 	// F27 — Grupo B com item de demanda cobrado
-	if sel["F27"] && grupoB(f) {
+	if sel["F27"] && valorOK && grupoB(f) && !f.grupoInferido {
 		v, vg := 0.0, 0.0
 		for _, it := range f.itens {
 			if !strings.HasPrefix(it.comp, "DEMANDA") || nv(it.valor) <= 0 {
@@ -518,14 +594,16 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 				v += nv(it.valor)
 			}
 		}
-		if v > 0 {
+		if v > 0 && f.extraida {
+			out = append(out, Achado{"F27", "ALERTA", fmt.Sprintf("Grupo B (%s) com demanda cobrada R$ %.2f — confira o grupo tarifário na fatura (a extração pode ter lido B numa UC do Grupo A)", f.subgrupo, v), 0, 0})
+		} else if v > 0 {
 			out = append(out, Achado{"F27", "ERRO", fmt.Sprintf("Grupo B (%s) com demanda de consumo cobrada R$ %.2f", f.subgrupo, v), rnd2(v), 0})
 		} else if vg > 0 {
 			out = append(out, Achado{"F27", "ALERTA", fmt.Sprintf("Grupo B (%s) com uso do sistema pela geração (TUSDg) R$ %.2f — conferir enquadramento", f.subgrupo, vg), 0, 0})
 		}
 	}
 	// F52 — duas ou mais linhas de CIP com valores iguais/próximos no mês
-	if sel["F52"] {
+	if sel["F52"] && valorOK {
 		var cips []uItem
 		for _, it := range f.itens {
 			if it.comp == "ILUMINACAO_PUBLICA" && nv(it.valor) > 0 {
@@ -600,7 +678,7 @@ func regrasHistorico(fats map[string]*uFat, sel map[string]bool) map[string][]Ac
 		}
 		for i, f := range lst {
 			// F53 — injeção ≤ 50% da média (12 meses, mín. 3) e ≤ 50% do mesmo mês do ano anterior
-			if sel["F53"] && tem[i] {
+			if sel["F53"] && tem[i] && !(f.extraida && inj[i] <= 0) { // base extraída: injeção 0 = não lida
 				var hist []float64
 				mesmo := -1.0
 				for j := i - 1; j >= 0 && len(hist) < 12; j-- {
@@ -643,7 +721,8 @@ func regrasHistorico(fats map[string]*uFat, sel map[string]bool) map[string][]Ac
 				comp, okC := somaGD(f, "compensada")
 				_, transf := somaGD(f, "transferida")
 				_, exp := somaGD(f, "expirado")
-				if okA && okP && okI && okC {
+				// base extraída sem o saldo anterior impresso: o da fatura anterior não fecha (posto, beneficiárias…)
+				if okA && okP && okI && okC && !(f.extraida && !daFatura) {
 					esperado := ant + injM - comp
 					if d := math.Abs(esperado - atual); d > 1 {
 						nivel := "ERRO"
@@ -686,12 +765,28 @@ func regrasHistorico(fats map[string]*uFat, sel map[string]bool) map[string][]Ac
 					if exc <= 0.05*cons { // resíduo pequeno: compensação por posto com fator de ajuste (Grupo A)
 						nivel = "ALERTA"
 					}
-					out[f.id] = append(out[f.id], Achado{"F55", nivel, fmt.Sprintf("consumo %.0f − compensado %.0f = %.0f kWh faturados acima do mínimo %.0f, com saldo de %.0f kWh sobrando", cons, comp, liq, minimo, saldo), rnd2(exc * precoEnergia(f)), rnd2(exc)})
+					obs, val := "", rnd2(exc*precoEnergia(f))
+					if f.extraida { // o saldo extraído pode ser de outro posto, a expirar ou reservado às beneficiárias
+						nivel, obs, val = "ALERTA", " — confira na fatura se o saldo é desta UC e deste posto", 0
+					}
+					out[f.id] = append(out[f.id], Achado{"F55", nivel, fmt.Sprintf("consumo %.0f − compensado %.0f = %.0f kWh faturados acima do mínimo %.0f, com saldo de %.0f kWh sobrando%s", cons, comp, liq, minimo, saldo, obs), val, rnd2(exc)})
 				}
 			}
 		}
 	}
 	return out
+}
+
+// aplicarRegrasComuns — regras só com a fatura e com o histórico da UC (as mesmas nas três bases: usinas, energia, acer)
+func aplicarRegrasComuns(fats map[string]*uFat, sel map[string]bool, out map[string][]Achado) {
+	for id, f := range fats {
+		if a := regrasFatura(f, sel); len(a) > 0 {
+			out[id] = append(out[id], a...)
+		}
+	}
+	for id, a := range regrasHistorico(fats, sel) {
+		out[id] = append(out[id], a...)
+	}
 }
 
 // AplicarRegrasUsinas — achados das regras "fatura"/"historico" selecionadas, por id_fatura
@@ -710,14 +805,7 @@ func AplicarRegrasUsinas(db *sql.DB, sel map[string]bool) (map[string][]Achado, 
 	if err != nil {
 		return nil, err
 	}
-	for id, f := range fats {
-		if a := regrasFatura(f, sel); len(a) > 0 {
-			out[id] = append(out[id], a...)
-		}
-	}
-	for id, a := range regrasHistorico(fats, sel) {
-		out[id] = append(out[id], a...)
-	}
+	aplicarRegrasComuns(fats, sel, out)
 	if sel["F51"] {
 		for id, a := range regraCIPPares(fats) {
 			out[id] = append(out[id], a...)
@@ -866,8 +954,8 @@ func regrasAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 		// TE e TUSD do mesmo posto: há distribuidora que divide as duas de outro jeito (TE acima, TUSD abaixo) —
 		// só acusa a linha se a SOMA TE+TUSD também passar da homologada
 		type somaPosto struct {
-			te, tusd   int
-			t, hom     float64
+			te, tusd int
+			t, hom   float64
 		}
 		somas := map[string]*somaPosto{}
 		for _, it := range f.itens {
@@ -1095,6 +1183,7 @@ func consumoCIP(f *uFat) float64 {
 //   - "degrau" = valor de CIP pago por 2+ UCs diferentes (é a tabela do município vista nas faturas);
 //   - ALERTA se 2+ UCs com consumo maior (≥ 5%) pagam um degrau menor — faixa de consumo trocada;
 //     o valor estimado é a diferença para o maior degrau pago por essas UCs.
+//
 // Fica em ALERTA: sem a lei não dá para afirmar a faixa (pode haver subclasse, isenção, rural).
 func regraCIPPares(fats map[string]*uFat) map[string][]Achado {
 	type ponto struct {

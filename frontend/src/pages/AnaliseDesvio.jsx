@@ -2953,7 +2953,7 @@ export default function AnaliseDesvio() {
 
       <CatalogoFichasModal open={catalogoFichas} onClose={() => setCatalogoFichas(false)} />
 
-      {tab === 'auditados' && (
+      {(tab === 'auditados' || tab === 'acer') && (
         <div className="flex items-center gap-2 text-xs">
           <span className="opacity-60">Visão:</span>
           {[['nova', 'Regras (formato Usinas)'], ['antiga', 'Lista detalhada (anterior)']].map(([v, rot]) => (
@@ -2963,8 +2963,9 @@ export default function AnaliseDesvio() {
           ))}
         </div>
       )}
-      {tab === 'agua' ? <AguaPanel /> : tab === 'acer' ? <AcerPanel /> : tab === 'usinas' ? <UsinasPanel />
-        : tab === 'auditados' && energiaVisao === 'nova' ? <EnergiaPanel admin={podeApontamentos} /> : (<>
+      {tab === 'agua' ? <AguaPanel /> : tab === 'acer' ? (energiaVisao === 'nova' ? <EnergiaPanel key="acer" base="acer" admin={podeApontamentos} /> : <AcerPanel />)
+        : tab === 'usinas' ? <UsinasPanel />
+        : tab === 'auditados' && energiaVisao === 'nova' ? <EnergiaPanel key="energia" base="energia" admin={podeApontamentos} /> : (<>
       {/* Filtros do topo: Empresa (select, substitui as pills) + Ordenação (maiores apontamentos).
           As empresas vêm do backend em empresasDisponiveis (com contagem por status). */}
       <div className="flex gap-3 flex-wrap items-center text-xs">

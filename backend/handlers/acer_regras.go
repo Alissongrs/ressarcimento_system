@@ -25,8 +25,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// regras que já rodam na base da Acer (as demais aparecem na lista como "ainda não ligada à Acer")
-var regrasAcer = map[string]bool{"F28": true, "F41": true, "F42": true, "F58": true, "F51": true}
+// regras que já rodam na base da Acer (as demais aparecem na lista como "ainda não ligada à Acer") — as mesmas
+// da aba Usinas. Sem saldo de créditos na extração da Acer, F54/F55 não têm o que comparar e não apontam.
+var regrasAcer = map[string]bool{"F28": true, "F41": true, "F42": true, "F58": true, "F51": true,
+	"F13": true, "F14": true, "F15": true, "F17": true, "F27": true, "F35": true, "F36": true, "F52": true,
+	"F53": true, "F54": true, "F55": true}
 
 // situacaoConjunto — situação da regra num conjunto (o motor F01–F05 vale para todos)
 func situacaoConjunto(conj, cod string) string {
@@ -96,7 +99,9 @@ func itemAcer(cl, desc string) (comp, posto, descOut string) {
 	case strings.HasPrefix(c, "DEMANDA_TUSD_KW") && !strings.Contains(c, "ULTRAPASSAGEM"):
 		comp = "DEMANDA"
 	case strings.Contains(c, "ILUMINACAO_PUBLICA") && !strings.Contains(c, "MULTA"):
-		comp = "CIP"
+		comp = "ILUMINACAO_PUBLICA"
+	case strings.Contains(c, "REATIV") || strings.Contains(c, "UFER") || strings.Contains(c, "UFDR") || strings.Contains(c, "DMCR"):
+		comp = "REATIVO_EXCEDENTE"
 	default:
 		comp = "OUTRO"
 	}
@@ -127,7 +132,8 @@ func carregarFaturasAcer(db *sql.DB) (map[string]*uFat, error) {
 	rows, err := db.Query(`SELECT id, COALESCE(NULLIF(TRIM(numero_instalacao),''), codigo_uc, ''), LEFT(mes_referencia,7),
 		COALESCE(grupo_tarifario,''), COALESCE(subgrupo_tarifario,''), COALESCE(modalidade_tarifaria,''),
 		COALESCE(DATE_FORMAT(data_leitura_anterior,'%Y-%m-%d'),''), COALESCE(DATE_FORMAT(data_leitura_atual,'%Y-%m-%d'),''),
-		COALESCE(valor_cip_cosip,0), COALESCE(valor_total_fatura,0), COALESCE(kwh_total,0), COALESCE(extracao_raw_json,'{}')
+		COALESCE(valor_cip_cosip,0), COALESCE(valor_total_fatura,0), COALESCE(kwh_total,0), COALESCE(extracao_raw_json,'{}'),
+		energia_injetada_kwh, energia_compensada_kwh
 		FROM ` + acerTabela + ` WHERE mes_referencia REGEXP '^[0-9]{4}-[0-9]{2}'`)
 	if err != nil {
 		return nil, err
@@ -137,13 +143,60 @@ func carregarFaturasAcer(db *sql.DB) (map[string]*uFat, error) {
 	for rows.Next() {
 		var id int64
 		var raw string
+		var inj, comp sql.NullFloat64
 		f := &uFat{}
-		if rows.Scan(&id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.modalidade, &f.lant, &f.latu, &f.cip, &f.total, &f.kwhRef, &raw) != nil {
+		if rows.Scan(&id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.modalidade, &f.lant, &f.latu, &f.cip, &f.total, &f.kwhRef, &raw,
+			&inj, &comp) != nil {
 			continue
 		}
 		f.id = fmt.Sprint(id)
 		var j map[string]any
 		_ = json.Unmarshal([]byte(raw), &j)
+		if inj.Valid {
+			f.gd = append(f.gd, uGD{tipo: "injetada", kwh: inj})
+		}
+		if comp.Valid {
+			f.gd = append(f.gd, uGD{tipo: "compensada", kwh: comp})
+		}
+		// tipo de ligação ("Tipo de fornecimento: MONOFÁSICO") — mínimo faturável do Grupo B
+		if s, ok := j["tipo_ligacao|texto_grande"].(string); ok {
+			f.fornecimento = strings.ToUpper(s)
+		}
+		// tabela do medidor: um registrador por linha (grandeza, posto, leituras, constante, consumo)
+		if tb, ok := j["tbl_medidor|tabela"].(map[string]any); ok {
+			ks := make([]string, 0, len(tb))
+			for k := range tb {
+				ks = append(ks, k)
+			}
+			sort.Strings(ks)
+			for _, k := range ks {
+				m, _ := tb[k].(map[string]any)
+				if m == nil {
+					continue
+				}
+				g := strings.ToUpper(fmt.Sprint(m["grandeza"]))
+				x := uMed{grandeza: g, medidor: fmt.Sprint(m["medidor"]), lant: numJSON(m["leitura_anterior"]),
+					latu: numJSON(m["leitura_atual"]), k: numJSON(m["constante_medidor"]), cons: numJSON(m["consumo_medidor"])}
+				p := strings.ToUpper(sem(fmt.Sprint(m["posto_horario"])))
+				switch {
+				case strings.Contains(p, "FORA"):
+					x.posto = "FORA_PONTA"
+				case strings.Contains(p, "PONTA"):
+					x.posto = "PONTA"
+				case strings.Contains(p, "INTERM"):
+					x.posto = "INTERMEDIARIO"
+				}
+				switch {
+				case strings.Contains(g, "KVARH"):
+					x.unid = "kvarh"
+				case strings.Contains(g, "KWH"):
+					x.unid = "kWh"
+				case strings.Contains(g, "KW") || strings.Contains(g, "DEMANDA"):
+					x.unid = "kW"
+				}
+				f.meds = append(f.meds, x)
+			}
+		}
 		// sem a leitura anterior, o ciclo começa "dias faturados" (ou 30) antes da atual — senão o ciclo vira
 		// só o mês da conta e a bandeira dos dias do mês anterior parece cobrada à toa
 		if f.lant == "" && f.latu != "" {
@@ -171,6 +224,7 @@ func carregarFaturasAcer(db *sql.DB) (map[string]*uFat, error) {
 		}
 		cl, _ := b["CLASSE"].(string)
 		f.classe = strings.ToUpper(strings.TrimSpace(strings.Split(cl, "/")[0]))
+		f.grupoInferido = f.subgrupo == "" && f.grupo == ""
 		f.subgrupo = subgrupoAcer(f.subgrupo, f.grupo, f.classe)
 		if f.grupo == "" && f.subgrupo != "" {
 			f.grupo = f.subgrupo[:1]
@@ -225,6 +279,7 @@ func carregarFaturasAcer(db *sql.DB) (map[string]*uFat, error) {
 			}
 			f.itens = append(f.itens, x)
 		}
+		conferirItensExtraidos(f)
 		fats[f.id] = f
 	}
 	return fats, nil
@@ -246,6 +301,7 @@ func AplicarRegrasAcer(db *sql.DB, sel map[string]bool) (map[string][]Achado, ma
 	if err != nil {
 		return nil, nil, err
 	}
+	aplicarRegrasComuns(fats, sel, out)
 	if sel["F28"] || sel["F41"] || sel["F42"] || sel["F58"] {
 		base, err := baseAneel(db)
 		if err != nil {
@@ -424,6 +480,7 @@ func limparCacheRegras(conj string) {
 		acerRegrasCache, acerRegrasErro = nil, "" // o cálculo seguinte usa a seleção nova
 		acerRegrasGeracao++
 		acerRegrasMu.Unlock()
+		limparCacheAcerPainel()
 	}
 	if conj == "energia" {
 		limparCacheEnergia()

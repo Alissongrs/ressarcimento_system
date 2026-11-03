@@ -29,8 +29,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// regras que já rodam na base de Energia (as demais aparecem como "ainda não ligada a esta base")
-var regrasEnergia = map[string]bool{"F28": true, "F41": true, "F42": true, "F58": true, "F51": true}
+// regras que já rodam na base de Energia (as demais aparecem como "ainda não ligada a esta base"):
+// as mesmas da aba Usinas — só com a fatura, com o histórico da UC, da ANEEL e a CIP entre UCs
+var regrasEnergia = map[string]bool{"F28": true, "F41": true, "F42": true, "F58": true, "F51": true,
+	"F13": true, "F14": true, "F15": true, "F17": true, "F27": true, "F35": true, "F36": true, "F52": true,
+	"F53": true, "F54": true, "F55": true}
 
 // empresas fora da Auditoria de Faturas (REZEK, VTAL) — mesmo corte da lista antiga
 const energiaFiltroEmpresa = `COALESCE(cod_empresa,0) NOT IN (14, 2025)`
@@ -49,6 +52,7 @@ var (
 	// "escassez" sozinho é o encargo CDE Escassez Hídrica (regra 46), não a bandeira
 	reEnBandeira = regexp.MustCompile(`BAND|\bB\.?\s*(AMAREL|VERM|ESCASS)|AD\.?\s*B\.|AMARELA|VERMELHA`)
 	reEnCIP      = regexp.MustCompile(`ILUM|\bCIP\b|COSIP|CIP-|CIP\s`)
+	reEnReativo  = regexp.MustCompile(`REAT|UFER|UFDR|DMCR|EXCED.*KVA|KVARH`)
 	reEnConsumo  = regexp.MustCompile(`CONSUMO|ENERGIA|TUSD|USO\s*(DO\s*)?SIST|(^|[^A-Z])TE([^A-Z]|$)|DISP|FORNECID`)
 )
 
@@ -72,8 +76,10 @@ func itemEnergia(descRaw, postoCampo, unidade string, credGD bool, valor float64
 	switch {
 	case credGD || reEnCompensa.MatchString(d):
 		comp = "CONSUMO_COMPENSADO"
-	case reEnCIP.MatchString(d):
-		comp = "CIP"
+	case reEnCIP.MatchString(d) && !strings.Contains(d, "MULTA") && !strings.Contains(d, "JUROS"):
+		comp = "ILUMINACAO_PUBLICA"
+	case valor > 0 && reEnReativo.MatchString(d):
+		comp = "REATIVO_EXCEDENTE"
 	case valor < 0 || reEnOutro.MatchString(d):
 		comp = "OUTRO"
 	case reEnBandeira.MatchString(d):
@@ -160,7 +166,13 @@ func carregarFaturasEnergia(db *sql.DB, cn *cnpjAneel, comItens bool) (map[strin
 		COALESCE(DATE_FORMAT(data_leitura_anterior,'%Y-%m-%d'),''), COALESCE(DATE_FORMAT(data_leitura_atual,'%Y-%m-%d'),''),
 		COALESCE(pis_aliquota,0), COALESCE(cofins_aliquota,0), LEFT(REGEXP_REPLACE(COALESCE(cep_uc,''),'[^0-9]',''),5),
 		UPPER(TRIM(COALESCE(classe_consumidor,''))), COALESCE(cip_iluminacao_publica_rs, valor_cip_cosip, 0),
-		COALESCE(valor_total_fatura,0), COALESCE(kwh_total,0), ` + itens + `
+		COALESCE(valor_total_fatura,0), COALESCE(kwh_total,0), ` + itens + `,
+		COALESCE(tipo_ligacao,''), COALESCE(numero_medidor,''), constante_k,
+		leit_ant_ativa_fponta, leit_atu_ativa_fponta, leit_ant_ativa_ponta, leit_atu_ativa_ponta,
+		leit_ant_reativa, leit_atu_reativa, leit_demanda_ponta, leit_demanda_fponta, fator_potencia,
+		energia_injetada_kwh, energia_compensada_kwh,
+		COALESCE(saldo_credito_energia, IF(saldo_gd_fponta_kwh IS NULL AND saldo_gd_ponta_kwh IS NULL, NULL,
+			COALESCE(saldo_gd_fponta_kwh,0) + COALESCE(saldo_gd_ponta_kwh,0))), COALESCE(valor_total_sefaz,0)
 		FROM FATURA_DADOS_EXTRAIDOS WHERE ` + energiaFiltroEmpresa + ` AND (` + energiaMesSQL + `) IS NOT NULL`)
 	if err != nil {
 		return nil, err
@@ -170,16 +182,49 @@ func carregarFaturasEnergia(db *sql.DB, cn *cnpjAneel, comItens bool) (map[strin
 	for rows.Next() {
 		f := &uFat{}
 		var pis, cof float64
-		var cep, raw string
+		var cep, raw, medidor string
+		var k, laFP, luFP, laP, luP, laR, luR, dP, dFP, fp, inj, comp, saldo sql.NullFloat64
 		if rows.Scan(&f.id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.modalidade, &f.cnpj, &f.lant, &f.latu,
-			&pis, &cof, &cep, &f.classe, &f.cip, &f.total, &f.kwhRef, &raw) != nil {
+			&pis, &cof, &cep, &f.classe, &f.cip, &f.total, &f.kwhRef, &raw,
+			&f.fornecimento, &medidor, &k, &laFP, &luFP, &laP, &luP, &laR, &luR, &dP, &dFP, &fp, &inj, &comp, &saldo, &f.totalSefaz) != nil {
 			continue
+		}
+		f.fornecimento = strings.ToUpper(f.fornecimento)
+		// medições (registradores) no formato das usinas: ativa por posto, reativa, demanda e o fator de potência
+		med := func(g, posto, unid string, a, b sql.NullFloat64) {
+			if a.Valid || b.Valid {
+				f.meds = append(f.meds, uMed{grandeza: g, posto: posto, medidor: medidor, unid: unid, lant: a, latu: b, k: k})
+			}
+		}
+		med("ENERGIA ATIVA", "FORA_PONTA", "kWh", laFP, luFP)
+		med("ENERGIA ATIVA", "PONTA", "kWh", laP, luP)
+		med("ENERGIA REATIVA", "", "kvarh", laR, luR)
+		for _, d := range []struct {
+			p string
+			v sql.NullFloat64
+		}{{"PONTA", dP}, {"FORA_PONTA", dFP}} {
+			if d.v.Valid {
+				f.meds = append(f.meds, uMed{grandeza: "DEMANDA", posto: d.p, medidor: medidor, unid: "kW", cons: d.v})
+			}
+		}
+		// 0,92 impresso é quase sempre o fator de REFERÊNCIA da distribuidora, não o medido
+		if fp.Valid && fp.Float64 > 0 && fp.Float64 <= 1 && math.Abs(fp.Float64-0.92) > 0.0005 {
+			f.meds = append(f.meds, uMed{grandeza: "FATOR DE POTENCIA", fp: fp})
+		}
+		for _, g := range []struct {
+			t string
+			v sql.NullFloat64
+		}{{"injetada", inj}, {"compensada", comp}, {"saldo_atual", saldo}} {
+			if g.v.Valid {
+				f.gd = append(f.gd, uGD{tipo: g.t, kwh: g.v})
+			}
 		}
 		f.cnpj = cn.resolver(f.cnpj)
 		if len(cep) == 5 {
 			f.cidade = "CEP " + cep // a FDE não tem o município da UC; o CEP de 5 dígitos fica dentro de um município
 		}
 		f.classe = strings.TrimSpace(strings.Split(f.classe, "/")[0])
+		f.grupoInferido = f.subgrupo == "" && f.grupo == ""
 		f.subgrupo = subgrupoAcer(f.subgrupo, f.grupo, f.classe)
 		if f.grupo == "" && f.subgrupo != "" {
 			f.grupo = f.subgrupo[:1]
@@ -246,6 +291,7 @@ func carregarFaturasEnergia(db *sql.DB, cn *cnpjAneel, comItens bool) (map[strin
 				f.itens = append(f.itens, x)
 			}
 		}
+		conferirItensExtraidos(f)
 		fats[f.id] = f
 	}
 	return fats, rows.Err()
@@ -334,7 +380,13 @@ func datasCoerentes(f *uFat) bool {
 func AplicarRegrasEnergia(db *sql.DB, sel map[string]bool) (map[string][]Achado, map[string]*uFat, error) {
 	out := map[string][]Achado{}
 	aneel := sel["F28"] || sel["F41"] || sel["F42"] || sel["F58"]
-	if !aneel && !sel["F51"] {
+	outras := false // regras só com a fatura / com o histórico da UC
+	for c := range sel {
+		if s := regrasSituacao[c]; regrasEnergia[c] && (s == "fatura" || s == "historico") {
+			outras = true
+		}
+	}
+	if !aneel && !outras && !sel["F51"] {
 		return out, map[string]*uFat{}, nil
 	}
 	var base *aneelBase
@@ -344,10 +396,11 @@ func AplicarRegrasEnergia(db *sql.DB, sel map[string]bool) (map[string][]Achado,
 			return nil, nil, err
 		}
 	}
-	fats, err := carregarFaturasEnergia(db, novoCNPJAneel(base), aneel && base != nil)
+	fats, err := carregarFaturasEnergia(db, novoCNPJAneel(base), (aneel && base != nil) || outras)
 	if err != nil {
 		return nil, nil, err
 	}
+	aplicarRegrasComuns(fats, sel, out)
 	conferirCNPJPorUF(fats)
 	if base != nil {
 		for id, f := range fats {
@@ -602,7 +655,9 @@ func CalcularEnergia(db *sql.DB, sel map[string]bool) (*energiaResultado, error)
 		x.ValorOutras = r2(x.ValorOutras)
 		if r != nil {
 			x.Rejeitada = r
-			out.Reabertas++
+			if len(x.Fichas) > 0 { // reabre só com erro novo (alerta novo fica na lista de alertas)
+				out.Reabertas++
+			}
 		}
 		if f := fats[id]; f != nil && x.Distribuidora == "" {
 			x.Distribuidora = f.cnpj
@@ -649,6 +704,14 @@ func contem(l []string, s string) bool {
 // energiaAplicarRejeicao — a fatura acabou de ser rejeitada: tira as regras rejeitadas do resultado em memória
 // (sem recalcular as 160 mil faturas). Sem regras gravadas (NULL) vale o legado F01–F05.
 func energiaAplicarRejeicao(id string, regras sql.NullString, usuario string) {
+	energiaMu.Lock()
+	defer energiaMu.Unlock()
+	aplicarRejeicaoResultado(energiaCache, id, regras, usuario)
+}
+
+// aplicarRejeicaoResultado — tira do resultado em memória (Energia ou Acer) as regras rejeitadas da fatura
+// (quem chama segura o mutex do cache)
+func aplicarRejeicaoResultado(cache *energiaResultado, id string, regras sql.NullString, usuario string) {
 	lst := regrasRejeicaoLegado
 	if regras.Valid && regras.String != "" {
 		lst = strings.Split(regras.String, ",")
@@ -666,13 +729,11 @@ func energiaAplicarRejeicao(id string, regras sql.NullString, usuario string) {
 		}
 		return o
 	}
-	energiaMu.Lock()
-	defer energiaMu.Unlock()
-	if energiaCache == nil {
+	if cache == nil {
 		return
 	}
-	lstOut := energiaCache.Apontamentos[:0]
-	for _, x := range energiaCache.Apontamentos {
+	lstOut := cache.Apontamentos[:0]
+	for _, x := range cache.Apontamentos {
 		if x.ID == id {
 			x.Fichas, x.Motor, x.Alertas = tira(x.Fichas), tira(x.Motor), tira(x.Alertas)
 			var as []Achado
@@ -699,7 +760,7 @@ func energiaAplicarRejeicao(id string, regras sql.NullString, usuario string) {
 		}
 		lstOut = append(lstOut, x)
 	}
-	energiaCache.Apontamentos = lstOut
+	cache.Apontamentos = lstOut
 }
 
 // limparCacheEnergia — seleção salva: a próxima leitura recalcula

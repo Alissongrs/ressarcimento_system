@@ -1100,7 +1100,7 @@ export default function ModalFaturaMontada({ row, onClose, onRejeitado, onEncami
         motivo,
         // rejeição vale para as regras que estavam apontando
         regras: String(row?.fichas_aplicadas || fatura?.fichas_aplicadas || '').match(/F\d{2}/gi) || [],
-      })
+      }, { params: fp }) // Acer: grava a rejeição no namespace da Acer (o id repete os da FDE)
       .then(() => { onRejeitado?.(idFatura); onClose?.(); })
       .catch((e) => window.alert('Falha ao rejeitar: ' + (e?.response?.data?.error || e.message)))
       .finally(() => setRejeitando(false));

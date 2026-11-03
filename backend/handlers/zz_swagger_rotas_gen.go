@@ -1576,6 +1576,16 @@ func swaggerRotaGet_api_v1_parametros_aneel_status() {}
 // @Router /api/v1/acer/regras-achados [get]
 func swaggerRotaGet_api_v1_acer_regras_achados() {}
 
+// @Summary Get acer painel
+// @Description Qualquer usuário autenticado. Handler: handlers.GetAcerPainel.
+// @Tags acer
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/acer/painel [get]
+func swaggerRotaGet_api_v1_acer_painel() {}
+
 // @Summary Get energia apontamentos
 // @Description Qualquer usuário autenticado. Handler: handlers.GetEnergiaApontamentos.
 // @Tags energia

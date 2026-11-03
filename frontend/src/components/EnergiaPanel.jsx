@@ -29,7 +29,18 @@ const FICHA_ROT = {
   F01: 'leitura × constante ≠ consumo', F02: 'consumo acima da média', F03: 'faturamento pela média',
   F04: 'consumo zerado/estimado', F05: 'quebra de leitura', F28: 'tarifa acima da homologada',
   F41: 'bandeira diferente da oficial', F42: 'valor da bandeira acima do homologado', F51: 'CIP fora da faixa do município',
-  F58: 'TUSD de geração',
+  F58: 'TUSD de geração', F13: 'ativo zero com reativo/demanda', F14: 'leitura atual menor que a anterior',
+  F15: 'FP ≥ 0,92 com UFER cobrada', F17: 'Grupo B com reativo', F27: 'Grupo B com demanda', F35: 'total acima da nota fiscal (SEFAZ)',
+  F36: 'item acima de quantidade × tarifa', F52: 'CIP cobrada em dobro', F53: 'injeção abaixo do histórico',
+  F54: 'saldo de créditos não fecha', F55: 'saldo de créditos não usado',
+};
+
+// base: 'energia' (FATURA_DADOS_EXTRAIDOS) ou 'acer' (FATURA_ACER_DADOS_EXTRAIDOS) — mesma tela, endpoint e conjunto de regras próprios
+const BASES = {
+  energia: { url: '/api/v1/energia/apontamentos', titulo: 'faturas de energia', cor: '#7c6f9c', aba: 'Energia',
+    carregando: 'Calculando as regras nas ~160 mil faturas de energia… (leva 1–2 minutos; a tela atualiza sozinha)' },
+  acer: { url: '/api/v1/acer/painel', titulo: 'faturas da Acer', cor: '#c2410c', aba: 'Acer',
+    carregando: 'Calculando as regras nas ~68 mil faturas da Acer… (leva uns 2 minutos; a tela atualiza sozinha)' },
 };
 
 function Card({ titulo, valor, sub, cor }) {
@@ -42,12 +53,14 @@ function Card({ titulo, valor, sub, cor }) {
   );
 }
 
-export default function EnergiaPanel({ admin = false }) {
+export default function EnergiaPanel({ admin = false, base = 'energia' }) {
+  const B = BASES[base] || BASES.energia;
+  const ehAcer = base === 'acer';
   const [dados, setDados] = useState(null);
   const [erro, setErro] = useState('');
   const [calculando, setCalculando] = useState(false);
   const [tentativa, setTentativa] = useState(0);
-  const [origem, setOrigem] = useState('padrao');
+  const [origem, setOrigem] = useState(base === 'acer' ? 'todos' : 'padrao'); // Acer: sem triagem do analista — mostra o motor
   const [ficha, setFicha] = useState('todas');
   const [empresa, setEmpresa] = useState('todas');
   const [dist, setDist] = useState('todas');
@@ -62,7 +75,7 @@ export default function EnergiaPanel({ admin = false }) {
 
   const carregar = useCallback((refresh) => {
     setErro('');
-    apiClient.get('/api/v1/energia/apontamentos', { params: refresh ? { refresh: 1 } : {}, timeout: 600000 })
+    apiClient.get(B.url, { params: refresh ? { refresh: 1 } : {}, timeout: 600000 })
       .then(({ status, data }) => {
         if (status === 202 || data?.calculando) {
           setCalculando(true);
@@ -73,7 +86,7 @@ export default function EnergiaPanel({ admin = false }) {
         setDados(data);
       })
       .catch((e) => { setCalculando(false); setErro(e?.response?.data?.error || e.message); });
-  }, []);
+  }, [B.url]);
   useEffect(() => { carregar(false); }, [carregar, tentativa]);
   const recalcular = () => { setDados(null); setRemovidas({}); carregar(true); };
 
@@ -115,7 +128,7 @@ export default function EnergiaPanel({ admin = false }) {
       outras += a.valor_outras_regras || 0;
       if (a.verificado) verif += 1;
       if (a.forte) fortes += 1;
-      if (a.rejeitada) reab += 1;
+      if (a.rejeitada && (a.fichas || SEM).length) reab += 1;
     });
     return { pf, pa, f02, outras, verif, fortes, reab };
   }, [visiveis]);
@@ -136,16 +149,15 @@ export default function EnergiaPanel({ admin = false }) {
       Detalhe: (a.detalhamento || SEM).join('; '), Fatura: pdfLink(a.link_fatura), id: a.id,
     })));
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Energia - regras');
-    XLSX.writeFile(wb, `auditoria_energia_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, `${B.aba} - regras`);
+    XLSX.writeFile(wb, `auditoria_${base}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   if (!dados) {
     return (
       <div className="p-6 text-sm">
         {erro ? <span className="text-[var(--danger)]">Erro: {erro}</span>
-          : <span className="opacity-70">{calculando ? 'Calculando as regras nas ~160 mil faturas de energia… (leva 1–2 minutos; a tela atualiza sozinha)'
-            : 'Carregando…'}</span>}
+          : <span className="opacity-70">{calculando ? B.carregando : 'Carregando…'}</span>}
       </div>
     );
   }
@@ -159,9 +171,9 @@ export default function EnergiaPanel({ admin = false }) {
         <Card titulo="Faturas analisadas" valor={num(dados.faturas_analisadas)} sub={`${num(dados.ucs_analisadas)} UCs · calculado ${dados.gerado_em}`} />
         <Card titulo="Apontamentos (erro)" valor={num(visiveis.filter((a) => (a.fichas || SEM).length).length)} sub={resumo(contagem.pf)} />
         <Card titulo="Alertas" valor={num(nAl)} sub={resumo(contagem.pa)} cor="#d97706" />
-        <Card titulo="Verificados pelo analista" valor={num(contagem.verif)} sub="F01–F05 conferidos (aba Energia)" cor="#7c6f9c" />
+        {!ehAcer && <Card titulo="Verificados pelo analista" valor={num(contagem.verif)} sub="F01–F05 conferidos (aba Energia)" cor="#7c6f9c" />}
         <Card titulo="F02 fortes" valor={num(contagem.fortes)} sub="acima do histórico + confirmado" cor="#dc2626" />
-        <Card titulo="Estimativa F02" valor={brl(contagem.f02)} sub="conferida quando verificado; senão excesso × R$/kWh" />
+        <Card titulo="Estimativa F02" valor={brl(contagem.f02)} sub={ehAcer ? 'valor cheio (100%) do excedente de energia' : 'conferida quando verificado; senão excesso × R$/kWh'} />
         <Card titulo="Outras regras (erro)" valor={brl(contagem.outras)} sub="tarifa/bandeira da ANEEL, CIP…" />
         {contagem.reab > 0 && <Card titulo="Reabertas" valor={num(contagem.reab)} sub="rejeitadas antes, com regra nova apontando" cor="#2b8fd6" />}
       </div>
@@ -175,20 +187,21 @@ export default function EnergiaPanel({ admin = false }) {
       <div className="flex flex-wrap gap-3 items-center text-xs">
         <label className="inline-flex items-center gap-1.5"><span className="opacity-70">Mostrar:</span>
           <select value={origem} onChange={(e) => setOrigem(e.target.value)} className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent">
-            <option value="padrao">verificados + regras novas</option>
-            <option value="novas">só regras novas</option>
-            {admin && <option value="todos">todos do motor (inclui não triados)</option>}
+            {!ehAcer && <option value="padrao">verificados + regras novas</option>}
+            {ehAcer && <option value="todos">motor F02–F05 + regras</option>}
+            <option value="novas">só regras do catálogo</option>
+            {!ehAcer && admin && <option value="todos">todos do motor (inclui não triados)</option>}
           </select></label>
         <label className="inline-flex items-center gap-1.5"><span className="opacity-70">Regra:</span>
           <select value={ficha} onChange={(e) => setFicha(e.target.value)} className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent">
             <option value="todas">todas</option>
             {sel.map((f) => <option key={f} value={f}>{f}{FICHA_ROT[f] ? ` — ${FICHA_ROT[f]}` : ''} ({contagem.pf[f] || 0}{contagem.pa[f] ? ` + ${contagem.pa[f]} alertas` : ''})</option>)}
           </select></label>
-        <label className="inline-flex items-center gap-1.5"><span className="opacity-70">Empresa:</span>
+        {!ehAcer && <label className="inline-flex items-center gap-1.5"><span className="opacity-70">Empresa:</span>
           <select value={empresa} onChange={(e) => setEmpresa(e.target.value)} className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent max-w-[220px]">
             <option value="todas">todas</option>
             {empresas.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select></label>
+          </select></label>}
         <label className="inline-flex items-center gap-1.5"><span className="opacity-70">Distribuidora:</span>
           <select value={dist} onChange={(e) => setDist(e.target.value)} className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent max-w-[220px]">
             <option value="todas">todas</option>
@@ -204,7 +217,7 @@ export default function EnergiaPanel({ admin = false }) {
           className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent min-w-[200px]" />
         <span className="opacity-70">{linhas.length} linhas · {brl(somaLinhas)}</span>
         <button onClick={() => setRegrasAberto(true)} className="ml-auto px-3 py-1 rounded-md font-semibold text-white"
-          style={{ background: '#7c6f9c' }} title="Escolher as regras do catálogo aplicadas às faturas de energia">
+          style={{ background: B.cor }} title={`Escolher as regras do catálogo aplicadas às ${B.titulo}`}>
           ⚙ Regras ({sel.length})</button>
         <button onClick={exportar} className="px-3 py-1 rounded-md font-semibold border border-[var(--cpv2-border)]">⬇ Excel</button>
         <button onClick={recalcular} className="px-3 py-1 rounded-md font-semibold border border-[var(--cpv2-border)]">↻ Rodar de novo</button>
@@ -229,7 +242,8 @@ export default function EnergiaPanel({ admin = false }) {
               const det = [...(a.detalhamento || SEM), ...(a.achados || SEM).map((x) => `${x.codigo} ${x.nivel}: ${x.detalhe}`)];
               return (
                 <React.Fragment key={a.id}>
-                  <tr onClick={() => setModalFatura({ id: a.id, UC: a.uc, fichas_aplicadas: [...fs, ...(a.alertas || SEM)].join(','), fonte: undefined })}
+                  <tr onClick={() => setModalFatura({ id: a.id, UC: a.uc, fichas_aplicadas: [...fs, ...(a.alertas || SEM)].join(','),
+                      fonte: ehAcer ? 'acer' : undefined, link_fatura: a.link_fatura, numero_instalacao: a.uc })}
                     className="border-t border-[var(--cpv2-border)] cursor-pointer hover:bg-[var(--cpv2-surface)]">
                     <td className="p-2" onClick={(e) => { e.stopPropagation(); setAberta(aberta === a.id ? null : a.id); }}
                       title="ver o detalhe das regras">{aberta === a.id ? '▾' : '▸'}</td>
@@ -279,7 +293,7 @@ export default function EnergiaPanel({ admin = false }) {
           onRejeitado={(id) => setRemovidas((m) => ({ ...m, [String(id ?? modalFatura.id)]: true }))} />
       )}
       {regrasAberto && (
-        <RegrasModal conjunto="energia" titulo="Regras aplicadas às faturas de energia" onClose={() => setRegrasAberto(false)}
+        <RegrasModal conjunto={base} titulo={`Regras aplicadas às ${B.titulo}`} onClose={() => setRegrasAberto(false)}
           onSalvo={() => { setRegrasAberto(false); recalcular(); }} />
       )}
     </div>

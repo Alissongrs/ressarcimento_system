@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -221,6 +222,38 @@ func RejeitarApontamento(c *gin.Context) {
 	sqlDB, err := database.GormDB_App.DB()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "banco indisponível"})
+		return
+	}
+	// Acer: o id é da FATURA_ACER_DADOS_EXTRAIDOS (repete ids da FDE) — grava com fatura_id = 0 e uid "ACER#id"
+	if c.Query("fonte") == "acer" {
+		if _, e := strconv.ParseInt(id, 10, 64); e != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "id inválido"})
+			return
+		}
+		var existe int
+		if e := sqlDB.QueryRow("SELECT 1 FROM "+acerTabela+" WHERE id = ? LIMIT 1", id).Scan(&existe); e == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "fatura da Acer não encontrada"})
+			return
+		} else if e != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": e.Error()})
+			return
+		}
+		uid, uname := usuarioIA(c)
+		regrasRej := sql.NullString{}
+		if s := normalizarRegras(body.Regras...); s != "" {
+			regrasRej = sql.NullString{String: s, Valid: true}
+		}
+		if _, err := sqlDB.Exec(`INSERT INTO FATURA_REANALISES
+			(fatura_id, uid, modelo, justificativa, recomendacao, resposta_crua, confianca_final, pdf_anexado, usuario_id, usuario_nome,
+			 regras_rejeitadas, criado_em)
+			VALUES (0, ?, 'rejeicao_manual', ?, 'REJEITADO', ?, 0, 0, ?, ?, ?, NOW())`,
+			acerUIDPrefixo+id, truncarIA("Apontamento (Acer) rejeitado pelo analista. Motivo: "+body.Motivo, 4000),
+			"REJEITADO: "+body.Motivo, uid, uname, regrasRej); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		acerAplicarRejeicao(id, regrasRej, uname)
+		c.JSON(http.StatusOK, gin.H{"ok": true, "rejeitado": true})
 		return
 	}
 	// Confere existência da fatura (sem alterar schema).
