@@ -746,6 +746,10 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 		adminOnly := apiV1.Group("/")
 		adminOnly.Use(middleware.AuthMiddleware(), middleware.StrictAdminMiddleware())
 		{
+			// Tarefas da VPS pela tela (página /tarefas): pdf_pipeline e agua_sync → fila do worker/run_jobs.py
+			adminOnly.GET("/tarefas-vps", handlers.ListarTarefasVPS)
+			adminOnly.POST("/tarefas-vps/:job", handlers.RodarTarefaVPS)
+
 			// Histórico global (página /historico)
 			adminOnly.GET("/historico", handlers.HistoricoRecent)
 			adminOnly.GET("/requisicoes/historico", handlers.HistoricoRecent)

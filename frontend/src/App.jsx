@@ -40,6 +40,7 @@ import {
   Repeat,
   Landmark,
   MessageCircle,
+  Server,
 } from 'lucide-react';
 
 import FeedbackModal from './components/FeedbackModal.jsx';
@@ -83,6 +84,7 @@ const AdminFeedbacks = lazy(() => import('./pages/AdminFeedbacks.jsx'));
 const AdminRotinas = lazy(() => import('./pages/AdminRotinas.jsx'));
 const ProtocolosAneel = lazy(() => import('./pages/ProtocolosAneel.jsx'));
 const WhatsappEmpresa = lazy(() => import('./pages/WhatsappEmpresa.jsx'));
+const TarefasSistema = lazy(() => import('./pages/TarefasSistema.jsx'));
 // AdminEditor aposentado (removido do menu) — rota /admin/editor redireciona p/ Home
 const Backlog = lazy(() => import('./pages/Backlog.jsx'));
 const MinhaConta = lazy(() => import('./pages/MinhaConta.jsx'));
@@ -153,6 +155,7 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
     { to: '/regras', label: 'Regras', Icon: Settings2 },
     { to: '/dashboard', label: 'Métricas', Icon: BarChart3, adminOnly: true },
     { to: '/historico', label: 'Histórico', Icon: History, adminOnly: true },
+    { to: '/tarefas-sistema', label: 'Tarefas do sistema', Icon: Server, adminOnly: true },
     { to: '/rotinas', label: 'Rotinas', Icon: Repeat },
     { to: '/protocolos-aneel', label: 'Protocolos ANEEL', Icon: Landmark },
     { to: '/whatsapp', label: 'WhatsApp', Icon: MessageCircle },
@@ -706,6 +709,23 @@ function App() {
             </NavLink>
           )}
 
+          {role === 'admin' && (
+            <NavLink
+              to="/tarefas-sistema"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="Tarefas do sistema"
+            >
+              <Server className="sidebar-icon" strokeWidth={1.25} />
+              <span className="text-sm font-medium sidebar-label">Tarefas do sistema</span>
+            </NavLink>
+          )}
+
           {role !== 'solicitante' && (
             <NavLink
               to="/rotinas"
@@ -923,6 +943,23 @@ function App() {
             </NavLink>
           )}
 
+          {role === 'admin' && (
+            <NavLink
+              to="/tarefas-sistema"
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 px-3 py-2 rounded-md ${
+                  isActive
+                    ? 'bg-[var(--menu-hover)] text-[var(--menu-fg)]'
+                    : 'hover:bg-[var(--menu-hover)]'
+                }`
+              }
+              title="Tarefas do sistema"
+            >
+              <Server className="sidebar-icon shrink-0" strokeWidth={1.25} />
+              <span className="text-sm font-medium sidebar-label">Tarefas do sistema</span>
+            </NavLink>
+          )}
+
           {role !== 'solicitante' && (
             <NavLink
               to="/rotinas"
@@ -1116,6 +1153,7 @@ function App() {
                         {role === 'admin' ? (
                           <>
                             <Route path="/historico" element={<Historico />} />
+                            <Route path="/tarefas-sistema" element={<TarefasSistema />} />
                             <Route path="/dashboard" element={<Relatorios />} />
                             {/* Preferred admin feedbacks route */}
                             <Route path="/adminfeedbacks" element={<AdminFeedbacks />} />
@@ -1129,6 +1167,7 @@ function App() {
                           <>
                             {/* Gestor não tem acesso — redireciona para a Home */}
                             <Route path="/historico" element={<Navigate to="/" replace />} />
+                            <Route path="/tarefas-sistema" element={<Navigate to="/" replace />} />
                             <Route path="/dashboard" element={<Navigate to="/" replace />} />
                             <Route path="/admin/editor" element={<Navigate to="/" replace />} />
                           </>

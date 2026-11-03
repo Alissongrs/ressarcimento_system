@@ -29,7 +29,8 @@ import (
 // da aba Usinas. Sem saldo de créditos na extração da Acer, F54/F55 não têm o que comparar e não apontam.
 var regrasAcer = map[string]bool{"F28": true, "F41": true, "F42": true, "F58": true, "F51": true,
 	"F13": true, "F14": true, "F15": true, "F17": true, "F27": true, "F35": true, "F36": true, "F52": true,
-	"F53": true, "F54": true, "F55": true}
+	"F53": true, "F54": true, "F55": true,
+	"F06": true, "F07": true, "F08": true, "F33": true, "F34": true, "F57": true}
 
 // situacaoConjunto — situação da regra num conjunto (o motor F01–F05 vale para todos)
 func situacaoConjunto(conj, cod string) string {
@@ -133,7 +134,9 @@ func carregarFaturasAcer(db *sql.DB) (map[string]*uFat, error) {
 		COALESCE(grupo_tarifario,''), COALESCE(subgrupo_tarifario,''), COALESCE(modalidade_tarifaria,''),
 		COALESCE(DATE_FORMAT(data_leitura_anterior,'%Y-%m-%d'),''), COALESCE(DATE_FORMAT(data_leitura_atual,'%Y-%m-%d'),''),
 		COALESCE(valor_cip_cosip,0), COALESCE(valor_total_fatura,0), COALESCE(kwh_total,0), COALESCE(extracao_raw_json,'{}'),
-		energia_injetada_kwh, energia_compensada_kwh
+		energia_injetada_kwh, energia_compensada_kwh, COALESCE(dias_faturados,0), COALESCE(numero_medidor,''),
+		COALESCE(indicacao_troca_medidor,0) = 1,
+		(COALESCE(indicador_leitura_estimativa,0) = 1 OR COALESCE(flag_faturamento_media,0) = 1 OR COALESCE(indicacao_impedimento_leitura,0) = 1)
 		FROM ` + acerTabela + ` WHERE mes_referencia REGEXP '^[0-9]{4}-[0-9]{2}'`)
 	if err != nil {
 		return nil, err
@@ -146,9 +149,10 @@ func carregarFaturasAcer(db *sql.DB) (map[string]*uFat, error) {
 		var inj, comp sql.NullFloat64
 		f := &uFat{}
 		if rows.Scan(&id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.modalidade, &f.lant, &f.latu, &f.cip, &f.total, &f.kwhRef, &raw,
-			&inj, &comp) != nil {
+			&inj, &comp, &f.diasImpr, &f.medidor, &f.trocaMed, &f.justLeitura) != nil {
 			continue
 		}
+		f.dias, f.dLant, f.dLatu = diasEntre(f.lant, f.latu), f.lant, f.latu // antes de deduzir a leitura anterior abaixo
 		f.id = fmt.Sprint(id)
 		var j map[string]any
 		_ = json.Unmarshal([]byte(raw), &j)
@@ -278,6 +282,10 @@ func carregarFaturasAcer(db *sql.DB) (map[string]*uFat, error) {
 				x.comp = "TE"
 			}
 			f.itens = append(f.itens, x)
+		}
+		f.medidor = normNumMedidor(f.medidor)
+		if f.medidor == "" {
+			f.medidor = medidorAtivo(f)
 		}
 		conferirItensExtraidos(f)
 		fats[f.id] = f

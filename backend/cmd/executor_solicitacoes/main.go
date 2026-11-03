@@ -167,6 +167,8 @@ func handle(db *sql.DB, solID int64, user, msg, acaoJSON string) (string, string
 			return opRelatorio(db, &a)
 		case "inserir_historico":
 			return opInserirHistorico(db, solID, user, &a)
+		case "editar_historico":
+			return opEditarHistorico(db, solID, user, &a)
 		case "movimentar":
 			return opMovimentar(db, solID, user, &a)
 		case "rodar_job":
@@ -397,6 +399,50 @@ func ni(n sql.NullInt64) interface{} {
 		return n.Int64
 	}
 	return nil
+}
+
+// opEditarHistorico troca SÓ o comentário de uma linha que já existe em FT_HISTORICO_MOVIMENTACOES (data,
+// etapa, status, instância e aprovação ficam). Grava só se o texto ainda for o da prévia aprovada; backup
+// coluna a coluna em FT_EXECUTOR_BACKUP ("#protocolo N" / Reverter restaura o texto antigo).
+func opEditarHistorico(db *sql.DB, solID int64, user string, a *procedit.Acao) (string, string) {
+	if a.IdHistorico <= 0 || a.IdProcesso <= 0 || strings.TrimSpace(a.Comentario) == "" {
+		return "revisao", "Edição de histórico incompleta (linha ou texto novo); requer execução manual."
+	}
+	var atual sql.NullString
+	if err := db.QueryRow(`SELECT comentario FROM FT_HISTORICO_MOVIMENTACOES WHERE id_historico=? AND id_processo=?`,
+		a.IdHistorico, a.IdProcesso).Scan(&atual); err != nil {
+		return "revisao", fmt.Sprintf("Histórico #%d do processo %d não encontrado: %v. Requer execução manual.", a.IdHistorico, a.IdProcesso, err)
+	}
+	if atual.String != a.ComentarioAntes {
+		return "revisao", fmt.Sprintf("O comentário do histórico #%d mudou depois da prévia (agora: %q); nada foi alterado. Requer execução manual.", a.IdHistorico, oneline(atual.String))
+	}
+	if dryRun {
+		return "executado", fmt.Sprintf("[DRY] histórico #%d: %q → %q", a.IdHistorico, oneline(atual.String), oneline(a.Comentario))
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return "erro", err.Error()
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`INSERT INTO FT_EXECUTOR_BACKUP
+		(id_solicitacao, usuario_nome, acao, tabela, pk_coluna, pk_valor, coluna, valor_antigo, valor_novo)
+		VALUES (?,?, 'editar_historico', 'FT_HISTORICO_MOVIMENTACOES', 'id_historico', ?, 'comentario', ?, ?)`,
+		solID, user, fmt.Sprint(a.IdHistorico), atual.String, a.Comentario); err != nil {
+		return "erro", "backup: " + err.Error()
+	}
+	res, err := tx.Exec(`UPDATE FT_HISTORICO_MOVIMENTACOES SET comentario=? WHERE id_historico=? AND id_processo=? AND comentario=?`,
+		a.Comentario, a.IdHistorico, a.IdProcesso, atual.String)
+	if err != nil {
+		return "erro", "update histórico: " + err.Error()
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return "revisao", fmt.Sprintf("Histórico #%d não foi alterado (%d linhas); requer execução manual.", a.IdHistorico, n)
+	}
+	if err := tx.Commit(); err != nil {
+		return "erro", err.Error()
+	}
+	return "executado", fmt.Sprintf("Comentário do histórico #%d do processo %s (%s) alterado: %q → %q — data, etapa e status mantidos.",
+		a.IdHistorico, a.Processo, a.Cliente, oneline(atual.String), oneline(a.Comentario))
 }
 
 // backupInsert registra uma LINHA INSERIDA (p/ reversão por DELETE). coluna='__inserido__'.

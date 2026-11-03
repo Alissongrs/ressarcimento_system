@@ -118,3 +118,6 @@ ressarcimento_system_old_*/
 FATURA_DADOS_EXTRAIDOS_LOG.json
 
 /deploy.ps1
+
+# estado das tarefas em segundo plano do worker/run_jobs.py (VPS)
+worker/.jobs_em_andamento/

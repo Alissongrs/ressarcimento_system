@@ -64,3 +64,30 @@ func deref(p *int) interface{} {
 	}
 	return *p
 }
+
+// Pedido #29 (03/11/2026): editar o texto de um histórico não pode virar movimentação, mesmo com
+// "indeferido"/"ANEEL" no texto.
+func TestEditarComentarioHistorico(t *testing.T) {
+	msg := `PR-2024-017888 CLARO UC 90569431. Alterar o comentário da Luana "Solicitação de restituição em dobro indeferida na ANEEL." de 11/09/2026, para "Indeferido ANEEL", manter a mesma data de 11/09/2026.`
+	p, ok := interpretar(msg)
+	if !ok || p.op != "editar_historico" {
+		t.Fatalf("virou %q (ok=%v, %q)", p.op, ok, p.motivo)
+	}
+	if p.comentarioAntes != "Solicitação de restituição em dobro indeferida na ANEEL." || p.comentario != "Indeferido ANEEL" {
+		t.Errorf("textos: antes=%q novo=%q", p.comentarioAntes, p.comentario)
+	}
+	if p.dataHist[:10] != "2026-09-11" || p.processoRef == "" {
+		t.Errorf("data=%q processo=%q", p.dataHist, p.processoRef)
+	}
+	if !EhComando(msg) {
+		t.Errorf("deve ser comando")
+	}
+	// sem aspas: não adivinha — pede o texto atual e o novo
+	if p, ok := interpretar("corrigir o comentário do histórico do processo 18789 para indeferido"); ok || p.op != "editar_historico" {
+		t.Errorf("sem aspas devia pedir os textos: op=%q ok=%v", p.op, ok)
+	}
+	// inserir histórico continua inserir
+	if p, ok := interpretar(`inserir histórico no processo 18789: "indeferido na ANEEL"`); !ok || p.op != "inserir_historico" {
+		t.Errorf("inserir virou %q", p.op)
+	}
+}

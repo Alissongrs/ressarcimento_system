@@ -33,6 +33,8 @@ const FICHA_ROT = {
   F15: 'FP ≥ 0,92 com UFER cobrada', F17: 'Grupo B com reativo', F27: 'Grupo B com demanda', F35: 'total acima da nota fiscal (SEFAZ)',
   F36: 'item acima de quantidade × tarifa', F52: 'CIP cobrada em dobro', F53: 'injeção abaixo do histórico',
   F54: 'saldo de créditos não fecha', F55: 'saldo de créditos não usado',
+  F06: 'fatura sem leitura do medidor', F07: 'virada do medidor', F08: 'troca de medidor',
+  F33: 'ciclo abaixo de 15 dias', F34: 'ciclo acima do máximo', F57: 'disponibilidade + Fio B',
 };
 
 // base: 'energia' (FATURA_DADOS_EXTRAIDOS) ou 'acer' (FATURA_ACER_DADOS_EXTRAIDOS) — mesma tela, endpoint e conjunto de regras próprios

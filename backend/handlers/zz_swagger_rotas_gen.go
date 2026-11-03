@@ -2618,6 +2618,29 @@ func swaggerRotaPost_api_v1_parametros_aneel_importar_cron() {}
 // @Router /api/v1/voz/audio/{id} [get]
 func swaggerRotaGet_api_v1_voz_audio__id_() {}
 
+// @Summary Listar tarefas vps
+// @Description Somente admin. Handler: handlers.ListarTarefasVPS.
+// @Tags tarefas-vps
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/tarefas-vps [get]
+func swaggerRotaGet_api_v1_tarefas_vps() {}
+
+// @Summary Rodar tarefa vps
+// @Description Somente admin. Handler: handlers.RodarTarefaVPS.
+// @Tags tarefas-vps
+// @Accept json
+// @Produce json
+// @Param job path string true "job"
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/tarefas-vps/{job} [post]
+func swaggerRotaPost_api_v1_tarefas_vps__job_() {}
+
 // @Summary Historico recent
 // @Description Somente admin. Handler: handlers.HistoricoRecent.
 // @Tags Requisições

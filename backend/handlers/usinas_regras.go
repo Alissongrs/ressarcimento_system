@@ -31,8 +31,9 @@ import (
 var regrasSituacao = map[string]string{
 	"F01": "motor", "F02": "motor", "F03": "motor", "F04": "motor", "F05": "motor",
 	"F13": "fatura", "F14": "fatura", "F15": "fatura", "F17": "fatura", "F27": "fatura", "F35": "fatura",
-	"F36": "fatura", "F52": "fatura",
+	"F36": "fatura", "F52": "fatura", "F07": "fatura", "F57": "fatura",
 	"F53": "historico", "F54": "historico", "F55": "historico",
+	"F06": "historico", "F08": "historico", "F33": "historico", "F34": "historico",
 	"F28": "aneel", "F41": "aneel", "F42": "aneel", "F58": "aneel", "F31": "parametro", "F32": "parametro", "F39": "parametro", "F40": "parametro",
 	"F43": "parametro", "F44": "parametro", "F45": "parametro",
 	"F46": "parametro", "F51": "pares", "F56": "parametro",
@@ -223,9 +224,18 @@ type uFat struct {
 	// as regras de valor só acusam quando os itens fecham com o total (itensOK)
 	extraida, itensOK bool
 	totalSefaz        float64 // total da NF3e na SEFAZ (2ª fonte do total), quando a base tem
-	itens             []uItem
-	meds              []uMed
-	gd                []uGD
+	// ciclo e leitura (F06 F07 F08 F33 F34)
+	dias         int    // dias do ciclo pelas datas de leitura DA BASE (0 = sem as duas datas)
+	dLant, dLatu string // as datas de leitura como vieram da base (lant/latu podem ser deduzidas)
+	diasImpr     int    // "dias faturados" impresso (0 = sem)
+	medidor      string // número do medidor de energia ativa
+	justLeitura  bool   // a fatura indica média, estimativa ou impedimento de leitura
+	trocaMed     bool   // a fatura indica troca de medidor
+	// itens da NF3e na SEFAZ (F57)
+	fioBSefaz, dispSefaz float64
+	itens                []uItem
+	meds                 []uMed
+	gd                   []uGD
 }
 
 // Achado de uma regra numa fatura
@@ -250,7 +260,7 @@ func carregarFaturasUsinas(db *sql.DB) (map[string]*uFat, error) {
 		COALESCE(JSON_EXTRACT(f.dados_json,'$.tributos'),'[]'),
 		UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.titular.cidade')),''))),
 		UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.unidade_consumidora.classe')),''))),
-		COALESCE(f.cosip,0) ` + base)
+		COALESCE(f.cosip,0), COALESCE(f.dias_faturados,0) ` + base)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +268,8 @@ func carregarFaturasUsinas(db *sql.DB) (map[string]*uFat, error) {
 		f := &uFat{}
 		var trib string
 		if rows.Scan(&f.id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.total, &f.fornecimento, &f.cnpj, &f.modalidade,
-			&f.lant, &f.latu, &trib, &f.cidade, &f.classe, &f.cip) == nil {
+			&f.lant, &f.latu, &trib, &f.cidade, &f.classe, &f.cip, &f.diasImpr) == nil {
+			f.dias, f.dLant, f.dLatu = diasEntre(f.lant, f.latu), f.lant, f.latu
 			var ts []struct {
 				Tributo  string   `json:"tributo"`
 				Aliquota *float64 `json:"aliquota"`
@@ -322,6 +333,9 @@ func carregarFaturasUsinas(db *sql.DB) (map[string]*uFat, error) {
 		}
 	}
 	gr.Close()
+	for _, f := range fats {
+		f.medidor = medidorAtivo(f)
+	}
 	return fats, nil
 }
 
@@ -785,6 +799,9 @@ func aplicarRegrasComuns(fats map[string]*uFat, sel map[string]bool, out map[str
 		}
 	}
 	for id, a := range regrasHistorico(fats, sel) {
+		out[id] = append(out[id], a...)
+	}
+	for id, a := range regrasLeitura(fats, sel) {
 		out[id] = append(out[id], a...)
 	}
 }

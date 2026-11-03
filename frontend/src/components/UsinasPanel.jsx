@@ -31,6 +31,12 @@ const FICHA_ROT = {
   F03: 'faturamento pela média',
   F04: 'consumo zerado/estimado',
   F05: 'quebra de leitura',
+  F06: 'fatura sem leitura do medidor',
+  F07: 'virada do medidor',
+  F08: 'troca de medidor',
+  F33: 'ciclo abaixo de 15 dias',
+  F34: 'ciclo acima do máximo',
+  F57: 'disponibilidade + Fio B',
 };
 const SEM_DADOS = [];
 

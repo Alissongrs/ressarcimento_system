@@ -33,7 +33,8 @@ import (
 // as mesmas da aba Usinas — só com a fatura, com o histórico da UC, da ANEEL e a CIP entre UCs
 var regrasEnergia = map[string]bool{"F28": true, "F41": true, "F42": true, "F58": true, "F51": true,
 	"F13": true, "F14": true, "F15": true, "F17": true, "F27": true, "F35": true, "F36": true, "F52": true,
-	"F53": true, "F54": true, "F55": true}
+	"F53": true, "F54": true, "F55": true,
+	"F06": true, "F07": true, "F08": true, "F33": true, "F34": true, "F57": true}
 
 // empresas fora da Auditoria de Faturas (REZEK, VTAL) — mesmo corte da lista antiga
 const energiaFiltroEmpresa = `COALESCE(cod_empresa,0) NOT IN (14, 2025)`
@@ -172,7 +173,10 @@ func carregarFaturasEnergia(db *sql.DB, cn *cnpjAneel, comItens bool) (map[strin
 		leit_ant_reativa, leit_atu_reativa, leit_demanda_ponta, leit_demanda_fponta, fator_potencia,
 		energia_injetada_kwh, energia_compensada_kwh,
 		COALESCE(saldo_credito_energia, IF(saldo_gd_fponta_kwh IS NULL AND saldo_gd_ponta_kwh IS NULL, NULL,
-			COALESCE(saldo_gd_fponta_kwh,0) + COALESCE(saldo_gd_ponta_kwh,0))), COALESCE(valor_total_sefaz,0)
+			COALESCE(saldo_gd_fponta_kwh,0) + COALESCE(saldo_gd_ponta_kwh,0))), COALESCE(valor_total_sefaz,0),
+		COALESCE(dias_faturados,0), COALESCE(indicacao_troca_medidor,0) = 1,
+		(COALESCE(indicador_leitura_estimativa,0) = 1 OR COALESCE(flag_faturamento_media,0) = 1 OR COALESCE(indicacao_impedimento_leitura,0) = 1),
+		COALESCE(fio_b_sefaz_rs,0), COALESCE(custo_disponib_sefaz_rs,0)
 		FROM FATURA_DADOS_EXTRAIDOS WHERE ` + energiaFiltroEmpresa + ` AND (` + energiaMesSQL + `) IS NOT NULL`)
 	if err != nil {
 		return nil, err
@@ -186,9 +190,12 @@ func carregarFaturasEnergia(db *sql.DB, cn *cnpjAneel, comItens bool) (map[strin
 		var k, laFP, luFP, laP, luP, laR, luR, dP, dFP, fp, inj, comp, saldo sql.NullFloat64
 		if rows.Scan(&f.id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.modalidade, &f.cnpj, &f.lant, &f.latu,
 			&pis, &cof, &cep, &f.classe, &f.cip, &f.total, &f.kwhRef, &raw,
-			&f.fornecimento, &medidor, &k, &laFP, &luFP, &laP, &luP, &laR, &luR, &dP, &dFP, &fp, &inj, &comp, &saldo, &f.totalSefaz) != nil {
+			&f.fornecimento, &medidor, &k, &laFP, &luFP, &laP, &luP, &laR, &luR, &dP, &dFP, &fp, &inj, &comp, &saldo, &f.totalSefaz,
+			&f.diasImpr, &f.trocaMed, &f.justLeitura, &f.fioBSefaz, &f.dispSefaz) != nil {
 			continue
 		}
+		f.dias, f.dLant, f.dLatu = diasEntre(f.lant, f.latu), f.lant, f.latu // antes de qualquer ajuste das datas abaixo
+		f.medidor = normNumMedidor(medidor)
 		f.fornecimento = strings.ToUpper(f.fornecimento)
 		// medições (registradores) no formato das usinas: ativa por posto, reativa, demanda e o fator de potência
 		med := func(g, posto, unid string, a, b sql.NullFloat64) {

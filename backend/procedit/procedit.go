@@ -162,8 +162,11 @@ type Acao struct {
 	Mov        *MovSpec          `json:"mov,omitempty"`
 	Relatorio  string            `json:"relatorio,omitempty"`
 	Params     map[string]string `json:"params,omitempty"`
-	Comentario string            `json:"comentario,omitempty"` // op inserir_historico
+	Comentario string            `json:"comentario,omitempty"` // op inserir_historico / editar_historico (texto novo)
 	DataHist   string            `json:"data_hist,omitempty"`  // data/hora do histórico (opcional)
+	// op editar_historico: a linha do histórico e o texto atual (o executor só grava se ainda for o mesmo)
+	IdHistorico     int64  `json:"id_historico,omitempty"`
+	ComentarioAntes string `json:"comentario_antes,omitempty"`
 }
 
 // fieldDef descreve um campo editável de processo.
@@ -469,6 +472,8 @@ type plano struct {
 	// inserir histórico
 	comentario string
 	dataHist   string
+	// editar comentário de um histórico que já existe (texto atual → comentario)
+	comentarioAntes string
 }
 
 // Etapas e status (DM_ETAPAS / DM_STATUS_PROCESSO / DM_STATUS_APROVACAO).
@@ -696,7 +701,7 @@ func EhComando(msg string) bool {
 	if rePergunta.MatchString(n) {
 		return false // pergunta → Q&A
 	}
-	if reHist.MatchString(n) || reMovVerbo.MatchString(n) {
+	if reHist.MatchString(n) || reEditHist.MatchString(n) || reMovVerbo.MatchString(n) {
 		return true
 	}
 	// edição de meta-alvo (mensal/anual) com verbo de comando, sem processo
@@ -718,6 +723,19 @@ func EhComando(msg string) bool {
 // interpretar: texto livre → plano. Determinístico, sem DB.
 func interpretar(msg string) (plano, bool) {
 	n := norm(msg)
+
+	// Editar o COMENTÁRIO de um histórico que já existe vem antes de tudo: o texto novo/antigo pode
+	// ter "indeferido", "encerrar", "ANEEL"… que casariam com movimentação (pedido #29: "alterar o
+	// comentário … para 'Indeferido ANEEL'" virou movimentação para Encerramento/Indeferido).
+	if reEditHist.MatchString(n) {
+		if pr, okp := ExtrairProcesso(msg); okp {
+			antes, novo, ok := extrairTextosEdicao(msg)
+			if !ok {
+				return plano{op: "editar_historico", processoRef: pr, motivo: "coloque entre aspas o texto atual do comentário e o texto novo — ex.: alterar o comentário \"texto atual\" para \"texto novo\""}, false
+			}
+			return plano{op: "editar_historico", processoRef: pr, comentarioAntes: antes, comentario: novo, dataHist: extrairDataHist(msg)}, true
+		}
+	}
 
 	// Inserir histórico tem prioridade: o texto do histórico pode mencionar "ANEEL",
 	// "protocolo", "mover" etc., que casariam por engano com relatório/movimentação.
@@ -877,6 +895,30 @@ func extrairComentarioHist(msg string) string {
 		return strings.TrimSpace(msg[i+1:])
 	}
 	return strings.Join(strings.Fields(reCmdHist.ReplaceAllString(msg, " ")), " ")
+}
+
+// verbo de edição + "comentário"/"histórico"/"texto" (sem verbo de inserir: isso é inserir_historico)
+var (
+	reEditHist  = regexp.MustCompile(`\b(alterar|altere|altera|editar|edite|edita|corrigir|corrija|corrige|mudar|mude|muda|trocar|troque|troca|substituir|substitua|ajustar|ajuste|reescrever|reescreva)\b.{0,40}\b(comentario|historico|texto da movimentacao|texto do historico)`)
+	reEntreAspa = regexp.MustCompile(`["“”]([^"“”]+)["“”]`)
+)
+
+// extrairTextosEdicao — o texto atual e o novo entre aspas: o 1º trecho entre aspas é o atual, o último o novo
+func extrairTextosEdicao(msg string) (string, string, bool) {
+	ms := reEntreAspa.FindAllStringSubmatch(msg, -1)
+	if len(ms) < 2 {
+		return "", "", false
+	}
+	antes, novo := strings.TrimSpace(ms[0][1]), strings.TrimSpace(ms[len(ms)-1][1])
+	if antes == "" || novo == "" || antes == novo {
+		return "", "", false
+	}
+	return antes, novo, true
+}
+
+// normComentario — compara comentário sem acento/caixa/espaços repetidos e sem pontuação final
+func normComentario(s string) string {
+	return strings.TrimRight(strings.Join(strings.Fields(norm(s)), " "), ".;:!, ")
 }
 
 // extrairDataHist acha dd/mm/aaaa [hh:mm] no texto → "AAAA-MM-DD[ HH:MM:SS]".
@@ -1077,6 +1119,10 @@ func Montar(db *sql.DB, msg string) (*Acao, string, bool, string) {
 		return a, fmt.Sprintf("Recalcular o repasse do processo %d (%s) pelo percentual do cliente.", idProc, cliente.String), true, ""
 	}
 
+	if p.op == "editar_historico" {
+		return montarEditarHistorico(db, p, idProc, cliente.String)
+	}
+
 	if p.op == "inserir_historico" {
 		a := &Acao{Op: "inserir_historico", Processo: p.processoRef, IdProcesso: idProc, Cliente: cliente.String,
 			Rotulo: "inserir histórico", Comentario: p.comentario, DataHist: p.dataHist}
@@ -1199,4 +1245,51 @@ func interpretarJob(n string) (map[string]string, bool) {
 		}
 	}
 	return params, true
+}
+
+// montarEditarHistorico acha a ÚNICA linha do histórico do processo com aquele texto (na data citada, se houver)
+// e monta a troca do comentário. Data, etapa, status, instância e aprovação não mudam.
+func montarEditarHistorico(db *sql.DB, p plano, idProc int64, cliente string) (*Acao, string, bool, string) {
+	q := `SELECT id_historico, COALESCE(comentario,''), DATE_FORMAT(data_movimentacao,'%d/%m/%Y %H:%i')
+		FROM FT_HISTORICO_MOVIMENTACOES WHERE id_processo = ?`
+	args := []interface{}{idProc}
+	if len(p.dataHist) >= 10 {
+		q += ` AND DATE(data_movimentacao) = ?`
+		args = append(args, p.dataHist[:10])
+	}
+	rows, err := db.Query(q+` ORDER BY data_movimentacao, id_historico`, args...)
+	if err != nil {
+		return nil, "", false, "erro ao ler o histórico: " + err.Error()
+	}
+	defer rows.Close()
+	alvo := normComentario(p.comentarioAntes)
+	type linha struct {
+		id            int64
+		texto, quando string
+	}
+	var achadas []linha
+	for rows.Next() {
+		var l linha
+		if rows.Scan(&l.id, &l.texto, &l.quando) != nil {
+			continue
+		}
+		if t := normComentario(l.texto); alvo != "" && (t == alvo || strings.Contains(t, alvo)) {
+			achadas = append(achadas, l)
+		}
+	}
+	onde := ""
+	if len(p.dataHist) >= 10 {
+		onde = " em " + p.dataHist[8:10] + "/" + p.dataHist[5:7] + "/" + p.dataHist[:4]
+	}
+	switch {
+	case len(achadas) == 0:
+		return nil, "", false, fmt.Sprintf("não achei no histórico do processo %d%s um comentário com o texto %q", idProc, onde, p.comentarioAntes)
+	case len(achadas) > 1:
+		return nil, "", false, fmt.Sprintf("achei %d comentários com o texto %q no processo %d%s — diga a data (dd/mm/aaaa) do que deve ser alterado", len(achadas), p.comentarioAntes, idProc, onde)
+	}
+	l := achadas[0]
+	a := &Acao{Op: "editar_historico", Processo: p.processoRef, IdProcesso: idProc, Cliente: cliente,
+		Rotulo: "editar comentário do histórico", IdHistorico: l.id, ComentarioAntes: l.texto, Comentario: p.comentario}
+	return a, fmt.Sprintf("Alterar o comentário do histórico #%d de %s do processo %d (%s) — a data, a etapa e o status não mudam:\n\n%q → %q",
+		l.id, l.quando, idProc, cliente, l.texto, p.comentario), true, ""
 }

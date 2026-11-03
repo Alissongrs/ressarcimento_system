@@ -19,6 +19,10 @@ PYTHON="${SURE_PYTHON:-python3}"
 LOG="${SURE_PIPELINE_LOG:-$BUNDLE/pdf_pipeline.log}"
 LOCK="/tmp/sure_pdf_pipeline.lock"
 EMPRESAS="4 14 32 33 42 69 80 120 144 154 180 183 189 191 202 203 204 205 206 207 208 209 210 212 214 216 217 218 219 223 224 359 362 363 366 367 371 374 375"
+# tela Tarefas (worker/run_jobs.py) pode pedir só algumas empresas: SURE_PIPELINE_EMPRESAS="4 189"
+if [ -n "${SURE_PIPELINE_EMPRESAS:-}" ]; then
+  EMPRESAS="$(echo "$SURE_PIPELINE_EMPRESAS" | tr -c '0-9\n' ' ' | tr -s ' ')"
+fi
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }

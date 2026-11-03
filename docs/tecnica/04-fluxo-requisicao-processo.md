@@ -138,7 +138,7 @@ deterministicamente ("aprovou = feito", não reinterpretada na execução).
 - **`Montar(db, msg)`** — resolve o processo (`PR-code` / id / `UC:<nº>`; UC ambígua
   retorna erro listando os códigos), lê valores atuais e devolve `Acao` + preview
   "antes→depois". **Ops:** `editar_processo`, `recalcular_repasse`, `movimentar`,
-  `inserir_historico`, `editar_meta`, `relatorio`, `rodar_job`.
+  `inserir_historico`, `editar_historico` (troca só o comentário de um histórico existente), `editar_meta`, `relatorio`, `rodar_job`.
 - **Limitador (whitelist):** `campos`/`CamposPermitidos()` é a barreira coluna-a-coluna
   (`TABELA.coluna→tipo`) do executor. Ponteiros de workflow (etapa/status/instância/
   aprovação) são **deliberadamente excluídos** — mudá-los sem histórico dessincroniza →
