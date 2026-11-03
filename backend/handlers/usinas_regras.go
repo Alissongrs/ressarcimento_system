@@ -117,7 +117,7 @@ func GetRegrasConjunto(c *gin.Context) {
 		s := situacaoConjunto(conj, f.Codigo)
 		pr := regrasPrecisa[f.Codigo]
 		if s == "nao_ligada" {
-			pr = "roda nas usinas; ainda não ligada à base da Acer"
+			pr = "roda nas usinas; ainda não ligada a esta base"
 		}
 		if s == "aneel" && base == nil {
 			pr += " (aguardando a 1ª importação)"
@@ -823,49 +823,95 @@ func regrasAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 				bandMax = bd.Valor / 1000
 			}
 		}
-		tot, n, ex, semTabela := 0.0, 0, "", true
+		tot, n, ex := 0.0, 0, ""
 		nA, exA := 0, ""
-		for _, it := range f.itens {
+		// homologada da linha: TE, TUSD ou as duas (linha que não diz, ex.: Energisa "Consumo em kWh")
+		type linhaF28 struct {
+			ok, soTE, soTUSD bool
+			hom              float64
+			reh              string
+		}
+		homDe := func(it uItem) linhaF28 {
 			if (it.comp != "TE" && it.comp != "TUSD") || !it.tsem.Valid || it.tsem.Float64 <= 0 || nv(it.qtd) <= 0 {
-				continue
+				return linhaF28{}
 			}
 			d := strings.ToUpper(it.desc)
 			if strings.Contains(d, "INJ") || strings.Contains(d, "COMP") || strings.Contains(d, "SCEE") {
-				continue
+				return linhaF28{}
 			}
 			cands := b.tarifasVigentes(f.cnpj, f.subgrupo, mod, postoANEEL(it.posto), "MWh", "Não se aplica", data)
 			if len(cands) == 0 && it.posto == "" {
 				cands = b.tarifasVigentes(f.cnpj, f.subgrupo, mod, "", "MWh", "Não se aplica", data)
 			}
 			if len(cands) == 0 {
-				continue
+				return linhaF28{}
 			}
-			semTabela = false
-			// linha que não diz TE nem TUSD (ex.: Energisa "Consumo em kWh") cobra as duas juntas
-			soTUSD := strings.Contains(d, "TUSD") || strings.Contains(d, "USD")
-			soTE := regexp.MustCompile(`(^|[^A-Z])TE([^A-Z]|$)`).MatchString(d)
-			hom := 0.0 // várias classes/subclasses possíveis: compara com a MAIOR (não acusa à toa)
-			for _, c := range cands {
+			l := linhaF28{soTUSD: strings.Contains(d, "TUSD") || strings.Contains(d, "USD"),
+				soTE: regexp.MustCompile(`(^|[^A-Z])TE([^A-Z]|$)`).MatchString(d), reh: cands[0].REH}
+			for _, c := range cands { // várias classes/subclasses possíveis: compara com a MAIOR (não acusa à toa)
 				v := c.TE + c.TUSD
-				if soTUSD && !soTE {
+				if l.soTUSD && !l.soTE {
 					v = c.TUSD
-				} else if soTE && !soTUSD {
+				} else if l.soTE && !l.soTUSD {
 					v = c.TE
 				}
-				if v > hom {
-					hom = v
+				if v > l.hom {
+					l.hom = v
 				}
 			}
-			hom /= 1000
+			l.hom /= 1000
+			l.ok = l.hom > 0 // categoria sem esse componente (ex.: A4 convencional cobra TUSD por kW): nada a comparar
+			return l
+		}
+		// TE e TUSD do mesmo posto: há distribuidora que divide as duas de outro jeito (TE acima, TUSD abaixo) —
+		// só acusa a linha se a SOMA TE+TUSD também passar da homologada
+		type somaPosto struct {
+			te, tusd   int
+			t, hom     float64
+		}
+		somas := map[string]*somaPosto{}
+		for _, it := range f.itens {
+			if l := homDe(it); l.ok && l.soTE != l.soTUSD {
+				s := somas[it.posto]
+				if s == nil {
+					s = &somaPosto{}
+					somas[it.posto] = s
+				}
+				if l.soTE {
+					s.te++
+				} else {
+					s.tusd++
+				}
+				s.t += it.tsem.Float64
+				s.hom += l.hom
+			}
+		}
+		for _, it := range f.itens {
+			l := homDe(it)
+			if !l.ok {
+				continue
+			}
+			soTE, soTUSD, hom := l.soTE, l.soTUSD, l.hom
+			if s := somas[it.posto]; soTE != soTUSD && s != nil && s.te == 1 && s.tusd == 1 &&
+				s.t <= tetoTarifa(s.hom+bandMax, f.pisCofins) {
+				continue
+			}
 			t := it.tsem.Float64
 			if !soTUSD && bandMax > 0 && t > tetoTarifa(hom, f.pisCofins) && t <= (hom+bandMax)/(1-pisCofinsMax)*1.005 {
 				hom += bandMax // TE com a bandeira do mês embutida
 			}
-			if dif := t - hom/(1-pisCofinsMax)*1.005; dif > 0.0001 && dif*nv(it.qtd) > 0.10 {
+			if t > tetoTarifa(hom, f.pisCofins)*1.25 && t-hom/(1-pisCofinsMax)*1.005 > 0.0001 {
+				// 25% acima não é reajuste nem arredondamento: quase sempre subgrupo/modalidade lidos errado na extração
+				nA++
+				if exA == "" {
+					exA = fmt.Sprintf("%s: R$ %.6f/kWh × R$ %.6f homologado (%s %s) — diferença grande demais; confira subgrupo/modalidade da fatura",
+						it.desc, t, hom, f.subgrupo, mod)
+				}
+			} else if dif := t - hom/(1-pisCofinsMax)*1.005; dif > 0.0001 && dif*nv(it.qtd) > 0.10 {
 				tot += (t - tetoTarifa(hom, f.pisCofins)) * nv(it.qtd)
 				n++
 				if ex == "" {
-					ex = fmt.Sprintf("%s: R$ %.6f/kWh cobrado × R$ %.6f homologado (%s)", it.desc, t, hom, cands[0].REH)
+					ex = fmt.Sprintf("%s: R$ %.6f/kWh cobrado × R$ %.6f homologado (%s)", it.desc, t, hom, l.reh)
 				}
 			} else if dif := t - tetoTarifa(hom, f.pisCofins); dif > 0.0001 && dif*nv(it.qtd) > 0.10 {
 				nA++
@@ -885,7 +931,6 @@ func regrasAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 			}
 			out = append(out, Achado{"F28", nivel, fmt.Sprintf("%d item(ns) com tarifa acima da homologada (R$ %.2f). Ex.: %s", n, tot, ex), rnd2(tot), 0})
 		}
-		_ = semTabela
 	}
 	// F58 — demanda de geração cobrada pela TUSD C (≈ demanda de consumo) e acima da TUSD G homologada
 	if sel["F58"] && !grupoB(f) {
@@ -932,8 +977,8 @@ func regrasAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 		for _, m := range meses {
 			if bd, ok := b.bandeiras[m]; ok {
 				oficiais[bd.Cor] = true
-				if strings.HasPrefix(bd.Cor, "VERMELHA") {
-					oficiais["VERMELHA"] = true
+				if strings.HasPrefix(bd.Cor, "VERMELHA") || bd.Cor == "ESCASSEZ" {
+					oficiais["VERMELHA"] = true // na Escassez Hídrica há distribuidora que imprime "bandeira vermelha"
 				}
 				conhecidos++
 			}
@@ -947,6 +992,18 @@ func regrasAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 					oficiais["VERMELHA"] = true
 				}
 			}
+		}
+		// 3+ linhas de bandeira com cor = fatura que cobra vários meses (refaturamento / acerto de ciclos anteriores):
+		// o ciclo da fatura não diz de que mês é cada linha — fica em alerta
+		nBand := 0
+		for _, it := range f.itens {
+			if it.comp == "BANDEIRA" && nv(it.valor) > 0 && corBandeira(it.desc) != "" && corBandeira(it.desc) != "VERDE" {
+				nBand++
+			}
+		}
+		nivelF41 := "ERRO"
+		if nBand >= 3 {
+			nivelF41 = "ALERTA"
 		}
 		if conhecidos == len(meses) && conhecidos > 0 {
 			for _, it := range f.itens {
@@ -963,9 +1020,13 @@ func regrasAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 						cs = append(cs, c)
 					}
 					sort.Strings(cs)
-					out = append(out, Achado{"F41", "ERRO", fmt.Sprintf("%s cobrada (R$ %.2f), mas a bandeira oficial do ciclo %s foi %s",
+					v := rnd2(nv(it.valor))
+					if nivelF41 == "ALERTA" {
+						v = 0
+					}
+					out = append(out, Achado{"F41", nivelF41, fmt.Sprintf("%s cobrada (R$ %.2f), mas a bandeira oficial do ciclo %s foi %s",
 						strings.Title(strings.ToLower(strings.ReplaceAll(cor, "_", " "))), nv(it.valor), strings.Join(meses, ", "), strings.Join(cs, "/")),
-						rnd2(nv(it.valor)), 0})
+						v, 0})
 					continue
 				}
 				if sel["F42"] && it.tsem.Valid && it.tsem.Float64 > 0 && nv(it.qtd) > 0 {

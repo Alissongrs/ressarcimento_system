@@ -11,6 +11,7 @@ import AuditoriaRankings from '../components/AuditoriaRankings';
 import AguaPanel from '../components/AguaPanel';
 import UsinasPanel from '../components/UsinasPanel';
 import AcerPanel from '../components/AcerPanel';
+import EnergiaPanel from '../components/EnergiaPanel';
 import CatalogoFichasModal from '../components/CatalogoFichasModal';
 import { fichaTooltip } from '../data/fichasCatalogo';
 import './controleProcessosV2.css'; // design system cpv2 (mesmo visual do Controle de Processos)
@@ -147,7 +148,7 @@ const getNomeEmpresa = (row) => {
 
 const TABS = [
   { id: 'aprovados',     label: 'Apontamentos',   cor: 'var(--success)', sub: 'CONFIRMADO' },
-  { id: 'auditados',     label: 'Energia',        cor: '#7c6f9c', sub: 'só ELEVADO REAL' },
+  { id: 'auditados',     label: 'Energia',        cor: '#7c6f9c', sub: 'verificados + regras' },
   { id: 'inconclusivos', label: 'Inconclusivos',  cor: 'var(--warning)', sub: 'triagem: motor apontou, fora de Auditados' },
   { id: 'rejeitados',    label: 'Rejeitados',     cor: 'var(--danger)', sub: 'REFUTADO' },
   { id: 'agua',          label: '💧 Água',        cor: '#2b8fd6', sub: 'desvio de consumo m³' },
@@ -2330,6 +2331,8 @@ export default function AnaliseDesvio() {
   // / id_usuario=1). Os demais usuários têm "Auditados" como aba principal e não veem Apontamentos.
   const podeApontamentos = user?.email === 'alisson.rodrigues@amee.com.br' || Number(user?.user_id) === 1;
   const [tab, setTab] = useState('auditados');
+  // aba Energia: visão no formato da aba Usinas (padrão) ou a lista detalhada anterior
+  const [energiaVisao, setEnergiaVisao] = useState('nova');
   const [catalogoFichas, setCatalogoFichas] = useState(false); // painel de referência das 61 fichas
   const tabInicialSet = useRef(false);
   // Quando o usuário resolve (token do localStorage), o Alisson começa em Apontamentos.
@@ -2950,7 +2953,18 @@ export default function AnaliseDesvio() {
 
       <CatalogoFichasModal open={catalogoFichas} onClose={() => setCatalogoFichas(false)} />
 
-      {tab === 'agua' ? <AguaPanel /> : tab === 'acer' ? <AcerPanel /> : tab === 'usinas' ? <UsinasPanel /> : (<>
+      {tab === 'auditados' && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="opacity-60">Visão:</span>
+          {[['nova', 'Regras (formato Usinas)'], ['antiga', 'Lista detalhada (anterior)']].map(([v, rot]) => (
+            <button key={v} onClick={() => setEnergiaVisao(v)} className="px-2 py-1 rounded-md border"
+              style={{ borderColor: energiaVisao === v ? '#7c6f9c' : 'var(--cpv2-border)', color: energiaVisao === v ? '#7c6f9c' : undefined,
+                fontWeight: energiaVisao === v ? 600 : 400 }}>{rot}</button>
+          ))}
+        </div>
+      )}
+      {tab === 'agua' ? <AguaPanel /> : tab === 'acer' ? <AcerPanel /> : tab === 'usinas' ? <UsinasPanel />
+        : tab === 'auditados' && energiaVisao === 'nova' ? <EnergiaPanel admin={podeApontamentos} /> : (<>
       {/* Filtros do topo: Empresa (select, substitui as pills) + Ordenação (maiores apontamentos).
           As empresas vêm do backend em empresasDisponiveis (com contagem por status). */}
       <div className="flex gap-3 flex-wrap items-center text-xs">

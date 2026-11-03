@@ -55,6 +55,18 @@ type aneelBase struct {
 	tarifas   []tarifaANEEL
 	bandeiras map[string]bandeiraANEEL // "AAAA-MM" → bandeira
 	porCor    map[string]float64       // "AAAA|COR" → adicional R$/MWh do patamar naquele ano
+	idxOnce   sync.Once
+	porCNPJ   map[string][]tarifaANEEL // índice por distribuidora (a Energia consulta ~500 mil linhas de item)
+}
+
+func (b *aneelBase) daDistribuidora(cnpj string) []tarifaANEEL {
+	b.idxOnce.Do(func() {
+		b.porCNPJ = map[string][]tarifaANEEL{}
+		for _, t := range b.tarifas {
+			b.porCNPJ[t.CNPJ] = append(b.porCNPJ[t.CNPJ], t)
+		}
+	})
+	return b.porCNPJ[cnpj]
 }
 
 func numBR(s string) float64 {
@@ -227,6 +239,19 @@ func cnpjsDistribuidoras(db *sql.DB) ([]string, error) {
 			}
 		}
 		ar.Close()
+	}
+	// Energia (FDE): CNPJ da distribuidora impresso na fatura
+	if er, err := db.Query(`SELECT REGEXP_REPLACE(COALESCE(cnpj_distribuidora_filial,''),'[^0-9]','') AS cnpj, COUNT(*)
+			FROM FATURA_DADOS_EXTRAIDOS WHERE COALESCE(cod_empresa,0) NOT IN (14, 2025) GROUP BY cnpj HAVING COUNT(*) >= 20`); err == nil {
+		for er.Next() {
+			var c string
+			var n int
+			if er.Scan(&c, &n) == nil && len(c) == 14 && !vistos[c] {
+				vistos[c] = true
+				out = append(out, c)
+			}
+		}
+		er.Close()
 	}
 	return out, nil
 }
@@ -492,7 +517,7 @@ func postoANEEL(p string) string {
 // detalhe: "Não se aplica" (tarifa normal) ou "SCEE"; geração = modalidade "Geração".
 func (b *aneelBase) tarifasVigentes(cnpj, subgrupo, modalidade, posto, unidade, detalhe, data string) []tarifaANEEL {
 	var out []tarifaANEEL
-	for _, t := range b.tarifas {
+	for _, t := range b.daDistribuidora(cnpj) {
 		if t.CNPJ != cnpj || !strings.EqualFold(t.Subgrupo, subgrupo) || t.Modalidade != modalidade ||
 			t.Detalhe != detalhe || !strings.EqualFold(t.Unidade, unidade) || t.Inicio > data || t.Fim < data {
 			continue
@@ -510,7 +535,7 @@ func (b *aneelBase) tarifasVigentes(cnpj, subgrupo, modalidade, posto, unidade, 
 
 // rehMudou — há início de vigência entre as duas datas (ciclo atravessa um reajuste)
 func (b *aneelBase) rehMudou(cnpj, subgrupo, modalidade, de, ate string) bool {
-	for _, t := range b.tarifas {
+	for _, t := range b.daDistribuidora(cnpj) {
 		if t.CNPJ == cnpj && strings.EqualFold(t.Subgrupo, subgrupo) && t.Modalidade == modalidade && t.Inicio > de && t.Inicio <= ate {
 			return true
 		}

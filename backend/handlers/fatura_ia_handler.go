@@ -233,6 +233,7 @@ func RejeitarApontamento(c *gin.Context) {
 		return
 	}
 	uid, uname := usuarioIA(c)
+	regrasRej := regrasDaRejeicao(sqlDB, id, body.Regras)
 	// Persiste a rejeição como reanálise (recomendacao='REJEITADO'). A lista da Auditoria
 	// exclui faturas que tenham esse registro — sem coluna nova no schema.
 	if _, err := sqlDB.Exec(`INSERT INTO FATURA_REANALISES
@@ -240,10 +241,11 @@ func RejeitarApontamento(c *gin.Context) {
 		 regras_rejeitadas, criado_em)
 		VALUES (?, 'rejeicao_manual', ?, 'REJEITADO', ?, 0, 0, ?, ?, ?, NOW())`,
 		id, truncarIA("Apontamento rejeitado pelo analista. Motivo: "+body.Motivo, 4000),
-		"REJEITADO: "+body.Motivo, uid, uname, regrasDaRejeicao(sqlDB, id, body.Regras)); err != nil {
+		"REJEITADO: "+body.Motivo, uid, uname, regrasRej); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	energiaAplicarRejeicao(id, regrasRej, uname)
 	// Remoção IMEDIATA do snapshot vivo — senão o apontamento só sai no próximo rebuild
 	// (cron ./auditados) e o usuário vê ele "voltar pra lista" ao atualizar. O rebuild já
 	// exclui REJEITADO daqui pra frente; este DELETE (best-effort) cobre a janela até lá.

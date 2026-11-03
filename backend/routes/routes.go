@@ -474,6 +474,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.GET("/parametros/aneel/status", handlers.StatusANEEL)
 			// 🅰️ Acer — regras da ANEEL e CIP (F28 F41 F42 F58 F51) escolhidas no botão ⚙ Regras da aba
 			authRequired.GET("/acer/regras-achados", handlers.GetAcerRegrasAchados)
+			authRequired.GET("/energia/apontamentos", handlers.GetEnergiaApontamentos)
 			authRequired.GET("/faturas/agua-analise", handlers.ListAguaAnalise)
 			authRequired.GET("/faturas/agua-analise/resumo", handlers.GetAguaResumo)
 			authRequired.GET("/faturas/agua/:id/historico", handlers.GetAguaHistorico)

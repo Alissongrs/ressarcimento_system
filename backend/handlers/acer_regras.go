@@ -34,7 +34,7 @@ func situacaoConjunto(conj, cod string) string {
 	if s == "" {
 		return "pendente"
 	}
-	if conj == "acer" && s != "motor" && !regrasAcer[cod] {
+	if s != "motor" && ((conj == "acer" && !regrasAcer[cod]) || (conj == "energia" && !regrasEnergia[cod])) {
 		return "nao_ligada"
 	}
 	return s
@@ -424,5 +424,8 @@ func limparCacheRegras(conj string) {
 		acerRegrasCache, acerRegrasErro = nil, "" // o cálculo seguinte usa a seleção nova
 		acerRegrasGeracao++
 		acerRegrasMu.Unlock()
+	}
+	if conj == "energia" {
+		limparCacheEnergia()
 	}
 }
