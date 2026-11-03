@@ -245,7 +245,7 @@ def motor_agua(empresas, env):
         return f"\n\n⚠️ Regra de pico de consumo falhou (código {p.returncode}).\n```\n{out[-800:]}\n```"
     n = re.search(r"OK\.\s*(\d+) apontamentos", out)
     qtd = n.group(1) if n else "0"
-    linhas = [f"\n\n🔎 **Regra de pico de consumo (consumo ≥ 2× a média dos últimos 12 meses) aplicada: "
+    linhas = [f"\n\n🔎 **Regra de pico de consumo (consumo por dia ≥ 1,8× (80% acima) da média das últimas 12 faturas) aplicada: "
               f"{qtd} apontamento(s)** na aba 💧 Água da Análise de Desvio."]
     rs = re.search(r"ressarcimento estimado total: R\$ ([\d,.]+)", out)
     por = re.search(r"apontamentos por empresa:\s*(\{[^}]*\})", out)
