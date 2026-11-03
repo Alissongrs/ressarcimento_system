@@ -154,6 +154,9 @@ def resumo_pipeline(txt, terminou):
     out = []
     if "já em execução — pulando" in txt:
         out.append("⚠️ O pdf_pipeline já estava rodando (provavelmente o agendamento automático) — este pedido não iniciou outro.")
+    elif terminou and rc and rc.group(1) != "0":
+        out.append(f"❌ **pdf_pipeline falhou** (código {rc.group(1)}) — {ok} fatura(s) extraída(s) antes do erro. "
+                   "Veja o final do log abaixo.")
     elif terminou:
         out.append(f"✅ **pdf_pipeline concluído** — {ok} fatura(s) extraída(s), {erros} com erro, {total} no total"
                    + (f" (código {rc.group(1)})" if rc else "") + ".")
@@ -185,7 +188,8 @@ def acompanhar(con):
                             (texto[:60000], st["sid"]))
             else:
                 falhou = "pdf_pipeline terminou" not in txt and "já em execução" not in txt
-                status = "erro" if falhou else "executado"
+                rcm = re.search(r"pdf_pipeline terminou \(rc=(\d+)\)", txt)
+                status = "erro" if falhou or (rcm and rcm.group(1) != "0") else "executado"
                 if falhou:
                     texto = "❌ O pdf_pipeline parou sem a linha de término no log (interrompido ou erro no script).\n" + texto
                 cur.execute("UPDATE FT_SOLICITACOES SET status=%s, resultado=%s, executado_em=NOW() WHERE id=%s",

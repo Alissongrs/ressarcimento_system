@@ -32,7 +32,7 @@ flock -n 8 || { log "já em execução — pulando."; exit 0; }
 
 # 1) BACKUP antes (reversão): dump rotativo do banco
 log "backup pré-pipeline…"
-"$BUNDLE/backup_sistema.sh" rotativo >> "$LOG" 2>&1 || log "aviso: backup pré-pipeline falhou"
+bash "$BUNDLE/backup_sistema.sh" rotativo >> "$LOG" 2>&1 || log "aviso: backup pré-pipeline falhou"
 
 # 2) Extração (--skip-processadas = idempotente; sem --workers por sua escolha)
 cd "$IA_DIR" || { log "pasta não encontrada: $IA_DIR"; exit 0; }
