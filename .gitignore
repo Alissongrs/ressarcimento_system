@@ -123,3 +123,4 @@ FATURA_DADOS_EXTRAIDOS_LOG.json
 worker/.jobs_em_andamento/
 worker/engine/_work/
 .deploy_backups/
+worker/engine/C:/

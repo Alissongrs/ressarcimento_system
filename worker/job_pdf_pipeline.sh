@@ -36,6 +36,12 @@ bash "$BUNDLE/backup_sistema.sh" rotativo >> "$LOG" 2>&1 || log "aviso: backup p
 
 # 2) Extração (--skip-processadas = idempotente; sem --workers por sua escolha)
 cd "$IA_DIR" || { log "pasta não encontrada: $IA_DIR"; exit 0; }
+# pdf_pipeline.py fica FORA do Git (tem as conexões do banco) e a cópia da VPS pode ser a antiga, que
+# grava log e imagens em "C:/paddleocr/..." — no Linux isso é uma pasta relativa a esta; sem ela o script
+# morre na 1ª linha (FileNotFoundError). Criar a pasta resolve sem mexer no script.
+if grep -q '"C:/paddleocr' pdf_pipeline.py 2>/dev/null; then
+  mkdir -p "C:/paddleocr/tmp" && log "aviso: pdf_pipeline.py da VPS é a versão antiga (caminho do Windows) — usando $IA_DIR/C:/paddleocr"
+fi
 log "iniciando pdf_pipeline para empresas: $EMPRESAS"
 # shellcheck disable=SC2086
 PYTHONUTF8=1 "$PYTHON" pdf_pipeline.py --prod --empresa $EMPRESAS --no-ocr --skip-processadas >> "$LOG" 2>&1

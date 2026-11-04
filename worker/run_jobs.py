@@ -32,7 +32,10 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from has_work import ler_dsn  # noqa: E402
-import regras_agua  # noqa: E402
+try:
+    import regras_agua  # noqa: E402
+except ImportError:  # arquivo faltando na VPS não pode parar a fila inteira de tarefas
+    regras_agua = None
 
 PY = os.environ.get("SURE_PYTHON", sys.executable or "python3")
 JOBS = {
@@ -235,8 +238,10 @@ def rodar(sid, usuario, acao_json):
     texto = resumo_agua(saida, empresas) if job == "agua_sync" else None
     if job == "agua_sync":
         # apontamentos: motor do BACKEND (desde 03/11/2026) — o worker não calcula mais regra de água
-        r = regras_agua.aplicar(desde, empresas, "apply")
-        texto = (texto or "") + regras_agua.texto_resumo(r)
+        r = (regras_agua.aplicar(desde, empresas, "apply") if regras_agua
+             else {"erro": "worker/regras_agua.py não está na VPS (faltou no deploy)."})
+        texto = (texto or "") + (regras_agua.texto_resumo(r) if regras_agua
+                                  else "\n\n⚠️ **Regras de água não rodaram:** " + r["erro"])
         m = re.search(r"OK\.\s*(\d+) faturas", saida)
         nf = int(m.group(1)) if m else (0 if re.search(r"NOVAS=0\b", saida) else None)
         texto += metricas({"faturas_novas": nf,
