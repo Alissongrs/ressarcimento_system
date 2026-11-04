@@ -2670,6 +2670,16 @@ func swaggerRotaGet_api_v1_tarefas_vps_qualidade() {}
 // @Router /api/v1/tarefas-vps/situacao [get]
 func swaggerRotaGet_api_v1_tarefas_vps_situacao() {}
 
+// @Summary Codigo pdp claro handler
+// @Description Somente admin. Handler: handlers.CodigoPDPClaroHandler.
+// @Tags claro-pdp
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/claro-pdp/codigo [get]
+func swaggerRotaGet_api_v1_claro_pdp_codigo() {}
+
 // @Summary Rodar tarefa vps
 // @Description Somente admin. Handler: handlers.RodarTarefaVPS.
 // @Tags tarefas-vps

@@ -2,6 +2,8 @@
 // ANEEL, espera o usuário entrar, recebe o que a janela leu, devolve à página do SURE (que grava com
 // o login dela) e fecha a janela. A extensão não guarda nem usa credencial nenhuma do SURE.
 
+importScripts('claro_bg.js'); // módulo Faturas Claro (portal PDP)
+
 const ANEEL = 'https://www2.aneel.gov.br/faleconosco/';
 
 async function job() {
@@ -25,6 +27,7 @@ async function iniciar(msg, sender) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, responder) => {
+  if (msg && String(msg.tipo || '').startsWith('claro_')) return false; // módulo Claro (claro_bg.js) responde
   (async () => {
     if (msg.tipo === 'iniciar') return responder(await iniciar(msg, sender));
     const j = await job();

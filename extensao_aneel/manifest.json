@@ -1,11 +1,18 @@
 {
   "manifest_version": 3,
-  "name": "SURE — Consulta ANEEL",
-  "version": "1.1.0",
-  "description": "Depois que você entra na Ouvidoria da ANEEL, lê a situação dos protocolos abertos e devolve ao SURE.",
-  "permissions": ["storage"],
-  "host_permissions": ["https://www2.aneel.gov.br/faleconosco/*"],
+  "name": "SURE — ANEEL e Faturas Claro",
+  "version": "1.2.0",
+  "description": "Consulta os protocolos da Ouvidoria da ANEEL e baixa as faturas novas da Claro (portal PDP) para o SURE.",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": [
+    "https://www2.aneel.gov.br/faleconosco/*",
+    "https://clarobps-pdp.azurewebsites.net/*",
+    "https://pdp.clarobpo.com/*",
+    "https://*.blob.core.windows.net/*",
+    "http://127.0.0.1:8801/*"
+  ],
   "background": { "service_worker": "background.js" },
+  "options_page": "opcoes.html",
   "content_scripts": [
     {
       "matches": ["https://sure.app.br/*", "http://sure.app.br/*", "http://179.127.26.37/*", "http://localhost/*"],
@@ -15,6 +22,11 @@
     {
       "matches": ["https://www2.aneel.gov.br/faleconosco/*"],
       "js": ["content_aneel.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://clarobps-pdp.azurewebsites.net/*", "https://pdp.clarobpo.com/*"],
+      "js": ["content_claro.js"],
       "run_at": "document_idle"
     }
   ]

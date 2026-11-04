@@ -30,6 +30,10 @@ func SituacaoTarefaVPS(c *gin.Context) {
 	if c.Query("job") == "agua_sync" {
 		tabela, col = "FATURA_AGUA_DADOS", "criado_em"
 	}
+	if c.Query("job") == "claro_pdp" {
+		situacaoClaro(c, db)
+		return
+	}
 	// só a janela recente (índice/escaneamento menor); "última" além de 120 dias vem da consulta de reserva
 	var ultima, d1, d7, d30 any
 	_ = db.QueryRow(`SELECT DATE_FORMAT(MAX(`+col+`),'%Y-%m-%dT%H:%i:%s'),
@@ -106,7 +110,7 @@ func motivoFalhaPipeline(status, res string) string {
 	case strings.Contains(res, "C:/paddleocr"):
 		mot = append(mot, "o script procurou uma pasta do Windows (C:/paddleocr) que não existe no servidor e parou antes de extrair qualquer fatura — corrigido no deploy de 03/11; rode de novo")
 	case strings.Contains(res, "Character set 'utf8' unsupported"):
-		mot = append(mot, "a biblioteca de conexão MySQL instalada na VPS (mysql-connector-python 8.0.30/8.0.31) tem um defeito e não conecta no banco de origem das faturas (MariaDB) — atualize a biblioteca na VPS e rode de novo")
+		mot = append(mot, "a biblioteca de conexão MySQL instalada na VPS (mysql-connector-python 8.0.30/8.0.31) tem um defeito e não conecta no banco de origem das faturas (MariaDB) — depois do deploy de 04/11 o próprio job atualiza a biblioteca; é só rodar de novo")
 	case reUltimoErroPy.MatchString(res):
 		m := reUltimoErroPy.FindAllStringSubmatch(res, -1)
 		u := m[len(m)-1]

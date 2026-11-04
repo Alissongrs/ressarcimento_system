@@ -216,7 +216,7 @@ function Situacao({ job, recarregar }) {
   ];
   return (
     <div className="rounded border p-3 space-y-2" style={{ borderColor: 'var(--border)' }}>
-      <div className="text-xs uppercase tracking-wide opacity-60">Situação da base {energia ? 'de energia' : 'de água'}</div>
+      <div className="text-xs uppercase tracking-wide opacity-60">Situação da base {energia ? 'de energia' : job === 'claro_pdp' ? 'Claro' : 'de água'}</div>
       <div className="flex flex-wrap gap-2">
         {itens.map((i) => (
           <div key={i.rot} className="rounded border px-3 py-1.5 min-w-[7.5rem]" style={{ borderColor: 'var(--border)' }}>
@@ -247,6 +247,115 @@ function Situacao({ job, recarregar }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Faturas Claro: roda NO NAVEGADOR, pela extensão do SURE (mesma da ANEEL) — abre o portal PDP da Claro,
+// entra (login guardado na extensão + código lido do e-mail pelo backend), baixa os zips novos e entrega ao
+// processamento local (ferramentas/claro_pdp). Aqui só pedimos, acompanhamos e respondemos o pedido de código.
+function CartaoClaro() {
+  const [temExt, setTemExt] = useState(() => document.documentElement.dataset.sureClaroExt === '1');
+  const [rodando, setRodando] = useState(false);
+  const [linhas, setLinhas] = useState([]);
+  const [fim, setFim] = useState(null);
+  const [local, setLocal] = useState(null);
+  const [rec, setRec] = useState(0);
+  const add = (t) => setLinhas((l) => [...l.filter((x) => !(t.chave && x.chave === t.chave)), t].slice(-12));
+
+  useEffect(() => {
+    let cancelado = false;
+    const buscarCodigo = async (desde) => {
+      add({ chave: 'cod', txt: 'Login enviado; esperando o código de segurança chegar por e-mail…' });
+      for (let i = 0; i < 36 && !cancelado; i++) {
+        try {
+          const { data } = await api.get('/claro-pdp/codigo', { params: { desde } });
+          if (data?.codigo) {
+            add({ chave: 'cod', txt: 'Código de segurança recebido do e-mail — entrando no portal.' });
+            window.postMessage({ origem: 'sure-pagina', tipo: 'claro_codigo', codigo: data.codigo }, window.location.origin);
+            return;
+          }
+        } catch (e) {
+          add({ chave: 'cod', txt: `Não consegui ler o e-mail do código: ${e?.response?.data?.error || e.message}` });
+        }
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+      window.postMessage({ origem: 'sure-pagina', tipo: 'claro_codigo', erro: 'não chegou' }, window.location.origin);
+    };
+    const ouvir = (ev) => {
+      if (ev.source !== window) return;
+      const d = ev.data || {};
+      if (d.origem !== 'sure-aneel-ext') return;
+      if (d.tipo === 'pronta' && d.claro) setTemExt(true);
+      else if (d.tipo === 'claro_status') setLocal(d.local || null);
+      else if (d.tipo === 'claro_aberto') add({ txt: `Portal da Claro aberto (último lote já processado: ${d.ultimo || '—'}).` });
+      else if (d.tipo === 'claro_aguardando_login') add({ txt: 'Entre com o login na janela do portal (para ser automático, guarde o login nas opções da extensão).' });
+      else if (d.tipo === 'claro_entrando') add({ chave: 'cod', txt: 'Entrando no portal com o login guardado…' });
+      else if (d.tipo === 'claro_precisa_codigo') buscarCodigo(d.desde);
+      else if (d.tipo === 'claro_lendo') add({ txt: 'Lendo a lista de lotes do portal…' });
+      else if (d.tipo === 'claro_lista') {
+        add({ txt: d.total ? `${d.total} lote(s) novo(s) para baixar (${n0(d.arquivos)} arquivos).` : 'Nenhum lote novo no portal — está tudo carregado.' });
+        if (d.talvezMais) add({ txt: 'Atenção: pode haver mais lotes além dos 100 mais recentes — rode de novo depois.' });
+      } else if (d.tipo === 'claro_progresso') {
+        add({ chave: 'prog', txt: d.concluido ? `Lote ${d.i} de ${d.total} entregue ao processamento (${d.nome}).`
+          : `Baixando lote ${d.i} de ${d.total}: ${d.mb} MB${d.mbTotal ? ` de ${d.mbTotal} MB` : ''}…` });
+      } else if (d.tipo === 'claro_resultado') {
+        setRodando(false);
+        setFim(d);
+        setRec((x) => x + 1);
+      }
+    };
+    window.addEventListener('message', ouvir);
+    window.postMessage({ origem: 'sure-pagina', tipo: 'ping' }, window.location.origin);
+    window.postMessage({ origem: 'sure-pagina', tipo: 'claro_status' }, window.location.origin);
+    return () => { cancelado = true; window.removeEventListener('message', ouvir); };
+  }, []);
+
+  const atualizar = () => {
+    setLinhas([]);
+    setFim(null);
+    setRodando(true);
+    window.postMessage({ origem: 'sure-pagina', tipo: 'claro_atualizar' }, window.location.origin);
+  };
+
+  return (
+    <div className="rounded-lg border p-4 flex flex-col gap-3" style={card}>
+      <div className="flex items-start gap-3">
+        <Server className="w-5 h-5 mt-0.5 opacity-70" strokeWidth={1.5} />
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold">Faturas Claro (portal PDP)</div>
+          <div className="text-sm opacity-75 mt-0.5">
+            Baixa do portal da Claro os lotes (zips) novos, extrai as faturas, sobe os PDFs para o Google Drive e grava no banco.
+            Roda pela extensão do SURE neste navegador; o processamento fica no computador onde o processamento local da Claro está ligado.
+          </div>
+          <div className="text-xs opacity-60 mt-1">
+            manual (pelo botão) · o portal libera 1 lote por dia, por volta das 4h
+            {local && ` · processamento local: ligado, ${local.pending} zip(s) na fila, ${local.freeGB} GB livres`}
+          </div>
+        </div>
+        {rodando && <Badge status="executando" />}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={atualizar} disabled={!temExt || rodando}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium text-white disabled:opacity-50"
+          style={{ background: 'var(--accent, #2563eb)' }}>
+          <Play className="w-4 h-4" /> {rodando ? 'Atualizando…' : 'Atualizar faturas Claro'}
+        </button>
+        {!temExt && <span className="text-xs" style={{ color: '#d97706' }}>Instale/atualize a extensão do SURE (pasta extensao_aneel, versão 1.2) neste navegador.</span>}
+      </div>
+      {(linhas.length > 0 || fim) && (
+        <div className="rounded border p-3 text-sm space-y-1" style={{ borderColor: 'var(--border)' }}>
+          {linhas.map((l, i) => <div key={i}>{l.txt}</div>)}
+          {fim && (fim.erro ? <div style={{ color: '#dc2626' }}><strong>Não concluiu:</strong> {fim.erro}</div> : (
+            <div>
+              <strong>{fim.baixados ? `${fim.baixados} lote(s) entregue(s) ao processamento` : 'Nada novo para baixar'}</strong>
+              {fim.baixados ? ' — a extração, o upload para o Drive e os links rodam em segundo plano no computador (≈1 fatura/s); o número abaixo sobe conforme entram.' : '.'}
+              {fim.erros?.length > 0 && <div style={{ color: '#dc2626' }}>Parou em: {fim.erros.join(' · ')}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+      <Situacao job="claro_pdp" recarregar={rec} />
     </div>
   );
 }
@@ -361,6 +470,7 @@ export default function TarefasSistema() {
             {dados.tarefas.map((t) => (
               <CartaoTarefa key={t.job} t={t} atual={execucoes.find((e) => e.job === t.job)} onRodar={rodar} />
             ))}
+            <CartaoClaro />
           </div>
           <div className="rounded-lg border" style={card}>
             <div className="px-4 py-2 font-semibold border-b" style={{ borderColor: 'var(--border)' }}>Execuções (pela tela e pelo chat)</div>

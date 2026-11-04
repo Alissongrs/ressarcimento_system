@@ -36,6 +36,21 @@ bash "$BUNDLE/backup_sistema.sh" rotativo >> "$LOG" 2>&1 || log "aviso: backup p
 
 # 2) Extração (--skip-processadas = idempotente; sem --workers por sua escolha)
 cd "$IA_DIR" || { log "pasta não encontrada: $IA_DIR"; exit 0; }
+# mysql-connector-python 8.0.30/8.0.31 tem um defeito que impede conectar no banco de origem das faturas
+# (MariaDB 10.4: "Character set 'utf8' unsupported" — reproduzido em 04/11/2026; 8.0.32+ e 9.x conectam).
+# Se for uma dessas, troca uma vez pela 8.4.0 (testada nos dois bancos) só para o usuário que roda o job.
+MYV="$("$PYTHON" -c 'import mysql.connector as m; print(m.__version__)' 2>/dev/null)"
+case "$MYV" in
+  8.0.30|8.0.31)
+    log "mysql-connector-python $MYV tem defeito com o banco de origem — atualizando para 8.4.0…"
+    if "$PYTHON" -m pip install --user --quiet "mysql-connector-python==8.4.0" >> "$LOG" 2>&1; then
+      log "mysql-connector-python agora: $("$PYTHON" -c 'import mysql.connector as m; print(m.__version__)' 2>/dev/null)"
+    else
+      log "aviso: não consegui atualizar o mysql-connector-python (rode na VPS: $PYTHON -m pip install --user mysql-connector-python==8.4.0)"
+    fi
+    ;;
+esac
+
 # pdf_pipeline.py fica FORA do Git (tem as conexões do banco) e a cópia da VPS pode ser a antiga, que
 # grava log e imagens em "C:/paddleocr/..." — no Linux isso é uma pasta relativa a esta; sem ela o script
 # morre na 1ª linha (FileNotFoundError). Criar a pasta resolve sem mexer no script.

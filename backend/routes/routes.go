@@ -754,6 +754,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			adminOnly.GET("/tarefas-vps", handlers.ListarTarefasVPS)
 			adminOnly.GET("/tarefas-vps/qualidade", handlers.QualidadeAmostraTarefas)
 			adminOnly.GET("/tarefas-vps/situacao", handlers.SituacaoTarefaVPS)
+			adminOnly.GET("/claro-pdp/codigo", handlers.CodigoPDPClaroHandler)
 			adminOnly.POST("/tarefas-vps/:job", handlers.RodarTarefaVPS)
 
 			// Histórico global (página /historico)
