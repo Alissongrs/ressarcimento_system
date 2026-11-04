@@ -2621,6 +2621,16 @@ func swaggerRotaPost_api_v1_rules_aplicar_agendadas() {}
 // @Router /api/v1/parametros/aneel/importar-cron [post]
 func swaggerRotaPost_api_v1_parametros_aneel_importar_cron() {}
 
+// @Summary Aplicar regras agua cron
+// @Description Pública. Handler: handlers.AplicarRegrasAguaCron.
+// @Tags Água
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/agua/regras/aplicar [post]
+func swaggerRotaPost_api_v1_agua_regras_aplicar() {}
+
 // @Summary Audio voz
 // @Description Pública. Handler: handlers.AudioVoz.
 // @Tags voz
@@ -2639,6 +2649,16 @@ func swaggerRotaGet_api_v1_voz_audio__id_() {}
 // @Failure 401 {object} map[string]string
 // @Router /api/v1/tarefas-vps [get]
 func swaggerRotaGet_api_v1_tarefas_vps() {}
+
+// @Summary Qualidade amostra tarefas
+// @Description Somente admin. Handler: handlers.QualidadeAmostraTarefas.
+// @Tags tarefas-vps
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/tarefas-vps/qualidade [get]
+func swaggerRotaGet_api_v1_tarefas_vps_qualidade() {}
 
 // @Summary Rodar tarefa vps
 // @Description Somente admin. Handler: handlers.RodarTarefaVPS.

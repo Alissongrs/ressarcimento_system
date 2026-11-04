@@ -1,10 +1,10 @@
 // src/pages/TarefasSistema.jsx
 // Tarefas do sistema (só admin): roda pela tela as tarefas que ficam na VPS — pdf_pipeline (extração das
-// faturas de energia) e agua_sync (faturas de água + regras de água). O botão cria um pedido já aprovado
+// faturas de energia) e agua_sync (faturas de água; as regras de água rodam no backend). O botão cria um pedido já aprovado
 // (o mesmo caminho do chat) e o worker da VPS (worker/run_jobs.py, a cada minuto) executa e devolve o
 // andamento e o resultado aqui. Backend: GET/POST /api/v1/tarefas-vps (handlers/tarefas_handler.go).
 import React, { useCallback, useEffect, useState } from 'react';
-import { Play, RefreshCw, Server } from 'lucide-react';
+import { ClipboardCheck, Play, RefreshCw, Server } from 'lucide-react';
 import api from '../services/apiClient.js';
 
 const card = { borderColor: 'var(--border)', background: 'var(--card)' };
@@ -77,9 +77,125 @@ function Resultado({ texto }) {
   );
 }
 
+const n0 = (v) => (v === undefined || v === null ? '—' : Number(v).toLocaleString('pt-BR'));
+const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+// números da execução (o worker grava; execuções antigas são lidas do texto)
+function Numeros({ m, job }) {
+  if (!m) return null;
+  const itens = [{ rot: job === 'pdf_pipeline' ? 'Faturas extraídas' : 'Faturas novas', v: n0(m.faturas_novas) }];
+  if (m.faturas_erro !== undefined) itens.push({ rot: 'Com erro', v: n0(m.faturas_erro), cor: m.faturas_erro > 0 ? '#dc2626' : undefined });
+  if (job === 'agua_sync') {
+    itens.push({ rot: 'Apontamentos novos', v: n0(m.apontamentos_novos) });
+    if (m.apontamentos_atualizados !== undefined) itens.push({ rot: 'Atualizados', v: n0(m.apontamentos_atualizados) });
+    if (m.ressarcimento_novos) itens.push({ rot: 'Estimado (novos)', v: brl(m.ressarcimento_novos) });
+  } else {
+    itens.push({ rot: 'Apontamentos', v: 'na aba Energia', pequeno: true });
+  }
+  return (
+    <div className="flex flex-wrap gap-2">
+      {itens.map((i) => (
+        <div key={i.rot} className="rounded border px-3 py-1.5 min-w-[7.5rem]" style={{ borderColor: 'var(--border)' }}>
+          <div className="text-[11px] uppercase tracking-wide opacity-60">{i.rot}</div>
+          <div className={i.pequeno ? 'text-sm opacity-70' : 'text-lg font-semibold tabular-nums'} style={i.cor ? { color: i.cor } : undefined}>{i.v}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// qualidade dos dados por amostragem (só leitura)
+function Qualidade({ base }) {
+  const [dias, setDias] = useState(7);
+  const [dados, setDados] = useState(null);
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState('');
+  const sortear = useCallback(async (d) => {
+    setCarregando(true);
+    setErro('');
+    try {
+      const { data } = await api.get('/tarefas-vps/qualidade', { params: { base, dias: d, n: 30 } });
+      setDados(data);
+    } catch (e) {
+      setErro(e?.response?.data?.error || 'Não consegui calcular a amostra.');
+    } finally { setCarregando(false); }
+  }, [base]);
+  useEffect(() => { sortear(dias); }, [sortear, dias]);
+  const cor = (pct) => (pct >= 95 ? '#1f9d6b' : pct >= 80 ? '#d97706' : '#dc2626');
+  return (
+    <div className="rounded border p-3 space-y-3" style={{ borderColor: 'var(--border)' }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <ClipboardCheck className="w-4 h-4 opacity-70" />
+        <span className="font-medium text-sm">Qualidade dos dados (amostra)</span>
+        <select value={dias} onChange={(e) => setDias(Number(e.target.value))} className="ml-auto px-2 py-1 rounded border bg-transparent text-sm" style={{ borderColor: 'var(--border)' }}>
+          {[1, 7, 30, 90].map((d) => <option key={d} value={d}>faturas dos últimos {d} dia{d > 1 ? 's' : ''}</option>)}
+        </select>
+        <button type="button" onClick={() => sortear(dias)} disabled={carregando} className="px-2 py-1 rounded border text-sm disabled:opacity-50" style={{ borderColor: 'var(--border)' }}>
+          {carregando ? 'Sorteando…' : 'Sortear outra amostra'}
+        </button>
+      </div>
+      {erro && <div className="text-sm" style={{ color: '#dc2626' }}>{erro}</div>}
+      {dados && dados.amostra === 0 && <div className="text-sm opacity-70">Nenhuma fatura entrou nesse período.</div>}
+      {dados && dados.amostra > 0 && (
+        <>
+          <div className="text-sm">
+            <span className="text-lg font-semibold tabular-nums" style={{ color: cor(dados.pct_sem_erro) }}>{dados.pct_sem_erro.toLocaleString('pt-BR')}%</span>
+            {' '}da amostra sem dado obrigatório faltando · {dados.amostra} sorteadas de {n0(dados.total_no_periodo)} que entraram desde {String(dados.desde).split('-').reverse().join('/')}
+          </div>
+          <table className="w-full text-xs">
+            <thead><tr className="text-left opacity-60"><th className="py-1">Checagem</th><th className="py-1 w-40">OK na amostra</th><th className="py-1">Por que importa</th></tr></thead>
+            <tbody>
+              {dados.checagens.map((c) => (
+                <tr key={c.id} className="border-t" style={{ borderColor: 'var(--border)' }}>
+                  <td className="py-1 pr-2">{c.rotulo}{c.nivel === 'alerta' && <span className="opacity-60"> (alerta)</span>}</td>
+                  <td className="py-1 pr-2">
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 w-20 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+                        <div className="h-full" style={{ width: `${c.pct_ok}%`, background: c.nivel === 'erro' ? cor(c.pct_ok) : '#6b7280' }} />
+                      </div>
+                      <span className="tabular-nums">{c.pct_ok.toLocaleString('pt-BR')}%</span>
+                      {c.falhas > 0 && <span className="opacity-60">({c.falhas})</span>}
+                    </div>
+                  </td>
+                  <td className="py-1 opacity-70">{c.porque}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {dados.faturas_com_problema.length > 0 && (
+            <details>
+              <summary className="text-sm cursor-pointer">Ver as {dados.faturas_com_problema.length} fatura(s) da amostra com problema</summary>
+              <div className="overflow-x-auto mt-2">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left opacity-60"><th className="py-1">Fatura</th><th>Empresa</th><th>UC</th><th>Origem</th><th>Mês</th><th>Dados</th><th>Problemas</th><th /></tr></thead>
+                  <tbody>
+                    {dados.faturas_com_problema.map((l) => (
+                      <tr key={l.id} className="border-t align-top" style={{ borderColor: 'var(--border)' }}>
+                        <td className="py-1 pr-2 tabular-nums">{l.id}</td>
+                        <td className="pr-2">{l.cod_empresa}</td>
+                        <td className="pr-2">{l.uc || '—'}</td>
+                        <td className="pr-2">{l.origem || '—'}</td>
+                        <td className="pr-2">{l.mes || '—'}</td>
+                        <td className="pr-2 whitespace-nowrap">{l.resumo}</td>
+                        <td className="pr-2">{l.problemas.join(' · ')}</td>
+                        <td>{l.link && /^https?:\/\//.test(l.link) && <a href={l.link} target="_blank" rel="noopener noreferrer" className="underline">fatura</a>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function CartaoTarefa({ t, atual, onRodar }) {
   const [empresas, setEmpresas] = useState('');
   const [enviando, setEnviando] = useState(false);
+  const [verQualidade, setVerQualidade] = useState(false);
   const ocupada = atual && atual.em_andamento;
   const rodar = async () => {
     const msg = t.job === 'pdf_pipeline'
@@ -111,8 +227,14 @@ function CartaoTarefa({ t, atual, onRodar }) {
           style={{ background: 'var(--accent, #2563eb)' }}>
           <Play className="w-4 h-4" /> {ocupada ? 'Em andamento' : enviando ? 'Enviando…' : 'Rodar agora'}
         </button>
+        <button type="button" onClick={() => setVerQualidade((v) => !v)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm" style={{ borderColor: 'var(--border)' }}>
+          <ClipboardCheck className="w-4 h-4" /> {verQualidade ? 'Fechar qualidade' : 'Qualidade dos dados'}
+        </button>
         {atual && <span className="text-xs opacity-60">última: pedido #{atual.id} por {atual.usuario || '—'} em {fmt(atual.criado_em)}</span>}
       </div>
+      {atual && !atual.em_andamento && <Numeros m={atual.metricas} job={t.job} />}
+      {verQualidade && <Qualidade base={t.job === 'pdf_pipeline' ? 'energia' : 'agua'} />}
       {atual && (
         <div className="rounded border p-3" style={{ borderColor: 'var(--border)' }}>
           {atual.em_andamento && atual.status !== 'executando' && !atual.resultado
@@ -182,7 +304,8 @@ export default function TarefasSistema() {
                 <table className="w-full text-sm">
                   <thead><tr className="text-left opacity-70">
                     <th className="px-4 py-2">#</th><th className="px-2 py-2">Tarefa</th><th className="px-2 py-2">Empresas</th>
-                    <th className="px-2 py-2">Quem pediu</th><th className="px-2 py-2">Pedido em</th><th className="px-2 py-2">Terminou em</th><th className="px-2 py-2">Situação</th>
+                    <th className="px-2 py-2">Quem pediu</th><th className="px-2 py-2">Pedido em</th><th className="px-2 py-2">Terminou em</th>
+                    <th className="px-2 py-2 text-right">Faturas</th><th className="px-2 py-2 text-right">Apontamentos</th><th className="px-2 py-2">Situação</th>
                   </tr></thead>
                   <tbody>
                     {execucoes.map((e) => (
@@ -194,9 +317,11 @@ export default function TarefasSistema() {
                           <td className="px-2 py-2">{e.usuario || '—'}</td>
                           <td className="px-2 py-2">{fmt(e.criado_em)}</td>
                           <td className="px-2 py-2">{fmt(e.executado_em)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{n0(e.metricas?.faturas_novas)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{e.job === 'agua_sync' ? n0(e.metricas?.apontamentos_novos) : '—'}</td>
                           <td className="px-2 py-2"><Badge status={e.status} /></td>
                         </tr>
-                        {aberto === e.id && <tr><td colSpan={7} className="px-4 pb-3"><Resultado texto={e.resultado} /></td></tr>}
+                        {aberto === e.id && <tr><td colSpan={9} className="px-4 pb-3"><Resultado texto={e.resultado} /></td></tr>}
                       </React.Fragment>
                     ))}
                   </tbody>

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Regra de ÁGUA "cobrança sem medição" (FA05) — roda DEPOIS do agua_motor, no job de água.
+"""[DESATIVADO 03/11/2026] As regras de água rodam no backend (handlers/agua_regras.go, via worker/regras_agua.py). Mantido só como referência.
+Regra de ÁGUA "cobrança sem medição" (FA05) — roda DEPOIS do agua_motor, no job de água.
 Sinal: a UC cobrada com EXATAMENTE o mesmo m³ por >= 3 faturas seguidas, >= 1,5x o normal da UC (mediana dos
 outros meses, mín. 4) e >= 5 m³ acima — típico de cobrança pela média/estimativa/mínimo com o hidrômetro parado,
 quebrado, imóvel fechado ou leitura impedida. É só o SINAL: a prova (leituras e avisos impressos) é conferida na

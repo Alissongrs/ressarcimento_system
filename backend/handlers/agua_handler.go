@@ -217,10 +217,17 @@ func RejeitarAguaApontamento(c *gin.Context) {
 	// Tabela PRÓPRIA da água (FATURA_AGUA_REJEICOES) — SEM a FK da energia.
 	// Antes gravava em FATURA_REANALISES, cuja FK exige fatura_id em FATURA_DADOS_EXTRAIDOS
 	// (energia); id de água não existe lá → erro 1452. ON DUPLICATE cobre re-rejeição.
-	if _, err := sqlDB.Exec(`INSERT INTO FATURA_AGUA_REJEICOES (id, motivo, usuario_id, usuario_nome, criado_em)
-		VALUES (?, ?, ?, ?, NOW())
-		ON DUPLICATE KEY UPDATE motivo=VALUES(motivo), usuario_id=VALUES(usuario_id), usuario_nome=VALUES(usuario_nome), criado_em=NOW()`,
-		id, truncarIA(body.Motivo, 2000), uid, uname); err != nil {
+	// guarda também a CHAVE (empresa, UC, mês, ficha): o motor de regras de água (agua_regras.go) não recria
+	// um apontamento rejeitado, mesmo depois que a linha sai do snapshot.
+	var kEmp, kUC sql.NullInt64
+	var kMes, kFicha sql.NullString
+	_ = sqlDB.QueryRow("SELECT cod_empresa, cod_uc, DATE_FORMAT(mes_referencia,'%Y-%m-%d'), ficha FROM FATURA_APONTAMENTOS_AGUA_AUDITADOS WHERE id=?", id).Scan(&kEmp, &kUC, &kMes, &kFicha)
+	if _, err := sqlDB.Exec(`INSERT INTO FATURA_AGUA_REJEICOES (id, motivo, usuario_id, usuario_nome, criado_em, cod_empresa, cod_uc, mes_referencia, ficha)
+		VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE motivo=VALUES(motivo), usuario_id=VALUES(usuario_id), usuario_nome=VALUES(usuario_nome), criado_em=NOW(),
+		  cod_empresa=COALESCE(VALUES(cod_empresa), cod_empresa), cod_uc=COALESCE(VALUES(cod_uc), cod_uc),
+		  mes_referencia=COALESCE(VALUES(mes_referencia), mes_referencia), ficha=COALESCE(VALUES(ficha), ficha)`,
+		id, truncarIA(body.Motivo, 2000), uid, uname, kEmp, kUC, kMes, kFicha); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

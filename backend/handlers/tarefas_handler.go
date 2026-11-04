@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -30,7 +31,7 @@ var tarefasVPS = []tarefaDef{
 		"Faz backup do banco, baixa e extrai as faturas novas das empresas (só as ainda não processadas). Os itens de baixa confiança caem nas filas de conferência da Auditoria de Faturas.",
 		"automático: segunda e quinta, 02:00", "pode levar horas", true},
 	{"agua_sync", "Faturas de água (agua_sync)",
-		"Traz da origem só as faturas de água novas (com backup das chaves inseridas) e aplica as regras de água: pico de consumo e cobrança sem medição (aba 💧 Água).",
+		"Traz da origem só as faturas de água novas (com backup das chaves inseridas). Depois o motor de regras do sistema aplica as regras de água — pico de consumo e cobrança sem medição — e os apontamentos novos aparecem na aba 💧 Água.",
 		"automático: terça e quinta, 02:00", "alguns minutos", true},
 }
 
@@ -67,8 +68,9 @@ func ListarTarefasVPS(c *gin.Context) {
 		Status     string `json:"status"`
 		Resultado  string `json:"resultado"`
 		CriadoEm   string `json:"criado_em"`
-		Executado  string `json:"executado_em,omitempty"`
-		EmAndament bool   `json:"em_andamento"`
+		Executado  string         `json:"executado_em,omitempty"`
+		EmAndament bool           `json:"em_andamento"`
+		Metricas   map[string]any `json:"metricas,omitempty"`
 	}
 	hist := []exec{}
 	for rows.Next() {
@@ -83,6 +85,7 @@ func ListarTarefasVPS(c *gin.Context) {
 		_ = json.Unmarshal([]byte(aj), &a)
 		e.Job, e.Empresas = a.Params["job"], a.Params["empresas"]
 		e.EmAndament = e.Status == "aprovado" || e.Status == "executando" || e.Status == "pendente"
+		e.Resultado, e.Metricas = metricasTarefa(e.Job, e.Resultado)
 		hist = append(hist, e)
 	}
 	c.JSON(http.StatusOK, gin.H{"tarefas": tarefasVPS, "execucoes": hist})
@@ -139,6 +142,60 @@ func RodarTarefaVPS(c *gin.Context) {
 	}
 	id, _ := res.LastInsertId()
 	c.JSON(http.StatusOK, gin.H{"ok": true, "id": id})
+}
+
+var (
+	reMetricas      = regexp.MustCompile(`(?s)\s*<!--metricas (\{.*?\})-->`)
+	reMetFaturasAg  = regexp.MustCompile(`(\d+) fatura\(s\) nova\(s\) inserida`)
+	reMetPicoAntigo = regexp.MustCompile(`aplicada: (\d+) apontamento`)
+	reMetSemMedAnt  = regexp.MustCompile(`(\d+) apontamento\(s\) novo\(s\), (\d+) atualizado`)
+	reMetPipeline   = regexp.MustCompile(`concluído\*\* — (\d+) fatura\(s\) extraída\(s\), (\d+) com erro`)
+)
+
+// metricasTarefa — tira do resultado a linha escondida <!--metricas {...}--> que o worker grava (números da
+// execução para a tela). Execuções antigas, sem a linha, têm os números lidos do próprio texto.
+func metricasTarefa(job, res string) (string, map[string]any) {
+	if m := reMetricas.FindStringSubmatch(res); m != nil {
+		var d map[string]any
+		if json.Unmarshal([]byte(m[1]), &d) == nil {
+			return strings.TrimSpace(reMetricas.ReplaceAllString(res, "")), d
+		}
+	}
+	d := map[string]any{}
+	switch job {
+	case "agua_sync":
+		d["base_qualidade"] = "agua"
+		if m := reMetFaturasAg.FindStringSubmatch(res); m != nil {
+			d["faturas_novas"], _ = strconv.Atoi(m[1])
+		}
+		ap := 0
+		achou := false
+		if m := reMetPicoAntigo.FindStringSubmatch(res); m != nil {
+			v, _ := strconv.Atoi(m[1])
+			ap += v
+			achou = true
+		}
+		if m := reMetSemMedAnt.FindStringSubmatch(res); m != nil {
+			v, _ := strconv.Atoi(m[1])
+			u, _ := strconv.Atoi(m[2])
+			ap += v
+			d["apontamentos_atualizados"] = u
+			achou = true
+		}
+		if achou {
+			d["apontamentos_novos"] = ap
+		}
+	case "pdf_pipeline":
+		d["base_qualidade"] = "energia"
+		if m := reMetPipeline.FindStringSubmatch(res); m != nil {
+			d["faturas_novas"], _ = strconv.Atoi(m[1])
+			d["faturas_erro"], _ = strconv.Atoi(m[2])
+		}
+	}
+	if len(d) <= 1 {
+		return res, nil
+	}
+	return res, d
 }
 
 func itoa64(n int64) string {

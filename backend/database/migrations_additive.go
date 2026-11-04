@@ -38,6 +38,11 @@ func runAdditiveMigrations(db *sql.DB) error {
 	addColumnIfMissing(db, "DM_USUARIO", "ms_email", "VARCHAR(255)")
 	// perfil de quem pediu (o worker aplica a regra de valor do solicitante) — 21/10/2026
 	addColumnIfMissing(db, "FT_SOLICITACOES", "perfil_solicitante", "VARCHAR(20)")
+	// rejeição de água guarda a chave do apontamento: o motor de regras de água não o recria (03/11/2026)
+	addColumnIfMissing(db, "FATURA_AGUA_REJEICOES", "cod_empresa", "INT")
+	addColumnIfMissing(db, "FATURA_AGUA_REJEICOES", "cod_uc", "BIGINT")
+	addColumnIfMissing(db, "FATURA_AGUA_REJEICOES", "mes_referencia", "DATE")
+	addColumnIfMissing(db, "FATURA_AGUA_REJEICOES", "ficha", "VARCHAR(8)")
 	// resultado era TEXT (64 KB): a lista da página Protocolos ANEEL (1.200+ linhas) não cabia.
 	// Só alarga (TEXT → MEDIUMTEXT), não mexe em dado; roda uma vez (depois o tipo já é mediumtext).
 	var tipoResultado string

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Motor de desvio de ÁGUA (FA02) — roda DEPOIS do agua_sync, nas faturas recém-inseridas.
+"""[DESATIVADO 03/11/2026] As regras de água rodam no backend (handlers/agua_regras.go, via worker/regras_agua.py). Mantido só como referência.
+Motor de desvio de ÁGUA (FA02) — roda DEPOIS do agua_sync, nas faturas recém-inseridas.
 Pico de consumo: consumo POR DIA de leitura >= 1,8x (80% acima de) o consumo por dia das <=12 faturas anteriores da UC
 (mín. 4 de base). Histórico por (cod_empresa, cod_uc): cod_uc se repete entre empresas (26/10/2026 — antes
 misturava UCs de clientes diferentes e derrubava a média). 'mediana_m3' guarda o consumo esperado para os

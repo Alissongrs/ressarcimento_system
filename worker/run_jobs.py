@@ -13,7 +13,8 @@ mesmo pedido rodar_job já aprovado.
 
 Whitelist de jobs (só estes rodam):
   agua_sync    — worker/jobs/agua_sync.py apply [--empresas …]: insere só as faturas de água novas
-                 (backup das chaves inseridas no próprio script) + regras de água (pico e sem medição).
+                 (backup das chaves inseridas no próprio script); depois as regras de água rodam no BACKEND
+                 (worker/regras_agua.py → POST /api/v1/agua/regras/aplicar).
   pdf_pipeline — worker/job_pdf_pipeline.sh (backup do banco + extração; o mesmo do cron seg/qui 02:00).
                  Pode levar horas: roda SOLTO em segundo plano (não trava esta fila) e, a cada minuto,
                  o andamento (fim do log) é gravado no pedido; ao terminar, o resumo vira o resultado.
@@ -31,6 +32,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from has_work import ler_dsn  # noqa: E402
+import regras_agua  # noqa: E402
 
 PY = os.environ.get("SURE_PYTHON", sys.executable or "python3")
 JOBS = {
@@ -165,6 +167,8 @@ def resumo_pipeline(txt, terminou):
         andamento = f"fatura {prog[-1][0]} de {prog[-1][1]} da empresa atual" if prog else "preparando (backup do banco)"
         out.append(f"⏳ **pdf_pipeline em andamento** — {andamento}; até agora {ok} ok / {erros} com erro.")
     out.append("\n```\n" + "\n".join(l[:200] for l in linhas[-25:]) + "\n```")
+    if terminou:
+        out.append(metricas({"faturas_novas": ok, "faturas_erro": erros, "faturas_total": total, "base_qualidade": "energia"}))
     return "\n".join(out)
 
 
@@ -215,6 +219,7 @@ def rodar(sid, usuario, acao_json):
     if job in FUNDO:
         return "executando", iniciar_fundo(sid, job, script, params)
     env = dict(os.environ, PYTHONUTF8="1")
+    desde = time.strftime("%Y-%m-%d")  # faturas que o sync inserir a partir de agora (relógio da VPS, o mesmo do sync)
     args = [PY, script, "apply"]
     empresas = params.get("empresas", "")
     if empresas:
@@ -229,55 +234,22 @@ def rodar(sid, usuario, acao_json):
         return "erro", f"A tarefa {job} falhou (código {p.returncode}).\n\n```\n{saida[-1500:]}\n```"
     texto = resumo_agua(saida, empresas) if job == "agua_sync" else None
     if job == "agua_sync":
-        texto = (texto or "") + motor_agua(empresas, env) + sem_medicao_agua(empresas, env)
+        # apontamentos: motor do BACKEND (desde 03/11/2026) — o worker não calcula mais regra de água
+        r = regras_agua.aplicar(desde, empresas, "apply")
+        texto = (texto or "") + regras_agua.texto_resumo(r)
+        m = re.search(r"OK\.\s*(\d+) faturas", saida)
+        nf = int(m.group(1)) if m else (0 if re.search(r"NOVAS=0\b", saida) else None)
+        texto += metricas({"faturas_novas": nf,
+                           "apontamentos_novos": None if r.get("erro") else (r.get("pico_novos", 0) + r.get("sem_medicao_novos", 0)),
+                           "apontamentos_atualizados": None if r.get("erro") else r.get("sem_medicao_atualizados", 0),
+                           "ressarcimento_novos": r.get("ressarcimento_novos"),
+                           "base_qualidade": "agua", "desde": desde})
     return "executado", texto or f"✅ Tarefa {job} concluída.\n\n```\n{saida[-1500:]}\n```"
 
 
-def motor_agua(empresas, env):
-    """Depois do sync: aplica a regra de PICO de consumo (FA02) nas faturas inseridas hoje
-    → apontamentos na aba 💧 Água (/analise-desvio)."""
-    args = [PY, os.path.join(HERE, "jobs", "agua_motor.py"), "apply"]
-    if empresas:
-        args += ["--empresas", empresas]
-    try:
-        p = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=1800, env=env, cwd=os.path.join(HERE, "jobs"))
-    except subprocess.TimeoutExpired:
-        return "\n\n⚠️ Regra de pico de consumo: passou de 30 min e foi interrompida."
-    out = (p.stdout or "") + "\n" + (p.stderr or "")
-    if p.returncode != 0:
-        return f"\n\n⚠️ Regra de pico de consumo falhou (código {p.returncode}).\n```\n{out[-800:]}\n```"
-    n = re.search(r"OK\.\s*(\d+) apontamentos", out)
-    qtd = n.group(1) if n else "0"
-    linhas = [f"\n\n🔎 **Regra de pico de consumo (consumo por dia ≥ 1,8× (80% acima) da média das últimas 12 faturas) aplicada: "
-              f"{qtd} apontamento(s)** na aba 💧 Água da Análise de Desvio."]
-    rs = re.search(r"ressarcimento estimado total: R\$ ([\d,.]+)", out)
-    por = re.search(r"apontamentos por empresa:\s*(\{[^}]*\})", out)
-    if qtd != "0" and rs:
-        valor = rs.group(1).replace(",", "X").replace(".", ",").replace("X", ".")
-        linhas.append(f"- Ressarcimento estimado: R$ {valor}")
-    if qtd != "0" and por:
-        linhas.append(f"- Por empresa: {por.group(1)}")
-    return "\n".join(linhas)
-
-
-def sem_medicao_agua(empresas, env):
-    """Regra de COBRANÇA SEM MEDIÇÃO (FA05) — a mesma do agendamento automático (job_agua.sh)."""
-    args = [PY, os.path.join(HERE, "jobs", "agua_sem_medicao.py"), "apply"]
-    if empresas:
-        args += ["--empresas", empresas]
-    try:
-        p = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=1800, env=env, cwd=os.path.join(HERE, "jobs"))
-    except subprocess.TimeoutExpired:
-        return "\n\n⚠️ Regra de cobrança sem medição: passou de 30 min e foi interrompida."
-    out = (p.stdout or "") + "\n" + (p.stderr or "")
-    if p.returncode != 0:
-        return f"\n\n⚠️ Regra de cobrança sem medição falhou (código {p.returncode}).\n```\n{out[-800:]}\n```"
-    m = re.search(r"OK\.\s*(\d+) inseridos, (\d+) atualizados", out)
-    if m:
-        return f"\n- Cobrança sem medição (mesmo m³ ≥ 3 meses): {m.group(1)} apontamento(s) novo(s), {m.group(2)} atualizado(s)."
-    return "\n- Cobrança sem medição: nada novo."
+def metricas(d):
+    """Linha escondida com os números da execução — a tela Tarefas lê (e não mostra o texto)."""
+    return "\n\n<!--metricas " + json.dumps({k: v for k, v in d.items() if v is not None}, ensure_ascii=False) + "-->"
 
 
 def main():

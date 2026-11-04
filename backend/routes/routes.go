@@ -738,6 +738,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 		apiV1.POST("/rules/aplicar-agendadas", handlers.AplicarRegrasAgendadas)
 		// Importação diária das tarifas/bandeiras da ANEEL (cron da VPS, mesmo X-Cron-Token)
 		apiV1.POST("/parametros/aneel/importar-cron", handlers.ImportarANEELCron)
+		// Regras de água (pico FA02 e sem medição FA05) — o worker chama depois do agua_sync (mesmo X-Cron-Token)
+		apiV1.POST("/agua/regras/aplicar", handlers.AplicarRegrasAguaCron)
 		// Áudio da voz do chat por id aleatório e temporário (5 min). Público porque o elemento
 		// <audio> não envia o header Authorization; quem gera o áudio é a rota autenticada /voz/falar.
 		apiV1.GET("/voz/audio/:id", handlers.AudioVoz)
@@ -750,6 +752,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 		{
 			// Tarefas da VPS pela tela (página /tarefas): pdf_pipeline e agua_sync → fila do worker/run_jobs.py
 			adminOnly.GET("/tarefas-vps", handlers.ListarTarefasVPS)
+			adminOnly.GET("/tarefas-vps/qualidade", handlers.QualidadeAmostraTarefas)
 			adminOnly.POST("/tarefas-vps/:job", handlers.RodarTarefaVPS)
 
 			// Histórico global (página /historico)

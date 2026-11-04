@@ -22,6 +22,8 @@ flock -n 7 || { log "já em execução — pulando."; exit 0; }
 
 cd "$AGUA_DIR" || { log "pasta não encontrada: $AGUA_DIR"; exit 0; }
 
+DESDE="$(date +%F)"  # faturas inseridas a partir de agora
+
 # 1) prévia (não grava nada)
 log "água: prévia (dry)…"
 PYTHONUTF8=1 "$PYTHON" agua_sync.py dry >> "$LOG" 2>&1
@@ -32,13 +34,9 @@ PYTHONUTF8=1 "$PYTHON" agua_sync.py apply >> "$LOG" 2>&1
 RC=$?
 log "água terminou (rc=$RC)."
 
-# 3) regra de PICO de consumo (FA02) nas faturas inseridas hoje → aba 💧 Água do front
-log "água: regra de pico de consumo (agua_motor apply)…"
-PYTHONUTF8=1 "$PYTHON" "$BUNDLE/jobs/agua_motor.py" apply >> "$LOG" 2>&1
-log "motor de água terminou (rc=$?)."
-
-# 4) regra de COBRANÇA SEM MEDIÇÃO (FA05): mesmo m³ cobrado ≥3 meses seguidos, acima de 1,5× o normal
-log "água: cobrança sem medição (agua_sem_medicao apply)…"
-PYTHONUTF8=1 "$PYTHON" "$BUNDLE/jobs/agua_sem_medicao.py" apply >> "$LOG" 2>&1
-log "cobrança sem medição terminou (rc=$?)."
+# 3) regras de água (pico FA02 + cobrança sem medição FA05) — motor do BACKEND desde 03/11/2026
+#    (jobs/agua_motor.py e jobs/agua_sem_medicao.py não rodam mais). O backend grava com backup.
+log "água: regras de água no backend (pico + sem medição)…"
+PYTHONUTF8=1 "$PYTHON" "$BUNDLE/regras_agua.py" apply --desde "$DESDE" >> "$LOG" 2>&1
+log "regras de água terminaram (rc=$?)."
 exit 0
