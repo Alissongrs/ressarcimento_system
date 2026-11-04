@@ -113,6 +113,8 @@ frontend/public/flowtory-craft-main/
 # Outros
 # ========================================
 *.zip
+# o zip da extensão do SURE é servido pelo site (botão Baixar a extensão) — precisa ir no deploy
+!frontend/public/extensao_sure.zip
 .mcp.json
 ressarcimento_system_old_*/
 FATURA_DADOS_EXTRAIDOS_LOG.json

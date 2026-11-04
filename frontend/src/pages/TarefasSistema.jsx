@@ -342,8 +342,7 @@ function CartaoClaro() {
           style={{ background: 'var(--accent, #2563eb)' }}>
           <Play className="w-4 h-4" /> {rodando ? 'Atualizando…' : 'Atualizar faturas Claro'}
         </button>
-        <BaixarExtensao />
-        {!temExt && <span className="text-xs" style={{ color: '#d97706' }}>Instale ou atualize a extensão do SURE (versão 1.2) neste navegador para usar o botão.</span>}
+        {!temExt && <span className="text-xs" style={{ color: '#d97706' }}>Instale ou atualize a extensão do SURE (versão 1.2) neste navegador para usar o botão — "Baixar a extensão do SURE", no topo da página.</span>}
       </div>
       {(linhas.length > 0 || fim) && (
         <div className="rounded border p-3 text-sm space-y-1" style={{ borderColor: 'var(--border)' }}>
@@ -456,12 +455,13 @@ export default function TarefasSistema() {
 
   return (
     <div className="w-full p-4 md:p-6 space-y-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-start gap-3">
         <div>
           <h1 className="text-xl font-semibold">Tarefas do sistema</h1>
           <div className="text-sm opacity-70">Roda no servidor (VPS) as rotinas de carga de faturas, sem esperar o agendamento automático. O andamento e o resultado aparecem aqui.</div>
         </div>
-        <button type="button" onClick={carregar} className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm" style={{ borderColor: 'var(--border)' }}>
+        <div className="ml-auto"><BaixarExtensao /></div>
+        <button type="button" onClick={carregar} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm" style={{ borderColor: 'var(--border)' }}>
           <RefreshCw className="w-4 h-4" /> Atualizar
         </button>
       </div>
