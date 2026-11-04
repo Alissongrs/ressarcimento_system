@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Landmark, RefreshCw, Search, Lock } from 'lucide-react';
 import api from '../services/apiClient.js';
+import BaixarExtensao from '../components/BaixarExtensao.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatarProtocolo, protocoloValido, SITUACOES_ANEEL } from '../utils/protocolosAneel.js';
 import './protocolosAneel.css';
@@ -298,17 +299,21 @@ function ConsultaSite({ isAdmin, onFim, onErro }) {
           Reler todos
         </button>
       )}
+      {!ajuda && <BaixarExtensao />}
       {estado && <span className="text-xs opacity-80">{estado}</span>}
       {ajuda && (
         <div className="w-full text-sm rounded-xl border px-3 py-2" style={card}>
-          <b>Falta instalar a extensão "SURE — Consulta ANEEL" neste Chrome</b> (uma vez só):
+          <b>Falta instalar a extensão do SURE neste Chrome</b> (uma vez só):
           <ol className="list-decimal ml-5 mt-1 space-y-0.5">
-            <li>Peça a pasta <code>extensao_aneel</code> ao administrador e salve no computador.</li>
+            <li>Baixe a extensão (botão abaixo) e descompacte no computador.</li>
             <li>Abra <code>chrome://extensions</code> e ligue o <b>Modo do desenvolvedor</b> (canto superior direito).</li>
-            <li>Clique em <b>Carregar sem compactação</b> e escolha a pasta <code>extensao_aneel</code>.</li>
+            <li>Clique em <b>Carregar sem compactação</b> e escolha a pasta <code>extensao_sure</code>.</li>
             <li>Recarregue esta página e clique de novo em <b>Consultar no site da ANEEL</b>.</li>
           </ol>
-          <button className="pa-btn mt-2" onClick={() => setAjuda(false)}>Fechar</button>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <BaixarExtensao />
+            <button className="pa-btn" onClick={() => setAjuda(false)}>Fechar</button>
+          </div>
         </div>
       )}
     </>

@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ClipboardCheck, Play, RefreshCw, Server } from 'lucide-react';
 import api from '../services/apiClient.js';
+import BaixarExtensao from '../components/BaixarExtensao.jsx';
 
 const card = { borderColor: 'var(--border)', background: 'var(--card)' };
 
@@ -341,7 +342,8 @@ function CartaoClaro() {
           style={{ background: 'var(--accent, #2563eb)' }}>
           <Play className="w-4 h-4" /> {rodando ? 'Atualizando…' : 'Atualizar faturas Claro'}
         </button>
-        {!temExt && <span className="text-xs" style={{ color: '#d97706' }}>Instale/atualize a extensão do SURE (pasta extensao_aneel, versão 1.2) neste navegador.</span>}
+        <BaixarExtensao />
+        {!temExt && <span className="text-xs" style={{ color: '#d97706' }}>Instale ou atualize a extensão do SURE (versão 1.2) neste navegador para usar o botão.</span>}
       </div>
       {(linhas.length > 0 || fim) && (
         <div className="rounded border p-3 text-sm space-y-1" style={{ borderColor: 'var(--border)' }}>
