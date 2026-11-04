@@ -753,6 +753,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			// Tarefas da VPS pela tela (página /tarefas): pdf_pipeline e agua_sync → fila do worker/run_jobs.py
 			adminOnly.GET("/tarefas-vps", handlers.ListarTarefasVPS)
 			adminOnly.GET("/tarefas-vps/qualidade", handlers.QualidadeAmostraTarefas)
+			adminOnly.GET("/tarefas-vps/situacao", handlers.SituacaoTarefaVPS)
 			adminOnly.POST("/tarefas-vps/:job", handlers.RodarTarefaVPS)
 
 			// Histórico global (página /historico)

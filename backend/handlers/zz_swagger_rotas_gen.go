@@ -2660,6 +2660,16 @@ func swaggerRotaGet_api_v1_tarefas_vps() {}
 // @Router /api/v1/tarefas-vps/qualidade [get]
 func swaggerRotaGet_api_v1_tarefas_vps_qualidade() {}
 
+// @Summary Situacao tarefa vps
+// @Description Somente admin. Handler: handlers.SituacaoTarefaVPS.
+// @Tags tarefas-vps
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/tarefas-vps/situacao [get]
+func swaggerRotaGet_api_v1_tarefas_vps_situacao() {}
+
 // @Summary Rodar tarefa vps
 // @Description Somente admin. Handler: handlers.RodarTarefaVPS.
 // @Tags tarefas-vps

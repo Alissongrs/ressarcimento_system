@@ -71,6 +71,7 @@ func ListarTarefasVPS(c *gin.Context) {
 		Executado  string         `json:"executado_em,omitempty"`
 		EmAndament bool           `json:"em_andamento"`
 		Metricas   map[string]any `json:"metricas,omitempty"`
+		Motivo     string         `json:"motivo_falha,omitempty"`
 	}
 	hist := []exec{}
 	for rows.Next() {
@@ -86,6 +87,13 @@ func ListarTarefasVPS(c *gin.Context) {
 		e.Job, e.Empresas = a.Params["job"], a.Params["empresas"]
 		e.EmAndament = e.Status == "aprovado" || e.Status == "executando" || e.Status == "pendente"
 		e.Resultado, e.Metricas = metricasTarefa(e.Job, e.Resultado)
+		if e.Job == "pdf_pipeline" && !e.EmAndament {
+			if e.Motivo = motivoFalhaPipeline(e.Status, e.Resultado); e.Motivo != "" {
+				e.Status = "erro" // execuções antigas gravaram "concluído (código 1)" como sucesso
+				e.Resultado = strings.Replace(e.Resultado, "✅ **pdf_pipeline concluído**", "❌ **pdf_pipeline falhou**", 1)
+				e.Resultado = strings.Replace(e.Resultado, "Os itens de baixa confiança estão nas filas de conferência da Auditoria de Faturas.", "", 1)
+			}
+		}
 		hist = append(hist, e)
 	}
 	c.JSON(http.StatusOK, gin.H{"tarefas": tarefasVPS, "execucoes": hist})

@@ -48,7 +48,12 @@ function Resultado({ texto }) {
     <div className="text-sm space-y-2">
       {partes.map((p, i) => {
         if (i % 2 === 1) {
-          return <pre key={i} className="text-xs p-2 rounded overflow-x-auto max-h-72" style={{ background: 'var(--bg-subtle, rgba(127,127,127,.08))' }}>{p.replace(/^\n/, '')}</pre>;
+          return (
+            <details key={i}>
+              <summary className="text-xs cursor-pointer opacity-70">Ver log técnico</summary>
+              <pre className="text-xs p-2 mt-1 rounded overflow-x-auto max-h-72" style={{ background: 'var(--bg-subtle, rgba(127,127,127,.08))' }}>{p.replace(/^\n/, '')}</pre>
+            </details>
+          );
         }
         const linhas = p.split('\n');
         const blocos = [];
@@ -192,6 +197,60 @@ function Qualidade({ base }) {
   );
 }
 
+// situação da base: quando entrou a última fatura e quantas entraram (só leitura)
+function Situacao({ job, recarregar }) {
+  const [s, setS] = useState(null);
+  const [verEmp, setVerEmp] = useState(false);
+  useEffect(() => {
+    api.get('/tarefas-vps/situacao', { params: { job } }).then(({ data }) => setS(data)).catch(() => setS(null));
+  }, [job, recarregar]);
+  if (!s) return null;
+  const parado = s.dias_sem_entrar >= 7;
+  const quando = s.dias_sem_entrar < 0 ? '—' : s.dias_sem_entrar === 0 ? 'hoje' : s.dias_sem_entrar === 1 ? 'ontem' : `há ${s.dias_sem_entrar} dias`;
+  const energia = job === 'pdf_pipeline';
+  const itens = [
+    { rot: energia ? 'Última fatura extraída' : 'Última fatura recebida', v: `${fmt(s.ultima).split(' ')[0]} (${quando})`, cor: parado ? '#d97706' : undefined },
+    { rot: 'Últimas 24h', v: n0(s.d1) },
+    { rot: 'Últimos 7 dias', v: n0(s.d7) },
+    { rot: 'Últimos 30 dias', v: n0(s.d30) },
+  ];
+  return (
+    <div className="rounded border p-3 space-y-2" style={{ borderColor: 'var(--border)' }}>
+      <div className="text-xs uppercase tracking-wide opacity-60">Situação da base {energia ? 'de energia' : 'de água'}</div>
+      <div className="flex flex-wrap gap-2">
+        {itens.map((i) => (
+          <div key={i.rot} className="rounded border px-3 py-1.5 min-w-[7.5rem]" style={{ borderColor: 'var(--border)' }}>
+            <div className="text-[11px] uppercase tracking-wide opacity-60">{i.rot}</div>
+            <div className="text-sm font-semibold tabular-nums" style={i.cor ? { color: i.cor } : undefined}>{i.v}</div>
+          </div>
+        ))}
+      </div>
+      {parado && <div className="text-xs" style={{ color: '#d97706' }}>Nenhuma fatura {energia ? 'extraída' : 'nova'} {quando}.</div>}
+      {s.por_empresa_30d?.length > 0 && (
+        <div>
+          <button type="button" onClick={() => setVerEmp((v) => !v)} className="text-xs underline opacity-70">
+            {verEmp ? 'Esconder por empresa' : 'Ver por empresa (30 dias)'}
+          </button>
+          {verEmp && (
+            <table className="text-xs mt-1">
+              <thead><tr className="text-left opacity-60"><th className="pr-4 py-1">Empresa</th><th className="pr-4 text-right">Faturas</th><th>Última</th></tr></thead>
+              <tbody>
+                {s.por_empresa_30d.map((e) => (
+                  <tr key={e.cod_empresa} className="border-t" style={{ borderColor: 'var(--border)' }}>
+                    <td className="pr-4 py-0.5">{e.cod_empresa || 'sem código'}{e.nome ? ` · ${e.nome}` : ''}</td>
+                    <td className="pr-4 text-right tabular-nums">{n0(e.n30)}</td>
+                    <td>{fmt(e.ultima)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CartaoTarefa({ t, atual, onRodar }) {
   const [empresas, setEmpresas] = useState('');
   const [enviando, setEnviando] = useState(false);
@@ -233,7 +292,13 @@ function CartaoTarefa({ t, atual, onRodar }) {
         </button>
         {atual && <span className="text-xs opacity-60">última: pedido #{atual.id} por {atual.usuario || '—'} em {fmt(atual.criado_em)}</span>}
       </div>
-      {atual && !atual.em_andamento && <Numeros m={atual.metricas} job={t.job} />}
+      {atual && !atual.em_andamento && atual.motivo_falha && (
+        <div className="rounded border px-3 py-2 text-sm" style={{ borderColor: '#dc2626' }}>
+          <strong style={{ color: '#dc2626' }}>A última execução falhou:</strong> {atual.motivo_falha}.
+        </div>
+      )}
+      {atual && !atual.em_andamento && !atual.motivo_falha && <Numeros m={atual.metricas} job={t.job} />}
+      <Situacao job={t.job} recarregar={atual ? `${atual.id}-${atual.status}` : ''} />
       {verQualidade && <Qualidade base={t.job === 'pdf_pipeline' ? 'energia' : 'agua'} />}
       {atual && (
         <div className="rounded border p-3" style={{ borderColor: 'var(--border)' }}>
