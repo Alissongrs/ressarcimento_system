@@ -105,6 +105,8 @@ func motivoFalhaPipeline(status, res string) string {
 	switch {
 	case strings.Contains(res, "C:/paddleocr"):
 		mot = append(mot, "o script procurou uma pasta do Windows (C:/paddleocr) que não existe no servidor e parou antes de extrair qualquer fatura — corrigido no deploy de 03/11; rode de novo")
+	case strings.Contains(res, "Character set 'utf8' unsupported"):
+		mot = append(mot, "a biblioteca de conexão MySQL instalada na VPS (mysql-connector-python 8.0.30/8.0.31) tem um defeito e não conecta no banco de origem das faturas (MariaDB) — atualize a biblioteca na VPS e rode de novo")
 	case reUltimoErroPy.MatchString(res):
 		m := reUltimoErroPy.FindAllStringSubmatch(res, -1)
 		u := m[len(m)-1]

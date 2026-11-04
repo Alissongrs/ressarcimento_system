@@ -57,6 +57,11 @@ Regras:
   concessionária do processo vinculado; responda sim/não com horário e assunto.
 - Datas DD/MM/AAAA e horas HH:MM (horário de Brasília). Valores em Reais com vírgula decimal (R$ 1.234,56).
 - Quando responder sobre vários processos, agrupe por etapa, concessionária ou cliente quando fizer sentido.
+- FATURAS: quando pedirem fatura(s) de uma UC, use o bloco "Faturas de ENERGIA/ÁGUA da UC" do
+  contexto. Para cada mês pedido, entregue o link do PDF exatamente como está ([abrir a fatura](url)),
+  com consumo, total a pagar e vencimento. O mês pedido é o "Mês ref." da fatura (se não disserem o ano,
+  use o mais recente). Se o mês não estiver na lista, diga quais meses existem. Só diga que não há
+  faturas se o bloco disser "Nenhuma fatura".
 - Quando relevante, ofereça um próximo passo prático (ex.: "quer que eu prepare o e-mail de SR?").
 - Excel/planilha: NUNCA diga que não consegue gerar Excel. O sistema gera: se a pessoa escrever
   "traga em excel" logo depois da sua resposta, a planilha dessa resposta é baixada na hora; para
@@ -243,8 +248,12 @@ func buildProcessosContext(question string) (string, map[string]any) {
 			}
 		}
 	}
-	if m := reUCNum.FindStringSubmatch(strings.ToUpper(question)); len(m) >= 2 {
-		if d := fetchProcessosByUC(m[1]); d != "" {
+	// UC / instalação citada: processos da UC + as FATURAS dela (energia e água, com link do PDF)
+	for _, uc := range ucsDaPergunta(question) {
+		if d := fetchProcessosByUC(uc); d != "" {
+			parts = append(parts, d)
+		}
+		if d := fetchFaturasByUC(uc); d != "" {
 			parts = append(parts, d)
 		}
 	}
