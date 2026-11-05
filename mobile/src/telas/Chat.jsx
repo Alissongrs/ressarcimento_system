@@ -115,18 +115,18 @@ export default function Chat({ usuario, irPara }) {
       </div>
       <form className="chat-barra" onSubmit={(e) => { e.preventDefault(); enviar(); }}>
         <button type="button" className={`btn-mic${ouvindo ? ' on' : ''}`} onClick={microfone} aria-label={ouvindo ? 'Parar o ditado' : 'Ditar'}>
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
         </button>
         <textarea ref={taRef} rows={1} value={texto} onChange={(e) => setTexto(e.target.value)}
           placeholder={ouvindo ? 'Ouvindo…' : 'Mensagem'}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); enviar(); } }} />
         {texto.trim() ? (
           <button type="submit" className="btn-env" disabled={busy} aria-label="Enviar">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M3 20l18-8L3 4v6l12 2-12 2z" /></svg>
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M3 20l18-8L3 4v6l12 2-12 2z" /></svg>
           </button>
         ) : (
           <button type="button" className="btn-env" onClick={() => setVoz(true)} aria-label="Conversar por voz">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" /></svg>
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" /></svg>
           </button>
         )}
       </form>

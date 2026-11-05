@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
@@ -59,42 +60,86 @@ func VozTranscreverOpenAI(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "não consegui ler o áudio"})
 		return
 	}
-	defer f.Close()
-
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	_ = w.WriteField("model", vozEnv("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe"))
-	_ = w.WriteField("language", "pt")
-	_ = w.WriteField("prompt", vozPromptSTT)
-	_ = w.WriteField("response_format", "json")
-	part, _ := w.CreateFormFile("file", nome)
-	if _, err := io.Copy(part, f); err != nil {
+	audio, err := io.ReadAll(f)
+	f.Close()
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "não consegui ler o áudio"})
 		return
 	}
-	_ = w.Close()
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, openAIBase()+"/v1/audio/transcriptions", &buf)
-	req.Header.Set("Authorization", "Bearer "+openAIKey())
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "transcrição indisponível agora"})
-		return
+	// modelo configurado primeiro; se a chave não tiver acesso a ele (403/404), tenta o próximo
+	modelos := vozModelos(vozEnv("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe"), "gpt-4o-transcribe", "whisper-1")
+	ultimoErro := ""
+	for _, modelo := range modelos {
+		var buf bytes.Buffer
+		w := multipart.NewWriter(&buf)
+		_ = w.WriteField("model", modelo)
+		_ = w.WriteField("language", "pt")
+		_ = w.WriteField("prompt", vozPromptSTT)
+		_ = w.WriteField("response_format", "json")
+		part, _ := w.CreateFormFile("file", nome)
+		_, _ = part.Write(audio)
+		_ = w.Close()
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, openAIBase()+"/v1/audio/transcriptions", &buf)
+		req.Header.Set("Authorization", "Bearer "+openAIKey())
+		req.Header.Set("Content-Type", w.FormDataContentType())
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			cancel()
+			c.JSON(http.StatusBadGateway, gin.H{"error": "transcrição indisponível agora"})
+			return
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		cancel()
+		if resp.StatusCode == http.StatusOK {
+			var out struct {
+				Text string `json:"text"`
+			}
+			_ = json.Unmarshal(body, &out)
+			c.JSON(http.StatusOK, gin.H{"texto": strings.TrimSpace(out.Text), "modelo": modelo})
+			return
+		}
+		ultimoErro = "a transcrição falhou (OpenAI " + resp.Status + ", modelo " + modelo + ")" + vozMotivo(body)
+		log.Printf("[voz] transcrição %s: %s", modelo, ultimoErro)
+		if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusNotFound {
+			break
+		}
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode != http.StatusOK {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "a transcrição falhou (OpenAI " + resp.Status + ")"})
-		return
+	c.JSON(http.StatusBadGateway, gin.H{"error": ultimoErro})
+}
+
+// lista sem repetidos, na ordem
+func vozModelos(ms ...string) []string {
+	var out []string
+	visto := map[string]bool{}
+	for _, m := range ms {
+		m = strings.TrimSpace(m)
+		if m != "" && !visto[m] {
+			visto[m] = true
+			out = append(out, m)
+		}
 	}
-	var out struct {
-		Text string `json:"text"`
+	return out
+}
+
+// motivo que a OpenAI devolve no erro (ex.: "Project does not have access to model …")
+func vozMotivo(body []byte) string {
+	var e struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
-	_ = json.Unmarshal(body, &out)
-	c.JSON(http.StatusOK, gin.H{"texto": strings.TrimSpace(out.Text)})
+	if json.Unmarshal(body, &e) != nil || strings.TrimSpace(e.Error.Message) == "" {
+		return ""
+	}
+	m := strings.TrimSpace(e.Error.Message)
+	if utf8.RuneCountInString(m) > 220 {
+		m = string([]rune(m)[:220]) + "…"
+	}
+	return ": " + m
 }
 
 // POST /voz/openai/falar
@@ -114,28 +159,45 @@ func VozFalarOpenAI(c *gin.Context) {
 	if utf8.RuneCountInString(txt) > 3000 {
 		txt = string([]rune(txt)[:3000])
 	}
-	payload, _ := json.Marshal(map[string]any{
-		"model":           vozEnv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts"),
-		"voice":           vozEnv("OPENAI_TTS_VOICE", "coral"),
-		"input":           txt,
-		"instructions":    "Fale em português do Brasil, com sotaque brasileiro natural, tom cordial e profissional de uma colega de trabalho, ritmo de conversa (nem lento nem apressado).",
-		"response_format": "mp3",
-	})
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, openAIBase()+"/v1/audio/speech", bytes.NewReader(payload))
-	req.Header.Set("Authorization", "Bearer "+openAIKey())
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "voz indisponível agora"})
-		return
+	ultimoErro := ""
+	for _, modelo := range vozModelos(vozEnv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts"), "tts-1") {
+		corpo := map[string]any{
+			"model":           modelo,
+			"voice":           vozEnv("OPENAI_TTS_VOICE", "coral"),
+			"input":           txt,
+			"response_format": "mp3",
+		}
+		if strings.HasPrefix(modelo, "gpt-") {
+			corpo["instructions"] = "Fale em português do Brasil, com sotaque brasileiro natural, tom cordial e profissional de uma colega de trabalho, ritmo de conversa (nem lento nem apressado)."
+		} else if corpo["voice"] == "coral" {
+			corpo["voice"] = "nova" // tts-1 não tem a coral
+		}
+		payload, _ := json.Marshal(corpo)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, openAIBase()+"/v1/audio/speech", bytes.NewReader(payload))
+		req.Header.Set("Authorization", "Bearer "+openAIKey())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			cancel()
+			c.JSON(http.StatusBadGateway, gin.H{"error": "voz indisponível agora"})
+			return
+		}
+		if resp.StatusCode == http.StatusOK {
+			defer cancel()
+			defer resp.Body.Close()
+			c.Header("Cache-Control", "no-store")
+			c.DataFromReader(http.StatusOK, -1, "audio/mpeg", io.LimitReader(resp.Body, 20<<20), nil)
+			return
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		cancel()
+		ultimoErro = "a voz falhou (OpenAI " + resp.Status + ", modelo " + modelo + ")" + vozMotivo(body)
+		log.Printf("[voz] fala %s: %s", modelo, ultimoErro)
+		if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusNotFound {
+			break
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "a voz falhou (OpenAI " + resp.Status + ")"})
-		return
-	}
-	c.Header("Cache-Control", "no-store")
-	c.DataFromReader(http.StatusOK, -1, "audio/mpeg", io.LimitReader(resp.Body, 20<<20), nil)
+	c.JSON(http.StatusBadGateway, gin.H{"error": ultimoErro})
 }

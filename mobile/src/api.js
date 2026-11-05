@@ -56,12 +56,16 @@ export async function transcrever(blob, ext) {
 }
 
 // texto → voz (OpenAI, pelo servidor) — devolve o MP3
+// se a OpenAI recusar, usa a voz neural do chat do site (/voz/falar, edge-tts, sem custo)
 export async function falar(texto) {
-  const r = await fetch('/api/v1/voz/openai/falar', {
-    method: 'POST', credentials: 'include', headers: { ...cabecalhoAuth(), 'Content-Type': 'application/json' }, body: JSON.stringify({ texto }),
-  });
-  if (!r.ok) throw new Error(`Erro ${r.status} na voz`);
-  return r.arrayBuffer();
+  const opts = { method: 'POST', credentials: 'include', headers: { ...cabecalhoAuth(), 'Content-Type': 'application/json' }, body: JSON.stringify({ texto }) };
+  for (const rota of ['/api/v1/voz/openai/falar', '/api/v1/voz/falar']) {
+    try {
+      const r = await fetch(rota, opts);
+      if (r.ok && /audio/.test(r.headers.get('content-type') || '')) return r.arrayBuffer();
+    } catch { /* tenta a próxima */ }
+  }
+  throw new Error('voz indisponível');
 }
 
 const url = (p) => (/^\/api\//.test(p) ? p : '/api/v1' + (p.startsWith('/') ? p : '/' + p));

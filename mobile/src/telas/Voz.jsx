@@ -9,6 +9,11 @@ import { responder, mid } from '../conversa';
 const TIPOS = [['audio/webm;codecs=opus', 'webm'], ['audio/webm', 'webm'], ['audio/mp4', 'mp4'], ['audio/ogg;codecs=opus', 'ogg']];
 const SILENCIO_MS = 1200; // pausa que encerra a sua fala
 const MAX_FALA_MS = 45000;
+// a OpenAI recusou a transcrição (chave sem acesso a áudio)? usa o reconhecimento do próprio
+// celular por 1 h e depois tenta a OpenAI de novo
+const NAV_KEY = 'sure_voz_stt_nav';
+const sttNavegadorAtivo = () => { try { return Date.now() - Number(localStorage.getItem(NAV_KEY) || 0) < 3600e3; } catch { return false; } };
+const Reconhecimento = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
 const ROTULO = {
   iniciando: 'Preparando o microfone…',
@@ -27,6 +32,7 @@ export default function Voz({ msgs, setMsgs, pendente, setPendente, fechar }) {
   const [sure, setSure] = useState('');
   const [erro, setErro] = useState('');
   const [nivel, setNivel] = useState(0);
+  const [aviso, setAviso] = useState('');
 
   const r = useRef({}).current; // motor (não re-renderiza)
   const estadoRef = useRef('iniciando');
@@ -59,7 +65,41 @@ export default function Voz({ msgs, setMsgs, pendente, setPendente, fechar }) {
   const escutar = () => {
     if (r.fechado) return;
     mudar('ouvindo');
+    if (r.sttNav) { ouvirNavegador(); return; }
     comecarGravacao();
+  };
+
+  // reconhecimento de fala do próprio celular (sem OpenAI): ele mesmo percebe a pausa
+  const ouvirNavegador = () => {
+    let final = '';
+    const rec = new Reconhecimento();
+    rec.lang = 'pt-BR';
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.onresult = (ev) => {
+      let t = '';
+      for (let i = 0; i < ev.results.length; i++) { t += ev.results[i][0].transcript; if (ev.results[i].isFinal) final = t; }
+      if (estadoRef.current === 'ouvindo') mudar('falou');
+      setEu(t);
+    };
+    rec.onerror = (ev) => { if (ev.error === 'not-allowed' || ev.error === 'audio-capture') { setErro('Libere o microfone para o SURE (cadeado ao lado do endereço → Microfone → Permitir).'); mudar('erro'); } };
+    rec.onend = () => {
+      r.recNav = null;
+      if (r.fechado) return;
+      if (final.trim()) { processarTexto(final.trim()); return; }
+      if (estadoRef.current === 'ouvindo' || estadoRef.current === 'falou') setTimeout(() => { if (!r.fechado && (estadoRef.current === 'ouvindo' || estadoRef.current === 'falou')) { mudar('ouvindo'); ouvirNavegador(); } }, 250);
+    };
+    r.recNav = rec;
+    try { rec.start(); } catch { /* já estava ouvindo */ }
+  };
+  const passarParaNavegador = () => {
+    if (!Reconhecimento) return false;
+    r.sttNav = true;
+    try { localStorage.setItem(NAV_KEY, String(Date.now())); } catch { /* ignore */ }
+    try { if (r.rec && r.rec.state !== 'inactive') r.rec.stop(); } catch { /* ignore */ }
+    r.stream?.getTracks().forEach((t) => t.stop()); // libera o microfone para o reconhecimento do celular
+    setAviso('Transcrição pelo próprio celular — a chave da OpenAI ainda não tem acesso a áudio. Para interromper a resposta, toque no círculo.');
+    return true;
   };
 
   // ── uma volta completa: fala gravada → texto → resposta → voz ──
@@ -68,9 +108,18 @@ export default function Voz({ msgs, setMsgs, pendente, setPendente, fechar }) {
     const blob = await pararGravacao(true);
     if (r.fechado) return;
     let texto = '';
-    try { texto = blob && blob.size > 2000 ? await transcrever(blob, r.ext) : ''; } catch (e) { setErro(e.message); }
+    try {
+      texto = blob && blob.size > 2000 ? await transcrever(blob, r.ext) : '';
+    } catch (e) {
+      if (/OpenAI|40[34]/.test(e.message) && passarParaNavegador()) { setSure('Não consegui ouvir essa. Pode repetir, por favor?'); escutar(); return; }
+      setErro(e.message);
+    }
     if (r.fechado) return;
     if (!texto || texto.replace(/[^\p{L}\p{N}]/gu, '').length < 2) { escutar(); return; }
+    processarTexto(texto);
+  };
+
+  const processarTexto = async (texto) => {
     setEu(texto);
     setSure('');
     setErro('');
@@ -133,6 +182,7 @@ export default function Voz({ msgs, setMsgs, pendente, setPendente, fechar }) {
   // ── laço do microfone: mede o volume e decide quando você começou/parou de falar ──
   const laco = () => {
     if (r.fechado) return;
+    if (r.sttNav) { setNivel(estadoRef.current === 'falou' ? 0.5 : 0); r.raf = requestAnimationFrame(laco); return; }
     r.analisador.getFloatTimeDomainData(r.amostra);
     let s = 0;
     for (let i = 0; i < r.amostra.length; i++) s += r.amostra[i] * r.amostra[i];
@@ -176,6 +226,7 @@ export default function Voz({ msgs, setMsgs, pendente, setPendente, fechar }) {
         r.ruido = 0;
         r.calibIni = Date.now();
         try { r.trava = await navigator.wakeLock?.request('screen'); } catch { /* ignore */ }
+        if (sttNavegadorAtivo()) passarParaNavegador();
         escutar();
         laco();
       } catch (e) {
@@ -188,6 +239,7 @@ export default function Voz({ msgs, setMsgs, pendente, setPendente, fechar }) {
       r.fechado = true;
       cancelAnimationFrame(r.raf);
       calar();
+      try { r.recNav?.abort(); } catch { /* ignore */ }
       try { if (r.rec && r.rec.state !== 'inactive') r.rec.stop(); } catch { /* ignore */ }
       r.stream?.getTracks().forEach((t) => t.stop());
       try { r.ctx?.close(); } catch { /* ignore */ }
@@ -200,8 +252,8 @@ export default function Voz({ msgs, setMsgs, pendente, setPendente, fechar }) {
     const e = estadoRef.current;
     if (e === 'falando') { calar(); escutar(); return; }
     if (e === 'pausado') { escutar(); return; }
-    if (e === 'falou') { processarFala(); return; } // terminou de falar: envia já
-    if (e === 'ouvindo') { pararGravacao(false); mudar('pausado'); }
+    if (e === 'falou') { if (r.sttNav) r.recNav?.stop(); else processarFala(); return; } // terminou de falar: envia já
+    if (e === 'ouvindo') { if (r.sttNav) { mudar('pausado'); r.recNav?.abort(); } else pararGravacao(false); mudar('pausado'); }
   };
 
   const escala = estado === 'falando' ? 1.08 : 1 + nivel * 0.35;
@@ -218,6 +270,7 @@ export default function Voz({ msgs, setMsgs, pendente, setPendente, fechar }) {
       </button>
       <div className="voz-estado">{ROTULO[estado]}</div>
       {erro && <div className="erro voz-erro">{erro}</div>}
+      {aviso && !erro && <div className="fraco pequeno voz-erro">{aviso}</div>}
       <div className="voz-baixo">
         <button type="button" className="btn-sec" onClick={tocarOrbe}>{estado === 'pausado' ? 'Continuar' : estado === 'falando' ? 'Interromper' : estado === 'falou' ? 'Enviar agora' : 'Pausar'}</button>
         <button type="button" className="btn-sec" onClick={fechar}>Voltar ao chat</button>

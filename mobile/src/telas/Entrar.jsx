@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { api } from '../api';
 
-export default function Entrar({ aoEntrar, entrou }) {
+export default function Entrar({ aoEntrar, entrou, erroQR }) {
   const [email, setEmail] = useState('');
   const [enviado, setEnviado] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -35,6 +35,12 @@ export default function Entrar({ aoEntrar, entrou }) {
     <div className="entrar">
       <img src="/m/icons/sure-192.png" alt="" className="entrar-logo" />
       <h1>SURE</h1>
+      {erroQR && <div className="erro entrar-form">{erroQR}</div>}
+      <div className="entrar-qr">
+        <b>Mais fácil: pelo QR code</b>
+        <span>No computador, já logado no SURE, clique no seu nome (canto de cima) → <b>Conectar celular</b> e aponte a câmera deste celular para o QR.</span>
+      </div>
+      <div className="fraco pequeno">ou receba um link no e-mail:</div>
       {!enviado ? (
         <form onSubmit={pedir} className="entrar-form">
           <label htmlFor="em">E-mail corporativo</label>
