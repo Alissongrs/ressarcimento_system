@@ -113,6 +113,11 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      # SURE no celular (pasta mobile/, servido em /m/)
+      - name: Build app do celular
+        working-directory: mobile
+        run: npm ci && npm run build
+
   # Job 3: Security Scan
   security-scan:
     name: Security Scan
@@ -338,7 +343,7 @@ jobs:
 
           git checkout "$REF"
           git pull --ff-only
-          docker compose build backend frontend
+          docker compose build backend frontend mobile
           docker compose up -d
 
           echo "Aguardando healthcheck (/api/v1/healthz)..."
@@ -355,7 +360,7 @@ jobs:
               [ -f ".env_backups/${nome}.$STAMP" ] && cp -p ".env_backups/${nome}.$STAMP" "$alvo" && echo "$alvo restaurado"
             done
             git reset --hard "$PREV"
-            docker compose build backend frontend
+            docker compose build backend frontend mobile
             docker compose up -d
             exit 1
           fi
