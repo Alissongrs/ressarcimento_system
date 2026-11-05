@@ -87,15 +87,7 @@ const Login = () => {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
       if (token) {
         login(token);
-        // pediu o link pelo app do celular (/m/)? volta para o app, não para o site completo
-        let destino = '/';
-        try {
-          const raw = localStorage.getItem('sure_depois_login');
-          localStorage.removeItem('sure_depois_login');
-          const o = raw ? JSON.parse(raw) : null;
-          if (o && /^\/m\/[\w#/-]*$/.test(o.para || '') && Date.now() - Number(o.em || 0) < 24 * 3600 * 1000) destino = o.para;
-        } catch { /* ignore */ }
-        window.location.href = destino === '/' ? `/?v=${Date.now()}` : destino;
+        window.location.href = `/?v=${Date.now()}`;
         return;
       }
       const magicErr = params.get('magic');

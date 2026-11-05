@@ -2100,30 +2100,6 @@ func swaggerRotaPost_api_v1_chat_extract_pdf() {}
 // @Router /api/v1/chat/processos [post]
 func swaggerRotaPost_api_v1_chat_processos() {}
 
-// @Summary Voz transcrever open ai
-// @Description Qualquer usuário autenticado. Handler: handlers.VozTranscreverOpenAI.
-// @Tags voz
-// @Accept json
-// @Produce json
-// @Param body body object false "Corpo da requisição (JSON)"
-// @Security BearerAuth
-// @Success 200 {object} map[string]interface{}
-// @Failure 401 {object} map[string]string
-// @Router /api/v1/voz/openai/transcrever [post]
-func swaggerRotaPost_api_v1_voz_openai_transcrever() {}
-
-// @Summary Voz falar open ai
-// @Description Qualquer usuário autenticado. Handler: handlers.VozFalarOpenAI.
-// @Tags voz
-// @Accept json
-// @Produce json
-// @Param body body object false "Corpo da requisição (JSON)"
-// @Security BearerAuth
-// @Success 200 {object} map[string]interface{}
-// @Failure 401 {object} map[string]string
-// @Router /api/v1/voz/openai/falar [post]
-func swaggerRotaPost_api_v1_voz_openai_falar() {}
-
 // @Summary Chat processos contexto handler
 // @Description Qualquer usuário autenticado. Handler: handlers.ChatProcessosContextoHandler.
 // @Tags Chat
@@ -2829,16 +2805,6 @@ func swaggerRotaPost_api_v2_auth_magic() {}
 // @Router /api/v2/auth/magic/verify [get]
 func swaggerRotaGet_api_v2_auth_magic_verify() {}
 
-// @Summary Qr entrar
-// @Description Pública. Handler: v2.QREntrar.
-// @Tags v2 · Auth
-// @Accept json
-// @Produce json
-// @Param body body object false "Corpo da requisição (JSON)"
-// @Success 200 {object} map[string]interface{}
-// @Router /api/v2/auth/qr/entrar [post]
-func swaggerRotaPost_api_v2_auth_qr_entrar() {}
-
 // @Summary Me
 // @Description Qualquer usuário autenticado. Handler: v2.Me.
 // @Tags v2 · Auth
@@ -2848,29 +2814,6 @@ func swaggerRotaPost_api_v2_auth_qr_entrar() {}
 // @Failure 401 {object} map[string]string
 // @Router /api/v2/auth/me [get]
 func swaggerRotaGet_api_v2_auth_me() {}
-
-// @Summary Qr criar
-// @Description Qualquer usuário autenticado. Handler: v2.QRCriar.
-// @Tags v2 · Auth
-// @Accept json
-// @Produce json
-// @Param body body object false "Corpo da requisição (JSON)"
-// @Security BearerAuth
-// @Success 200 {object} map[string]interface{}
-// @Failure 401 {object} map[string]string
-// @Router /api/v2/auth/qr [post]
-func swaggerRotaPost_api_v2_auth_qr() {}
-
-// @Summary Qr status
-// @Description Qualquer usuário autenticado. Handler: v2.QRStatus.
-// @Tags v2 · Auth
-// @Produce json
-// @Param codigo path string true "codigo"
-// @Security BearerAuth
-// @Success 200 {object} map[string]interface{}
-// @Failure 401 {object} map[string]string
-// @Router /api/v2/auth/qr/{codigo} [get]
-func swaggerRotaGet_api_v2_auth_qr__codigo_() {}
 
 // @Summary Get dimensoes
 // @Description Qualquer usuário autenticado. Handler: v2.GetDimensoes.

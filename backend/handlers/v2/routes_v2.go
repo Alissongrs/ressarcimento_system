@@ -25,15 +25,10 @@ func RegisterAuthRoutesPublic(g *gin.RouterGroup) {
 	g.GET("/auth/magic/config", MagicConfig)
 	g.POST("/auth/magic", MagicRequest)
 	g.GET("/auth/magic/verify", MagicVerify)
-
-	// Login no celular por QR code (o site, já logado, gera; o app do celular troca pela sessão)
-	g.POST("/auth/qr/entrar", QREntrar)
 }
 
 func RegisterAuthRoutesAuthed(g *gin.RouterGroup) {
 	g.GET("/auth/me", Me)
-	g.POST("/auth/qr", QRCriar)
-	g.GET("/auth/qr/:codigo", QRStatus)
 }
 
 // RegisterReadRoutes monta os handlers GET do Sprint 1.

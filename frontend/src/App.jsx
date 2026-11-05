@@ -55,7 +55,6 @@ import AlertasVencimentoModal from './components/AlertasVencimentoModal.jsx';
 import AlertCalendarModal from './components/AlertCalendarModal.jsx';
 import AlertTicker from './components/AlertTicker.jsx';
 import AvisosBell from './components/AvisosBell.jsx';
-import ConectarCelular from './components/ConectarCelular.jsx';
 import GlobalNewProcessNotifier from './components/GlobalNewProcessNotifier.jsx';
 import FloatingEmailComposer from './components/FloatingEmailComposer.jsx';
 import { SureMark } from './components/SureLogo.jsx';
@@ -239,7 +238,6 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
         </nav>
         <div className="top-nav-actions">
           {role !== 'solicitante' && <AvisosBell />}
-          <ConectarCelular />
           {(role === 'admin' || role === 'gestor') && (
             <>
               <button

@@ -213,22 +213,6 @@ services:
     networks:
       - frontend
 
-  # SURE no celular (pasta mobile/) — servido em https://sure.app.br/m/ pelo nginx do frontend
-  # (location /m/ → http://mobile:80). Sem porta publicada: só o frontend fala com ele.
-  mobile:
-    build:
-      context: ./mobile
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/healthz >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks:
-      - frontend
-
   # ====================================================================
   # CADDY DESATIVADO neste VPS (30/07/2026).
   # O front público aqui é o APACHE DO HOST, que já termina TLS p/ vários

@@ -553,9 +553,6 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.POST("/chat/sessions/:id/messages", handlers.AddChatMessage)
 			authRequired.DELETE("/chat/sessions/:id", handlers.DeleteChatSession)
 			authRequired.POST("/chat/processos", handlers.ChatProcessosHandler)
-			// conversa por voz (app do celular): fala → texto e texto → fala, pela OpenAI
-			authRequired.POST("/voz/openai/transcrever", handlers.VozTranscreverOpenAI)
-			authRequired.POST("/voz/openai/falar", handlers.VozFalarOpenAI)
 			authRequired.GET("/chat/processos/contexto", handlers.ChatProcessosContextoHandler)
 
 			// Irregularidades
