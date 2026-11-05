@@ -23,9 +23,45 @@ export function usuarioDoToken() {
   } catch { return null; }
 }
 
-export function sair() {
+// sem token guardado no celular, a sessão pode existir só no cookie do site (entrou pelo
+// site completo): pergunta ao servidor quem está conectado.
+export async function sessaoDoServidor() {
+  try {
+    const r = await fetch('/api/v2/auth/me', { credentials: 'include', headers: { Accept: 'application/json' } });
+    if (!r.ok) return null;
+    const d = await r.json();
+    if (!d || !d.id) return null;
+    return { nome: d.nome || '', email: d.email || '', perfil: String(d.perfil || d.role || '').toLowerCase(), id: d.id, expira: 0 };
+  } catch { return null; }
+}
+
+export async function sair() {
+  // encerra também a sessão do cookie (senão o "continuar" entraria de novo)
+  try { await fetch('/api/v2/auth/logout', { method: 'POST', credentials: 'include' }); } catch { /* ignore */ }
   try { localStorage.removeItem('userToken'); } catch { /* ignore */ }
   window.dispatchEvent(new Event('sure-sair'));
+}
+
+const cabecalhoAuth = () => { const tk = lerToken(); return tk ? { Authorization: `Bearer ${tk}` } : {}; };
+
+// fala → texto (OpenAI, pelo servidor)
+export async function transcrever(blob, ext) {
+  const fd = new FormData();
+  fd.append('audio', blob, `fala.${ext}`);
+  const r = await fetch('/api/v1/voz/openai/transcrever', { method: 'POST', body: fd, credentials: 'include', headers: cabecalhoAuth() });
+  const d = await r.json().catch(() => null);
+  if (r.status === 401) { sair(); throw new Error('Sua sessão expirou. Entre de novo.'); }
+  if (!r.ok) throw new Error(d?.error || `Erro ${r.status} na transcrição`);
+  return String(d?.texto || '').trim();
+}
+
+// texto → voz (OpenAI, pelo servidor) — devolve o MP3
+export async function falar(texto) {
+  const r = await fetch('/api/v1/voz/openai/falar', {
+    method: 'POST', credentials: 'include', headers: { ...cabecalhoAuth(), 'Content-Type': 'application/json' }, body: JSON.stringify({ texto }),
+  });
+  if (!r.ok) throw new Error(`Erro ${r.status} na voz`);
+  return r.arrayBuffer();
 }
 
 const url = (p) => (/^\/api\//.test(p) ? p : '/api/v1' + (p.startsWith('/') ? p : '/' + p));

@@ -2100,6 +2100,30 @@ func swaggerRotaPost_api_v1_chat_extract_pdf() {}
 // @Router /api/v1/chat/processos [post]
 func swaggerRotaPost_api_v1_chat_processos() {}
 
+// @Summary Voz transcrever open ai
+// @Description Qualquer usuário autenticado. Handler: handlers.VozTranscreverOpenAI.
+// @Tags voz
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/voz/openai/transcrever [post]
+func swaggerRotaPost_api_v1_voz_openai_transcrever() {}
+
+// @Summary Voz falar open ai
+// @Description Qualquer usuário autenticado. Handler: handlers.VozFalarOpenAI.
+// @Tags voz
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/voz/openai/falar [post]
+func swaggerRotaPost_api_v1_voz_openai_falar() {}
+
 // @Summary Chat processos contexto handler
 // @Description Qualquer usuário autenticado. Handler: handlers.ChatProcessosContextoHandler.
 // @Tags Chat

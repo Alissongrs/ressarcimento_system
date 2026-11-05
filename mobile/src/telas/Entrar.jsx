@@ -3,11 +3,21 @@
 import React, { useState } from 'react';
 import { api } from '../api';
 
-export default function Entrar({ aoEntrar }) {
+export default function Entrar({ aoEntrar, entrou }) {
   const [email, setEmail] = useState('');
   const [enviado, setEnviado] = useState(false);
   const [busy, setBusy] = useState(false);
   const [erro, setErro] = useState('');
+  const [conferindo, setConferindo] = useState(false);
+
+  const continuar = async () => {
+    setConferindo(true);
+    setErro('');
+    const u = await aoEntrar();
+    setConferindo(false);
+    if (u) entrou(u);
+    else setErro('Neste celular você ainda não está conectado ao SURE. Digite seu e-mail acima e abra o link que chegar — no próprio celular.');
+  };
 
   const pedir = async (e) => {
     e.preventDefault();
@@ -40,7 +50,8 @@ export default function Entrar({ aoEntrar }) {
           <button type="button" className="btn-sec" onClick={() => setEnviado(false)}>Pedir de novo</button>
         </div>
       )}
-      <button type="button" className="btn-link" onClick={aoEntrar}>Já entrei pelo site — continuar</button>
+      <button type="button" className="btn-link" onClick={continuar} disabled={conferindo}>{conferindo ? 'Conferindo…' : 'Já entrei pelo site neste celular — continuar'}</button>
+      {erro && enviado && <div className="erro entrar-form">{erro}</div>}
     </div>
   );
 }

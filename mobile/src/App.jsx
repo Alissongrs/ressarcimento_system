@@ -1,7 +1,7 @@
 // SURE no celular: Chat, Processos, Pedidos e Tarefas, com a barra de abas embaixo.
 // A aba aberta fica no endereço (#chat, #processos…) — os atalhos do ícone usam isso.
 import React, { useEffect, useState } from 'react';
-import { usuarioDoToken, sair } from './api';
+import { usuarioDoToken, sessaoDoServidor, sair } from './api';
 import Entrar from './telas/Entrar';
 import Chat from './telas/Chat';
 import Processos from './telas/Processos';
@@ -14,10 +14,12 @@ const ABAS = [
   { id: 'pedidos', nome: 'Pedidos', ic: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M9 8h6M9 12h6M9 16h4" /></> },
   { id: 'tarefas', nome: 'Tarefas', ic: <><path d="M4 12l4 4 8-9" /><path d="M14 17h6" /></> },
 ];
+// token guardado no celular OU a sessão (cookie) do site
+const descobrir = async () => usuarioDoToken() || sessaoDoServidor();
 const abaDoHash = () => { const h = window.location.hash.replace('#', ''); return ABAS.some((a) => a.id === h) ? h : 'chat'; };
 
 export default function App() {
-  const [usuario, setUsuario] = useState(usuarioDoToken);
+  const [usuario, setUsuario] = useState(() => usuarioDoToken() || undefined); // undefined = conferindo
   const [aba, setAba] = useState(abaDoHash);
 
   useEffect(() => {
@@ -26,14 +28,16 @@ export default function App() {
     window.addEventListener('sure-sair', fora);
     window.addEventListener('hashchange', hash);
     // a sessão pode ter sido aberta/fechada pelo site em outra aba
-    const vis = () => { if (document.visibilityState === 'visible') setUsuario(usuarioDoToken()); };
+    if (!usuarioDoToken()) descobrir().then((u) => setUsuario(u || null));
+    const vis = () => { if (document.visibilityState === 'visible') descobrir().then((u) => setUsuario(u || null)); };
     document.addEventListener('visibilitychange', vis);
     return () => { window.removeEventListener('sure-sair', fora); window.removeEventListener('hashchange', hash); document.removeEventListener('visibilitychange', vis); };
   }, []);
 
   const irPara = (id) => { window.location.hash = id; setAba(id); };
 
-  if (!usuario) return <Entrar aoEntrar={() => setUsuario(usuarioDoToken())} />;
+  if (usuario === undefined) return <div className="entrar"><img src="/m/icons/sure-192.png" alt="" className="entrar-logo" /></div>;
+  if (!usuario) return <Entrar aoEntrar={descobrir} entrou={setUsuario} />;
 
   return (
     <div className="app">

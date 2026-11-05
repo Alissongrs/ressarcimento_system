@@ -26,6 +26,8 @@ import (
 type processoChatRequest struct {
 	Question string      `json:"question"`
 	History  []aisureMsg `json:"history"`
+	// "voz" = conversa falada (app do celular): resposta curta, sem tabela, para ser lida em voz alta
+	Modo string `json:"modo"`
 }
 
 type processoChatResponse struct {
@@ -96,6 +98,10 @@ func ChatProcessosHandler(c *gin.Context) {
 	if _, uname := usuarioIA(c); primeiroNome(uname) != "" {
 		sysPrompt += fmt.Sprintf("\n\nVocê está conversando com %s. Chame-a sempre pelo primeiro nome (\"%s\") em toda resposta, de forma natural (no início ou no fim da frase).",
 			uname, primeiroNome(uname))
+	}
+
+	if req.Modo == "voz" {
+		sysPrompt += "\n\nMODO VOZ: esta resposta será FALADA em voz alta pelo celular. Responda em 1 a 4 frases curtas, como numa conversa. Sem tabelas, sem listas longas, sem links nem Markdown; números por extenso quando curtos e valores como \"14 mil e 423 reais\". Se houver muitos itens, diga o total e os 2 ou 3 principais e ofereça mandar a lista completa no chat."
 	}
 
 	answer, err := callAisureOpenAI(ctx, req.History, req.Question, "", sysPrompt)
