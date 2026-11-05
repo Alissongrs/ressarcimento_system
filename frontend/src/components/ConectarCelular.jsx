@@ -1,6 +1,7 @@
 // "Conectar celular": mostra um QR code que abre o SURE no celular JÁ LOGADO (mesmo usuário).
 // O código vale uma vez só e por 2 minutos (backend: /api/v2/auth/qr).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
 import { Smartphone, X, CheckCircle2, RefreshCw } from 'lucide-react';
 import api from '../services/apiClient';
@@ -54,9 +55,11 @@ export default function ConectarCelular({ className = 'top-nav-link top-nav-aler
       <button type="button" onClick={() => setAberto(true)} className={className} title="Conectar celular (QR code)" aria-label="Conectar celular">
         <Smartphone className="top-nav-icon" />
       </button>
-      {aberto && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4" onClick={fechar} role="dialog" aria-label="Conectar celular">
-          <div className="w-full max-w-sm rounded-xl border p-5 text-center" style={{ background: 'var(--card, var(--bg))', borderColor: 'var(--border)' }} onClick={(e) => e.stopPropagation()}>
+      {/* portal no <body>: dentro da barra do topo a janela ficava cortada (o cabeçalho prende elementos fixos) */}
+      {aberto && createPortal(
+        <div onClick={fechar} role="dialog" aria-label="Conectar celular"
+          style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.6)', padding: 16 }}>
+          <div className="w-full max-w-sm rounded-xl border p-5 text-center" style={{ background: 'var(--card, var(--bg, #fff))', borderColor: 'var(--border)', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,.4)' }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <b className="flex items-center gap-2"><Smartphone className="w-5 h-5" /> Conectar celular</b>
               <button type="button" onClick={fechar} aria-label="Fechar" className="opacity-70 hover:opacity-100"><X className="w-5 h-5" /></button>
@@ -85,7 +88,8 @@ export default function ConectarCelular({ className = 'top-nav-link top-nav-aler
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
