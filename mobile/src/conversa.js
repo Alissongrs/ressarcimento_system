@@ -22,8 +22,7 @@ export async function responder(q, { historico, pendente, voz = false }) {
     if (NAO.test(q)) return { msgs: [{ role: 'assistant', content: 'Pedido cancelado — nada foi enviado.' }], pendente: null, fala: 'Tudo bem, cancelei. Nada foi enviado.' };
     // falou outra coisa: o pedido anterior fica de lado e a frase nova segue normal
   }
-  const forcado = /^[#@]sistema\b/i.test(q);
-  const pedido = q.replace(/^[#@]sistema[\s,:]*/i, '').trim();
+  const { forcado, pedido } = montarPedido(q, historico);
   let it = null;
   try { it = await api('/solicitacoes/interpretar', { method: 'POST', body: { mensagem: pedido } }); } catch { it = null; }
   if (it && (it.comando || forcado)) {
@@ -40,6 +39,27 @@ export async function responder(q, { historico, pendente, voz = false }) {
   const d = await api('/chat/processos', { method: 'POST', body: { question: q, history: historico, modo: voz ? 'voz' : undefined } });
   const ans = d?.answer || 'Sem resposta.';
   return { msgs: [{ role: 'assistant', content: ans }], pendente: null, fala: paraFala(ans) };
+}
+
+// "nova tarefa: …", "coloque/registre/crie um pedido…", "quero que você altere…" → pedido ao
+// sistema (sem depender da IA de perguntas, que não registra nada). "Isso que eu te pedi" leva
+// junto o que a pessoa tinha falado antes.
+const RE_PEDIR = new RegExp([
+  '^\\s*(?:por favor,?\\s*)?(?:[#@]sistema\\b|nova\\s+tarefa\\b)',
+  '\\b(?:quero|preciso|gostaria)\\s+(?:que\\s+(?:voc[êe]|vc)\\s+)?(?:coloque|registre|crie|abra|lance|cadastre|altere|mude|atualize|mova|rode|execute)\\b',
+  '\\b(?:coloque|coloca|colocar|registre|registra|registrar|crie|cria|criar|abra|abre|abrir|lance|lan[çc]a|lan[çc]ar|cadastre|cadastra|cadastrar|fa[çc]a|faz)\\s+(?:um|uma|o|a|esse|essa|isso|l[áa])?\\s*(?:um\\s+|uma\\s+)?(?:pedido|tarefa|solicita[çc][ãa]o|chamado)\\b',
+  '\\b(?:pode|consegue)\\s+(?:colocar|registrar|criar|abrir|lan[çc]ar)\\s+(?:um|uma|o|a|esse|essa|isso)?\\s*(?:pedido|tarefa|solicita[çc][ãa]o)\\b',
+].join('|'), 'i');
+const RE_REFERE = /\b(isso|isto|esse pedido|essa tarefa|o que (eu )?(te )?(pedi|falei|disse)|que eu (te )?(pedi|falei|disse)|como (eu )?(te )?(pedi|falei))\b/i;
+
+export function montarPedido(q, historico = []) {
+  if (!RE_PEDIR.test(q)) return { forcado: false, pedido: q.trim() };
+  let pedido = q.replace(/^\s*(?:por favor,?\s*)?(?:[#@]sistema|nova\s+tarefa)[\s,:-]*/i, '').trim() || q.trim();
+  if (RE_REFERE.test(q)) {
+    const antes = historico.filter((m) => m.role === 'user').slice(-3).map((m) => m.content).filter((t) => t && t !== q);
+    if (antes.length) pedido = `${pedido}\n\nContexto (o que eu tinha falado antes): ${antes.map((t) => `"${t}"`).join(' / ')}`;
+  }
+  return { forcado: true, pedido };
 }
 
 export async function enviarPedido(pedido) {
