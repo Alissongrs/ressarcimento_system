@@ -556,7 +556,12 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 		}
 	}
 	// F13 — ativo zero com reativo excedente cobrado ou demanda medida > 0 (GD com compensação afasta)
-	if sel["F13"] && valorOK && consumoAtivo(f) == 0 && !temCompensacao(f) && !(f.extraida && f.kwhRef > 0) {
+	// "Consumo 0" na fatura não prova que não houve consumo: a Cosern abate o consumo com a energia injetada e imprime
+	// 0,00, mas as leituras × constante mostram o consumo (UFV Parelhas 1.1, UC 2880456, 06/2025: (8.245−2.569)×0,84 e
+	// (454−167)×84 kWh; 297.191 kWh injetados) — conferido pela analista 05/11/2026. Com consumo nas leituras ou GD
+	// injetando, o reativo excedente pode ser devido e a F13 não se aplica.
+	if sel["F13"] && valorOK && consumoAtivo(f) == 0 && !temCompensacao(f) && !(f.extraida && f.kwhRef > 0) &&
+		!ativoNasLeituras(f) && !injetaGD(f) {
 		reat, dem := 0.0, 0.0
 		for _, it := range f.itens {
 			if it.comp == "REATIVO_EXCEDENTE" && nv(it.valor) > 0 {

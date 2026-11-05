@@ -1069,3 +1069,33 @@ func lerTributosAcer(f *uFat, j map[string]any) {
 		f.tribs = append(f.tribs, uTrib{nome: n, base: b.Float64, aliq: a.Float64, valor: v.Float64})
 	}
 }
+
+// ativoNasLeituras — algum registrador de energia ATIVA (não injetada/gerada, não demanda) andou no ciclo:
+// (leitura atual − anterior) × constante > 0
+func ativoNasLeituras(f *uFat) bool {
+	for _, m := range f.meds {
+		g := strings.ToUpper(sem(m.grandeza))
+		if !strings.Contains(g, "ATIV") || reGeraMed.MatchString(g) || strings.Contains(g, "DEMANDA") || strings.EqualFold(m.unid, "kW") {
+			continue
+		}
+		if m.lant.Valid && m.latu.Valid && m.latu.Float64 > m.lant.Float64 {
+			return true
+		}
+	}
+	return false
+}
+
+// injetaGD — a UC injetou energia no ciclo (geração própria): o consumo pode vir abatido na fatura
+func injetaGD(f *uFat) bool {
+	for _, g := range f.gd {
+		if strings.Contains(strings.ToLower(g.tipo), "injet") && nv(g.kwh) > 0 {
+			return true
+		}
+	}
+	for _, it := range f.itens {
+		if it.comp == "GD_INJETADA" || it.comp == "DEMANDA_GERACAO" {
+			return true
+		}
+	}
+	return false
+}

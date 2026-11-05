@@ -17,7 +17,7 @@ var regraSimples = map[string]string{
 	"F08": "Houve troca de medidor e o consumo cobrado não fecha com as leituras dos dois medidores (o retirado e o novo).",
 	"F10": "A fatura foi cobrada pela média, mas a média usada é maior do que a média real dos meses anteriores da unidade. A cobrança pela média tem que usar a média correta.",
 	"F11": "A unidade ficou três meses ou mais seguidos sendo cobrada sem leitura do medidor. A norma limita a cobrança sem leitura; depois disso a distribuidora precisa ler o medidor e acertar a conta.",
-	"F13": "A fatura cobra energia reativa (um tipo de cobrança técnica) num mês em que a unidade não consumiu energia. Sem consumo, não há como haver excedente de reativo.",
+	"F13": "A fatura cobra energia reativa (um tipo de cobrança técnica) num mês em que a unidade não consumiu energia. Sem consumo, não há como haver excedente de reativo. Atenção: consumo 0 na fatura não basta — se as leituras do medidor mostram consumo, ou se a unidade tem geração própria que abate o consumo, a regra não se aplica.",
 	"F14": "Um dos registradores do medidor 'andou para trás' (a leitura atual é menor que a anterior). Isso é sinal de leitura errada, e a cobrança baseada nela também.",
 	"F15": "A unidade teve fator de potência dentro do limite (0,92 ou mais) e mesmo assim pagou multa de reativo excedente. A multa só cabe abaixo de 0,92.",
 	"F16": "A fatura cobrou mais energia reativa excedente do que o medidor registrou. A cobrança de reativo tem que seguir o que foi medido.",
