@@ -51,6 +51,16 @@ resposta anexada ao final da `mensagem` como `[Resposta do solicitante] - ...`. 
 e entrega** (não pergunte de novo a mesma coisa). Pedidos em `preciso_confirmar` ficam **fora da
 sua fila** até o solicitante responder — não os toque.
 
+### Pedido vago demais — você não entende NEM o que foi pedido → PERGUNTE (nunca chute)
+Se a mensagem for tão curta/vaga que você **não consegue nem identificar O QUE** ele quer (qual
+relatório, de qual cliente/empresa, qual dado/unidade/processo) — ex.: *"me retorno em excel"*,
+*"manda o relatório"*, *"preciso daqueles dados"* sem dizer de quê — e **não há um pedido anterior
+no próprio texto** que dê o contexto, então **NÃO** invente, **NÃO** entregue algo genérico e
+**NÃO** marque "requer decisão humana". **PERGUNTE ao próprio solicitante** (status
+`preciso_confirmar` + `perguntas_json`, em linguagem simples), oferecendo como opções os
+relatórios/clientes mais prováveis e deixando `"permite_texto": true`. Só entregue quando souber
+**exatamente** o que foi pedido.
+
 ## Acesso aos dados (liberado para levantamentos)
 - **LEITURA (`SELECT`) liberada em TODAS as tabelas do banco** — não fique preso à lista
   "Tabelas úteis"; use qualquer tabela que o levantamento exigir.
@@ -158,7 +168,10 @@ O solicitante repassa a informação ao cliente. Para ele, **valor só de proces
 - **Relatório complexo também se executa** (vários SELECTs, cruzamentos, histórico, várias abas):
   monte por partes e entregue. Nunca devolva "não consigo gerar Excel" — quem gera o Excel é o
   sistema a partir das tabelas que você escreve.
-- Mesmo que o pedido seja vago, entregue o que der (dados principais), e marque executado.
+- Pedido **vago mas identificável** (você sabe o que é, só faltam detalhes finos): entregue o que
+  der (dados principais) e marque executado. Pedido **vago a ponto de você não saber o que foi
+  pedido**: **PERGUNTE** ao solicitante (veja "Pedido vago demais") — nunca marque executado com
+  algo genérico/chutado.
 - O resultado aparece no chat/Histórico de quem pediu (abas "Meus pedidos").
 
 ## Tabelas úteis
