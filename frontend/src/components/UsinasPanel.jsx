@@ -5,9 +5,9 @@ import apiClient from '../services/apiClient';
 import { abrirDossie } from './dossieApontamento';
 
 // ⚡ Auditoria das faturas das USINAS (Thopen) — aba dentro de /analise-desvio.
-// Somente leitura: o backend roda o mesmo motor F01–F05 da Auditoria sobre FATURA_USINA* (ao vivo, cache 10 min).
-// Estimativa do F02 = excesso de kWh × preço do kWh com tributos (itens de energia da própria fatura);
-// "não compensado" = parte que a compensação de GD da fatura não abateu (o que de fato pesou no pagamento).
+// Somente leitura: o backend aplica SÓ as regras marcadas no botão Regras (o motor F01–F05 só se marcado)
+// sobre FATURA_USINA* (ao vivo, cache 10 min). Uma linha por fatura: regras com erro, com alerta, o resumo do que
+// foi encontrado e o valor envolvido (achados com erro + a parte não compensada do F02, quando ele aponta).
 // Botão "Regras": escolhe quais regras do catálogo (página Regras) valem para as faturas das usinas — salva no
 // servidor (DM_REGRAS_CONJUNTO, conjunto "usinas"); regras que dependem de parâmetro externo aparecem bloqueadas.
 
@@ -15,17 +15,6 @@ const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', c
 const num = (v, d = 0) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: d });
 const mesBR = (m) => (m && m.length >= 7 ? `${m.slice(5, 7)}/${m.slice(0, 4)}` : m || '—');
 
-const CLASSIF = {
-  ELEVADO_REAL: { rot: 'acima do histórico', cor: '#dc2626' },
-  CRESCENTE: { rot: 'consumo crescente', cor: '#d97706' },
-  SAZONAL: { rot: 'sazonal', cor: '#6b7280' },
-  DENTRO_DO_HISTORICO: { rot: 'dentro do histórico', cor: '#6b7280' },
-};
-const VALID = {
-  CONFIRMADO: 'confirmado pelas 3 próximas',
-  SEM_3_PROXIMAS: 'aguardando 3 próximas',
-  ATIVACAO: 'novo patamar (ativação)',
-};
 const FICHA_ROT = {
   F01: 'leitura × constante ≠ consumo',
   F02: 'consumo acima da média',
@@ -206,9 +195,9 @@ function DetalheUC({ ap, onClose }) {
           <button onClick={onClose} className="text-sm opacity-70 hover:opacity-100">✕ fechar</button>
         </div>
         <div className="mt-3 text-sm">
-          <b>{ap.fichas.join(', ')}</b> em {mesBR(ap.mes_referencia)} — {(ap.detalhamento || []).join(' · ')}
+          <b>{[...(ap.fichas || []), ...(ap.alertas || [])].join(', ')}</b> em {mesBR(ap.mes_referencia)}{(ap.detalhamento || []).length ? ` — ${ap.detalhamento.join(' · ')}` : ''}
         </div>
-        {ap.fichas.includes('F02') && (
+        {(ap.fichas || []).includes('F02') && (
           <div className="mt-2 text-xs opacity-80">
             Consumo {num(ap.consumo_kwh)} kWh × média {num(ap.media_kwh)} kWh → excesso {num(ap.excesso_kwh)} kWh
             × {brl(ap.preco_kwh)}/kWh = <b>{brl(ap.estimativa_bruta)}</b> bruto ·
@@ -263,17 +252,25 @@ function DetalheUC({ ap, onClose }) {
   );
 }
 
+// valor do apontamento: soma dos achados com ERRO + a estimativa do F02 (parte não compensada), quando o F02 apontou
+const valorAp = (a) => valorOutras(a) + ((a.fichas || []).includes('F02') ? a.estimativa_nao_compensada || 0 : 0);
+// resumo legível: o primeiro achado (erro antes de alerta) ou o detalhamento do motor
+const resumoAp = (a) => {
+  const ach = [...(a.achados || [])].sort((x, y) => (x.nivel === 'ERRO' ? 0 : 1) - (y.nivel === 'ERRO' ? 0 : 1));
+  if (ach.length) return `${ach[0].codigo}: ${ach[0].detalhe}`;
+  return (a.detalhamento || [])[0] || '';
+};
+
 export default function UsinasPanel() {
   const [dados, setDados] = useState(null);
   const [erro, setErro] = useState('');
   const [loading, setLoading] = useState(true);
   const [ficha, setFicha] = useState('todas');
   const [dist, setDist] = useState('todas');
-  const [soFortes, setSoFortes] = useState(false);
+  const [nivel, setNivel] = useState('todos'); // todos | erro | alerta
   const [busca, setBusca] = useState('');
   const [detalhe, setDetalhe] = useState(null);
   const [regrasAberto, setRegrasAberto] = useState(false);
-  const [alertas, setAlertas] = useState(false);
 
   const carregar = useCallback(async (refresh) => {
     setLoading(true);
@@ -293,79 +290,85 @@ export default function UsinasPanel() {
   const dists = useMemo(() => [...new Set(aps.map((a) => a.distribuidora))].sort(), [aps]);
   const linhas = useMemo(() => {
     const q = busca.trim().toLowerCase();
-    return aps.filter((a) => (ficha === 'todas' || a.fichas.includes(ficha) || (alertas && (a.alertas || []).includes(ficha)))
-      && (alertas || a.fichas.length > 0)
-      && (dist === 'todas' || a.distribuidora === dist)
-      && (!soFortes || a.forte)
-      && (!q || `${a.usina} ${a.titular} ${a.uc}`.toLowerCase().includes(q)));
-  }, [aps, ficha, dist, soFortes, busca, alertas]);
-  const somaLiq = useMemo(() => linhas.reduce((s, a) => s + (a.estimativa_nao_compensada || 0) + valorOutras(a), 0), [linhas]);
+    return aps.filter((a) => {
+      const er = a.fichas || SEM_DADOS;
+      const al = a.alertas || SEM_DADOS;
+      if (nivel === 'erro' && !er.length) return false;
+      if (nivel === 'alerta' && !al.length) return false;
+      if (ficha !== 'todas' && !er.includes(ficha) && !al.includes(ficha)) return false;
+      if (dist !== 'todas' && a.distribuidora !== dist) return false;
+      return !q || `${a.usina} ${a.titular} ${a.uc}`.toLowerCase().includes(q);
+    }).sort((x, y) => valorAp(y) - valorAp(x) || ((y.fichas || []).length - (x.fichas || []).length));
+  }, [aps, ficha, dist, nivel, busca]);
+  const soma = useMemo(() => linhas.reduce((s, a) => s + valorAp(a), 0), [linhas]);
 
   const exportar = () => {
     const ws = XLSX.utils.json_to_sheet(linhas.map((a) => ({
-      Fichas: a.fichas.join(','), Distribuidora: a.distribuidora, Usina: a.usina, Titular: a.titular, UC: a.uc,
-      'Mês ref.': mesBR(a.mes_referencia), 'Consumo kWh': a.consumo_kwh, 'Média kWh': a.media_kwh || null,
-      'Excesso kWh': a.excesso_kwh || null, 'Desvio %': a.fichas.includes('F02') ? a.desvio_pct : null,
-      Classificação: CLASSIF[a.classificacao_historico]?.rot || a.classificacao_historico || '',
-      Validação: VALID[a.f02_validacao] || a.f02_validacao || '', Forte: a.forte ? 'sim' : '',
-      'Preço kWh': a.preco_kwh || null, 'Estimativa bruta': a.estimativa_bruta || null,
-      'Não compensado': a.estimativa_nao_compensada || null, 'Outras regras R$': valorOutras(a) || null,
-      Alertas: (a.alertas || []).join(','), Detalhe: (a.detalhamento || []).join('; '),
-      'Achados': (a.achados || []).map((x) => `${x.codigo} ${x.nivel}: ${x.detalhe}`).join(' | '),
-      Leitura: a.metodo, Fatura: a.link_drive, id_fatura: a.id_fatura,
+      'Regras (erro)': (a.fichas || []).join(','), 'Regras (alerta)': (a.alertas || []).join(','),
+      Distribuidora: a.distribuidora, Usina: a.usina, Titular: a.titular, UC: a.uc, 'Mês ref.': mesBR(a.mes_referencia),
+      'Valor envolvido (erros)': valorAp(a) || null, 'Total a pagar': a.total_a_pagar || null,
+      'O que foi encontrado': [...(a.achados || []).map((x) => `${x.codigo} ${x.nivel}: ${x.detalhe}`), ...(a.detalhamento || [])].join(' | '),
+      Fatura: a.link_drive, id_fatura: a.id_fatura,
     })));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Usinas - regras');
     XLSX.writeFile(wb, `auditoria_usinas_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  if (loading && !dados) return <div className="p-6 text-sm opacity-70">Aplicando as regras nas faturas das usinas…</div>;
+  if (loading && !dados) return <div className="p-6 text-sm opacity-70">Aplicando as regras selecionadas nas faturas das usinas…</div>;
   if (erro && !dados) return <div className="p-6 text-sm text-[var(--danger)]">Erro: {erro}</div>;
   const pf = dados?.por_ficha || {};
   const pa = dados?.por_alerta || {};
   const sel = dados?.regras_selecionadas || SEM_DADOS;
-  const nAlertas = Object.values(pa).reduce((s, v) => s + v, 0);
+  const comAlgo = sel.filter((f) => pf[f] || pa[f]);
+  const nErro = aps.filter((a) => (a.fichas || []).length).length;
+  const nAlerta = aps.filter((a) => !(a.fichas || []).length && (a.alertas || []).length).length;
+  const totalErros = aps.reduce((s, a) => s + valorAp(a), 0);
 
   return (
     <div className="w-full space-y-4">
       <div className="flex flex-wrap gap-3">
         <Card titulo="Faturas analisadas" valor={num(dados.faturas_analisadas)} sub={`${num(dados.ucs_analisadas)} UCs de usinas`} />
-        <Card titulo="Apontamentos (erro)" valor={num(aps.filter((a) => a.fichas.length).length)}
-          sub={sel.filter((f) => pf[f]).map((f) => `${f} ${pf[f]}`).join(' · ') || 'nenhum'} />
-        <Card titulo="Alertas" valor={num(nAlertas)} sub={sel.filter((f) => pa[f]).map((f) => `${f} ${pa[f]}`).join(' · ') || 'nenhum'}
-          cor="#d97706" />
-        <Card titulo="F02 fortes" valor={num(dados.f02_fortes)} sub="acima do histórico + confirmado" cor="#dc2626" />
-        <Card titulo="Estimativa F02 (não compensado)" valor={brl(dados.estimativa_nao_compensada)}
-          sub={`bruto ${brl(dados.estimativa_bruta)}`} />
-        <Card titulo="Só os fortes (não compensado)" valor={brl(dados.estimativa_fortes_nao_compensada)}
-          sub={`bruto ${brl(dados.estimativa_fortes_bruta)}`} cor="#dc2626" />
-        <Card titulo="Outras regras (erro)" valor={brl(dados.estimativa_outras_regras)} sub="F13, F35, F36, F55… valor envolvido" />
+        <Card titulo="Regras aplicadas" valor={num(sel.length)} sub="as marcadas no botão Regras" />
+        <Card titulo="Faturas com erro" valor={num(nErro)} sub="a regra se confirmou com os números da fatura" cor="#dc2626" />
+        <Card titulo="Faturas só com alerta" valor={num(nAlerta)} sub="indício — conferir na fatura" cor="#d97706" />
+        <Card titulo="Valor envolvido (erros)" valor={brl(totalErros)} sub="soma do que as regras com erro calcularam" />
       </div>
 
-      <div className="text-[11px] opacity-60">
-        Usinas: o consumo é quase todo abatido pelos créditos da própria geração — "não compensado" é o que pesou na conta;
-        "bruto" é o excesso a tarifa cheia (crédito que deixou de sobrar). Estimativa pelo excesso de kWh × tarifa da fatura,
-        não pelo total a pagar.
+      {erro && <div className="text-xs text-[var(--danger)]">Erro ao recalcular: {erro}</div>}
+
+      <div className="flex flex-wrap gap-2 text-[11px]">
+        {comAlgo.length === 0 && <span className="opacity-60">Nenhuma das regras selecionadas apontou nada.</span>}
+        {comAlgo.map((f) => (
+          <button key={f} type="button" onClick={() => setFicha(ficha === f ? 'todas' : f)}
+            className={`px-2 py-0.5 rounded-full border ${ficha === f ? 'border-[var(--accent)] font-semibold' : 'border-[var(--cpv2-border)]'}`}>
+            {f}{FICHA_ROT[f] ? ` · ${FICHA_ROT[f]}` : ''}
+            {pf[f] ? <span style={{ color: '#dc2626' }}> · {pf[f]} erro</span> : null}
+            {pa[f] ? <span style={{ color: '#d97706' }}> · {pa[f]} alerta</span> : null}
+          </button>
+        ))}
       </div>
 
       <div className="flex flex-wrap gap-3 items-center text-xs">
         <label className="inline-flex items-center gap-1.5"><span className="opacity-70">Regra:</span>
           <select value={ficha} onChange={(e) => setFicha(e.target.value)} className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent">
             <option value="todas">todas</option>
-            {sel.map((f) => <option key={f} value={f}>{f}{FICHA_ROT[f] ? ` — ${FICHA_ROT[f]}` : ''} ({pf[f] || 0}{pa[f] ? ` + ${pa[f]} alertas` : ''})</option>)}
+            {sel.map((f) => <option key={f} value={f}>{f}{FICHA_ROT[f] ? ` — ${FICHA_ROT[f]}` : ''} ({pf[f] || 0} erro{pa[f] ? ` + ${pa[f]} alerta` : ''})</option>)}
+          </select></label>
+        <label className="inline-flex items-center gap-1.5"><span className="opacity-70">Nível:</span>
+          <select value={nivel} onChange={(e) => setNivel(e.target.value)} className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent">
+            <option value="todos">erro e alerta</option>
+            <option value="erro">só erro</option>
+            <option value="alerta">só alerta</option>
           </select></label>
         <label className="inline-flex items-center gap-1.5"><span className="opacity-70">Distribuidora:</span>
           <select value={dist} onChange={(e) => setDist(e.target.value)} className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent">
             <option value="todas">todas</option>
             {dists.map((d) => <option key={d} value={d}>{d}</option>)}
           </select></label>
-        <label className="inline-flex items-center gap-1.5 cursor-pointer">
-          <input type="checkbox" checked={soFortes} onChange={(e) => setSoFortes(e.target.checked)} /> só F02 fortes</label>
-        <label className="inline-flex items-center gap-1.5 cursor-pointer">
-          <input type="checkbox" checked={alertas} onChange={(e) => setAlertas(e.target.checked)} /> mostrar alertas</label>
         <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar usina, titular ou UC"
           className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent min-w-[220px]" />
-        <span className="opacity-70">{linhas.length} linhas · {brl(somaLiq)}</span>
+        <span className="opacity-70">{linhas.length} faturas · {brl(soma)}</span>
         <button onClick={() => setRegrasAberto(true)} className="ml-auto px-3 py-1 rounded-md font-semibold text-white"
           style={{ background: '#d97706' }} title="Escolher as regras do catálogo aplicadas às faturas das usinas">
           ⚙ Regras ({sel.length})</button>
@@ -378,42 +381,34 @@ export default function UsinasPanel() {
         <table className="w-full text-xs">
           <thead className="bg-[var(--cpv2-surface)]">
             <tr className="text-left">
-              <th className="p-2">Regra</th><th className="p-2">Distribuidora</th><th className="p-2">Usina</th><th className="p-2">UC</th>
-              <th className="p-2">Mês</th><th className="p-2 text-right">Consumo kWh</th><th className="p-2 text-right">Média kWh</th>
-              <th className="p-2 text-right">Desvio</th><th className="p-2">Classificação</th><th className="p-2">Validação</th>
-              <th className="p-2 text-right">Bruto</th><th className="p-2 text-right">Não compensado</th>
-              <th className="p-2 text-right">Outras regras</th><th className="p-2">Fatura</th>
+              <th className="p-2">Erro</th><th className="p-2">Alerta</th><th className="p-2">Distribuidora</th><th className="p-2">Usina</th>
+              <th className="p-2">UC</th><th className="p-2">Mês</th><th className="p-2">O que foi encontrado</th>
+              <th className="p-2 text-right">Valor envolvido</th><th className="p-2">Fatura</th>
             </tr>
           </thead>
           <tbody>
             {linhas.map((a) => {
-              const cl = CLASSIF[a.classificacao_historico];
+              const v = valorAp(a);
               return (
                 <tr key={a.id_fatura} onClick={() => setDetalhe(a)}
-                  className="border-t border-[var(--cpv2-border)] cursor-pointer hover:bg-[var(--cpv2-surface)]">
-                  <td className="p-2 font-semibold" title={(a.detalhamento || []).join('\n')}>
-                    {a.fichas.join(', ')}{a.forte && <span className="ml-1" title="acima do histórico e confirmado pelas 3 próximas">🔴</span>}
-                    {(a.alertas || []).length > 0 && <span className="ml-1 text-[10px] font-normal" style={{ color: '#d97706' }}>⚠ {a.alertas.join(', ')}</span>}</td>
+                  className="border-t border-[var(--cpv2-border)] cursor-pointer hover:bg-[var(--cpv2-surface)] align-top">
+                  <td className="p-2 font-semibold" style={{ color: '#dc2626' }}>{(a.fichas || []).join(', ') || '—'}</td>
+                  <td className="p-2" style={{ color: '#d97706' }}>{(a.alertas || []).join(', ') || '—'}</td>
                   <td className="p-2">{a.distribuidora}</td>
                   <td className="p-2">{a.usina || a.titular}</td>
                   <td className="p-2">{a.uc}</td>
                   <td className="p-2">{mesBR(a.mes_referencia)}</td>
-                  <td className="p-2 text-right">{num(a.consumo_kwh)}</td>
-                  <td className="p-2 text-right">{a.media_kwh ? num(a.media_kwh) : '—'}</td>
-                  <td className="p-2 text-right">{a.fichas.includes('F02') ? `+${num(a.desvio_pct)}%` : '—'}</td>
-                  <td className="p-2" style={{ color: cl?.cor }}>{cl?.rot || a.classificacao_historico || '—'}</td>
-                  <td className="p-2">{VALID[a.f02_validacao] || a.f02_validacao || '—'}</td>
-                  <td className="p-2 text-right">{a.estimativa_bruta ? brl(a.estimativa_bruta) : '—'}</td>
-                  <td className="p-2 text-right font-semibold">{a.estimativa_nao_compensada ? brl(a.estimativa_nao_compensada) : '—'}</td>
-                  <td className="p-2 text-right">{valorOutras(a) ? brl(valorOutras(a)) : '—'}</td>
-                  <td className="p-2" onClick={(e) => e.stopPropagation()}>
+                  <td className="p-2 max-w-[520px]" title={[...(a.achados || []).map((x) => `${x.codigo} (${x.nivel}): ${x.detalhe}`), ...(a.detalhamento || [])].join('\n')}>
+                    <div className="line-clamp-2">{resumoAp(a)}</div></td>
+                  <td className="p-2 text-right font-semibold">{v ? brl(v) : '—'}</td>
+                  <td className="p-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     <LinkFatura link={a.link_drive} rotulo="PDF" />
-                    <button type="button" className="ml-2 text-[var(--accent)]" title="Dossiê do apontamento (PDF): como foi feito, o que foi pego, histórico e a fatura com os valores marcados"
-                        onClick={async () => { const m = await abrirDossie('usinas', a.id_fatura); if (m) setErro(m); }}>📑 Dossiê</button></td>
+                    <button type="button" className="ml-2 text-[var(--accent)]" title="Dossiê do apontamento (PDF): explica cada regra, a tese, como foi aplicada, a conta e a fatura com os valores marcados"
+                      onClick={async () => { const m = await abrirDossie('usinas', a.id_fatura); if (m) setErro(m); }}>📑 Dossiê</button></td>
                 </tr>
               );
             })}
-            {!linhas.length && <tr><td colSpan={14} className="p-4 text-center opacity-60">nenhum apontamento com esses filtros</td></tr>}
+            {!linhas.length && <tr><td colSpan={9} className="p-4 text-center opacity-60">nenhum apontamento com esses filtros</td></tr>}
           </tbody>
         </table>
       </div>

@@ -148,12 +148,12 @@ const getNomeEmpresa = (row) => {
 
 const TABS = [
   { id: 'aprovados',     label: 'Apontamentos',   cor: 'var(--success)', sub: 'CONFIRMADO' },
-  { id: 'auditados',     label: 'Energia',        cor: '#7c6f9c', sub: 'verificados + regras' },
+  { id: 'auditados',     label: 'Energia',        cor: '#7c6f9c', sub: 'regras selecionadas' },
   { id: 'inconclusivos', label: 'Inconclusivos',  cor: 'var(--warning)', sub: 'triagem: motor apontou, fora de Auditados' },
   { id: 'rejeitados',    label: 'Rejeitados',     cor: 'var(--danger)', sub: 'REFUTADO' },
   { id: 'agua',          label: '💧 Água',        cor: '#2b8fd6', sub: 'desvio de consumo m³' },
   { id: 'acer',          label: '🅰️ Acer',        cor: '#7c6f9c', sub: 'empresa 2028 — base própria' },
-  { id: 'usinas',        label: '⚡ Usinas',      cor: '#d97706', sub: 'F01–F05 nas faturas das usinas' },
+  { id: 'usinas',        label: '⚡ Usinas',      cor: '#d97706', sub: 'regras selecionadas nas faturas das usinas' },
 ];
 
 const STATUS_POR_TAB = {

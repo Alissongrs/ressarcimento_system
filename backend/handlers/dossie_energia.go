@@ -493,7 +493,13 @@ func gerarDossieEnergiaPDF(db *sql.DB, a *dossieApont, f *uFat, hist []*uFat, pa
 		}
 		ciclo += ")"
 	}
-	grupo := strings.Trim(strings.Join([]string{f.subgrupo, f.classe, f.modalidade, strings.ToLower(f.fornecimento)}, " · "), " ·")
+	var partesGrupo []string
+	for _, x := range []string{f.subgrupo, f.classe, f.modalidade, strings.ToLower(f.fornecimento)} {
+		if x = strings.TrimSpace(x); x != "" && !strings.EqualFold(x, "null") {
+			partesGrupo = append(partesGrupo, x)
+		}
+	}
+	grupo := strings.Join(partesGrupo, " · ")
 	if f.grupoInferido {
 		grupo += " (grupo deduzido da classe)"
 	}
@@ -578,8 +584,10 @@ func gerarDossieEnergiaPDF(db *sql.DB, a *dossieApont, f *uFat, hist []*uFat, pa
 	} else if f.extraida && !f.itensOK {
 		fonte += " Nesta fatura os itens extraídos NÃO fecham com o total a pagar — os valores por item são indicativos."
 	}
-	par("Como ler: ERRO = a regra se confirmou com os números da fatura; ALERTA = indício que precisa da conferência visual antes de virar pedido. "+
-		fonte+" Toda conclusão deve ser conferida na fatura (páginas no fim deste dossiê, com os valores marcados em amarelo).", 7.6)
+	par("Como ler este dossiê: para cada regra que apontou há (1) o problema em poucas palavras, (2) os números encontrados nesta fatura, "+
+		"(3) a conta do valor, (4) como o sistema aplicou a regra, (5) por que está como ERRO ou ALERTA e (6) a tese, os critérios e a base legal. "+
+		"ERRO = a regra se confirmou com os números da fatura; ALERTA = indício que precisa de conferência antes de virar pedido. "+
+		fonte+" Os termos técnicos estão no glossário; as páginas da fatura, com os valores marcados em amarelo, vêm no fim.", 7.8)
 
 	// ---- regra a regra
 	for _, grupoCod := range []struct {
@@ -593,7 +601,11 @@ func gerarDossieEnergiaPDF(db *sql.DB, a *dossieApont, f *uFat, hist []*uFat, pa
 				nome = cod + " — " + ficha.Nome
 			}
 			titulo(fmt.Sprintf("%s · %s", nome, grupoCod.nivel))
-			sub("O que foi pego nesta fatura")
+			if simples := regraSimples[cod]; simples != "" {
+				sub("Em poucas palavras")
+				par(simples, 8.8)
+			}
+			sub("O que foi encontrado nesta fatura (os números)")
 			var achou []string
 			valor := 0.0
 			for _, d := range a.Detalhe {
@@ -645,17 +657,25 @@ func gerarDossieEnergiaPDF(db *sql.DB, a *dossieApont, f *uFat, hist []*uFat, pa
 			for _, t := range achou {
 				par("• "+t, 8.6)
 			}
+			sub("A conta do valor")
 			if valor > 0 {
-				pdf.SetFont("Arial", "B", 8.6)
+				pdf.SetFont("Arial", "B", 8.8)
 				pdf.CellFormat(W, 5, tr("Valor envolvido: R$ "+brNum(valor, 2)), "", 1, "L", false, 0, "")
+				par("É o valor que a regra calculou como cobrado a mais (ou não pago ao cliente) nesta fatura, com os números do item anterior, onde a conta está passo a passo. O valor do pedido pode mudar com tributos, juros e a devolução em dobro quando cabível.", 7.8)
+			} else if grupoCod.nivel == "ERRO" {
+				par("A regra se confirmou, mas o valor depende de um dado que esta fatura não traz por inteiro — ele é apurado na conferência (veja \"Valor a ressarcir\" abaixo).", 7.8)
+			} else {
+				par("Num alerta, o valor que aparecer no item anterior é uma ESTIMATIVA: ele só vira valor do pedido depois que a conferência confirmar o indício (veja \"Valor a ressarcir\" abaixo).", 7.8)
 			}
-			if como := regraComo[cod]; como != "" {
-				sub("Como o sistema chegou nisso")
+			if como := comoAplicou(cod); como != "" {
+				sub("Como o sistema aplicou a regra")
 				par(como, 8.2)
 			}
+			sub("Por que está como " + grupoCod.nivel)
+			par(porqueNivel(grupoCod.nivel, f.extraida), 8)
 			if ficha != nil {
 				if ficha.Interpretacao != "" {
-					sub("O que a regra diz (catálogo)")
+					sub("A tese: por que isso é cobrança indevida (catálogo de regras)")
 					par(ficha.Interpretacao, 7.8)
 				}
 				if ficha.Criterios != "" {
@@ -868,6 +888,15 @@ func gerarDossieEnergiaPDF(db *sql.DB, a *dossieApont, f *uFat, hist []*uFat, pa
 	for i, p := range passos {
 		par(fmt.Sprintf("%d. %s", i+1, p), 8.8)
 		pdf.Ln(0.6)
+	}
+
+	// ---- glossário (para quem não é da área)
+	titulo("Glossário — os termos usados neste dossiê")
+	for _, g := range glossarioDossie {
+		pdf.SetFont("Arial", "B", 7.8)
+		pdf.CellFormat(W, 4.2, tr(g[0]), "", 1, "L", false, 0, "")
+		par(g[1], 7.6)
+		pdf.Ln(0.4)
 	}
 
 	// ---- páginas da fatura

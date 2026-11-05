@@ -291,6 +291,9 @@ func CalcularUsinas(db *sql.DB, sel map[string]bool) (*usinasResultado, error) {
 				x.Alertas = append(x.Alertas, a.Codigo)
 			}
 		}
+		if x.Fichas == nil { // fatura só com alerta: lista vazia (null quebrava a tela)
+			x.Fichas = []string{}
+		}
 		for _, f := range x.Fichas {
 			out.PorFicha[f]++
 		}
