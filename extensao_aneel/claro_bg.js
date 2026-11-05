@@ -2,11 +2,11 @@
 //
 // Botão "Atualizar faturas Claro" no SURE → abre o portal numa janela → (se a sessão caiu) entra com o login
 // guardado nas opções e com o código de segurança que o SURE lê no e-mail → lê a lista de zips → baixa só os
-// lotes MAIS NOVOS que o último já processado → entrega cada zip, em partes, ao receptor local
-// (ferramentas/claro_pdp/recv_claro.py, 127.0.0.1:8801). Os consumidores locais extraem, sobem os PDFs para o
-// Google Drive e gravam os links no banco. A extensão não grava nada no SURE.
-
-const CLARO_RECV = 'http://127.0.0.1:8801/';
+// lotes MAIS NOVOS que o último já processado → manda o LINK de cada zip para a fila da Claro no servidor do SURE
+// (/api/v1/claro-pdp/fila): a VPS baixa o zip direto do portal, extrai, sobe os PDFs para o Google Drive e grava os
+// links no banco (worker/job_claro.sh). Se o portal recusar o download vindo do servidor, a extensão baixa aqui e
+// envia ao servidor em partes. Fala com o SURE com o login da página que pediu (token só desta atualização,
+// guardado na sessão do navegador e apagado no fim). Até a versão 1.2 o destino era o receptor local do PC.
 const CLARO_BASE_PADRAO = 'https://clarobps-pdp.azurewebsites.net';
 const CLARO_LISTA = '/RoboProcessoExecucao/ListarFaturaEnergiaEletrica';
 const PARTE = 8 * 1024 * 1024;
@@ -20,36 +20,53 @@ function claroParaSure(j, dados) {
   if (j && j.sureTabId) chrome.tabs.sendMessage(j.sureTabId, { paraSure: true, dados }).catch(() => {});
 }
 
-async function recv(caminho, opcoes) {
-  const r = await fetch(CLARO_RECV + caminho, opcoes);
-  if (!r.ok) throw new Error('receptor local respondeu ' + r.status);
+// chamada à API do SURE com o login da página (j = { api, token })
+async function sure(j, caminho, opcoes = {}) {
+  // cookie de login do SURE (vai junto por causa da permissão do site) + o token da página, quando houver
+  const headers = { ...(opcoes.headers || {}) };
+  if (j.token) headers.Authorization = 'Bearer ' + j.token;
+  const r = await fetch(j.api + caminho, { ...opcoes, headers, credentials: 'include' });
+  if (r.status === 401) throw new Error('o login do SURE expirou — entre de novo no SURE e clique outra vez');
+  if (r.status === 403) throw new Error('só administradores podem atualizar as faturas Claro');
+  if (!r.ok) {
+    let det = '';
+    try { det = (await r.json()).error || ''; } catch (e) { /* sem corpo */ }
+    throw new Error(det || `o servidor do SURE respondeu ${r.status}`);
+  }
   return r;
 }
+const esperar = (ms) => new Promise((res) => setTimeout(res, ms));
+const apiValida = (api) => /^(https:\/\/sure\.app\.br|http:\/\/sure\.app\.br|http:\/\/179\.127\.26\.37|http:\/\/localhost(:\d+)?)\/api\/v1$/.test(api || '');
 
-async function claroIniciar(sender) {
+async function claroIniciar(msg, sender) {
   const atual = await claroJob();
   if (atual && atual.status !== 'fim') {
     // janela antiga fechada sem aviso? libera
     const viva = await chrome.windows.get(atual.windowId).then(() => true).catch(() => false);
     if (viva) return { erro: 'Já existe uma atualização da Claro em andamento.' };
   }
-  let feitos, stat;
+  if (!apiValida(msg.api)) return { erro: 'Abra o SURE pelo endereço oficial (sure.app.br) para atualizar as faturas Claro.' };
+  const cx = { api: msg.api, token: msg.token };
+  let fila;
   try {
-    feitos = await (await recv('?feitos')).json();
-    stat = await (await recv('?stat')).json();
+    fila = await (await sure(cx, '/claro-pdp/fila')).json();
   } catch (e) {
-    return { erro: 'O processamento local da Claro está desligado neste computador. Rode ferramentas\\claro_pdp\\iniciar.ps1 e tente de novo.' };
+    return { erro: 'Não consegui falar com a fila da Claro no servidor: ' + String(e.message || e) };
   }
-  if (stat.freeGB < 8) return { erro: `Pouco espaço em disco no C: (${stat.freeGB} GB livres; precisa de pelo menos 8 GB).` };
+  if (fila.freeGB >= 0 && fila.freeGB < 8) return { erro: `Pouco espaço em disco no servidor (${fila.freeGB.toFixed(1)} GB livres; precisa de pelo menos 8 GB).` };
+  const aviso = fila.worker && !fila.worker.ativo
+    ? 'o processamento da Claro no servidor não está rodando — os lotes ficam na fila até ele voltar'
+    : (fila.worker && fila.worker.aviso && fila.worker.aviso !== 'ok' ? fila.worker.aviso : '');
   const { claroBase } = await chrome.storage.local.get('claroBase');
   const base = (claroBase || CLARO_BASE_PADRAO).replace(/\/+$/, '');
   const win = await chrome.windows.create({ url: base + CLARO_LISTA, type: 'popup', width: 1100, height: 780, focused: true });
   const j = {
     sureTabId: sender.tab.id, windowId: win.id, tabId: win.tabs && win.tabs[0] ? win.tabs[0].id : null,
-    status: 'abrindo', ultimo: feitos.ultimo || '0', fila: feitos.fila || [], loginEm: 0, logins: 0, desvios: 0,
+    status: 'abrindo', ultimo: fila.ultimo || '0', fila: fila.fila || [], loginEm: 0, logins: 0, desvios: 0,
+    api: cx.api, token: cx.token,
   };
   await claroSalvar(j);
-  return { ok: true, ultimo: j.ultimo };
+  return { ok: true, ultimo: j.ultimo, aviso };
 }
 
 // ── funções que rodam DENTRO da página do portal (mundo da página, para usar o jQuery/DataTables dela) ──
@@ -106,18 +123,39 @@ async function noPortal(j, func, args) {
   return r ? r.result : null;
 }
 
-// baixa o zip do link (Azure Blob) e entrega ao receptor local em partes
-async function transferir(url, nome, aoProgresso) {
+// 1º caminho: o servidor baixa o zip direto do link (Azure Blob) — nada passa por este computador.
+// Espera o download terminar (ou falhar) antes do próximo lote, para nunca pular um lote.
+async function servidorBaixa(j, url, nome, aoProgresso) {
+  await sure(j, '/claro-pdp/fila/link', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome, url }),
+  });
+  const alvo = encodeURIComponent(nome);
+  let parado = 0, ultimoBytes = -1;
+  for (;;) {
+    await esperar(2500);
+    const d = await (await sure(j, `/claro-pdp/fila/arquivo?f=${alvo}`)).json();
+    if (d.status === 'pronto') return { ok: true };
+    if (d.status === 'erro') return { ok: false, erro: d.erro || 'falhou' };
+    if (d.status !== 'baixando') return { ok: false, erro: 'o servidor perdeu o download (reiniciou?)' };
+    aoProgresso(d.bytes || 0, d.total > 0 ? d.total : 0);
+    parado = d.bytes === ultimoBytes ? parado + 1 : 0;
+    ultimoBytes = d.bytes;
+    if (parado > 240) return { ok: false, erro: 'o download no servidor parou por 10 minutos' };
+  }
+}
+
+// reserva: baixa aqui no navegador e envia ao servidor em partes (mesmo protocolo do antigo receptor local)
+async function navegadorEnvia(j, url, nome, aoProgresso) {
   const r = await fetch(url);
   if (!r.ok || !r.body) throw new Error(`download respondeu ${r.status} (${new URL(url).hostname})`);
   const total = Number(r.headers.get('content-length') || 0);
   const alvo = encodeURIComponent(nome);
-  await recv(`?f=${alvo}&mode=start`, { method: 'POST' });
+  await sure(j, `/claro-pdp/fila/parte?f=${alvo}&mode=start`, { method: 'POST' });
   const leitor = r.body.getReader();
   let buf = [], tam = 0, enviado = 0;
   const despachar = async () => {
     if (!tam) return;
-    await recv(`?f=${alvo}`, { method: 'POST', body: new Blob(buf) });
+    await sure(j, `/claro-pdp/fila/parte?f=${alvo}`, { method: 'POST', body: new Blob(buf) });
     enviado += tam; buf = []; tam = 0;
     aoProgresso(enviado, total);
   };
@@ -128,10 +166,8 @@ async function transferir(url, nome, aoProgresso) {
     if (tam >= PARTE) await despachar();
   }
   await despachar();
-  const noDisco = Number(await (await recv(`?f=${alvo}`)).text());
-  if (total && noDisco !== total) throw new Error(`arquivo incompleto (${noDisco} de ${total} bytes)`);
-  await recv(`?f=${alvo}&mode=done`, { method: 'POST' });
-  return noDisco;
+  await sure(j, `/claro-pdp/fila/parte?f=${alvo}&mode=done${total ? `&total=${total}` : ''}`, { method: 'POST' });
+  return enviado;
 }
 
 async function claroBaixar(j) {
@@ -155,10 +191,18 @@ async function claroBaixar(j) {
     try {
       const link = await noPortal(j, mainObterLink, [l.id, l.tipo]);
       if (!link || link.erro) throw new Error((link && link.erro) || 'sem link');
-      await transferir(link.url, l.nome, (env, tot) => claroParaSure(j, {
-        tipo: 'claro_progresso', i: i + 1, total: pend.length, nome: l.nome,
+      const prog = (onde) => (env, tot) => claroParaSure(j, {
+        tipo: 'claro_progresso', i: i + 1, total: pend.length, nome: l.nome, onde,
         mb: Math.round(env / 1048576), mbTotal: tot ? Math.round(tot / 1048576) : null,
-      }));
+      });
+      const srv = await servidorBaixa(j, link.url, l.nome, prog('servidor'));
+      if (!srv.ok) {
+        claroParaSure(j, { tipo: 'claro_reserva', nome: l.nome, motivo: srv.erro });
+        // o link do portal pode valer uma vez só: pede outro antes de baixar por aqui
+        const link2 = await noPortal(j, mainObterLink, [l.id, l.tipo]);
+        if (!link2 || link2.erro) throw new Error((link2 && link2.erro) || 'sem link');
+        await navegadorEnvia(j, link2.url, l.nome, prog('navegador'));
+      }
       baixados++;
       claroParaSure(j, { tipo: 'claro_progresso', i: i + 1, total: pend.length, nome: l.nome, concluido: true });
     } catch (e) {
@@ -172,25 +216,28 @@ async function claroBaixar(j) {
 
 async function claroFim(j, res) {
   claroParaSure(j, { tipo: 'claro_resultado', ...res });
-  await claroLimpar();
+  await claroLimpar(); // apaga também o token da página
   if (!res.erro && !(res.erros && res.erros.length)) chrome.windows.remove(j.windowId).catch(() => {});
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, responder) => {
   if (!msg || !String(msg.tipo || '').startsWith('claro_')) return false;
   (async () => {
-    if (msg.tipo === 'claro_iniciar') return responder(await claroIniciar(sender));
+    if (msg.tipo === 'claro_iniciar') return responder(await claroIniciar(msg, sender));
 
     if (msg.tipo === 'claro_codigo') { // a página do SURE devolveu o código (ou desistiu)
       if (esperaCodigo) { clearTimeout(esperaCodigo.timer); esperaCodigo.resolver(msg); esperaCodigo = null; }
       return responder({});
     }
 
-    if (msg.tipo === 'claro_status') {
-      let local = null;
-      try { local = { ...(await (await recv('?stat')).json()), ...(await (await recv('?feitos')).json()) }; } catch (e) { local = null; }
-      if (local) { local.feitos_total = (local.feitos || []).length; delete local.feitos; }
-      return responder({ job: await claroJob(), local });
+    if (msg.tipo === 'claro_status') { // situação da fila no servidor
+      let fila = null;
+      if (apiValida(msg.api)) {
+        try { fila = await (await sure({ api: msg.api, token: msg.token }, '/claro-pdp/fila')).json(); } catch (e) { fila = null; }
+      }
+      const jb = await claroJob();
+      if (jb) delete jb.token;
+      return responder({ job: jb, fila });
     }
 
     const j = await claroJob();

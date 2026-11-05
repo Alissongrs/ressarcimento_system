@@ -80,8 +80,13 @@ COPY --chown=app:app ocr_prod /app/ocr_prod
 RUN pip install --no-cache-dir -U pip && \
     pip install --no-cache-dir --only-binary=:all: PyMuPDF==1.27.2.3 && \
     pip install --no-cache-dir -r /app/ocr_prod/requirements.txt && \
-    pip install --no-cache-dir "edge-tts>=7,<8"
+    pip install --no-cache-dir "edge-tts>=7,<8" "pymysql>=1.1,<2"
 # edge-tts = voz neural feminina do chat (POST /api/v1/voz/falar)
+# pymysql = conexão da extração da Claro (backend/claro) com o banco pelo DB_APP_URL
+
+# ---- extração das faturas Claro na VPS (backend/claro, no Git; usa o ocr_prod acima para o resto) ----
+# chamado pelo worker/job_claro.sh do host: docker compose exec backend python /app/claro/processar.py …
+COPY --chown=app:app claro /app/claro
 
 # Handler Go lê PYTHON_PATH + FASE1_PIPELINE_PATH; SKIP_SEFAZ=1 no lote;
 # PROMPT_CONFIRMAR_PATH aponta pro prompt já copiado em /app/data.

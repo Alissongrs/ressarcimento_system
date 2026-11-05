@@ -755,6 +755,11 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			adminOnly.GET("/tarefas-vps/qualidade", handlers.QualidadeAmostraTarefas)
 			adminOnly.GET("/tarefas-vps/situacao", handlers.SituacaoTarefaVPS)
 			adminOnly.GET("/claro-pdp/codigo", handlers.CodigoPDPClaroHandler)
+			// Fila dos zips da Claro na VPS (a extensão manda o link; o servidor baixa; worker/job_claro.sh processa)
+			adminOnly.GET("/claro-pdp/fila", handlers.ClaroFilaEstado)
+			adminOnly.POST("/claro-pdp/fila/link", handlers.ClaroFilaLink)
+			adminOnly.GET("/claro-pdp/fila/arquivo", handlers.ClaroFilaArquivo)
+			adminOnly.POST("/claro-pdp/fila/parte", handlers.ClaroFilaParte)
 			adminOnly.POST("/tarefas-vps/:job", handlers.RodarTarefaVPS)
 
 			// Histórico global (página /historico)

@@ -160,6 +160,8 @@ services:
       UPLOAD_DIR: "/app/uploads"
       # WhatsApp da empresa conectado por QR code (sessão no volume whatsapp_data)
       WHATSAPP_DIR: "/app/whatsapp_sessao"
+      # Fila dos zips da Claro (portal PDP): o backend baixa aqui e o worker/job_claro.sh (cron do host) processa
+      CLARO_FILA_DIR: "/app/claro_fila"
 
       # Redis (rate limiting distribuído)
       REDIS_URL: "redis://redis:6379"
@@ -178,6 +180,8 @@ services:
     volumes:
       - uploads_data:/app/uploads
       - whatsapp_data:/app/whatsapp_sessao
+      # pasta do host (o rclone do host sobe os PDFs dela para o Google Drive)
+      - ./worker/claro_fila:/app/claro_fila
       - ./backend/data/catalogo.txt:/app/data/catalogo.txt
       - ./backend/data/regras_aisure.txt:/app/data/regras_aisure.txt:ro
       - ./backend/data/prompt_confirmar.txt:/app/data/prompt_confirmar.txt:ro

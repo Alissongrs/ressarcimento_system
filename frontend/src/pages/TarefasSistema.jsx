@@ -252,15 +252,22 @@ function Situacao({ job, recarregar }) {
   );
 }
 
-// Faturas Claro: roda NO NAVEGADOR, pela extensão do SURE (mesma da ANEEL) — abre o portal PDP da Claro,
-// entra (login guardado na extensão + código lido do e-mail pelo backend), baixa os zips novos e entrega ao
-// processamento local (ferramentas/claro_pdp). Aqui só pedimos, acompanhamos e respondemos o pedido de código.
+// Faturas Claro: a extensão do SURE (mesma da ANEEL) abre o portal PDP da Claro, entra (login guardado na extensão +
+// código lido do e-mail pelo backend) e manda o link de cada zip novo para a fila da Claro NO SERVIDOR
+// (/claro-pdp/fila). A VPS baixa, extrai, sobe para o Drive e grava os links (worker/job_claro.sh).
+// Aqui só pedimos, acompanhamos e respondemos o pedido de código.
+const tokenDaPagina = () => {
+  try { return String(localStorage.getItem('userToken') || '').trim().replace(/^['"]+|['"]+$/g, ''); } catch { return ''; }
+};
+
 function CartaoClaro() {
-  const [temExt, setTemExt] = useState(() => document.documentElement.dataset.sureClaroExt === '1');
+  // '2' = extensão 1.3+, que manda para o servidor (a 1.2 ainda procurava o processamento local do PC)
+  const [temExt, setTemExt] = useState(() => document.documentElement.dataset.sureClaroExt === '2');
+  const [extAntiga, setExtAntiga] = useState(() => document.documentElement.dataset.sureClaroExt === '1');
   const [rodando, setRodando] = useState(false);
   const [linhas, setLinhas] = useState([]);
   const [fim, setFim] = useState(null);
-  const [local, setLocal] = useState(null);
+  const [fila, setFila] = useState(null);
   const [rec, setRec] = useState(0);
   const add = (t) => setLinhas((l) => [...l.filter((x) => !(t.chave && x.chave === t.chave)), t].slice(-12));
 
@@ -287,9 +294,12 @@ function CartaoClaro() {
       if (ev.source !== window) return;
       const d = ev.data || {};
       if (d.origem !== 'sure-aneel-ext') return;
-      if (d.tipo === 'pronta' && d.claro) setTemExt(true);
-      else if (d.tipo === 'claro_status') setLocal(d.local || null);
-      else if (d.tipo === 'claro_aberto') add({ txt: `Portal da Claro aberto (último lote já processado: ${d.ultimo || '—'}).` });
+      if (d.tipo === 'pronta' && d.claro === 2) { setTemExt(true); setExtAntiga(false); }
+      else if (d.tipo === 'pronta' && d.claro) setExtAntiga(true);
+      else if (d.tipo === 'claro_aberto') {
+        add({ txt: `Portal da Claro aberto (último lote já processado: ${d.ultimo || '—'}).` });
+        if (d.aviso) add({ txt: `Atenção: ${d.aviso}.` });
+      }
       else if (d.tipo === 'claro_aguardando_login') add({ txt: 'Entre com o login na janela do portal (para ser automático, guarde o login nas opções da extensão).' });
       else if (d.tipo === 'claro_entrando') add({ chave: 'cod', txt: 'Entrando no portal com o login guardado…' });
       else if (d.tipo === 'claro_precisa_codigo') buscarCodigo(d.desde);
@@ -298,8 +308,10 @@ function CartaoClaro() {
         add({ txt: d.total ? `${d.total} lote(s) novo(s) para baixar (${n0(d.arquivos)} arquivos).` : 'Nenhum lote novo no portal — está tudo carregado.' });
         if (d.talvezMais) add({ txt: 'Atenção: pode haver mais lotes além dos 100 mais recentes — rode de novo depois.' });
       } else if (d.tipo === 'claro_progresso') {
-        add({ chave: 'prog', txt: d.concluido ? `Lote ${d.i} de ${d.total} entregue ao processamento (${d.nome}).`
-          : `Baixando lote ${d.i} de ${d.total}: ${d.mb} MB${d.mbTotal ? ` de ${d.mbTotal} MB` : ''}…` });
+        add({ chave: 'prog', txt: d.concluido ? `Lote ${d.i} de ${d.total} na fila do servidor (${d.nome}).`
+          : `${d.onde === 'navegador' ? 'Enviando ao servidor por este navegador' : 'O servidor está baixando'} o lote ${d.i} de ${d.total}: ${d.mb} MB${d.mbTotal ? ` de ${d.mbTotal} MB` : ''}…` });
+      } else if (d.tipo === 'claro_reserva') {
+        add({ txt: `O servidor não conseguiu baixar ${d.nome} direto do portal (${d.motivo}) — baixando por este navegador e enviando ao servidor.` });
       } else if (d.tipo === 'claro_resultado') {
         setRodando(false);
         setFim(d);
@@ -308,15 +320,23 @@ function CartaoClaro() {
     };
     window.addEventListener('message', ouvir);
     window.postMessage({ origem: 'sure-pagina', tipo: 'ping' }, window.location.origin);
-    window.postMessage({ origem: 'sure-pagina', tipo: 'claro_status' }, window.location.origin);
     return () => { cancelado = true; window.removeEventListener('message', ouvir); };
   }, []);
+
+  // situação da fila da Claro no servidor (direto da API; não depende da extensão)
+  useEffect(() => {
+    let vivo = true;
+    const ler = () => api.get('/claro-pdp/fila').then(({ data }) => { if (vivo) setFila(data); }).catch(() => {});
+    ler();
+    const t = setInterval(ler, rodando ? 10000 : 30000);
+    return () => { vivo = false; clearInterval(t); };
+  }, [rodando, rec]);
 
   const atualizar = () => {
     setLinhas([]);
     setFim(null);
     setRodando(true);
-    window.postMessage({ origem: 'sure-pagina', tipo: 'claro_atualizar' }, window.location.origin);
+    window.postMessage({ origem: 'sure-pagina', tipo: 'claro_atualizar', token: tokenDaPagina() }, window.location.origin);
   };
 
   return (
@@ -326,13 +346,20 @@ function CartaoClaro() {
         <div className="flex-1 min-w-0">
           <div className="font-semibold">Faturas Claro (portal PDP)</div>
           <div className="text-sm opacity-75 mt-0.5">
-            Baixa do portal da Claro os lotes (zips) novos, extrai as faturas, sobe os PDFs para o Google Drive e grava no banco.
-            Roda pela extensão do SURE neste navegador; o processamento fica no computador onde o processamento local da Claro está ligado.
+            Pega no portal da Claro os lotes (zips) novos; o servidor baixa, extrai as faturas, sobe os PDFs para o Google Drive e grava no banco.
+            O login no portal roda pela extensão do SURE neste navegador; o resto é no servidor, sem precisar deixar nada ligado no computador.
           </div>
           <div className="text-xs opacity-60 mt-1">
             manual (pelo botão) · o portal libera 1 lote por dia, por volta das 4h
-            {local && ` · processamento local: ligado, ${local.pending} zip(s) na fila, ${local.freeGB} GB livres`}
+            {fila && ` · servidor: ${fila.pending} lote(s) na fila, ${fila.feitos_total} processado(s)${fila.freeGB >= 0 ? `, ${Number(fila.freeGB).toFixed(1)} GB livres` : ''}`}
           </div>
+          {fila && fila.worker && (!fila.worker.ativo || (fila.worker.aviso && fila.worker.aviso !== 'ok' && !/^subindo/.test(fila.worker.aviso))) && (
+            <div className="text-xs mt-1" style={{ color: '#d97706' }}>
+              {!fila.worker.ativo
+                ? 'O processamento da Claro no servidor não está rodando (o cron do worker na VPS não deu sinal nos últimos minutos) — os lotes ficam na fila até ele voltar.'
+                : `Processamento da Claro no servidor: ${fila.worker.aviso}.`}
+            </div>
+          )}
         </div>
         {rodando && <Badge status="executando" />}
       </div>
@@ -342,7 +369,9 @@ function CartaoClaro() {
           style={{ background: 'var(--accent, #2563eb)' }}>
           <Play className="w-4 h-4" /> {rodando ? 'Atualizando…' : 'Atualizar faturas Claro'}
         </button>
-        {!temExt && <span className="text-xs" style={{ color: '#d97706' }}>Instale ou atualize a extensão do SURE (versão 1.2) neste navegador para usar o botão — "Baixar a extensão do SURE", no topo da página.</span>}
+        {!temExt && <span className="text-xs" style={{ color: '#d97706' }}>{extAntiga
+          ? 'A extensão do SURE deste navegador é antiga (ela mandava para o processamento do computador). Atualize para a versão 1.3 — "Baixar a extensão do SURE", no topo da página — e clique no ↻ dela em chrome://extensions.'
+          : 'Instale ou atualize a extensão do SURE (versão 1.3) neste navegador para usar o botão — "Baixar a extensão do SURE", no topo da página.'}</span>}
       </div>
       {(linhas.length > 0 || fim) && (
         <div className="rounded border p-3 text-sm space-y-1" style={{ borderColor: 'var(--border)' }}>
@@ -350,11 +379,17 @@ function CartaoClaro() {
           {fim && (fim.erro ? <div style={{ color: '#dc2626' }}><strong>Não concluiu:</strong> {fim.erro}</div> : (
             <div>
               <strong>{fim.baixados ? `${fim.baixados} lote(s) entregue(s) ao processamento` : 'Nada novo para baixar'}</strong>
-              {fim.baixados ? ' — a extração, o upload para o Drive e os links rodam em segundo plano no computador (≈1 fatura/s); o número abaixo sobe conforme entram.' : '.'}
+              {fim.baixados ? ' — a extração, o upload para o Drive e os links rodam em segundo plano no servidor; o número abaixo sobe conforme entram.' : '.'}
               {fim.erros?.length > 0 && <div style={{ color: '#dc2626' }}>Parou em: {fim.erros.join(' · ')}</div>}
             </div>
           ))}
         </div>
+      )}
+      {fila && fila.log && fila.log.length > 0 && (
+        <details className="text-xs">
+          <summary className="cursor-pointer opacity-70">Últimos registros do processamento no servidor</summary>
+          <pre className="mt-1 p-2 rounded border whitespace-pre-wrap" style={{ borderColor: 'var(--border)' }}>{fila.log.join('\n')}</pre>
+        </details>
       )}
       <Situacao job="claro_pdp" recarregar={rec} />
     </div>

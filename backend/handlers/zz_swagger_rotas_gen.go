@@ -2680,6 +2680,50 @@ func swaggerRotaGet_api_v1_tarefas_vps_situacao() {}
 // @Router /api/v1/claro-pdp/codigo [get]
 func swaggerRotaGet_api_v1_claro_pdp_codigo() {}
 
+// @Summary Claro fila estado
+// @Description Somente admin. Handler: handlers.ClaroFilaEstado.
+// @Tags claro-pdp
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/claro-pdp/fila [get]
+func swaggerRotaGet_api_v1_claro_pdp_fila() {}
+
+// @Summary Claro fila link
+// @Description Somente admin. Handler: handlers.ClaroFilaLink.
+// @Tags claro-pdp
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/claro-pdp/fila/link [post]
+func swaggerRotaPost_api_v1_claro_pdp_fila_link() {}
+
+// @Summary Claro fila arquivo
+// @Description Somente admin. Handler: handlers.ClaroFilaArquivo.
+// @Tags claro-pdp
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/claro-pdp/fila/arquivo [get]
+func swaggerRotaGet_api_v1_claro_pdp_fila_arquivo() {}
+
+// @Summary Claro fila parte
+// @Description Somente admin. Handler: handlers.ClaroFilaParte.
+// @Tags claro-pdp
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/claro-pdp/fila/parte [post]
+func swaggerRotaPost_api_v1_claro_pdp_fila_parte() {}
+
 // @Summary Rodar tarefa vps
 // @Description Somente admin. Handler: handlers.RodarTarefaVPS.
 // @Tags tarefas-vps

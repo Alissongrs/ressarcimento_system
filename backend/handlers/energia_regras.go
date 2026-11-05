@@ -32,6 +32,9 @@ import (
 // regras que já rodam na base de Energia (as demais aparecem como "ainda não ligada a esta base"):
 // as mesmas da aba Usinas — só com a fatura, com o histórico da UC, da ANEEL e a CIP entre UCs
 var regrasEnergia = map[string]bool{"F28": true, "F41": true, "F42": true, "F58": true, "F51": true,
+	// regras_extra.go (05/11/2026) — a FDE não tem o quadro de tributos (base/valor) nem o de continuidade
+	"F16": true, "F18": true, "F20": true, "F23": true, "F29": true, "F44": true, "F46": true,
+	"F10": true, "F11": true, "F19": true, "F21": true, "F24": true, "F26": true, "F31": true, "F32": true, "F43": true,
 	"F13": true, "F14": true, "F15": true, "F17": true, "F27": true, "F35": true, "F36": true, "F52": true,
 	"F53": true, "F54": true, "F55": true,
 	"F06": true, "F07": true, "F08": true, "F33": true, "F34": true, "F57": true}
@@ -184,7 +187,8 @@ func carregarFaturasEnergiaOnde(db *sql.DB, cn *cnpjAneel, comItens bool, onde s
 			COALESCE(saldo_gd_fponta_kwh,0) + COALESCE(saldo_gd_ponta_kwh,0))), COALESCE(valor_total_sefaz,0),
 		COALESCE(dias_faturados,0), COALESCE(indicacao_troca_medidor,0) = 1,
 		(COALESCE(indicador_leitura_estimativa,0) = 1 OR COALESCE(flag_faturamento_media,0) = 1 OR COALESCE(indicacao_impedimento_leitura,0) = 1),
-		COALESCE(fio_b_sefaz_rs,0), COALESCE(custo_disponib_sefaz_rs,0)
+		COALESCE(fio_b_sefaz_rs,0), COALESCE(custo_disponib_sefaz_rs,0),
+		COALESCE(demanda_contratada_ponta_kw,0), COALESCE(demanda_contratada_fponta_kw,0), COALESCE(indicador_leitura_real,0) = 1
 		FROM FATURA_DADOS_EXTRAIDOS WHERE `+energiaFiltroEmpresa+` AND (`+energiaMesSQL+`) IS NOT NULL`+onde, args...)
 	if err != nil {
 		return nil, err
@@ -196,11 +200,21 @@ func carregarFaturasEnergiaOnde(db *sql.DB, cn *cnpjAneel, comItens bool, onde s
 		var pis, cof float64
 		var cep, raw, medidor string
 		var k, laFP, luFP, laP, luP, laR, luR, dP, dFP, fp, inj, comp, saldo sql.NullFloat64
+		var cP, cFP float64
 		if rows.Scan(&f.id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.modalidade, &f.cnpj, &f.lant, &f.latu,
 			&pis, &cof, &cep, &f.classe, &f.cip, &f.total, &f.kwhRef, &raw,
 			&f.fornecimento, &medidor, &k, &laFP, &luFP, &laP, &luP, &laR, &luR, &dP, &dFP, &fp, &inj, &comp, &saldo, &f.totalSefaz,
-			&f.diasImpr, &f.trocaMed, &f.justLeitura, &f.fioBSefaz, &f.dispSefaz) != nil {
+			&f.diasImpr, &f.trocaMed, &f.justLeitura, &f.fioBSefaz, &f.dispSefaz, &cP, &cFP, &f.leituraReal) != nil {
 			continue
+		}
+		if cP > 0 || cFP > 0 { // demanda contratada (regras_extra.go: F23, F24, F26, F29)
+			f.contr = map[string]float64{}
+			if cP > 0 {
+				f.contr["PONTA"] = cP
+			}
+			if cFP > 0 {
+				f.contr["FORA_PONTA"] = cFP
+			}
 		}
 		f.dias, f.dLant, f.dLatu = diasEntre(f.lant, f.latu), f.lant, f.latu // antes de qualquer ajuste das datas abaixo
 		f.medidor = normNumMedidor(medidor)
@@ -394,7 +408,7 @@ func datasCoerentes(f *uFat) bool {
 // AplicarRegrasEnergia — achados das regras selecionadas no conjunto "energia", por id da fatura
 func AplicarRegrasEnergia(db *sql.DB, sel map[string]bool) (map[string][]Achado, map[string]*uFat, error) {
 	out := map[string][]Achado{}
-	aneel := sel["F28"] || sel["F41"] || sel["F42"] || sel["F58"]
+	aneel := precisaAneel(sel)
 	outras := false // regras só com a fatura / com o histórico da UC
 	for c := range sel {
 		if s := regrasSituacao[c]; regrasEnergia[c] && (s == "fatura" || s == "historico") {

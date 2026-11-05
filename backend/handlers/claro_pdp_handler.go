@@ -1,7 +1,7 @@
 package handlers
 
 // Faturas Claro pelo portal PDP (Accenture) — apoio do backend ao módulo Claro da extensão do SURE.
-// A extensão faz login, baixa os zips novos e entrega ao processamento local (C:\claro_bf); o backend só
+// A extensão faz login e manda os links dos zips novos para a fila no servidor (claro_fila_handler.go); aqui o backend só
 // (1) devolve o código de segurança que o portal mandou por e-mail e (2) informa a situação da base.
 
 import (

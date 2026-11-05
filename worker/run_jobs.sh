@@ -8,6 +8,13 @@ LOG="${SURE_JOBS_LOG:-$REPO/worker/run_jobs.log}"
 LOCK="${SURE_JOBS_LOCK:-/tmp/sure_run_jobs.lock}"
 PYTHON="${SURE_PYTHON:-python3}"
 
+# Lotes da Claro (portal PDP) baixados pelo backend → extração + Drive + links (worker/job_claro.sh).
+# Vai junto deste cron de 1 minuto para não precisar de linha nova no crontab; roda solto e tem trava própria.
+# (disparado ANTES do flock abaixo para não herdar a trava deste script)
+if [ -f "$REPO/worker/job_claro.sh" ]; then
+  setsid bash "$REPO/worker/job_claro.sh" </dev/null >/dev/null 2>&1 &
+fi
+
 exec 7>"$LOCK" || exit 0
 flock -n 7 || exit 0
 cd "$REPO" || { echo "[$(date '+%F %T')] repo não encontrado: $REPO" >> "$LOG"; exit 0; }

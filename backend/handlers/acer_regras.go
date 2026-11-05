@@ -28,6 +28,9 @@ import (
 // regras que já rodam na base da Acer (as demais aparecem na lista como "ainda não ligada à Acer") — as mesmas
 // da aba Usinas. Sem saldo de créditos na extração da Acer, F54/F55 não têm o que comparar e não apontam.
 var regrasAcer = map[string]bool{"F28": true, "F41": true, "F42": true, "F58": true, "F51": true,
+	// regras_extra.go (05/11/2026) — a Acer não tem demanda contratada nem quadro de continuidade
+	"F16": true, "F18": true, "F20": true, "F29": true, "F38": true, "F39": true, "F44": true, "F46": true,
+	"F10": true, "F11": true, "F19": true, "F21": true, "F31": true, "F32": true, "F43": true,
 	"F13": true, "F14": true, "F15": true, "F17": true, "F27": true, "F35": true, "F36": true, "F52": true,
 	"F53": true, "F54": true, "F55": true,
 	"F06": true, "F07": true, "F08": true, "F33": true, "F34": true, "F57": true}
@@ -241,6 +244,7 @@ func carregarFaturasAcerOnde(db *sql.DB, onde string, args ...any) (map[string]*
 		if f.grupo == "" && f.subgrupo != "" {
 			f.grupo = f.subgrupo[:1]
 		}
+		lerTributosAcer(f, j) // base/alíquota/valor (regras_extra.go: F38, F39)
 		// PIS + COFINS da tabela de alíquotas
 		if tb, ok := j["tbl_aliquotas|tabela"].(map[string]any); ok {
 			vistos := map[string]bool{}
@@ -318,7 +322,7 @@ func AplicarRegrasAcer(db *sql.DB, sel map[string]bool) (map[string][]Achado, ma
 		return nil, nil, err
 	}
 	aplicarRegrasComuns(fats, sel, out)
-	if sel["F28"] || sel["F41"] || sel["F42"] || sel["F58"] {
+	if precisaAneel(sel) {
 		base, err := baseAneel(db)
 		if err != nil {
 			return nil, nil, err

@@ -1,32 +1,56 @@
 {
   "manifest_version": 3,
   "name": "SURE — ANEEL e Faturas Claro",
-  "version": "1.2.0",
-  "description": "Consulta os protocolos da Ouvidoria da ANEEL e baixa as faturas novas da Claro (portal PDP) para o SURE.",
-  "permissions": ["storage", "scripting"],
+  "version": "1.3.0",
+  "description": "Consulta os protocolos da Ouvidoria da ANEEL e manda as faturas novas da Claro (portal PDP) para o SURE processar no servidor.",
+  "permissions": [
+    "storage",
+    "scripting"
+  ],
   "host_permissions": [
     "https://www2.aneel.gov.br/faleconosco/*",
     "https://clarobps-pdp.azurewebsites.net/*",
     "https://pdp.clarobpo.com/*",
     "https://*.blob.core.windows.net/*",
-    "http://127.0.0.1:8801/*"
+    "https://sure.app.br/*",
+    "http://sure.app.br/*",
+    "http://179.127.26.37/*",
+    "http://localhost/*"
   ],
-  "background": { "service_worker": "background.js" },
+  "background": {
+    "service_worker": "background.js"
+  },
   "options_page": "opcoes.html",
   "content_scripts": [
     {
-      "matches": ["https://sure.app.br/*", "http://sure.app.br/*", "http://179.127.26.37/*", "http://localhost/*"],
-      "js": ["content_sure.js"],
+      "matches": [
+        "https://sure.app.br/*",
+        "http://sure.app.br/*",
+        "http://179.127.26.37/*",
+        "http://localhost/*"
+      ],
+      "js": [
+        "content_sure.js"
+      ],
       "run_at": "document_start"
     },
     {
-      "matches": ["https://www2.aneel.gov.br/faleconosco/*"],
-      "js": ["content_aneel.js"],
+      "matches": [
+        "https://www2.aneel.gov.br/faleconosco/*"
+      ],
+      "js": [
+        "content_aneel.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://clarobps-pdp.azurewebsites.net/*", "https://pdp.clarobpo.com/*"],
-      "js": ["content_claro.js"],
+      "matches": [
+        "https://clarobps-pdp.azurewebsites.net/*",
+        "https://pdp.clarobpo.com/*"
+      ],
+      "js": [
+        "content_claro.js"
+      ],
       "run_at": "document_idle"
     }
   ]

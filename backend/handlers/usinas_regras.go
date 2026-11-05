@@ -34,20 +34,38 @@ var regrasSituacao = map[string]string{
 	"F36": "fatura", "F52": "fatura", "F07": "fatura", "F57": "fatura",
 	"F53": "historico", "F54": "historico", "F55": "historico",
 	"F06": "historico", "F08": "historico", "F33": "historico", "F34": "historico",
-	"F28": "aneel", "F41": "aneel", "F42": "aneel", "F58": "aneel", "F31": "parametro", "F32": "parametro", "F39": "parametro", "F40": "parametro",
-	"F43": "parametro", "F44": "parametro", "F45": "parametro",
-	"F46": "parametro", "F51": "pares", "F56": "parametro",
+	"F28": "aneel", "F41": "aneel", "F42": "aneel", "F58": "aneel", "F51": "pares",
+	// ligadas em 05/11/2026 (regras_extra.go) com os dados que as bases já têm
+	"F16": "fatura", "F18": "fatura", "F20": "fatura", "F23": "fatura", "F29": "fatura", "F38": "fatura", "F39": "fatura",
+	"F44": "fatura", "F46": "fatura",
+	"F10": "historico", "F11": "historico", "F19": "historico", "F21": "historico", "F24": "historico", "F26": "historico",
+	"F48": "historico", "F49": "historico",
+	"F31": "aneel", "F32": "aneel", "F43": "aneel",
+	// dependem de parâmetro de fora que o sistema não tem (regrasPrecisa)
+	"F30": "parametro", "F40": "parametro", "F45": "parametro", "F47": "parametro", "F56": "parametro", "F60": "parametro", "F61": "parametro",
 }
 
 // o que falta para as regras que dependem de parâmetro (mostrado na lista)
 var regrasPrecisa = map[string]string{
 	"F28": "tarifa homologada TE/TUSD — importada da ANEEL", "F58": "TUSD G homologada — importada da ANEEL",
 	"F41": "bandeira acionada no mês — importada da ANEEL", "F42": "adicional da bandeira — importado da ANEEL",
-	"F31": "datas de vigência dos reajustes (ANEEL)", "F32": "tarifas antiga e nova + data do reajuste (ANEEL)",
-	"F39": "alíquotas de ICMS por UF/classe e PIS/COFINS", "F40": "isenções/benefícios de ICMS por UF",
-	"F43": "dias de cada bandeira no ciclo (rateio por dias)", "F44": "valor da bandeira + alíquotas",
-	"F45": "valor homologado da CDE Covid", "F46": "vigência da CDE Escassez Hídrica",
-	"F56": "TUSD Fio B e percentual de transição (Lei 14.300)",
+	"F31": "tarifas antiga e nova + início da vigência — importadas da ANEEL", "F32": "tarifas antiga e nova + início da vigência — importadas da ANEEL",
+	"F43": "bandeira de cada mês — importada da ANEEL; rateio pelos dias do ciclo",
+	// ligadas em parte: o que falta para a parte que não roda
+	"F39": "roda a conta valor = base × alíquota e o teto de PIS/COFINS; falta a tabela de alíquotas de ICMS por UF/classe/faixa para conferir a alíquota em si",
+	"F44": "roda a parte de GD (bandeira sobre o consumo bruto); falta a regra de isenção de ICMS por UF para a outra parte",
+	"F46": "roda como ALERTA depois de 10/10/2024; falta a data do processo tarifário de cada distribuidora que tirou o encargo (REH) para ERRO",
+	"F48": "roda com o quadro de continuidade da fatura (Usinas); falta o valor da compensação (fórmula do PRODIST com o consumo médio) para ERRO",
+	"F49": "roda com o quadro de continuidade da fatura (Usinas); o limite do DMIC raramente vem impresso",
+	"F24": "sem o contrato (CUSD/aditivos) só aponta mudança fora do padrão (ALERTA)",
+	// não rodam: parâmetro de fora que o sistema não tem
+	"F30": "tabela de descontos por classe/subclasse (baixa renda, rural, irrigante, serviço público) e o comprovante de enquadramento",
+	"F40": "regras de isenção de ICMS por UF (faixas de consumo, classes isentas) e o comprovante de enquadramento",
+	"F45": "data-fim e valor unitário da CDE Covid por distribuidora (REH)",
+	"F47": "resoluções ANEEL de devolução de CDE (período e valor unitário)",
+	"F56": "TUSD Fio B cheia homologada por distribuidora (componente da tarifa) e o enquadramento GD I/II/III da UC",
+	"F60": "percentual de desconto do contrato de energia incentivada / outorga (50%, 80% ou 100%)",
+	"F61": "outorga de autoprodutor com o percentual de desconto e os encargos isentos",
 }
 
 var padraoUsinas = []string{"F01", "F02", "F03", "F04", "F05"}
@@ -239,6 +257,13 @@ type uFat struct {
 	itens                []uItem
 	meds                 []uMed
 	gd                   []uGD
+	// regras_extra.go: demanda contratada por posto (PONTA, FORA_PONTA, UNICO), quadro de tributos e de continuidade
+	contr map[string]float64
+	tribs []uTrib
+	qual  []uQual
+	// leituraReal: a base marca "leitura real" no mês (FDE indicador_leitura_real) — o "faturamento pela média"
+	// da FDE vem marcado em 8.778 faturas e quase todas têm leitura real (05/11/2026); F10/F11 só valem sem ela
+	leituraReal bool
 }
 
 // Achado de uma regra numa fatura
@@ -272,15 +297,17 @@ func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string
 		COALESCE(JSON_EXTRACT(f.dados_json,'$.tributos'),'[]'),
 		UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.titular.cidade')),''))),
 		UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.unidade_consumidora.classe')),''))),
-		COALESCE(f.cosip,0), COALESCE(f.dias_faturados,0) ` + base, args...)
+		COALESCE(f.cosip,0), COALESCE(f.dias_faturados,0),
+		COALESCE(JSON_EXTRACT(f.dados_json,'$.demanda'),'[]'), COALESCE(JSON_EXTRACT(f.dados_json,'$.qualidade_servico'),'[]') ` + base, args...)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		f := &uFat{}
-		var trib string
+		var trib, dem, qual string
 		if rows.Scan(&f.id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.total, &f.fornecimento, &f.cnpj, &f.modalidade,
-			&f.lant, &f.latu, &trib, &f.cidade, &f.classe, &f.cip, &f.diasImpr) == nil {
+			&f.lant, &f.latu, &trib, &f.cidade, &f.classe, &f.cip, &f.diasImpr, &dem, &qual) == nil {
+			lerExtrasUsina(f, trib, dem, qual)
 			f.dias, f.dLant, f.dLatu = diasEntre(f.lant, f.latu), f.lant, f.latu
 			var ts []struct {
 				Tributo  string   `json:"tributo"`
@@ -823,6 +850,14 @@ func aplicarRegrasComuns(fats map[string]*uFat, sel map[string]bool, out map[str
 	for id, a := range regrasLeitura(fats, sel) {
 		out[id] = append(out[id], a...)
 	}
+	for id, f := range fats { // regras_extra.go
+		if a := regrasExtraFatura(f, sel); len(a) > 0 {
+			out[id] = append(out[id], a...)
+		}
+	}
+	for id, a := range regrasExtraHistorico(fats, sel) {
+		out[id] = append(out[id], a...)
+	}
 }
 
 // AplicarRegrasUsinas — achados das regras "fatura"/"historico" selecionadas, por id_fatura
@@ -847,7 +882,7 @@ func AplicarRegrasUsinas(db *sql.DB, sel map[string]bool) (map[string][]Achado, 
 			out[id] = append(out[id], a...)
 		}
 	}
-	if sel["F28"] || sel["F41"] || sel["F42"] || sel["F58"] {
+	if precisaAneel(sel) {
 		base, err := baseAneel(db)
 		if err != nil {
 			return nil, err
@@ -928,7 +963,7 @@ func tetoTarifa(hom, pisCofins float64) float64 {
 const pisCofinsMax = 0.0925
 
 func regrasAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
-	out := regrasAneelFatura(f, b, sel)
+	out := append(regrasAneelFatura(f, b, sel), regrasExtraAneel(f, b, sel)...)
 	if !f.variasFaturas {
 		return out
 	}

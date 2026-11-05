@@ -126,3 +126,8 @@ worker/.jobs_em_andamento/
 worker/engine/_work/
 .deploy_backups/
 worker/engine/C:/
+
+# fila dos zips da Claro na VPS (só o marco inicial e o leia-me ficam no Git)
+worker/claro_fila/*
+!worker/claro_fila/ultimo_inicial.txt
+!worker/claro_fila/LEIAME.md
