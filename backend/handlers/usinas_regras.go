@@ -37,12 +37,12 @@ var regrasSituacao = map[string]string{
 	"F28": "aneel", "F41": "aneel", "F42": "aneel", "F58": "aneel", "F51": "pares",
 	// ligadas em 05/11/2026 (regras_extra.go) com os dados que as bases já têm
 	"F16": "fatura", "F18": "fatura", "F20": "fatura", "F23": "fatura", "F29": "fatura", "F38": "fatura", "F39": "fatura",
-	"F44": "fatura", "F46": "fatura",
+	"F44": "fatura", "F46": "fatura", "F45": "fatura", "F56": "fatura", // F45 F46 F56: regras_componentes.go
 	"F10": "historico", "F11": "historico", "F19": "historico", "F21": "historico", "F24": "historico", "F26": "historico",
 	"F48": "historico", "F49": "historico",
 	"F31": "aneel", "F32": "aneel", "F43": "aneel",
 	// dependem de parâmetro de fora que o sistema não tem (regrasPrecisa)
-	"F30": "parametro", "F40": "parametro", "F45": "parametro", "F47": "parametro", "F56": "parametro", "F60": "parametro", "F61": "parametro",
+	"F30": "parametro", "F40": "parametro", "F47": "parametro", "F60": "parametro", "F61": "parametro",
 }
 
 // o que falta para as regras que dependem de parâmetro (mostrado na lista)
@@ -54,16 +54,16 @@ var regrasPrecisa = map[string]string{
 	// ligadas em parte: o que falta para a parte que não roda
 	"F39": "roda a conta valor = base × alíquota e o teto de PIS/COFINS; falta a tabela de alíquotas de ICMS por UF/classe/faixa para conferir a alíquota em si",
 	"F44": "roda a parte de GD (bandeira sobre o consumo bruto); falta a regra de isenção de ICMS por UF para a outra parte",
-	"F46": "roda como ALERTA depois de 10/10/2024; falta a data do processo tarifário de cada distribuidora que tirou o encargo (REH) para ERRO",
-	"F48": "roda com o quadro de continuidade da fatura (Usinas); falta o valor da compensação (fórmula do PRODIST com o consumo médio) para ERRO",
-	"F49": "roda com o quadro de continuidade da fatura (Usinas); o limite do DMIC raramente vem impresso",
+	"F45": "componente CDE Covid homologado (ANEEL, Componentes Tarifárias 2022–2026) — a linha da fatura é comparada com ele",
+	"F46": "componente CDE Covid/Escassez homologado (ANEEL, Componentes Tarifárias 2022–2026); a ANEEL não separa a Escassez da Covid",
+	"F56": "TUSD Fio B homologada (ANEEL, Componentes Tarifárias) × percentual do ano da GD II; GD I isenta; GD III não conferida; só onde a fatura discrimina a linha",
+	"F48": "roda com o quadro de continuidade da fatura (Usinas): compensação devida pelo PRODIST Módulo 8 item 225 (indicador × VRC/730 × kei 34/40/108; VRC impresso ou Fio B homologado × quantidades); ERRO só sem nenhum crédito e com as 3 faturas seguintes na base",
+	"F49": "roda com o quadro de continuidade da fatura (Usinas); sem o limite do DMIC impresso usa o Anexo 8.B do PRODIST (REN 1.137/2025) pela faixa do DIC",
 	"F24": "sem o contrato (CUSD/aditivos) só aponta mudança fora do padrão (ALERTA)",
 	// não rodam: parâmetro de fora que o sistema não tem
 	"F30": "tabela de descontos por classe/subclasse (baixa renda, rural, irrigante, serviço público) e o comprovante de enquadramento",
 	"F40": "regras de isenção de ICMS por UF (faixas de consumo, classes isentas) e o comprovante de enquadramento",
-	"F45": "data-fim e valor unitário da CDE Covid por distribuidora (REH)",
-	"F47": "resoluções ANEEL de devolução de CDE (período e valor unitário)",
-	"F56": "TUSD Fio B cheia homologada por distribuidora (componente da tarifa) e o enquadramento GD I/II/III da UC",
+	"F47": "a devolução da CDE de 2025 vem embutida na TE homologada (componente negativo) — conferida pela F32/F46; devolução em linha própria precisa da resolução específica (período e valor unitário)",
 	"F60": "percentual de desconto do contrato de energia incentivada / outorga (50%, 80% ou 100%)",
 	"F61": "outorga de autoprodutor com o percentual de desconto e os encargos isentos",
 }
@@ -244,7 +244,7 @@ type uFat struct {
 	// variasFaturas: base extraída cujo PDF trazia mais de uma fatura e a extração juntou os itens (soma dos itens
 	// acima de 1,5× o total — dossiê da fatura 220110 da Celesc, 03/11/2026: agosto verde + setembro vermelha)
 	variasFaturas bool
-	totalSefaz        float64 // total da NF3e na SEFAZ (2ª fonte do total), quando a base tem
+	totalSefaz    float64 // total da NF3e na SEFAZ (2ª fonte do total), quando a base tem
 	// ciclo e leitura (F06 F07 F08 F33 F34)
 	dias         int    // dias do ciclo pelas datas de leitura DA BASE (0 = sem as duas datas)
 	dLant, dLatu string // as datas de leitura como vieram da base (lant/latu podem ser deduzidas)
@@ -264,6 +264,8 @@ type uFat struct {
 	// leituraReal: a base marca "leitura real" no mês (FDE indicador_leitura_real) — o "faturamento pela média"
 	// da FDE vem marcado em 8.778 faturas e quase todas têm leitura real (05/11/2026); F10/F11 só valem sem ela
 	leituraReal bool
+	// vrcImpr: "Valor EUSD/VRC" impresso no quadro de continuidade (base da compensação de DIC/FIC/DMIC — F48/F49)
+	vrcImpr float64
 }
 
 // Achado de uma regra numa fatura
@@ -289,7 +291,7 @@ func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string
 		base += " AND (" + onde + ")"
 	}
 	fats := map[string]*uFat{}
-	rows, err := db.Query(`SELECT f.id_fatura, ` + usinaChaveUC + `, LEFT(f.mes_referencia,7), COALESCE(f.grupo,''),
+	rows, err := db.Query(`SELECT f.id_fatura, `+usinaChaveUC+`, LEFT(f.mes_referencia,7), COALESCE(f.grupo,''),
 		COALESCE(f.subgrupo,''), COALESCE(f.total_a_pagar,0),
 		COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.unidade_consumidora.tipo_fornecimento')),''),
 		REGEXP_REPLACE(COALESCE(f.distribuidora_cnpj,''),'[^0-9]',''), COALESCE(f.modalidade_tarifaria,''),
@@ -298,16 +300,19 @@ func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string
 		UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.titular.cidade')),''))),
 		UPPER(TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(f.dados_json,'$.unidade_consumidora.classe')),''))),
 		COALESCE(f.cosip,0), COALESCE(f.dias_faturados,0),
-		COALESCE(JSON_EXTRACT(f.dados_json,'$.demanda'),'[]'), COALESCE(JSON_EXTRACT(f.dados_json,'$.qualidade_servico'),'[]') ` + base, args...)
+		COALESCE(JSON_EXTRACT(f.dados_json,'$.demanda'),'[]'), COALESCE(JSON_EXTRACT(f.dados_json,'$.qualidade_servico'),'[]'),
+		COALESCE(REGEXP_SUBSTR(f.dados_json, 'VRC[^0-9]{0,12}[0-9.]+,[0-9]+'),
+			REGEXP_SUBSTR(f.dados_json, '[0-9.]+,[0-9]+", "pagina": [0-9]+, "rotulo": "Valor EUSD/VRC'), '') `+base, args...)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		f := &uFat{}
-		var trib, dem, qual string
+		var trib, dem, qual, vrc string
 		if rows.Scan(&f.id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.total, &f.fornecimento, &f.cnpj, &f.modalidade,
-			&f.lant, &f.latu, &trib, &f.cidade, &f.classe, &f.cip, &f.diasImpr, &dem, &qual) == nil {
+			&f.lant, &f.latu, &trib, &f.cidade, &f.classe, &f.cip, &f.diasImpr, &dem, &qual, &vrc) == nil {
 			lerExtrasUsina(f, trib, dem, qual)
+			f.vrcImpr = numVRC(vrc)
 			f.dias, f.dLant, f.dLatu = diasEntre(f.lant, f.latu), f.lant, f.latu
 			var ts []struct {
 				Tributo  string   `json:"tributo"`
@@ -329,7 +334,7 @@ func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string
 	rows.Close()
 	ir, err := db.Query(`SELECT i.id_fatura, COALESCE(i.descricao,''), COALESCE(i.componente,''), COALESCE(i.posto,''),
 		COALESCE(i.unidade,''), i.quantidade_faturada, i.tarifa_com_tributos, i.valor, i.tarifa_sem_tributos
-		FROM FATURA_USINA_ITENS i JOIN FATURA_USINA f ON f.id_fatura = i.id_fatura ` + strings.Replace(base, "FROM FATURA_USINA f ", "", 1) +
+		FROM FATURA_USINA_ITENS i JOIN FATURA_USINA f ON f.id_fatura = i.id_fatura `+strings.Replace(base, "FROM FATURA_USINA f ", "", 1)+
 		` ORDER BY i.id_fatura, i.ordem`, args...)
 	if err != nil {
 		return nil, err
@@ -345,7 +350,7 @@ func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string
 	mr, err := db.Query(`SELECT m.id_fatura, COALESCE(m.grandeza,''), COALESCE(m.posto,''), COALESCE(m.medidor,''),
 		COALESCE(m.unidade,''), m.leitura_anterior, m.leitura_atual, m.constante, m.consumo, m.fator_potencia,
 		COALESCE(m.leitura_arredondada,0)
-		FROM FATURA_USINA_MEDICOES m JOIN FATURA_USINA f ON f.id_fatura = m.id_fatura ` + strings.Replace(base, "FROM FATURA_USINA f ", "", 1) +
+		FROM FATURA_USINA_MEDICOES m JOIN FATURA_USINA f ON f.id_fatura = m.id_fatura `+strings.Replace(base, "FROM FATURA_USINA f ", "", 1)+
 		` ORDER BY m.id_fatura, m.ordem`, args...)
 	if err != nil {
 		return nil, err
@@ -359,7 +364,7 @@ func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string
 	}
 	mr.Close()
 	gr, err := db.Query(`SELECT g.id_fatura, COALESCE(g.tipo,''), COALESCE(g.posto,''), g.kwh
-		FROM FATURA_USINA_GD g JOIN FATURA_USINA f ON f.id_fatura = g.id_fatura ` + strings.Replace(base, "FROM FATURA_USINA f ", "", 1) +
+		FROM FATURA_USINA_GD g JOIN FATURA_USINA f ON f.id_fatura = g.id_fatura `+strings.Replace(base, "FROM FATURA_USINA f ", "", 1)+
 		` AND g.tipo <> 'rateio'`, args...)
 	if err != nil {
 		return nil, err
@@ -857,6 +862,11 @@ func aplicarRegrasComuns(fats map[string]*uFat, sel map[string]bool, out map[str
 	}
 	for id, a := range regrasExtraHistorico(fats, sel) {
 		out[id] = append(out[id], a...)
+	}
+	for id, f := range fats { // regras_componentes.go
+		if a := regrasComponentes(f, sel); len(a) > 0 {
+			out[id] = append(out[id], a...)
+		}
 	}
 }
 

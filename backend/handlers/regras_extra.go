@@ -59,7 +59,6 @@ var (
 	reAtivaMed  = regexp.MustCompile(`ATIV|CONSUMO|KWH|ENRG\s*ATV|ENERGIA\s*KWH`)
 	reGeraMed   = regexp.MustCompile(`INJ|GERA|GER\b`)
 	reDemMed    = regexp.MustCompile(`DEMANDA|\bDEM\b|\bDN\b|\bKW\b`)
-	reEscassez  = regexp.MustCompile(`ESCASS`)
 	reNaoTribut = regexp.MustCompile(`MULTA|JUROS|MORA|CORRE[CÇ][AÃ]O|ATUALIZ|ATUALIZA[CÇ][AÃ]O\s*MONET`)
 )
 
@@ -442,17 +441,7 @@ func regrasExtraFatura(f *uFat, sel map[string]bool) []Achado {
 		}
 	}
 
-	// F46 — CDE Escassez Hídrica cobrada depois do marco geral (10/10/2024, MP 1.212/2024) em cliente cativo
-	if sel["F46"] && !acl && f.mes >= "2024-11" {
-		for _, it := range f.itens {
-			d := strings.ToUpper(sem(it.desc))
-			if reEscassez.MatchString(d) && !strings.Contains(d, "BANDEIRA") && nv(it.valor) > 0 {
-				out = append(out, Achado{"F46", "ALERTA", fmt.Sprintf("%s R$ %.2f em %s, depois do marco geral de 10/10/2024 (MP 1.212/2024) — para ERRO falta a data do processo tarifário da distribuidora que encerrou o encargo",
-					it.desc, nv(it.valor), f.mes), 0, 0})
-				break
-			}
-		}
-	}
+	// F46 (CDE Escassez) e F45 (CDE Covid) — regras_componentes.go, com o componente homologado da ANEEL
 	return out
 }
 
@@ -641,41 +630,128 @@ func regrasExtraHistorico(fats map[string]*uFat, sel map[string]bool) map[string
 			if (sel["F48"] || sel["F49"]) && len(f.qual) > 0 {
 				var viol []string
 				dmic := false
+				dicLim := map[string]float64{}
 				for _, q := range f.qual {
+					if strings.EqualFold(q.ind, "DIC") && q.lim > 0 {
+						dicLim[q.periodo] = q.lim
+					}
+				}
+				for _, q := range f.qual {
+					fonteLim := ""
+					if strings.EqualFold(q.ind, "DMIC") && q.lim <= 0 && q.apur > 0 {
+						// limite do DMIC não impresso: o da mesma faixa do DIC impresso (PRODIST Módulo 8, Anexo 8.B)
+						if l, tab, ok := dmicPeloDIC(f, dicLim[q.periodo]); ok {
+							q.lim, fonteLim = l, " pelo Anexo 8.B do PRODIST ("+tab+", mesma faixa do DIC impresso)"
+						}
+					}
 					if q.lim > 0 && q.apur > q.lim {
 						ind := strings.ToUpper(q.ind)
 						if ind == "DMIC" {
 							dmic = true
 						}
 						if (ind == "DMIC" && sel["F49"]) || ((ind == "DIC" || ind == "FIC") && sel["F48"]) {
-							viol = append(viol, fmt.Sprintf("%s %.2f > limite %.2f (%s)", ind, q.apur, q.lim, q.periodo))
+							viol = append(viol, fmt.Sprintf("%s %.2f > limite %.2f%s (%s)", ind, q.apur, q.lim, fonteLim, q.periodo))
 						}
 					}
 				}
 				if len(viol) > 0 {
-					comp := false
-					n := 0
-					for j := i; j < len(serie) && j <= i+2; j++ {
+					// período apurado (o quadro sai 1–2 meses depois) e o crédito: até 2 meses após a apuração
+					per := ""
+					for _, q := range f.qual {
+						if pm := periodoMes(q.periodo); pm != "" {
+							per = pm
+							break
+						}
+					}
+					if per == "" {
+						per = mesSeguinte(f.mes, -2)
+					}
+					credito, n, achouComp := 0.0, 0, false
+					var linhasComp []string
+					for j := 0; j < len(serie); j++ {
+						if serie[j].mes <= per || serie[j].mes > mesSeguinte(per, 3) {
+							continue
+						}
 						n++
 						for _, it := range serie[j].itens {
 							d := strings.ToUpper(sem(it.desc))
-							if it.comp == "COMPENSACAO_CONTINUIDADE" || strings.Contains(d, "DIC") || strings.Contains(d, "FIC") ||
-								strings.Contains(d, "DMIC") || strings.Contains(d, "CONTINUIDADE") || strings.Contains(d, "COMPENS. IND") {
-								comp = true
+							if strings.Contains(d, "BAND") || !(it.comp == "COMPENSACAO_CONTINUIDADE" || reCompCont.MatchString(d)) {
+								continue
 							}
+							achouComp = true
+							credito += math.Abs(nv(it.valor))
+							linhasComp = append(linhasComp, fmt.Sprintf("%s R$ %.2f (%s)", strings.TrimSpace(it.desc), math.Abs(nv(it.valor)), serie[j].mes))
 						}
 					}
-					if !comp {
-						cod := "F48"
-						if dmic && !sel["F48"] {
-							cod = "F49"
+					// compensação devida (PRODIST Módulo 8, item 225) com o VRC da fatura do mês apurado
+					fv := f
+					for j := 0; j < len(serie); j++ {
+						if serie[j].mes == per {
+							fv = serie[j]
 						}
-						obs := ""
+					}
+					// VRC: o impresso no quadro (do mês apurado) ou o calculado com o Fio B homologado da fatura daquele mês
+					vrc, vrcDet, okVRC := f.vrcImpr, "impresso na fatura (Valor EUSD/VRC)", f.vrcImpr > 0
+					if !okVRC {
+						vrc, vrcDet, okVRC = vrcFioB(fv)
+						vrcDet = "calculado: " + vrcDet
+					}
+					kei, tens := keiContinuidade(f)
+					devida, qual := 0.0, ""
+					if okVRC {
+						dicP := dicLim[""]
+						for _, q := range f.qual {
+							if strings.EqualFold(q.ind, "DIC") && q.lim > 0 {
+								dicP = q.lim
+							}
+						}
+						for _, q := range f.qual {
+							ind := strings.ToUpper(q.ind)
+							lim := q.lim
+							if ind == "DMIC" && lim <= 0 {
+								lim, _, _ = dmicPeloDIC(f, dicP)
+							}
+							if lim <= 0 || q.apur <= lim {
+								continue
+							}
+							c := 0.0
+							switch ind {
+							case "DIC", "DMIC":
+								c = q.apur * vrc / 730 * kei
+							case "FIC":
+								if dicP > 0 {
+									c = q.apur / lim * dicP * vrc / 730 * kei
+								}
+							}
+							if c > devida {
+								devida, qual = c, ind
+							}
+						}
+						devida = math.Min(devida, 18*vrc)
+					}
+					cod := "F48"
+					if dmic && !sel["F48"] || qual == "DMIC" && sel["F49"] {
+						cod = "F49"
+					}
+					obs := ""
+					if n < 3 {
+						obs = fmt.Sprintf(" — a base tem só %d das 3 faturas dos meses seguintes à apuração: o crédito pode estar na que falta", n)
+					}
+					base := "indicador de continuidade acima do limite: " + strings.Join(viol, "; ")
+					switch {
+					case devida > 0 && !achouComp:
+						det := fmt.Sprintf("%s — nenhuma compensação nas faturas até 2 meses após a apuração (%s); devida R$ %.2f pelo %s = %s × VRC R$ %.2f / 730 × kei %.0f (%s) — VRC %s (PRODIST Módulo 8, item 225)%s",
+							base, per, devida, qual, qual+" apurado", vrc, kei, tens, vrcDet, obs)
+						nivel, val, det := nivelBase(f, devida, det)
 						if n < 3 {
-							obs = " — ainda não há as 2 faturas seguintes na base (o crédito pode vir depois)"
+							nivel, val = "ALERTA", 0
 						}
-						out[f.id] = append(out[f.id], Achado{cod, "ALERTA", fmt.Sprintf("indicador de continuidade acima do limite: %s — nenhuma compensação nesta fatura nem nas %d seguintes%s",
-							strings.Join(viol, "; "), n-1, obs), 0, 0})
+						out[f.id] = append(out[f.id], Achado{cod, nivel, det, val, 0})
+					// com crédito lançado não se acusa diferença: o VRC da distribuidora é o do ciclo que ela adota (item 227) —
+					// a CPFL 4002914653 creditou R$ 176,90 = 15,82 × VRC impresso R$ 204,07 / 730 × 40, exato
+					case devida == 0 && !achouComp:
+						out[f.id] = append(out[f.id], Achado{cod, "ALERTA", fmt.Sprintf("%s — nenhuma compensação nas faturas até 2 meses após a apuração (%s)%s; sem o Fio B homologado da fatura não deu para calcular o valor",
+							base, per, obs), 0, 0})
 					}
 				}
 			}

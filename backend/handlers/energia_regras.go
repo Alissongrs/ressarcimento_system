@@ -33,7 +33,7 @@ import (
 // as mesmas da aba Usinas — só com a fatura, com o histórico da UC, da ANEEL e a CIP entre UCs
 var regrasEnergia = map[string]bool{"F28": true, "F41": true, "F42": true, "F58": true, "F51": true,
 	// regras_extra.go (05/11/2026) — a FDE não tem o quadro de tributos (base/valor) nem o de continuidade
-	"F16": true, "F18": true, "F20": true, "F23": true, "F29": true, "F44": true, "F46": true,
+	"F16": true, "F18": true, "F20": true, "F23": true, "F29": true, "F44": true, "F46": true, "F45": true, "F56": true,
 	"F10": true, "F11": true, "F19": true, "F21": true, "F24": true, "F26": true, "F31": true, "F32": true, "F43": true,
 	"F13": true, "F14": true, "F15": true, "F17": true, "F27": true, "F35": true, "F36": true, "F52": true,
 	"F53": true, "F54": true, "F55": true,

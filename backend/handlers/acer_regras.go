@@ -29,7 +29,7 @@ import (
 // da aba Usinas. Sem saldo de créditos na extração da Acer, F54/F55 não têm o que comparar e não apontam.
 var regrasAcer = map[string]bool{"F28": true, "F41": true, "F42": true, "F58": true, "F51": true,
 	// regras_extra.go (05/11/2026) — a Acer não tem demanda contratada nem quadro de continuidade
-	"F16": true, "F18": true, "F20": true, "F29": true, "F38": true, "F39": true, "F44": true, "F46": true,
+	"F16": true, "F18": true, "F20": true, "F29": true, "F38": true, "F39": true, "F44": true, "F46": true, "F45": true, "F56": true,
 	"F10": true, "F11": true, "F19": true, "F21": true, "F31": true, "F32": true, "F43": true,
 	"F13": true, "F14": true, "F15": true, "F17": true, "F27": true, "F35": true, "F36": true, "F52": true,
 	"F53": true, "F54": true, "F55": true,
