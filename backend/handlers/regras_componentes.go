@@ -26,6 +26,7 @@ import (
 	"io"
 	"math"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -579,3 +580,80 @@ func numVRC(s string) float64 {
 }
 
 var reNumBR = regexp.MustCompile(`[0-9][0-9.]*,[0-9]+`)
+
+// ---------------------------------------------------------------- F64 — créditos de GD expirando / expirados
+
+// regrasCreditosGD — quadro de créditos da fatura (usinas: FATURA_USINA_GD tipos "a_expirar" e "expirado"):
+//   - créditos que expiram em até 2 meses depois do mês da fatura: oportunidade de redistribuir o rateio (ALERTA);
+//   - créditos já expirados no mês com consumo cobrado sem compensação na mesma fatura (ALERTA — a distribuidora
+//     deveria usar os créditos mais antigos primeiro).
+func regrasCreditosGD(f *uFat, sel map[string]bool) []Achado {
+	if !sel["F64"] || len(f.gd) == 0 || len(f.mes) != 7 {
+		return nil
+	}
+	limite := mesSeguinte(f.mes, 2)
+	aExp := map[string]float64{} // mês de expiração → kWh (somando os postos)
+	expirado := 0.0
+	for _, g := range f.gd {
+		q := nv(g.kwh)
+		if q <= 0 {
+			continue
+		}
+		switch g.tipo {
+		case "a_expirar":
+			if len(g.ref) >= 7 && g.ref[:7] >= f.mes && g.ref[:7] <= limite {
+				aExp[g.ref[:7]] += q
+			}
+		case "expirado":
+			expirado += q
+		}
+	}
+	var out []Achado
+	if len(aExp) > 0 {
+		meses := make([]string, 0, len(aExp))
+		for m := range aExp {
+			meses = append(meses, m)
+		}
+		sort.Strings(meses)
+		var partes []string
+		tot := 0.0
+		for _, m := range meses {
+			partes = append(partes, fmt.Sprintf("%s kWh em %s", brNum(aExp[m], 0), mesBR(m)))
+			tot += aExp[m]
+		}
+		if tot >= 100 { // abaixo disso o crédito em jogo é irrisório
+			out = append(out, Achado{"F64", "ALERTA", fmt.Sprintf("créditos de energia que expiram em até 2 meses: %s — se não forem usados, a energia gerada é perdida; dá para redistribuir o rateio entre as UCs beneficiárias antes da data (prazo de 60 meses, REN 1.000/2021)",
+				strings.Join(partes, "; ")), 0, rnd2(tot)})
+		}
+	}
+	if expirado >= 1 {
+		naoComp := math.Max(0, consumoAtivo(f)-compensadoGD(f))
+		det := fmt.Sprintf("%s kWh de créditos expiraram neste ciclo", brNum(expirado, 0))
+		if naoComp > 0 {
+			det += fmt.Sprintf(" enquanto a fatura cobrou %s kWh de consumo sem compensação — os créditos mais antigos deveriam ter sido usados antes de expirar", brNum(naoComp, 0))
+		} else {
+			det += " — confira se as UCs beneficiárias pagaram consumo sem compensação no período (os créditos deveriam ter sido usados)"
+		}
+		out = append(out, Achado{"F64", "ALERTA", det, 0, rnd2(expirado)})
+	}
+	return out
+}
+
+// compensadoGD — kWh compensados na fatura (quadro de GD; sem ele, as linhas de consumo compensado)
+func compensadoGD(f *uFat) float64 {
+	s := 0.0
+	for _, g := range f.gd {
+		if g.tipo == "compensada" {
+			s += nv(g.kwh)
+		}
+	}
+	if s > 0 {
+		return s
+	}
+	for _, it := range f.itens {
+		if it.comp == "CONSUMO_COMPENSADO" {
+			s = math.Max(s, math.Abs(nv(it.qtd)))
+		}
+	}
+	return s
+}

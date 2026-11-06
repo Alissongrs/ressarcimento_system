@@ -32,11 +32,12 @@ import (
 // regras que já rodam na base de Energia (as demais aparecem como "ainda não ligada a esta base"):
 // as mesmas da aba Usinas — só com a fatura, com o histórico da UC, da ANEEL e a CIP entre UCs
 var regrasEnergia = map[string]bool{"F28": true, "F41": true, "F42": true, "F58": true, "F51": true,
-	// regras_extra.go (05/11/2026) — a FDE não tem o quadro de tributos (base/valor) nem o de continuidade
+	// regras_extra.go (05/11/2026) — a FDE não tem o quadro de tributos (base/valor)
 	"F16": true, "F18": true, "F20": true, "F23": true, "F29": true, "F44": true, "F46": true, "F45": true, "F56": true,
 	"F10": true, "F11": true, "F19": true, "F21": true, "F24": true, "F26": true, "F31": true, "F32": true, "F43": true,
 	"F13": true, "F14": true, "F15": true, "F17": true, "F27": true, "F35": true, "F36": true, "F52": true,
-	"F53": true, "F54": true, "F55": true,
+	"F53": true, "F54": true, "F55": true, "F22": true,
+	"F48": true, "F49": true, // quadro de continuidade lido do texto guardado (FATURA_CONTINUIDADE)
 	"F06": true, "F07": true, "F08": true, "F33": true, "F34": true, "F57": true}
 
 // empresas fora da Auditoria de Faturas (REZEK, VTAL) — mesmo corte da lista antiga
@@ -323,7 +324,36 @@ func carregarFaturasEnergiaOnde(db *sql.DB, cn *cnpjAneel, comItens bool, onde s
 		conferirItensExtraidos(f)
 		fats[f.id] = f
 	}
-	return fats, rows.Err()
+	if err := rows.Err(); err != nil {
+		return fats, err
+	}
+	lerContinuidade(db, "energia", fats)
+	return fats, nil
+}
+
+// lerContinuidade — quadro de continuidade (DIC, FIC, DMIC, DICRI) lido do texto guardado da fatura e gravado em
+// FATURA_CONTINUIDADE (ferramentas/continuidade/importar.py). Sem a tabela, não faz nada (F48/F49 ficam sem dado).
+func lerContinuidade(db *sql.DB, base string, fats map[string]*uFat) {
+	rows, err := db.Query(`SELECT fatura_id, indicador, COALESCE(periodo,''), limite, apurado, vrc FROM FATURA_CONTINUIDADE WHERE base = ?`, base)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, ind, per string
+		var lim, apur, vrc sql.NullFloat64
+		if rows.Scan(&id, &ind, &per, &lim, &apur, &vrc) != nil {
+			continue
+		}
+		f := fats[id]
+		if f == nil {
+			continue
+		}
+		f.qual = append(f.qual, uQual{ind: ind, periodo: per, apur: nv(apur), lim: nv(lim)})
+		if vrc.Valid && vrc.Float64 > 0 {
+			f.vrcImpr = vrc.Float64
+		}
+	}
 }
 
 // faixas de CEP por UF (início dos 5 dígitos)

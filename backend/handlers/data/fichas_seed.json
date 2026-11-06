@@ -730,5 +730,41 @@
   "no_motor": false,
   "faturas_necessarias": "Mínimo: 1 fatura — com Fio B, desconto (se houver) e encargos discriminados.\nIdeal: a fatura em análise, as anteriores desde o reconhecimento da autoprodução e a outorga de autoprodução com o percentual de desconto e os encargos isentos.\nCom uma fatura só: consigo ver se há desconto e encargos; para afirmar o erro, preciso da outorga. Sem ela, ALERTA.\nTodas as faturas precisam ser da mesma UC/instalação (confiro o nº em cada uma).",
   "criterios": "ERRO quando: autoprodutor comprovado e desconto no Fio B ausente ou menor que o devido em mais de 1 ponto percentual, e/ou encargos isentos cobrados.\nALERTA quando: há indício de autoprodução (mensagem, classe, contrato), mas a fatura não confirma a condição nem o percentual.\nOK quando: descontos e isenções aplicados conforme a outorga.\nNÃO SE APLICA quando: consumidor não enquadrado como autoprodutor.\nLimites e tolerâncias: percentual de desconto de 50% a 100% e encargos isentos — outorga e REH. O catálogo não fixa tolerância; eu adoto 1 ponto percentual, por arredondamento.\nExceções que afastam o erro: desconto e isenção corretamente aplicados; consumidor não enquadrado como APE."
+ },
+ {
+  "codigo": "F62",
+  "ordem": 62,
+  "nome": "Rateio de Créditos Diferente do Cadastrado",
+  "grupo": "Geração Distribuída",
+  "no_motor": false,
+  "interpretacao": "A regra 62 trata do rateio dos créditos de energia entre as unidades beneficiárias (autoconsumo remoto, geração compartilhada, múltiplas UCs) feito em percentual diferente do cadastrado pelo titular na distribuidora. Cada UC beneficiária deve receber o percentual do excedente que consta no cadastro; se a distribuidora aplica outro percentual, uma UC recebe menos crédito do que deveria e paga energia que estaria compensada. A base está na REN ANEEL 1.000/2021 (Sistema de Compensação de Energia Elétrica) e na Lei 14.300/2022.",
+  "aplicacao": "1. Ler na fatura da geradora o excedente distribuído e a lista de UCs beneficiárias com o kWh de cada uma.\n2. Obter o percentual cadastrado de cada UC (formulário de rateio protocolado na distribuidora).\n3. Calcular o kWh devido = excedente × percentual cadastrado e comparar com o kWh creditado.\n4. Valor a ressarcir: diferença de kWh × tarifa da UC beneficiária que recebeu a menos, com tributos.",
+  "base_legal": "REN ANEEL 1.000/2021 (SCEE); Lei 14.300/2022.",
+  "faturas_necessarias": "Fatura da geradora do mês (com a lista de beneficiárias) e o cadastro de rateio vigente.",
+  "criterios": "ERRO quando o kWh creditado difere do excedente × percentual cadastrado em mais de 1%. Depende do cadastro de rateio do cliente."
+ },
+ {
+  "codigo": "F63",
+  "ordem": 63,
+  "nome": "Enquadramento GD I / II / III Incorreto",
+  "grupo": "Geração Distribuída",
+  "no_motor": false,
+  "interpretacao": "A regra 63 trata da usina enquadrada pela distribuidora numa modalidade de transição da Lei 14.300/2022 diferente da que tem direito. Quem protocolou o pedido de acesso até 07/01/2023 é GD I e fica isento do Fio B até 2045; depois disso é GD II (paga um percentual crescente do Fio B) ou GD III (usinas maiores, pagam o Fio B integral e parte do Fio A). Enquadrar GD I como GD II ou III faz o cliente pagar Fio B indevido em todo kWh compensado.",
+  "aplicacao": "1. Identificar a usina na lista oficial de empreendimentos de geração distribuída da ANEEL (CNPJ do titular, município, potência) e a data do protocolo/conexão.\n2. Ler na fatura a modalidade aplicada (mensagens \"GD I\", \"GD II\", linhas de Fio B).\n3. Valor a ressarcir: o Fio B cobrado indevidamente nos meses em que a modalidade estava errada, com tributos.",
+  "base_legal": "Lei 14.300/2022, arts. 26 e 27; REN ANEEL 1.000/2021.",
+  "faturas_necessarias": "Faturas com cobrança de Fio B e o parecer de acesso da usina.",
+  "criterios": "ERRO quando a data de protocolo/conexão é até 07/01/2023 e a fatura cobra Fio B de GD II ou III. Conexão depois dessa data depende do parecer de acesso."
+ },
+ {
+  "codigo": "F64",
+  "ordem": 64,
+  "nome": "Créditos de Energia Expirando ou Expirados",
+  "grupo": "Geração Distribuída",
+  "no_motor": false,
+  "interpretacao": "A regra 64 trata dos créditos de energia da geração distribuída que expiram depois de 60 meses sem uso. Crédito expirado é energia gerada e entregue à rede que o cliente perde sem compensação. Quando os créditos expiram enquanto a própria UC (ou as beneficiárias do rateio) pagava consumo não compensado, a distribuidora deveria ter usado os créditos mais antigos primeiro; quando vão expirar, ainda dá para redistribuir o rateio e aproveitá-los.",
+  "aplicacao": "1. Ler no quadro de GD da fatura os créditos 'a expirar' (kWh e mês) e os já 'expirados'.\n2. Verificar se no mesmo período houve consumo cobrado sem compensação na UC ou nas beneficiárias.\n3. Valor a ressarcir: kWh expirados que poderiam ter abatido consumo cobrado × tarifa da UC, com tributos; para os que ainda vão expirar, o ganho é redistribuir o rateio antes da data.",
+  "base_legal": "REN ANEEL 1.000/2021 (SCEE: prazo de 60 meses e ordem de uso dos créditos); Lei 14.300/2022.",
+  "faturas_necessarias": "A fatura do mês com o quadro de créditos; para expirados, as faturas das UCs beneficiárias do período.",
+  "criterios": "ALERTA quando há créditos que expiram em até 2 meses (oportunidade de redistribuir) ou que já expiraram com consumo cobrado sem compensação na mesma fatura."
  }
 ]

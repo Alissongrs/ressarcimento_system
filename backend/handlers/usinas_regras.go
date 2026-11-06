@@ -40,9 +40,12 @@ var regrasSituacao = map[string]string{
 	"F44": "fatura", "F46": "fatura", "F45": "fatura", "F56": "fatura", // F45 F46 F56: regras_componentes.go
 	"F10": "historico", "F11": "historico", "F19": "historico", "F21": "historico", "F24": "historico", "F26": "historico",
 	"F48": "historico", "F49": "historico",
+	"F22": "historico", // regras_transformacao.go
+	"F63": "historico", // regras_enquadramento.go (usinas)
 	"F31": "aneel", "F32": "aneel", "F43": "aneel",
 	// dependem de parâmetro de fora que o sistema não tem (regrasPrecisa)
-	"F30": "parametro", "F40": "parametro", "F47": "parametro", "F60": "parametro", "F61": "parametro",
+	"F64": "fatura", // regras_componentes.go (usinas: quadro de créditos da fatura)
+	"F30": "parametro", "F40": "parametro", "F47": "parametro", "F59": "parametro", "F62": "parametro", "F60": "parametro", "F61": "parametro",
 }
 
 // o que falta para as regras que dependem de parâmetro (mostrado na lista)
@@ -64,6 +67,11 @@ var regrasPrecisa = map[string]string{
 	"F30": "tabela de descontos por classe/subclasse (baixa renda, rural, irrigante, serviço público) e o comprovante de enquadramento",
 	"F40": "regras de isenção de ICMS por UF (faixas de consumo, classes isentas) e o comprovante de enquadramento",
 	"F47": "a devolução da CDE de 2025 vem embutida na TE homologada (componente negativo) — conferida pela F32/F46; devolução em linha própria precisa da resolução específica (período e valor unitário)",
+	"F59": "crédito usado em outro posto sem o fator de ajuste: a fatura traz injetada/compensada por posto, mas a extração não guarda a energia transferida às beneficiárias por posto — sem ela o débito do posto não fecha",
+	"F62": "percentual de rateio CADASTRADO de cada UC beneficiária (formulário de rateio); na Copel o percentual extraído não é o do rateio",
+	"F63": "roda nas usinas: mudança da classe GD impressa na mesma UC e cruzamento com a lista de GD da ANEEL (município + CNPJ + potência; cadastro até 07/01/2023 = GD I); sem casamento único com a ANEEL, falta o parecer de acesso",
+	"F64": "roda nas usinas com o quadro de créditos da fatura (a expirar / expirados)",
+	"F22": "confere constante = RTC × RTP × K onde a fatura imprime as relações (Copel e CEMIG); nas demais só a troca de constante com degrau de consumo (ALERTA); laudo de inspeção da medição não entra",
 	"F60": "percentual de desconto do contrato de energia incentivada / outorga (50%, 80% ou 100%)",
 	"F61": "outorga de autoprodutor com o percentual de desconto e os encargos isentos",
 }
@@ -115,9 +123,19 @@ func catalogoRegras(db *sql.DB) []fichaRegra {
 		}
 		rows.Close()
 	}
-	if len(out) == 0 {
-		_ = json.Unmarshal(fichasSeedJSON, &out)
+	// regras novas do seed (F62–F64…) que ainda não estão na tabela editável do banco entram também
+	var seed []fichaRegra
+	_ = json.Unmarshal(fichasSeedJSON, &seed)
+	tem := map[string]bool{}
+	for _, f := range out {
+		tem[f.Codigo] = true
 	}
+	for _, f := range seed {
+		if !tem[f.Codigo] {
+			out = append(out, f)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Ordem < out[j].Ordem })
 	return out
 }
 
@@ -228,6 +246,7 @@ type uMed struct {
 type uGD struct {
 	tipo, posto string
 	kwh         sql.NullFloat64
+	ref         string // mês de expiração do crédito ("AAAA-MM"), quando a fatura informa
 }
 type uFat struct {
 	id, chave, mes, grupo, subgrupo, fornecimento string
@@ -266,6 +285,11 @@ type uFat struct {
 	leituraReal bool
 	// vrcImpr: "Valor EUSD/VRC" impresso no quadro de continuidade (base da compensação de DIC/FIC/DMIC — F48/F49)
 	vrcImpr float64
+	// F22 (regras_transformacao.go): relações dos transformadores de medição e o K do medidor, quando impressos
+	rtc, rtp, kMedidor, kTecKWh float64
+	// F63 (regras_enquadramento.go): usina (pasta), titular, potência de geração e a modalidade GD impressa
+	usina, titCNPJ, modGD string
+	potGer               float64
 }
 
 // Achado de uma regra numa fatura
@@ -302,16 +326,19 @@ func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string
 		COALESCE(f.cosip,0), COALESCE(f.dias_faturados,0),
 		COALESCE(JSON_EXTRACT(f.dados_json,'$.demanda'),'[]'), COALESCE(JSON_EXTRACT(f.dados_json,'$.qualidade_servico'),'[]'),
 		COALESCE(REGEXP_SUBSTR(f.dados_json, 'VRC[^0-9]{0,12}[0-9.]+,[0-9]+'),
-			REGEXP_SUBSTR(f.dados_json, '[0-9.]+,[0-9]+", "pagina": [0-9]+, "rotulo": "Valor EUSD/VRC'), '') `+base, args...)
+			REGEXP_SUBSTR(f.dados_json, '[0-9.]+,[0-9]+", "pagina": [0-9]+, "rotulo": "Valor EUSD/VRC'), ''),
+		COALESCE(JSON_EXTRACT(f.dados_json,'$.unidade_consumidora.tecnico'),''),
+		COALESCE(f.pasta_usina,''), COALESCE(f.titular_cnpj_cpf,''), COALESCE(f.modalidade_gd,''), COALESCE(f.demanda_geracao_kw,0) `+base, args...)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		f := &uFat{}
-		var trib, dem, qual, vrc string
+		var trib, dem, qual, vrc, tec string
 		if rows.Scan(&f.id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.total, &f.fornecimento, &f.cnpj, &f.modalidade,
-			&f.lant, &f.latu, &trib, &f.cidade, &f.classe, &f.cip, &f.diasImpr, &dem, &qual, &vrc) == nil {
+			&f.lant, &f.latu, &trib, &f.cidade, &f.classe, &f.cip, &f.diasImpr, &dem, &qual, &vrc, &tec, &f.usina, &f.titCNPJ, &f.modGD, &f.potGer) == nil {
 			lerExtrasUsina(f, trib, dem, qual)
+			lerTecnicoUsina(f, tec)
 			f.vrcImpr = numVRC(vrc)
 			f.dias, f.dLant, f.dLatu = diasEntre(f.lant, f.latu), f.lant, f.latu
 			var ts []struct {
@@ -363,7 +390,7 @@ func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string
 		}
 	}
 	mr.Close()
-	gr, err := db.Query(`SELECT g.id_fatura, COALESCE(g.tipo,''), COALESCE(g.posto,''), g.kwh
+	gr, err := db.Query(`SELECT g.id_fatura, COALESCE(g.tipo,''), COALESCE(g.posto,''), g.kwh, COALESCE(g.ref_expiracao,'')
 		FROM FATURA_USINA_GD g JOIN FATURA_USINA f ON f.id_fatura = g.id_fatura `+strings.Replace(base, "FROM FATURA_USINA f ", "", 1)+
 		` AND g.tipo <> 'rateio'`, args...)
 	if err != nil {
@@ -372,7 +399,7 @@ func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string
 	for gr.Next() {
 		var id string
 		var x uGD
-		if gr.Scan(&id, &x.tipo, &x.posto, &x.kwh) == nil && fats[id] != nil {
+		if gr.Scan(&id, &x.tipo, &x.posto, &x.kwh, &x.ref) == nil && fats[id] != nil {
 			fats[id].gd = append(fats[id].gd, x)
 		}
 	}
@@ -872,6 +899,15 @@ func aplicarRegrasComuns(fats map[string]*uFat, sel map[string]bool, out map[str
 		if a := regrasComponentes(f, sel); len(a) > 0 {
 			out[id] = append(out[id], a...)
 		}
+		if a := regrasCreditosGD(f, sel); len(a) > 0 {
+			out[id] = append(out[id], a...)
+		}
+	}
+	for id, a := range regrasTransformacao(fats, sel) { // regras_transformacao.go (F22)
+		out[id] = append(out[id], a...)
+	}
+	for id, a := range regrasEnquadramento(fats, sel) { // regras_enquadramento.go (F63)
+		out[id] = append(out[id], a...)
 	}
 }
 

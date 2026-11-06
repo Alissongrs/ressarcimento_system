@@ -38,7 +38,9 @@ func usinaMedFP(col string) string {
 }
 
 // chave da UC: só o número antes de " / " (Enel SP A4 imprime "inst / conta") e sem zeros à esquerda
-const usinaChaveUC = `TRIM(LEADING '0' FROM TRIM(SUBSTRING_INDEX(COALESCE(f.uc,''),'/',1)))`
+// corta só em " / " (CEMIG imprime "0204252440 / 200009379420", nº antigo / novo). A Energisa escreve a UC como
+// "6/4016559-9" (regional/número): cortar na "/" juntava todas as UCs do MT na chave "6" (06/11/2026: 19 UCs em 4 chaves)
+const usinaChaveUC = `TRIM(LEADING '0' FROM TRIM(SUBSTRING_INDEX(COALESCE(f.uc,''),' / ',1)))`
 
 // FonteUsinas — subconsulta no formato que o motor lê (mesmas colunas da FDE).
 // Ficam de fora demonstrativos (FIT, GD Copel), duplicatas e faturas sem consumo.

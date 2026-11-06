@@ -741,7 +741,7 @@ func regrasExtraHistorico(fats map[string]*uFat, sel map[string]bool) map[string
 					switch {
 					case devida > 0 && !achouComp:
 						det := fmt.Sprintf("%s — nenhuma compensação nas faturas até 2 meses após a apuração (%s); devida R$ %.2f pelo %s = %s × VRC R$ %.2f / 730 × kei %.0f (%s) — VRC %s (PRODIST Módulo 8, item 225)%s",
-							base, per, devida, qual, qual+" apurado", vrc, kei, tens, vrcDet, obs)
+							base, per, devida, qual, map[bool]string{true: "(FIC apurado ÷ limite do FIC) × limite do DIC", false: qual + " apurado"}[qual == "FIC"], vrc, kei, tens, vrcDet, obs)
 						nivel, val, det := nivelBase(f, devida, det)
 						if n < 3 {
 							nivel, val = "ALERTA", 0
