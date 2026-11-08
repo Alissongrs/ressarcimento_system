@@ -265,6 +265,7 @@ func MotorApontamentosUCs(sqlDB *sql.DB, codigosUC, instalacoes []string) (map[i
 }
 
 func motorApontamentosWhere(sqlDB *sql.DB, tabela, where string, args []any) (map[int64]ResultadoDesvio, error) {
+	usinas := tabela == FonteUsinas()
 	// ORDER BY cronológico REAL: mes_referencia vem em formatos misturados
 	// ('MM/AAAA' e 'AAAA-MM-DD'). Ordenar como string embaralha a história
 	// (todos os 'MM/AAAA' caem na frente) e gerava F02 falso. Normaliza p/ ISO.
@@ -479,13 +480,37 @@ func motorApontamentosWhere(sqlDB *sql.DB, tabela, where string, args []any) (ma
 		// série ANTES. Revertido ao all-history até isso ser feito. Ver memory.)
 		serie := consByUC[r.chave]
 		somaBase, baseMeses := 0.0, 0
-		for j, v := range serie {
-			if j == r.lidx {
-				continue // exclui o mês atual
+		if usinas {
+			// USINAS (conferência PDF de 06/11/2026, 32 de 41 F02 falsos): a série da FATURA_USINA é cronológica e
+			// limpa por UC; a média é só dos 12 meses ANTERIORES com consumo > F02MinKWh (a do histórico inteiro
+			// usava meses futuros na 1ª fatura e as rampas de pré-operação de 1–37 kWh derrubavam a base), sem
+			// contar duas vezes o mesmo mês (fatura duplicada sem duplicata_de)
+			mesesUC := mesByUC[r.chave]
+			vistoMes := map[string]bool{}
+			if r.lidx < len(mesesUC) {
+				vistoMes[mesesUC[r.lidx]] = true
 			}
-			if v > 0 {
-				somaBase += v
-				baseMeses++
+			for j := r.lidx - 1; j >= 0 && baseMeses < F02JanelaM; j-- {
+				if j < len(mesesUC) {
+					if vistoMes[mesesUC[j]] {
+						continue
+					}
+					vistoMes[mesesUC[j]] = true
+				}
+				if v := serie[j]; v > F02MinKWh {
+					somaBase += v
+					baseMeses++
+				}
+			}
+		} else {
+			for j, v := range serie {
+				if j == r.lidx {
+					continue // exclui o mês atual
+				}
+				if v > 0 {
+					somaBase += v
+					baseMeses++
+				}
 			}
 		}
 		media := 0.0
@@ -509,6 +534,13 @@ func motorApontamentosWhere(sqlDB *sql.DB, tabela, where string, args []any) (ma
 		// quadrinho que aponte pico real, do que 0 apontamento na UC recente.
 		// Guarda de escala continua valendo (historicoConsistente) para evitar
 		// o antigo bug CEMIG Grupo A (demanda no campo consumo → 952% fantasma).
+		// USINAS: acúmulo de 2 ciclos — o mês anterior (consecutivo) ficou quase parado e este leu os dois; a média
+		// dos dois meses volta ao patamar (Equatorial GO 43c01c69, Elektro Pacaembu, Energisa Canarana — 06/11/2026)
+		if usinas && media > 0 && r.lidx > 0 {
+			if prev := serie[r.lidx-1]; prev < 0.5*media && (cons+prev)/2 <= 1.5*media {
+				baseMeses = 0
+			}
+		}
 		mediaF, baseF := media, baseMeses
 		if baseF < F02BaseMin {
 			if mh, bm := mediaHistoricoImpresso(histJSON, cons); bm >= F02BaseMin && historicoConsistente(histJSON, cons) {

@@ -196,6 +196,9 @@ func AvaliarDesvio(f FaturaDesvio) ResultadoDesvio {
 			k = 1
 		}
 		calc := math.Abs(p.LeituraAtual-p.LeituraAnterior) * k
+		if math.Abs(p.ConsumoFaturado-calc) < 1 || math.Abs(p.ConsumoFaturado-calc*F01Perda) < 1 {
+			continue // diferença abaixo de 1 kWh = consumo truncado para inteiro (Copel: 5,985 → 5 — 06/11/2026)
+		}
 		div := math.Min(
 			math.Abs(p.ConsumoFaturado-calc)/p.ConsumoFaturado,
 			math.Abs(p.ConsumoFaturado-calc*F01Perda)/p.ConsumoFaturado,

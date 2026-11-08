@@ -247,6 +247,7 @@ type uGD struct {
 	tipo, posto string
 	kwh         sql.NullFloat64
 	ref         string // mês de expiração do crédito ("AAAA-MM"), quando a fatura informa
+	mes, rotulo string // mês da coluna do quadro (Celesc imprime 6 meses) e o rótulo impresso da linha
 }
 type uFat struct {
 	id, chave, mes, grupo, subgrupo, fornecimento string
@@ -390,7 +391,8 @@ func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string
 		}
 	}
 	mr.Close()
-	gr, err := db.Query(`SELECT g.id_fatura, COALESCE(g.tipo,''), COALESCE(g.posto,''), g.kwh, COALESCE(g.ref_expiracao,'')
+	gr, err := db.Query(`SELECT g.id_fatura, COALESCE(g.tipo,''), COALESCE(g.posto,''), g.kwh, COALESCE(g.ref_expiracao,''),
+		COALESCE(g.mes_ref,''), COALESCE(g.rotulo,'')
 		FROM FATURA_USINA_GD g JOIN FATURA_USINA f ON f.id_fatura = g.id_fatura `+strings.Replace(base, "FROM FATURA_USINA f ", "", 1)+
 		` AND g.tipo <> 'rateio'`, args...)
 	if err != nil {
@@ -399,13 +401,14 @@ func carregarFaturasUsinasOnde(db *sql.DB, onde string, args ...any) (map[string
 	for gr.Next() {
 		var id string
 		var x uGD
-		if gr.Scan(&id, &x.tipo, &x.posto, &x.kwh, &x.ref) == nil && fats[id] != nil {
+		if gr.Scan(&id, &x.tipo, &x.posto, &x.kwh, &x.ref, &x.mes, &x.rotulo) == nil && fats[id] != nil {
 			fats[id].gd = append(fats[id].gd, x)
 		}
 	}
 	gr.Close()
 	for _, f := range fats {
 		f.medidor = medidorAtivo(f)
+		f.gd = gdDoMes(f.gd, f.mes)
 	}
 	return fats, nil
 }
@@ -457,15 +460,127 @@ func temCompensacao(f *uFat) bool {
 	return false
 }
 
+// gdDoMes — o quadro de GD da Celesc (e outros) imprime vários meses em colunas: fica só a coluna do mês da
+// fatura (ou a mais recente, sem ela). Conferência de 06/11/2026: somar as 6 colunas dava saldo/injeção 6×.
+func gdDoMes(gd []uGD, mes string) []uGD {
+	meses := map[string]bool{}
+	ult := ""
+	for _, g := range gd {
+		if g.mes != "" {
+			meses[g.mes] = true
+			if g.mes > ult {
+				ult = g.mes
+			}
+		}
+	}
+	if len(meses) <= 1 {
+		return gd
+	}
+	alvo := ult
+	if meses[mes] {
+		alvo = mes
+	}
+	out := gd[:0:0]
+	for _, g := range gd {
+		if g.mes == "" || g.mes == alvo {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// postoAgregado — linha de total ("Saldo Total", posto TODOS/TOTAL ou sem posto) que repete a soma dos postos
+func postoAgregado(p string) bool {
+	switch strings.ToUpper(strings.TrimSpace(p)) {
+	case "", "TODOS", "TOTAL":
+		return true
+	}
+	return false
+}
+
+// somaGD — soma do quadro de GD de um tipo. Com linhas por posto, a linha de total é ignorada (EDP imprime
+// "Saldo Total" além dos postos → saldo dobrado). Saldo e injeção mantêm o sinal impresso (Enel "177,6-" = saldo
+// devedor; Equatorial GO imprime geração negativa); compensada/transferida/expirada valem pelo módulo.
 func somaGD(f *uFat, tipo string) (float64, bool) {
+	porPosto := false
+	for _, g := range f.gd {
+		if g.tipo == tipo && g.kwh.Valid && !postoAgregado(g.posto) {
+			porPosto = true
+			break
+		}
+	}
+	comSinal := strings.HasPrefix(tipo, "saldo") || tipo == "injetada"
 	s, ok := 0.0, false
 	for _, g := range f.gd {
-		if g.tipo == tipo && g.kwh.Valid {
+		if g.tipo != tipo || !g.kwh.Valid || (porPosto && postoAgregado(g.posto)) {
+			continue
+		}
+		if comSinal {
+			s += g.kwh.Float64
+		} else {
 			s += math.Abs(g.kwh.Float64)
+		}
+		ok = true
+	}
+	return s, ok
+}
+
+// somaGDRotulo — soma das linhas do quadro de GD cujo rótulo casa (ex.: Copel "Saldo Mês F Ponta"), sem total
+func somaGDRotulo(f *uFat, re *regexp.Regexp) (float64, bool) {
+	porPosto := false
+	for _, g := range f.gd {
+		if g.kwh.Valid && re.MatchString(g.rotulo) && !postoAgregado(g.posto) {
+			porPosto = true
+		}
+	}
+	s, ok := 0.0, false
+	for _, g := range f.gd {
+		if g.kwh.Valid && re.MatchString(g.rotulo) && !(porPosto && postoAgregado(g.posto)) {
+			s += g.kwh.Float64
 			ok = true
 		}
 	}
 	return s, ok
+}
+
+var reTarifaTE = regexp.MustCompile(`(?i)\bTE\b|ENERGIA\s+EL[EÉ]TRICA`)
+var reTarifaTUSD = regexp.MustCompile(`(?i)TUSD|USO\s+DO\s+SISTEMA`)
+
+// compensadoItens — kWh compensados pela GD nos itens. A distribuidora divide a compensação de um posto em várias
+// linhas (CPFL "Inj Ponta" + "Inj. mUC oPT Pta"; Enel uma por mês de origem "MUC05/26"; EDP mPT/oPT; Celesc
+// (0N)/(0O)) e repete o kWh nas linhas TE e TUSD: soma as linhas de cada posto dentro do mesmo componente e fica
+// com o maior componente. Conferência de 06/11/2026: o máximo por posto deixava 87 F55 falsos.
+func compensadoItens(f *uFat) (total float64, porPosto map[string]float64) {
+	soma := map[string]map[string]float64{}
+	for _, it := range f.itens {
+		if (it.comp != "CONSUMO_COMPENSADO" && it.comp != "GD_INJETADA") || !it.qtd.Valid {
+			continue
+		}
+		p := it.posto
+		if p == "" || p == "UNICO" || p == "TODOS" {
+			p = "FORA_PONTA"
+		}
+		k := "X"
+		if reTarifaTUSD.MatchString(it.desc) {
+			k = "TUSD"
+		} else if reTarifaTE.MatchString(it.desc) {
+			k = "TE"
+		}
+		if soma[p] == nil {
+			soma[p] = map[string]float64{}
+		}
+		soma[p][k] += math.Abs(it.qtd.Float64)
+	}
+	porPosto = map[string]float64{}
+	for p, m := range soma {
+		mx := 0.0
+		for _, v := range m {
+			mx = math.Max(mx, v)
+		}
+		porPosto[p] = mx
+		total += mx
+	}
+	return total, porPosto
 }
 
 var reRetroativo = regexp.MustCompile(`(?i)retro|parc|anterior|ref\.?\s*\d\d/|\d\d/\d{4}`)
@@ -555,8 +670,8 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 				continue
 			}
 			d := v - q*t
-			if d <= 0.10 {
-				continue
+			if d <= 0.10 || d <= folgaImpressao(q, t) {
+				continue // dentro do arredondamento do que a fatura imprime (quantidade e tarifa)
 			}
 			// base extraída: casa decimal errada, tarifa SEM tributos no lugar da com tributos (valor ≈ 1,2–1,5 ×
 			// quantidade × tarifa) ou coluna trocada — diferença de mais de 5% do item não é cobrança a mais
@@ -578,9 +693,8 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 			out = append(out, Achado{"F36", "ALERTA", fmt.Sprintf("%d item(ns) acima de quantidade × tarifa (R$ %.2f) — confira na fatura. Ex.: %s", n, tot, pior), 0, 0})
 		} else if n > 0 {
 			out = append(out, Achado{"F36", "ERRO", fmt.Sprintf("%d item(ns) cobrado(s) acima de quantidade × tarifa (R$ %.2f). Ex.: %s", n, tot, pior), rnd2(tot), 0})
-		} else if nA > 0 {
-			out = append(out, Achado{"F36", "ALERTA", fmt.Sprintf("%d item(ns) com diferença de R$ %.2f (até 0,1%% do item — pode ser arredondamento da tarifa impressa)", nA, totA), 0, 0})
 		}
+		_, _ = totA, nA // até 0,1% do item: arredondamento do preço com tributos (Enel SP) — não aponta (06/11/2026)
 	}
 	// F13 — ativo zero com reativo excedente cobrado ou demanda medida > 0 (GD com compensação afasta)
 	// "Consumo 0" na fatura não prova que não houve consumo: a Cosern abate o consumo com a energia injetada e imprime
@@ -619,8 +733,8 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 		for _, m := range f.meds {
 			g := strings.ToUpper(m.grandeza)
 			if strings.EqualFold(m.unid, "kW") || m.arred || !m.lant.Valid || !m.latu.Valid ||
-				regexp.MustCompile(`DEMANDA|\bDEM\b|\bDN\b|DMCR|EXCE|EXC|UFER|UFDR|\bKW\b`).MatchString(g) {
-				continue // demanda/excedente não são registradores acumulativos
+				reNaoAcumula.MatchString(g) {
+				continue // demanda/excedente/data-hora não são registradores acumulativos
 			}
 			la, lb := m.lant.Float64, m.latu.Float64
 			if f.extraida && la < 100 {
@@ -630,6 +744,16 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 				dig := math.Pow(10, math.Floor(math.Log10(math.Max(la, 1)))+1)
 				if la >= 0.9*dig && lb < 0.1*dig {
 					continue // virada do mostrador (F07)
+				}
+				// virada com a leitura atual já acima de 10% do mostrador (usina gera muito no ciclo): fecha com o
+				// consumo impresso — Enel CE 1.000.000 − 969.098 + 175.554 = 206.456 (06/11/2026)
+				if k := nv(m.k); m.cons.Valid && m.cons.Float64 > 0 && la >= 0.5*dig {
+					if k <= 0 {
+						k = 1
+					}
+					if cv := (dig - la + lb) * k; math.Abs(cv-m.cons.Float64) <= 0.02*m.cons.Float64+1 {
+						continue
+					}
 				}
 				nivel, obs := "ERRO", ""
 				if lb == 0 || lb < 0.5*la || strings.Contains(g, "INJ") || strings.Contains(g, "GERA") || strings.Contains(g, "DATA") {
@@ -695,7 +819,7 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 			out = append(out, Achado{"F27", "ALERTA", fmt.Sprintf("Grupo B (%s) com demanda cobrada R$ %.2f — confira o grupo tarifário na fatura (a extração pode ter lido B numa UC do Grupo A)", f.subgrupo, v), 0, 0})
 		} else if v > 0 {
 			out = append(out, Achado{"F27", "ERRO", fmt.Sprintf("Grupo B (%s) com demanda de consumo cobrada R$ %.2f", f.subgrupo, v), rnd2(v), 0})
-		} else if vg > 0 {
+		} else if vg > 0 && consumoAtivo(f) > 0 { // sem consumo = conta de uso do sistema da central geradora (Cosern "B3")
 			out = append(out, Achado{"F27", "ALERTA", fmt.Sprintf("Grupo B (%s) com uso do sistema pela geração (TUSDg) R$ %.2f — conferir enquadramento", f.subgrupo, vg), 0, 0})
 		}
 	}
@@ -703,17 +827,18 @@ func regrasFatura(f *uFat, sel map[string]bool) []Achado {
 	if sel["F52"] && valorOK {
 		var cips []uItem
 		for _, it := range f.itens {
-			if it.comp == "ILUMINACAO_PUBLICA" && nv(it.valor) > 0 {
-				cips = append(cips, it)
+			if it.comp == "ILUMINACAO_PUBLICA" && nv(it.valor) > 0 && !reMultaCIP.MatchString(it.desc) {
+				cips = append(cips, it) // multa/juros por atraso da CIP (Brasília) não é uma 2ª CIP
 			}
 		}
 		if len(cips) >= 2 {
 			a, b := nv(cips[0].valor), nv(cips[1].valor)
 			igual := math.Abs(a-b) <= math.Max(0.10, 0.01*math.Max(a, b))
-			retro := reRetroativo.MatchString(cips[1].desc) || reRetroativo.MatchString(cips[0].desc)
+			retro := reRetroativo.MatchString(cips[1].desc) || reRetroativo.MatchString(cips[0].desc) ||
+				reComplCIP.MatchString(cips[1].desc) || reComplCIP.MatchString(cips[0].desc)
 			if igual && !retro {
 				out = append(out, Achado{"F52", "ERRO", fmt.Sprintf("CIP cobrada %d vezes no mês (R$ %.2f e R$ %.2f)", len(cips), a, b), rnd2(math.Min(a, b)), 0})
-			} else {
+			} else if !retro {
 				out = append(out, Achado{"F52", "ALERTA", fmt.Sprintf("%d linhas de CIP (R$ %.2f e R$ %.2f) — pode ser retroativa/parcelada", len(cips), a, b), 0, 0})
 			}
 		}
@@ -760,6 +885,71 @@ func precoEnergia(f *uFat) float64 {
 	return 0
 }
 
+var (
+	reSaldoMes   = regexp.MustCompile(`(?i)SALDO\s+M[EÊ]S|SALDO\s+DO\s+M[EÊ]S|EXCEDENTE\s+DO\s+M[EÊ]S`)
+	reRecebidoGD = regexp.MustCompile(`(?i)RECEBID|RECEB\.`)
+)
+
+// regraSaldoGD — F54 de uma fatura (lst = faturas da UC em ordem, i = posição)
+func regraSaldoGD(f *uFat, lst []*uFat, i int) (Achado, bool) {
+	atual, okA := somaGD(f, "saldo_atual")
+	ant, okP := somaGD(f, "saldo_anterior")
+	daFatura := okP
+	if !okP && i > 0 && lst[i-1].mes == mesSeguinte(f.mes, -1) { // só a fatura do mês imediatamente anterior
+		ant, okP = somaGD(lst[i-1], "saldo_atual")
+	}
+	if !okA || !okP {
+		return Achado{}, false
+	}
+	injM, okI := somaGD(f, "injetada")
+	comp, okC := somaGD(f, "compensada")
+	if ci, _ := compensadoItens(f); ci > comp {
+		comp, okC = ci, true
+	}
+	transf, temTransf := somaGD(f, "transferida")
+	expir, _ := somaGD(f, "expirado")
+	receb, temReceb := somaGDRotulo(f, reRecebidoGD)
+	saldoMes, temSaldoMes := somaGDRotulo(f, reSaldoMes)
+	_, compPorPosto := compensadoItens(f)
+	tol := math.Max(1, 0.002*math.Max(math.Abs(ant), math.Abs(atual)))
+	tol = math.Max(tol, 0.8*compPorPosto["PONTA"]) // ponta compensada com crédito fora ponta convertido
+	fecha := func(esp float64) bool { return math.Abs(esp-atual) <= tol }
+	if temSaldoMes && fecha(ant+saldoMes) {
+		return Achado{}, false
+	}
+	if !okI || !okC {
+		return Achado{}, false
+	}
+	esperado := ant + injM - comp - transf - expir
+	if fecha(esperado) || (temReceb && fecha(esperado+receb)) || (temReceb && fecha(ant+receb-comp-transf-expir)) {
+		return Achado{}, false
+	}
+	// rateio não impresso: a geradora injetou mais do que compensou, não há quadro de transferência e o saldo
+	// ficou abaixo do esperado (foi para as beneficiárias); beneficiária: sem injeção, saldo acima do esperado
+	if (injM > comp && !temTransf && atual < esperado) || (injM <= 0 && atual > esperado) {
+		return Achado{}, false
+	}
+	if !daFatura && f.extraida {
+		return Achado{}, false
+	}
+	nivel := "ALERTA"
+	if daFatura && !temTransf && expir == 0 && injM == 0 && !temSaldoMes {
+		nivel = "ERRO"
+	}
+	det := fmt.Sprintf("saldo esperado %.0f (anterior %.0f + injetada %.0f − compensada %.0f", esperado, ant, injM, comp)
+	if transf != 0 {
+		det += fmt.Sprintf(" − transferida %.0f", transf)
+	}
+	if expir != 0 {
+		det += fmt.Sprintf(" − expirada %.0f", expir)
+	}
+	det += fmt.Sprintf(") × impresso %.0f kWh", atual)
+	if temSaldoMes {
+		det += fmt.Sprintf("; pelo \"saldo do mês\" impresso (%.0f) também não fecha", saldoMes)
+	}
+	return Achado{"F54", nivel, det, 0, rnd2(math.Abs(esperado - atual))}, true
+}
+
 func regrasHistorico(fats map[string]*uFat, sel map[string]bool) map[string][]Achado {
 	out := map[string][]Achado{}
 	porUC := map[string][]*uFat{}
@@ -795,7 +985,10 @@ func regrasHistorico(fats map[string]*uFat, sel map[string]bool) map[string][]Ac
 						media += h
 					}
 					media /= float64(len(hist))
-					if inj[i] <= 0.5*media && (mesmo < 0 || inj[i] <= 0.5*mesmo) {
+					// sem leitura no mês (Enel SP "Não Exec.") ou leitura congelada que o mês seguinte compensa (Energisa
+					// Canarana: o seguinte veio com ~1,6× a média) não é parada da usina (06/11/2026)
+					acumulou := i+1 < len(lst) && tem[i+1] && inj[i+1] >= 1.3*media
+					if inj[i] <= 0.5*media && (mesmo < 0 || inj[i] <= 0.5*mesmo) && !acumulou {
 						det := fmt.Sprintf("injeção %.0f kWh ≤ 50%% da média de %d meses (%.0f kWh)", inj[i], len(hist), media)
 						if mesmo >= 0 {
 							det += fmt.Sprintf(" e do mesmo mês do ano anterior (%.0f kWh)", mesmo)
@@ -806,48 +999,21 @@ func regrasHistorico(fats map[string]*uFat, sel map[string]bool) map[string][]Ac
 					}
 				}
 			}
-			// F54 — saldo esperado (anterior + injetada − compensada) × saldo impresso, tolerância 1 kWh
+			// F54 — o saldo impresso tem de fechar com o quadro da própria fatura. Conferência de 06/11/2026 (108 F54, 102
+			// falsos): a usina com rateio não imprime o que foi para as beneficiárias; Copel/Elektro/Cosern/Equatorial
+			// imprimem o "Saldo Mês"/"Excedente do mês" (já líquido do rateio); Celesc/Brasília imprimem a transferência;
+			// o crédito fora ponta usado na ponta entra convertido (fator ~1,6); a UC beneficiária recebe crédito sem
+			// injeção própria. Só aponta quando nenhuma dessas leituras fecha e a fatura traz tudo o que precisa.
 			if sel["F54"] {
-				atual, okA := somaGD(f, "saldo_atual")
-				ant, okP := somaGD(f, "saldo_anterior")
-				daFatura := okP // saldo anterior impresso na própria fatura (senão, vem do saldo da fatura anterior)
-				if !okP && i > 0 && lst[i-1].mes < f.mes {
-					ant, okP = somaGD(lst[i-1], "saldo_atual")
-				}
-				injM, okI := somaGD(f, "injetada")
-				comp, okC := somaGD(f, "compensada")
-				_, transf := somaGD(f, "transferida")
-				_, exp := somaGD(f, "expirado")
-				// base extraída sem o saldo anterior impresso: o da fatura anterior não fecha (posto, beneficiárias…)
-				if okA && okP && okI && okC && !(f.extraida && !daFatura) {
-					esperado := ant + injM - comp
-					if d := math.Abs(esperado - atual); d > 1 {
-						nivel := "ERRO"
-						if transf || exp || injM > 0 || !daFatura { // injeção vai p/ beneficiárias sem aparecer; saldo anterior de outra fatura
-							nivel = "ALERTA" // transferência/expiração sem discriminação suficiente
-						}
-						out[f.id] = append(out[f.id], Achado{"F54", nivel, fmt.Sprintf("saldo esperado %.0f (anterior %.0f + injetada %.0f − compensada %.0f) × impresso %.0f kWh", esperado, ant, injM, comp, atual), 0, rnd2(d)})
-					}
+				if a, ok := regraSaldoGD(f, lst, i); ok {
+					out[f.id] = append(out[f.id], a)
 				}
 			}
 			// F55 — havia saldo (sobrou crédito) e o consumo líquido ficou acima do mínimo faturável em mais de 1 kWh
 			if sel["F55"] && temCompensacao(f) {
 				saldo, okS := somaGD(f, "saldo_atual")
 				cons := consumoAtivo(f)
-				porPosto := map[string]float64{}
-				for _, it := range f.itens {
-					if (it.comp == "CONSUMO_COMPENSADO" || it.comp == "GD_INJETADA") && it.qtd.Valid {
-						p := it.posto
-						if p == "" || p == "UNICO" || p == "TODOS" {
-							p = "FORA_PONTA"
-						}
-						porPosto[p] = math.Max(porPosto[p], math.Abs(it.qtd.Float64))
-					}
-				}
-				comp := 0.0
-				for _, v := range porPosto {
-					comp += v
-				}
+				comp, _ := compensadoItens(f)
 				if c2, ok := somaGD(f, "compensada"); ok && c2 > comp {
 					comp = c2
 				}
@@ -1167,8 +1333,8 @@ func regrasAneelFatura(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 		}
 		for _, it := range f.itens {
 			if !strings.HasPrefix(it.comp, "DEMANDA_GERACAO") || it.comp == "DEMANDA_GERACAO_ULTRAPASSAGEM" ||
-				!it.tsem.Valid || it.tsem.Float64 <= 0 || nv(it.qtd) <= 0 {
-				continue
+				reUltrapassagem.MatchString(it.desc) || !it.tsem.Valid || it.tsem.Float64 <= 0 || nv(it.qtd) <= 0 {
+				continue // EDP "Ultrapassagem Geração" = 2 × TUSDg, às vezes gravada como DEMANDA_GERACAO
 			}
 			cands := b.tarifasVigentes(f.cnpj, f.subgrupo, "Geração", "Não se aplica", "kW", "Não se aplica", data)
 			if len(cands) == 0 {
@@ -1180,13 +1346,33 @@ func regrasAneelFatura(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 					hom = c.TUSD
 				}
 			}
+			// ciclo que atravessa o reajuste: a tarifa cobrada é a média por dias entre a antiga e a nova (CPFL Santa
+			// Cruz 10,019 = (21 × 10,43 + 9 × 9,06) / 30 — 06/11/2026); vale a maior das duas como teto
+			if f.dLant != "" {
+				for _, c := range b.tarifasVigentes(f.cnpj, f.subgrupo, "Geração", "Não se aplica", "kW", "Não se aplica", f.dLant) {
+					hom = math.Max(hom, c.TUSD)
+				}
+			}
 			tg := it.tsem.Float64
 			if tg-tetoTarifa(hom, f.pisCofins) <= 0.0001 || (tg-hom)*nv(it.qtd) <= 0.10 {
 				continue
 			}
-			if tusdC > 0 && math.Abs(tg-tusdC)/tusdC <= 0.02 {
-				out = append(out, Achado{"F58", "ERRO", fmt.Sprintf("%s: %.0f kW a R$ %.4f/kW ≈ TUSD de consumo R$ %.4f; TUSD G homologada R$ %.4f/kW (%s)",
-					it.desc, nv(it.qtd), tg, tusdC, hom, cands[0].REH), rnd2((tg - hom) * nv(it.qtd)), 0})
+			// sem item de demanda de consumo na fatura (UC só de geração — Celesc), compara com a TUSD de demanda de
+			// consumo homologada: injeção cobrada a R$ 17,71–18,09/kW (TUSD consumo A4) em vez da TUSDg (~R$ 4)
+			if tusdC <= 0 {
+				for _, mod := range []string{"Verde", "Azul"} {
+					for _, c := range b.tarifasVigentes(f.cnpj, f.subgrupo, mod, "Não se aplica", "kW", "Não se aplica", data) {
+						if c.TUSD > 0 && math.Abs(tg-c.TUSD)/c.TUSD <= 0.03 {
+							tusdC = c.TUSD
+						}
+					}
+				}
+			}
+			if tusdC > 0 && math.Abs(tg-tusdC)/tusdC <= 0.03 {
+				// geração cobrada pela TUSD de consumo (do item de demanda da fatura ou da tabela homologada): depende do
+				// contrato (CUSD) e do direito à TUSDg — ALERTA com a estimativa no texto (Celesc, 06/11/2026)
+				out = append(out, Achado{"F58", "ALERTA", fmt.Sprintf("%s: %.0f kW a R$ %.4f/kW = TUSD de demanda de consumo; TUSD G homologada R$ %.4f/kW (%s) — diferença ≈ R$ %.2f sem tributos no mês; confira no CUSD se a demanda contratada é de geração e se a usina tem direito à TUSDg",
+					it.desc, nv(it.qtd), tg, hom, cands[0].REH, (tg-hom)*nv(it.qtd)), 0, 0})
 			} else {
 				out = append(out, Achado{"F58", "ALERTA", fmt.Sprintf("%s: R$ %.4f/kW acima da TUSD G homologada R$ %.4f/kW (%s)",
 					it.desc, tg, hom, cands[0].REH), 0, 0})
@@ -1301,8 +1487,9 @@ func consumoCIP(f *uFat) float64 {
 	med := 0.0
 	for _, m := range f.meds {
 		g := strings.ToUpper(sem(m.grandeza))
-		if strings.Contains(g, "ATIV") && !strings.Contains(g, "INJ") && !strings.Contains(g, "GER") &&
-			strings.HasPrefix(strings.ToUpper(m.unid), "KWH") && nv(m.cons) > 0 {
+		ativa := strings.Contains(g, "ATIV") || (strings.HasPrefix(g, "ENERGIA") && !strings.Contains(g, "REAT"))
+		if ativa && !strings.Contains(g, "INJ") && !strings.Contains(g, "GER") && !strings.Contains(g, "KVAR") &&
+			(strings.HasPrefix(strings.ToUpper(m.unid), "KWH") || strings.Contains(g, "KWH")) && nv(m.cons) > 0 {
 			med += nv(m.cons)
 		}
 	}
@@ -1430,3 +1617,33 @@ func fmtDegraus(d []float64) string {
 	}
 	return strings.Join(s, " · ")
 }
+
+// casasDecimais — casas com que o número veio da fatura (até 6)
+func casasDecimais(x float64) int {
+	t := strconv.FormatFloat(math.Abs(x), 'f', -1, 64)
+	if i := strings.IndexByte(t, '.'); i >= 0 {
+		return min(len(t)-i-1, 6)
+	}
+	return 0
+}
+
+// folgaImpressao — quanto quantidade × tarifa pode diferir do valor só porque a fatura imprime os dois arredondados.
+// Conferência de 06/11/2026 (43 F36, todos arredondamento): Light imprime kWh inteiro e fatura kWh fracionário
+// (rateio da GD — até 1 kWh), EDP/Energisa imprimem a demanda com 2 casas e faturam com 3–4 (4,70 × 4,7040).
+func folgaImpressao(q, t float64) float64 {
+	dq, dt := casasDecimais(q), casasDecimais(t)
+	fq := 0.5 * math.Pow(10, -float64(dq))
+	if dq == 0 {
+		fq = 1
+	}
+	return fq*t + q*0.5*math.Pow(10, -float64(dt)) + 0.01
+}
+
+var (
+	// F14: registradores que zeram por ciclo ou não são energia (demanda corrigida DM.CORR POTE, data/hora, adimensional)
+	reNaoAcumula = regexp.MustCompile(`DEMANDA|\bDEM\b|\bDN\b|DMCR|EXCE|EXC|UFER|UFDR|\bKW\b|CORR|DATA|HORA|ADIMENS|\bRP\b`)
+	reMultaCIP   = regexp.MustCompile(`(?i)MULTA|JUROS|ATUALIZA[CÇ]`)
+	reComplCIP   = regexp.MustCompile(`(?i)COMPLEMENT`) // Light "Complemento COSIP RJ – Lei Mun. 9049/2025"
+)
+
+var reUltrapassagem = regexp.MustCompile(`(?i)ULTRAPASS|ULTRAP\.`)

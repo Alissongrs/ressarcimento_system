@@ -248,7 +248,7 @@ func regrasExtraFatura(f *uFat, sel map[string]bool) []Achado {
 	// F18 — demanda reativa excedente (UFDR/DMCR) cobrada sem nenhum registro reativo
 	if sel["F18"] && valorOK && !f.extraida {
 		if _, _, ud := itensReativo(f); ud > 0 && temRegistroAtivo(f) && !temRegistroReativo(f) {
-			out = append(out, Achado{"F18", "ERRO", fmt.Sprintf("demanda reativa excedente cobrada R$ %.2f sem nenhum registro reativo (kvar/kvarh) no quadro de medição", ud), rnd2(ud), 0})
+			out = append(out, Achado{"F18", "ALERTA", fmt.Sprintf("demanda reativa excedente cobrada R$ %.2f sem nenhum registro reativo (kvar/kvarh) no quadro de medição — há layouts que não imprimem o reativo (CPFL desde 10/2025): confira a memória de cálculo com a distribuidora", ud), 0, 0})
 		}
 	}
 
@@ -390,10 +390,11 @@ func regrasExtraFatura(f *uFat, sel map[string]bool) []Achado {
 		}
 		if pior > 0 {
 			nivel, val, ex := nivelBase(f, pior, "")
-			if soPisCofins { // a alíquota de PIS/COFINS impressa é a efetiva do mês, arredondada — a conta não fecha exata
-				nivel, val, ex = "ALERTA", 0, " — PIS/COFINS: a alíquota impressa é a efetiva do mês (arredondada); confira o cálculo por item"
+			// PIS/COFINS: a alíquota impressa no quadro-resumo é a efetiva do mês, arredondada — base × alíquota não
+			// fecha e os tributos item a item conferem (CPFL baf52c938df1911d, 06/11/2026): não aponta
+			if !soPisCofins {
+				out = append(out, Achado{"F39", nivel, det + ex, val, 0})
 			}
-			out = append(out, Achado{"F39", nivel, det + ex, val, 0})
 		}
 		for _, t := range f.tribs {
 			n := strings.ToUpper(t.nome)
@@ -406,12 +407,7 @@ func regrasExtraFatura(f *uFat, sel map[string]bool) []Achado {
 
 	// F44 — GD: bandeira cobrada sobre o consumo bruto, e não sobre o líquido (consumo − compensado)
 	if sel["F44"] && valorOK && !acl {
-		comp := 0.0
-		for _, it := range f.itens {
-			if it.comp == "CONSUMO_COMPENSADO" && it.qtd.Valid {
-				comp = math.Max(comp, math.Abs(it.qtd.Float64))
-			}
-		}
+		comp, _ := compensadoItens(f)
 		if c2, ok := somaGD(f, "compensada"); ok && c2 > comp {
 			comp = c2
 		}
@@ -510,6 +506,11 @@ func regrasExtraHistorico(fats map[string]*uFat, sel map[string]bool) map[string
 			if i < 2 || i+1 >= len(serie) || serie[i-1].medidor == "" || f.medidor == "" {
 				return false
 			}
+			// sem buraco na base: com faturas faltando, o número "mudou" sem a troca estar nesta fatura (Copel Assis
+			// 1.2/1.3: faltam 05–07/2025 e o medidor novo já chega com ~450 mil na leitura anterior — 06/11/2026)
+			if mesSeguinte(serie[i-1].mes, 1) != f.mes {
+				return false
+			}
 			return !mesmoMedidor(serie[i-1].medidor, f.medidor) && mesmoMedidor(serie[i-2].medidor, serie[i-1].medidor) &&
 				mesmoMedidor(serie[i+1].medidor, f.medidor)
 		}
@@ -552,15 +553,23 @@ func regrasExtraHistorico(fats map[string]*uFat, sel map[string]bool) map[string
 				out[f.id] = append(out[f.id], Achado{"F11", nivel, fmt.Sprintf("%d ciclos consecutivos sem leitura real (média/estimativa/impedimento) de %s a %s%s", fim-i+3, serie[i-2].mes, serie[fim].mes, det), 0, 0})
 			}
 			// F19 — reativo cobrado nos 3 ciclos seguintes à troca de medidor (período de teste do reativo)
-			if sel["F19"] && evento(i) && !grupoB(f) {
-				for j := i + 1; j < len(serie) && j <= i+3; j++ {
-					if serie[j].mes > mesSeguinte(f.mes, 3) {
+			// a carência é de quem passa a ter o reativo medido; a UC que já pagava reativo com o medidor antigo não ganha
+			// período de teste com a simples troca (conferência PDF 06/11/2026: 7 de 7 F19 eram assim)
+			jaPagava := false
+			for j := i - 1; j >= 0 && j >= i-3; j-- {
+				if _, v, ud := itensReativo(serie[j]); v+ud > 0 {
+					jaPagava = true
+				}
+			}
+			if sel["F19"] && evento(i) && !grupoB(f) && !jaPagava {
+				for j := i; j < len(serie) && j <= i+2; j++ { // o ciclo da troca é o 1º dos 3
+					if serie[j].mes > mesSeguinte(f.mes, 2) {
 						break
 					}
 					q, v, ud := itensReativo(serie[j])
 					if v+ud >= 10 { // centavos de reativo não justificam a conferência
 						out[serie[j].id] = append(out[serie[j].id], Achado{"F19", "ALERTA", fmt.Sprintf("reativo excedente cobrado R$ %.2f (%.0f kvarh) no %dº ciclo depois da troca de medidor de %s — nos 3 primeiros ciclos o reativo só pode ser informado (REN 1000 art. 316); confira a data da troca na fatura",
-							v+ud, q, j-i, f.mes), 0, 0})
+							v+ud, q, j-i+1, f.mes), 0, 0})
 					}
 				}
 			}
@@ -836,12 +845,9 @@ func regrasExtraAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 		n31, n32, tot31 := 0, 0, 0.0
 		ex31, ex32 := "", ""
 		porDesc := map[string]int{}
-		compPosto := map[string]float64{} // kWh compensados (GD) por posto: a tarifa nova vale também no crédito
+		_, compPosto := compensadoItens(f) // kWh compensados (GD) por posto, somando as linhas: a tarifa nova vale também no crédito
 		for _, it := range f.itens {
 			porDesc[it.comp+"|"+it.posto]++
-			if (it.comp == "CONSUMO_COMPENSADO" || it.comp == "GD_INJETADA") && it.qtd.Valid {
-				compPosto[it.posto] = math.Max(compPosto[it.posto], math.Abs(it.qtd.Float64))
-			}
 		}
 		nComp := 0
 		for _, it := range f.itens {
@@ -863,7 +869,19 @@ func regrasExtraAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 			if perto(t, pond, f.pisCofins) {
 				continue
 			}
-			qLiq := math.Max(0, q-compPosto[it.posto])
+			// CPFL: a coluna "Tarifa ANEEL" traz a tarifa nova, mas o preço cobrado (com tributos, ou valor ÷ kWh) já é
+			// a média proporcional — com tributos abaixo da "sem tributos" não pode ser a tarifa cheia (06/11/2026)
+			if pr := nv(it.tarifa); pr > 0 && pr < t {
+				continue
+			}
+			if q > 0 && nv(it.valor) > 0 && nv(it.valor)/q < t*0.999 {
+				continue
+			}
+			p := it.posto
+			if p == "" || p == "UNICO" || p == "TODOS" {
+				p = "FORA_PONTA"
+			}
+			qLiq := math.Max(0, q-compPosto[p])
 			if perto(t, hNova, f.pisCofins) && hNova > hAnt && t > pond/(1-math.Max(f.pisCofins, 0))*1.005 && (hNova-pond)*qLiq <= 0.10 && (hNova-pond)*q > 0.10 {
 				nComp++ // compensado pela GD com a mesma tarifa: o efeito líquido some
 				if ex31 == "" {
@@ -892,7 +910,7 @@ func regrasExtraAneel(f *uFat, b *aneelBase, sel map[string]bool) []Achado {
 		if sel["F31"] && n31 > 0 {
 			nivel, val, det := nivelBase(f, tot31, "")
 			out = append(out, Achado{"F31", nivel, fmt.Sprintf("%d item(ns) com o reajuste aplicado no ciclo inteiro (valor sobre os kWh não compensados pela GD). Ex.: %s%s", n31, ex31, det), val, 0})
-		} else if sel["F31"] && nComp > 0 {
+		} else if false && sel["F31"] && nComp > 0 { // efeito líquido ≈ 0 (consumo todo compensado à mesma tarifa) — não aponta (06/11/2026)
 			out = append(out, Achado{"F31", "ALERTA", fmt.Sprintf("%d item(ns) com o reajuste aplicado no ciclo inteiro, mas o consumo foi todo compensado pela GD com a mesma tarifa (efeito líquido ≈ 0; pesa só se sobrar consumo). Ex.: %s", nComp, ex31), 0, 0})
 		}
 		if sel["F32"] && n32 > 0 {

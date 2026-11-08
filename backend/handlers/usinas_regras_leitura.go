@@ -62,8 +62,8 @@ var reNaoConsumo = regexp.MustCompile(`INJ|GERA|EXCE|EXC\b|REAT|RTV|KVA|UFER|UFD
 // registroAtivo — registrador acumulativo de energia ATIVA consumida (não injeção, reativo nem demanda)
 func registroAtivo(m uMed) bool {
 	g := strings.ToUpper(sem(m.grandeza))
-	if m.unid != "" && !strings.EqualFold(m.unid, "kWh") {
-		return false
+	if m.unid != "" && !strings.EqualFold(m.unid, "kWh") && !strings.Contains(g, "KWH") {
+		return false // (Light: "Energia Ativa-Kwh" com unidade gravada "kW" é registro de energia — 06/11/2026)
 	}
 	g = strings.ReplaceAll(g, "KWH", "")
 	return !reNaoConsumo.MatchString(g)
@@ -404,7 +404,15 @@ func regraCiclo(f, ant, prox *uFat, sel map[string]bool) (Achado, bool) {
 	confImpr := f.diasImpr > 0 && absInt(f.diasImpr-d) <= 1
 	// continuidade: a leitura anterior desta é a atual da fatura anterior (datas da base, não as deduzidas)
 	continuidade := ant.dLatu != "" && f.dLant != "" && (ant.dLatu == f.dLant || diasEntre(ant.dLatu, f.dLant) == 1)
+	// troca de titular: o mês é partido em duas faturas (encerramento + ligação) — Cosern Senador I → ACER,
+	// Enel RJ Goytacazes (06/11/2026)
+	if outroTitular(f, ant) || outroTitular(f, prox) {
+		return Achado{}, false
+	}
 	if f.diasImpr > 0 && absInt(f.diasImpr-d) >= 2 {
+		if curto && f.diasImpr >= 15 && f.diasImpr <= 34 {
+			return Achado{}, false // faturou o ciclo normal impresso; a "leitura anterior" é outra data (Equatorial GO: movimentação do medidor)
+		}
 		if f.extraida {
 			return Achado{}, false // datas e dias impressos não batem: data lida errado
 		}
@@ -538,4 +546,13 @@ func br(s string) string {
 		return s[8:] + "/" + s[5:7] + "/" + s[:4]
 	}
 	return s
+}
+
+// outroTitular — a fatura vizinha é de outro titular (CPF/CNPJ diferente)
+func outroTitular(f, g *uFat) bool {
+	if g == nil {
+		return false
+	}
+	a, b := soDigitos(f.titCNPJ), soDigitos(g.titCNPJ)
+	return a != "" && b != "" && a != b
 }

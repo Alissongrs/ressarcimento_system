@@ -180,7 +180,7 @@ var (
 	reCompFP   = regexp.MustCompile(`F\.?\s*PONTA|FORA|\bFP\b|\bHFP\b|F\s*PTA`)
 	reCompP    = regexp.MustCompile(`PONTA|\bP\b|\bHP\b|\bPTA\b`)
 	reCDEEnc   = regexp.MustCompile(`CDE|ENC|CONTA|CTA`)
-	reParteTE  = regexp.MustCompile(`^\[?TE|TE`)
+	reParteTE  = regexp.MustCompile(`^\[?TE\b|\bTE\b`)
 	reLivre    = regexp.MustCompile(`\bACL\b|CCEE|MERCADO LIVRE|\bLIVRE\b`)
 )
 
