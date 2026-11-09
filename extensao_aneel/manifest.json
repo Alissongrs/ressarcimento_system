@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SURE — ANEEL e Faturas Claro",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Consulta os protocolos da Ouvidoria da ANEEL e manda as faturas novas da Claro (portal PDP) para o SURE processar no servidor.",
   "permissions": [
     "storage",

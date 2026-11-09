@@ -6,9 +6,16 @@
   const texto = () => (document.body ? document.body.innerText : '');
   const visivel = (el) => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
 
+  function botaoExterno() {
+    return [...document.querySelectorAll('button, a, input[type=button]')]
+      .find((b) => visivel(b) && (/ExtLogin/.test(b.getAttribute('onclick') || '') || /^\s*externo\s*$/i.test(b.innerText || b.value || '')));
+  }
+
   function estadoDaPagina() {
     const senha = [...document.querySelectorAll('input[type=password]')].find(visivel);
     if (senha) return 'login';
+    // tela de escolha (Accenture / Externo / Primeiro Acesso): os campos só aparecem em /Account/LoginExterno
+    if (botaoExterno()) return 'escolha';
     if (/LoginExternoVerificacao/i.test(location.pathname) || /C[oó]digo de verifica/i.test(texto())) return 'verificacao';
     if (/ListarFaturaEnergiaEletrica/i.test(location.pathname)) return 'lista';
     if (/\/Account\//i.test(location.pathname)) return 'conta';
@@ -71,6 +78,9 @@
         faixa('SURE: código recebido, entrando…');
         setTimeout(() => enviar(campo.form, campo), 400);
       });
+    } else if (r.acao === 'externo') {
+      const b = botaoExterno();
+      if (b) { faixa('SURE: abrindo o login externo…'); b.click(); } else location.href = '/Account/LoginExterno';
     } else if (r.acao === 'ir_lista') {
       location.href = '/RoboProcessoExecucao/ListarFaturaEnergiaEletrica';
     }

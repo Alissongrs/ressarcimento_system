@@ -264,6 +264,15 @@ chrome.runtime.onMessage.addListener((msg, sender, responder) => {
         claroParaSure(j, { tipo: 'claro_entrando' });
         return responder({ acao: 'login', usuario: claroUsuario, senha: claroSenha });
       }
+      if (msg.estado === 'escolha') { // tela Accenture / Externo / Primeiro Acesso → login externo
+        j.escolhas = (j.escolhas || 0) + 1;
+        await claroSalvar(j);
+        if (j.escolhas > 3) {
+          await claroFim(j, { erro: 'O portal voltou várias vezes para a tela de escolha do login (Accenture/Externo). Entre manualmente e clique de novo.' });
+          return responder({});
+        }
+        return responder({ acao: 'externo' });
+      }
       if (msg.estado === 'verificacao') return responder({ acao: 'codigo' });
       if (msg.estado === 'lista') {
         if (j.status !== 'baixando') claroBaixar(j);
