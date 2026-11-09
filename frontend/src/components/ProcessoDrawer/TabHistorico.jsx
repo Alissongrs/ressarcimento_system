@@ -209,10 +209,10 @@ function TextoAneel({ texto }) {
   );
 }
 
-export default function TabHistorico({ itens, isLoading, anexos = [], idProcesso, onToast }) {
+export default function TabHistorico({ itens, isLoading, anexos = [], idProcesso, onToast, detalhe }) {
   const aneelQ = useProtocolosAneelProcesso(idProcesso);
   const eventosAneel = aneelQ.data?.eventos || [];
-  const quadro = idProcesso ? <ProtocolosAneelProcesso idProcesso={idProcesso} onToast={onToast} /> : null;
+  const quadro = idProcesso ? <ProtocolosAneelProcesso idProcesso={idProcesso} onToast={onToast} detalhe={detalhe} /> : null;
   if (eventosAneel.length) {
     itens = [...(itens || []), ...eventosAneel.map(itemAneel)].sort(
       (a, b) => new Date(b.data_movimentacao || 0) - new Date(a.data_movimentacao || 0),

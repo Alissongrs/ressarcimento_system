@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../services/apiClient.js';
 import { fmtDataBR } from '../../utils/dateBR.js';
 import { chipSituacaoAneel, protocoloValido } from '../../utils/protocolosAneel.js';
+import RegistroAneelPainel from './RegistroAneelPainel.jsx';
 
 export function useProtocolosAneelProcesso(idProcesso) {
   return useQuery({
@@ -15,10 +16,11 @@ export function useProtocolosAneelProcesso(idProcesso) {
   });
 }
 
-export default function ProtocolosAneelProcesso({ idProcesso, onToast }) {
+export default function ProtocolosAneelProcesso({ idProcesso, onToast, detalhe }) {
   const qc = useQueryClient();
   const { data } = useProtocolosAneelProcesso(idProcesso);
   const [novo, setNovo] = useState('');
+  const [registrar, setRegistrar] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const itens = data?.itens || [];
   // ?protocolo=… (vindo do aviso do sininho): destaca a linha e rola até ela
@@ -101,7 +103,14 @@ export default function ProtocolosAneelProcesso({ idProcesso, onToast }) {
         <button type="button" className="cpv2-btn cpv2-btn--sm" disabled={salvando || !novo.trim()} onClick={vincular}>
           Vincular protocolo
         </button>
+        {detalhe && !registrar && (
+          <button type="button" className="cpv2-btn cpv2-btn--sm" onClick={() => setRegistrar(true)}
+            title="Abre o formulário da Ouvidoria da ANEEL aqui; a extensão preenche no site (versão de teste: não envia)">
+            Registrar na ANEEL (teste)
+          </button>
+        )}
       </div>
+      {registrar && <RegistroAneelPainel detalhe={detalhe} onFechar={() => setRegistrar(false)} />}
     </div>
   );
 }

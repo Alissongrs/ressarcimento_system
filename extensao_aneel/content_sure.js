@@ -32,6 +32,20 @@
       chrome.runtime.sendMessage({ tipo: 'claro_status', token: d.token || '', api: location.origin + '/api/v1' }, (r) => {
         if (!chrome.runtime.lastError) avisar({ tipo: 'claro_status', ...(r || {}) });
       });
+    } else if (d.tipo === 'aneel_registro') { // "Registrar na ANEEL" do processo (por enquanto só teste: não envia)
+      // porta própria (registro_bg.js), para não disputar resposta com os outros módulos no onMessage
+      const porta = chrome.runtime.connect({ name: 'sure-reg' });
+      let respondeu = false;
+      porta.onMessage.addListener((r) => {
+        respondeu = true;
+        porta.disconnect();
+        if (r && r.erro) avisar({ tipo: 'reg_estado', fim: true, erro: r.erro });
+        else avisar({ tipo: 'reg_estado', texto: 'Janela da ANEEL aberta. Se pedir, entre com o login do site.' });
+      });
+      porta.onDisconnect.addListener(() => {
+        if (!respondeu) avisar({ tipo: 'reg_estado', fim: true, erro: 'A extensão não respondeu — atualize-a para a versão 1.4.0 (↻ em chrome://extensions).' });
+      });
+      porta.postMessage({ tipo: 'reg_iniciar', modo: d.modo === 'endereco' ? 'endereco' : 'solicitacao', dados: d.dados || {}, teste: d.teste !== false });
     } else if (d.tipo === 'ping') {
       avisar({ tipo: 'pronta', claro: 2 });
     }

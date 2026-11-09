@@ -365,6 +365,7 @@ export default function ProcessoDrawer({
                   idProcesso={idProcesso}
                   anexos={anexosQ.data?.items || []}
                   onToast={onToast}
+                  detalhe={detalhe}
                 />
               )}
               {aba === 'emails' && (

@@ -1,3 +1,6 @@
+// Módulo "Registrar na ANEEL" (teste, 1.4.0) — carregado aqui junto com este módulo.
+importScripts('registro_bg.js');
+
 // Módulo "Faturas Claro" (portal PDP Claro / Accenture) — roda no service worker da extensão.
 //
 // Botão "Atualizar faturas Claro" no SURE → abre o portal numa janela → (se a sessão caiu) entra com o login
