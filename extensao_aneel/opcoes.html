@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>SURE — opções da extensão</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 24px; max-width: 640px; color: #1f2937; }
+  h1 { font-size: 18px; }
+  label { display: block; margin-top: 12px; font-weight: 600; }
+  input { width: 100%; padding: 6px 8px; margin-top: 4px; box-sizing: border-box; }
+  button { margin-top: 16px; padding: 6px 14px; }
+  .nota { color: #6b7280; font-size: 13px; margin-top: 6px; }
+  #ok { color: #1f9d6b; margin-left: 8px; }
+</style>
+</head>
+<body>
+<h1>Faturas Claro — login do portal PDP</h1>
+<p class="nota">Com o login guardado aqui, o botão "Atualizar faturas Claro" do SURE entra sozinho no portal; o código de
+segurança é lido pelo SURE no e-mail que o portal manda. O login fica só neste computador (armazenamento local da
+extensão) — não vai para o SURE nem para o servidor. Sem login guardado, a janela do portal espera você entrar.</p>
+<label>Usuário <input id="usuario" autocomplete="off"></label>
+<label>Senha <input id="senha" type="password" autocomplete="new-password"></label>
+<label>Endereço do portal <input id="base" placeholder="https://clarobps-pdp.azurewebsites.net"></label>
+<p class="nota">O portal avisou que vai mudar para https://pdp.clarobpo.com — quando mudar, troque aqui.</p>
+<button id="salvar">Salvar</button><button id="apagar">Apagar login</button><span id="ok"></span>
+<script src="opcoes.js"></script>
+</body>
+</html>
