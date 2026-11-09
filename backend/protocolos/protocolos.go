@@ -22,7 +22,6 @@ import (
 	"log"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"ressarcimento-backend/database"
@@ -46,8 +45,6 @@ var reProtocolo = regexp.MustCompile(`(?:^|[^\d.])(?:010\.?(\d{3})\.?(\d{5})-?(\
 // AtualizarCaixa é preenchido pelo pacote handlers: traz da caixa (Graph) os e-mails recentes para
 // mail_messages antes de cada rodada. Nil → usa só o que já está em mail_messages.
 var AtualizarCaixa func()
-
-var mu sync.Mutex
 
 func gdb() *gorm.DB { return database.GormDB_App }
 
@@ -397,16 +394,21 @@ func Sincronizar() (Resultado, error) {
 	if db == nil {
 		return r, fmt.Errorf("banco indisponível")
 	}
-	if !mu.TryLock() {
-		return r, fmt.Errorf("já existe uma atualização em andamento")
+	trava, err := pegarTrava("início")
+	if err != nil {
+		return r, err
 	}
-	defer mu.Unlock()
+	defer soltarTrava(trava)
 
+	etapa(trava, "protocolos do histórico")
 	r.NovosHistorico = CapturarDoHistorico(db)
+	etapa(trava, "procurando processo dos protocolos sem processo")
 	r.AchadosSemProcesso = ProcurarSemProcesso(db)
 	if AtualizarCaixa != nil {
+		etapa(trava, "lendo a caixa de e-mail (ANEEL)")
 		AtualizarCaixa()
 	}
+	etapa(trava, "lendo e-mails novos da ANEEL")
 	var jaTem int
 	_ = db.Raw("SELECT COUNT(*) FROM FT_PROTOCOLO_EVENTOS WHERE fonte = 'email'").Row().Scan(&jaTem)
 	r.PrimeiraRodada = jaTem == 0
@@ -428,7 +430,8 @@ func Sincronizar() (Resultado, error) {
 	}
 	rows.Close()
 
-	for _, e := range emails {
+	for i, e := range emails {
+		etapa(trava, fmt.Sprintf("e-mail %d de %d", i+1, len(emails)))
 		tipo := Classificar(e.assunto)
 		if tipo == "" {
 			continue

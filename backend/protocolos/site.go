@@ -40,13 +40,14 @@ type ItemSite struct {
 }
 
 type ResultadoSite struct {
-	Recebidos     int `json:"recebidos"`
-	Atualizados   int `json:"atualizados"`
-	Mudaram       int `json:"mudaram"`
-	Concluidos    int `json:"concluidos"`
-	Desconhecidos int `json:"desconhecidos"`
-	Tarefas       int `json:"tarefas"`
-	Vinculados    int `json:"vinculados"` // protocolos sem processo vinculados pela UC do campo Endereço
+	Recebidos     int    `json:"recebidos"`
+	Atualizados   int    `json:"atualizados"`
+	Mudaram       int    `json:"mudaram"`
+	Concluidos    int    `json:"concluidos"`
+	Desconhecidos int    `json:"desconhecidos"`
+	Tarefas       int    `json:"tarefas"`
+	Vinculados    int    `json:"vinculados"` // protocolos sem processo vinculados pela UC do campo Endereço
+	Erro          string `json:"erro,omitempty"`
 }
 
 // RotuloSite converte o status do site no rótulo do SURE.
@@ -80,8 +81,13 @@ func AbertosNoSite(todos bool) []string {
 func ImportarSite(itens []ItemSite) ResultadoSite {
 	db := gdb()
 	r := ResultadoSite{Recebidos: len(itens)}
-	mu.Lock()
-	defer mu.Unlock()
+	// espera a rodada de e-mail terminar (até 3 min); trava vencida é assumida
+	trava, err := esperarTrava("importando situação do site", 3*time.Minute)
+	if err != nil {
+		r.Erro = err.Error()
+		return r
+	}
+	defer soltarTrava(trava)
 	for _, it := range itens {
 		nums := Extrair(it.Protocolo)
 		sit := RotuloSite(it.Status)

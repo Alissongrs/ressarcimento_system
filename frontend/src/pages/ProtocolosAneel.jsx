@@ -265,7 +265,8 @@ function ConsultaSite({ isAdmin, onFim, onErro }) {
           try {
             const { data } = await api.post('/protocolos-aneel/site/importar', { itens: d.itens });
             const r = data?.resultado || {};
-            onFim(`Site da ANEEL: ${d.itens.length} de ${d.total} lidos, ${r.mudaram || 0} mudaram, ${r.concluidos || 0} concluídos agora` +
+            if (r.erro) onErro(`Nada foi gravado: ${r.erro}. Tente de novo em alguns minutos.`);
+            else onFim(`Site da ANEEL: ${d.itens.length} de ${d.total} lidos, ${r.mudaram || 0} mudaram, ${r.concluidos || 0} concluídos agora` +
               (r.vinculados ? `, ${r.vinculados} sem processo vinculados pela UC do endereço.` : '.') +
               (d.erro ? ` Parou antes do fim: ${d.erro}` : ''));
           } catch (e) { onErro(e?.response?.data?.error || 'Falha ao gravar o resultado do site.'); }

@@ -388,6 +388,8 @@ func ExtrairProcesso(msg string) (string, bool) {
 	return "", false
 }
 
+var reUCNumeroNovo = regexp.MustCompile(`\b(numero|n[o.]|codigo|cod\.?|numeracao)\s+(novo|nova|antigo|antiga|anterior|atual|correto)\b.{0,60}\b(uc|unidade|instalacao|cliente)\b|\b(uc|unidade(\s+consumidora)?|instalacao)\b.{0,60}\b(numero|codigo|numeracao)\s+(novo|nova|antigo|antiga|anterior|atual)\b|\bnova numeracao\b`)
+
 var reUCRef = regexp.MustCompile(`(?i)\b(?:uc|unidade(?:\s+consumidora)?|instala[cç][aã]o)\s*(?:n[ºo°.]*\s*)?[:#]?\s*(\d[\d./-]{3,24}\d)`)
 
 // resolverProcesso traduz a referência (PR-AAAA-N, id ou "UC:<nº>") no processo.
@@ -698,6 +700,12 @@ func nomeOuTraco(m map[int]string, v *int) string {
 // sem a tag #sistema, se o chat trata como pedido (prévia+aprovação) ou como Q&A.
 func EhComando(msg string) bool {
 	n := norm(msg)
+	// "número novo/antigo da UC X" (troca de numeração da distribuidora) é levantamento do worker
+	// (faturas Claro + e-mails da ouvidoria) — vai p/ a fila como consulta, mesmo escrito como pergunta.
+	// Antes ia p/ o Q&A, que só enxerga o banco e respondia "não há número novo" (Eliane, 09/11/2026).
+	if reUCNumeroNovo.MatchString(n) {
+		return true
+	}
 	if rePergunta.MatchString(n) {
 		return false // pergunta → Q&A
 	}
