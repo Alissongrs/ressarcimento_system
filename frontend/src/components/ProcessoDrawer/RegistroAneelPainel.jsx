@@ -3,7 +3,7 @@
 // "Preencher na ANEEL (teste)", a extensão do SURE abre o site na sessão do usuário, escolhe (ou preenche o
 // cadastro do) endereço da UC e preenche o formulário inteiro — mas NÃO envia: no teste o botão "Registrar
 // Solicitação" fica bloqueado. Nada é gravado no SURE nem na ANEEL. O "Não sou um robô" é sempre da pessoa.
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 // assuntos (Natureza 2 - Reclamação → "Classificação (assunto)") ligados a ressarcimento; código = value no site
 const ASSUNTOS_ANEEL = [
@@ -38,6 +38,13 @@ function gravarProcurador(p) {
 }
 
 const soDig = (s) => String(s || '').replace(/\D/g, '');
+// mesma regra da extensão: algum número do texto do endereço (sem pontuação e zeros à esquerda) = UC
+const ucSemZeros = (s) => soDig(s).replace(/^0+/, '');
+function enderecosDaUC(lista, uc) {
+  const alvo = ucSemZeros(uc);
+  if (!alvo || !lista) return [];
+  return lista.filter((e) => (e.texto.match(/\d[\d.-]*/g) || []).some((x) => ucSemZeros(x) === alvo));
+}
 const docLimpo = (s) => (/[*•x]/i.test(String(s || '')) ? '' : String(s || '')); // documento mascarado não serve
 
 function inicial(d) {
@@ -116,6 +123,10 @@ export default function RegistroAneelPainel({ detalhe, onFechar }) {
   const [versaoExt, setVersaoExt] = useState(() => document.documentElement.dataset.sureExtVersao || '');
   const [estado, setEstado] = useState(null); // { tipo: 'info'|'ok'|'erro', texto, detalhes? }
   const [rodando, setRodando] = useState(false);
+  const [enderecos, setEnderecos] = useState(null); // lista lida na hora no site (não é gravada)
+  const [conf, setConf] = useState(null); // { tipo, texto } da conferência
+  const modoRef = useRef('');
+  const conferiuRef = useRef(false);
   const set = (k, v) => setF((o) => ({ ...o, [k]: v }));
 
   const faltando = useMemo(() => {
@@ -131,6 +142,11 @@ export default function RegistroAneelPainel({ detalhe, onFechar }) {
       if (d.tipo === 'pronta') { setTemExt(true); setVersaoExt(document.documentElement.dataset.sureExtVersao || ''); }
       if (d.tipo !== 'reg_estado') return;
       if (d.fim) setRodando(false);
+      if (Array.isArray(d.enderecos)) setEnderecos(d.enderecos);
+      if (modoRef.current === 'conferir') {
+        setConf({ tipo: d.erro ? 'erro' : d.fim ? 'ok' : 'info', texto: d.erro || d.texto || '' });
+        return;
+      }
       setEstado({ tipo: d.erro ? 'erro' : d.fim ? 'ok' : 'info', texto: d.erro || d.texto || '', detalhes: d.detalhes });
     };
     window.addEventListener('message', ouvir);
@@ -138,8 +154,15 @@ export default function RegistroAneelPainel({ detalhe, onFechar }) {
     return () => window.removeEventListener('message', ouvir);
   }, []);
 
-  // modo: 'endereco' (cadastro da UC no site) ou 'solicitacao' (protocolar)
+  // modo: 'endereco' (cadastro da UC no site), 'solicitacao' (protocolar) ou 'conferir' (lê a lista de endereços)
   const preencher = (modo) => {
+    modoRef.current = modo;
+    if (modo === 'conferir') {
+      setRodando(true);
+      setConf({ tipo: 'info', texto: 'Conferindo no site da ANEEL…' });
+      window.postMessage({ origem: 'sure-pagina', tipo: 'aneel_registro', modo, teste: true, dados: {} }, window.location.origin);
+      return;
+    }
     if (f.titular === 'nao') {
       gravarProcurador({
         nome_procurador: f.nome_procurador, email_procurador: f.email_procurador,
@@ -154,6 +177,12 @@ export default function RegistroAneelPainel({ detalhe, onFechar }) {
     .filter(([k]) => !String(f[k] || '').trim()).map(([, n]) => n);
 
   const versaoOk = versaoExt && versaoExt.localeCompare('1.4.0', undefined, { numeric: true }) >= 0;
+  // ao abrir o painel, confere sozinho se a UC já está cadastrada no site (uma vez)
+  useEffect(() => {
+    if (temExt && versaoOk && !conferiuRef.current) { conferiuRef.current = true; preencher('conferir'); }
+  }, [temExt, versaoOk]); // eslint-disable-line react-hooks/exhaustive-deps
+  const daUC = useMemo(() => enderecosDaUC(enderecos, f.end_uc), [enderecos, f.end_uc]);
+  const ucCadastrada = enderecos ? daUC.length > 0 : null;
 
   return (
     <div className="cpv2-aneel-box" style={{ marginTop: 10, border: '1px dashed var(--cpv2-warning, #d4a017)' }}>
@@ -198,6 +227,24 @@ export default function RegistroAneelPainel({ detalhe, onFechar }) {
         <Campo label="UC (número da instalação)" nome="end_uc" f={f} set={set} req ajuda="Usada para achar o endereço já cadastrado no site." />
         <Campo label="Classe de consumo" nome="classe_consumo" f={f} set={set} req ajuda="Ex.: Comercial, Industrial, Rural" />
         <Campo label="Grupo tarifário (A/B)" nome="grupo_tarifario" f={f} set={set} req />
+      </div>
+      <div className="cpv2-muted-sm" style={{ margin: '6px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {ucCadastrada === true && (
+          <span style={{ color: 'var(--cpv2-success, #1f9d6b)' }}>
+            ✓ UC já cadastrada no site: {daUC[0].texto.slice(0, 110)}{daUC.length > 1 ? ` (+${daUC.length - 1})` : ''} — pode ir direto em "Protocolar".
+          </span>
+        )}
+        {ucCadastrada === false && (
+          <span style={{ color: 'var(--cpv2-danger, #c0392b)' }}>
+            ✗ UC não está entre os {enderecos.length} endereços cadastrados no site — use "Registrar endereço" antes de protocolar.
+          </span>
+        )}
+        {ucCadastrada === null && conf && <span style={{ color: conf.tipo === 'erro' ? 'var(--cpv2-danger, #c0392b)' : undefined }}>{conf.texto}</span>}
+        {temExt && versaoOk && (
+          <button type="button" className="cpv2-btn cpv2-btn--sm" disabled={rodando} onClick={() => preencher('conferir')}>
+            Conferir no site
+          </button>
+        )}
       </div>
 
       <div className="cpv2-section-title" style={{ marginTop: 10 }}>Endereço da UC (para o botão "Registrar endereço")</div>

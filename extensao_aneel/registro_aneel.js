@@ -239,6 +239,12 @@
       if (r.acao === 'ir') location.href = r.url;
       else if (r.acao === 'preencher_solicitacao') await preencherSolicitacao(r.dados || {});
       else if (r.acao === 'preencher_endereco') await preencherEndereco(r.dados || {});
+      else if (r.acao === 'ler_enderecos') {
+        // lista "Selecione o endereço" = endereços já cadastrados na conta (só leitura)
+        const sel = document.querySelector('[name=endereco]');
+        const enderecos = sel ? [...sel.options].filter((o) => o.value && o.value !== '0').map((o) => ({ id: o.value, texto: o.text.trim() })) : [];
+        await pedir({ tipo: 'reg_resultado', enderecos, texto: `${enderecos.length} endereços cadastrados no site.`, erro: sel ? undefined : 'a lista de endereços não apareceu no formulário' });
+      }
     } catch (e) {
       faixa('SURE (teste): erro ao preencher — ' + String(e.message || e).slice(0, 120), '#b91c1c');
       await pedir({ tipo: 'reg_resultado', erro: 'Erro ao preencher no site da ANEEL: ' + String(e.message || e).slice(0, 200) });

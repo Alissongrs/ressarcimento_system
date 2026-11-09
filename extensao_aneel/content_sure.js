@@ -40,12 +40,12 @@
         respondeu = true;
         porta.disconnect();
         if (r && r.erro) avisar({ tipo: 'reg_estado', fim: true, erro: r.erro });
-        else avisar({ tipo: 'reg_estado', texto: 'Janela da ANEEL aberta. Se pedir, entre com o login do site.' });
+        else avisar({ tipo: 'reg_estado', texto: d.modo === 'conferir' ? 'Conferindo os endereços cadastrados no site da ANEEL…' : 'Janela da ANEEL aberta. Se pedir, entre com o login do site.' });
       });
       porta.onDisconnect.addListener(() => {
         if (!respondeu) avisar({ tipo: 'reg_estado', fim: true, erro: 'A extensão não respondeu — atualize-a para a versão 1.4.0 (↻ em chrome://extensions).' });
       });
-      porta.postMessage({ tipo: 'reg_iniciar', modo: d.modo === 'endereco' ? 'endereco' : 'solicitacao', dados: d.dados || {}, teste: d.teste !== false });
+      porta.postMessage({ tipo: 'reg_iniciar', modo: ['endereco', 'conferir'].includes(d.modo) ? d.modo : 'solicitacao', dados: d.dados || {}, teste: d.teste !== false });
     } else if (d.tipo === 'ping') {
       avisar({ tipo: 'pronta', claro: 2 });
     }

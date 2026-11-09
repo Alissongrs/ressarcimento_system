@@ -28,9 +28,11 @@ async function regIniciar(msg, sender) {
       return { erro: 'Já existe um preenchimento da ANEEL aberto — feche aquela janela para começar outro.' };
     }
   }
-  // dois botões no SURE: "Registrar endereço" (cadastro da UC no site) e "Protocolar" (solicitação)
-  const fase = msg.modo === 'endereco' ? 'endereco' : 'solicitacao';
-  const win = await chrome.windows.create({ url: fase === 'endereco' ? REG_ENDERECO : REG_FORM, type: 'popup', width: 1200, height: 900, focused: true });
+  // botões no SURE: "Registrar endereço" (cadastro da UC no site), "Protocolar" (solicitação) e a conferência
+  // da lista de endereços já cadastrados (lê o site na hora, minimizado; não grava nada em lugar nenhum)
+  const fase = msg.modo === 'endereco' ? 'endereco' : msg.modo === 'conferir' ? 'conferir' : 'solicitacao';
+  const opcoes = { url: fase === 'endereco' ? REG_ENDERECO : REG_FORM, type: 'popup', width: 1200, height: 900 };
+  const win = await chrome.windows.create(fase === 'conferir' ? { ...opcoes, state: 'minimized' } : { ...opcoes, focused: true });
   await regSalvar({
     sureTabId: sender.tab.id, windowId: win.id, dados: msg.dados || {}, teste: true,
     fase, desvios: 0, avisouLogin: false,
@@ -47,6 +49,7 @@ async function regTratar(msg, sender) {
   if (msg.tipo === 'reg_pagina') {
     const p = msg.pagina;
     if (p === 'login' || p === 'verificacao') {
+      chrome.windows.update(j.windowId, { state: 'normal', focused: true }).catch(() => {}); // a pessoa precisa ver
       if (!j.avisouLogin) {
         j.avisouLogin = true;
         await regSalvar(j);
@@ -55,15 +58,18 @@ async function regTratar(msg, sender) {
           : 'A ANEEL pediu a verificação "não sou robô": resolva na janela que abriu.' });
       }
       return { acao: 'esperar', faixa: p === 'login'
-        ? 'SURE (teste): entre com o login da Ouvidoria. Depois a extensão abre o formulário e preenche — nada será enviado.'
+        ? (j.fase === 'conferir'
+          ? 'SURE: entre com o login da Ouvidoria para o SURE conferir os endereços cadastrados.'
+          : 'SURE (teste): entre com o login da Ouvidoria. Depois a extensão abre o formulário e preenche — nada será enviado.')
         : 'SURE (teste): resolva a verificação do site para continuar.' };
     }
+    if (p === 'solicitacao' && j.fase === 'conferir') return { acao: 'ler_enderecos' };
     if (p === 'solicitacao' && j.fase === 'solicitacao') {
       regParaSure(j, { texto: 'Preenchendo o formulário da ANEEL…' });
       return { acao: 'preencher_solicitacao', dados: j.dados, teste: true };
     }
     if (p === 'endereco' && j.fase === 'endereco') {
-      regParaSure(j, { texto: 'A UC não está cadastrada no site: preenchendo o cadastro do endereço (sem salvar)…' });
+      regParaSure(j, { texto: 'Preenchendo o cadastro do endereço da UC (sem salvar)…' });
       return { acao: 'preencher_endereco', dados: j.dados, teste: true };
     }
     // logado em outra página (ex.: início depois do login): volta para onde precisa
@@ -73,7 +79,7 @@ async function regTratar(msg, sender) {
       await regFim(j, { erro: 'O site da ANEEL não abriu o formulário. Abra-o manualmente na janela e clique de novo no SURE.' });
       return {};
     }
-    return { acao: 'ir', url: j.fase === 'endereco' ? REG_ENDERECO : REG_FORM };
+    return { acao: 'ir', url: j.fase === 'endereco' ? REG_ENDERECO : REG_FORM }; // 'conferir' lê no formulário
   }
 
   if (msg.tipo === 'reg_progresso') {
@@ -82,7 +88,8 @@ async function regTratar(msg, sender) {
   }
 
   if (msg.tipo === 'reg_resultado') {
-    await regFim(j, { texto: msg.texto, detalhes: msg.detalhes, erro: msg.erro });
+    await regFim(j, { texto: msg.texto, detalhes: msg.detalhes, erro: msg.erro, enderecos: msg.enderecos });
+    if (j.fase === 'conferir' && !msg.erro) chrome.windows.remove(j.windowId).catch(() => {}); // só leitura: fecha
     return {};
   }
   return {};
@@ -106,7 +113,9 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.windows.onRemoved.addListener(async (id) => {
   const j = await regJob();
   if (j && j.windowId === id) {
-    regParaSure(j, { fim: true, erro: 'A janela da ANEEL foi fechada antes de terminar o preenchimento.' });
+    regParaSure(j, { fim: true, erro: j.fase === 'conferir'
+      ? 'A janela da ANEEL foi fechada antes de ler os endereços.'
+      : 'A janela da ANEEL foi fechada antes de terminar o preenchimento.' });
     await regLimpar();
   }
 });
