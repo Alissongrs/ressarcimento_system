@@ -9,6 +9,7 @@
 // guardado na sessão do navegador e apagado no fim). Até a versão 1.2 o destino era o receptor local do PC.
 const CLARO_BASE_PADRAO = 'https://clarobps-pdp.azurewebsites.net';
 const CLARO_LISTA = '/RoboProcessoExecucao/ListarFaturaEnergiaEletrica';
+const CLARO_LOGIN = '/Account/LoginExterno'; // abre direto no login externo (pula a tela Accenture/Externo)
 const PARTE = 8 * 1024 * 1024;
 
 let esperaCodigo = null; // { resolver, timer }
@@ -59,7 +60,7 @@ async function claroIniciar(msg, sender) {
     : (fila.worker && fila.worker.aviso && fila.worker.aviso !== 'ok' ? fila.worker.aviso : '');
   const { claroBase } = await chrome.storage.local.get('claroBase');
   const base = (claroBase || CLARO_BASE_PADRAO).replace(/\/+$/, '');
-  const win = await chrome.windows.create({ url: base + CLARO_LISTA, type: 'popup', width: 1100, height: 780, focused: true });
+  const win = await chrome.windows.create({ url: base + CLARO_LOGIN, type: 'popup', width: 1100, height: 780, focused: true });
   const j = {
     sureTabId: sender.tab.id, windowId: win.id, tabId: win.tabs && win.tabs[0] ? win.tabs[0].id : null,
     status: 'abrindo', ultimo: fila.ultimo || '0', fila: fila.fila || [], loginEm: 0, logins: 0, desvios: 0,

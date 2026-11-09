@@ -6,6 +6,7 @@
 (() => {
   document.documentElement.dataset.sureAneelExt = '1';
   document.documentElement.dataset.sureClaroExt = '2'; // 2 = processamento da Claro na VPS (extensão 1.3)
+  document.documentElement.dataset.sureExtVersao = chrome.runtime.getManifest().version; // p/ conferir se o Chrome recarregou
   const avisar = (msg) => window.postMessage({ origem: 'sure-aneel-ext', ...msg }, location.origin);
   avisar({ tipo: 'pronta', claro: 2 });
 
