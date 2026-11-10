@@ -11,6 +11,17 @@ func TestUCNumeroNovoViraConsulta(t *testing.T) {
 		"qual o número antigo da instalação 335563503161?",
 		"a UC 60286180 tem número novo?",
 		"verifique a nova numeração da unidade 123456",
+		// formas soltas (10/11/2026)
+		"qual a nova UC da 38946823?",
+		"qual é a UC nova da instalação 38946823",
+		"me passa a UC atualizada da 38946823",
+		"procura o novo número da unidade 38946823 da Claro",
+		"qual o novo código da instalação 38946823",
+		"número da UC nova da 38946823",
+		"novo número de UC para 38946823",
+		"a UC 38946823 mudou de número?",
+		"a Elektro alterou a UC 38946823, qual ficou?",
+		"qual era a UC antiga da 335563503161?",
 	}
 	for _, m := range sim {
 		if !EhComando(m) {
@@ -23,6 +34,9 @@ func TestUCNumeroNovoViraConsulta(t *testing.T) {
 	nao := []string{
 		"qual o número de processos da CELESC?",
 		"quantos processos novos entraram hoje?",
+		"qual o status atual da UC 38946823?",
+		"quantas UCs novas da Claro entraram este mês?",
+		"qual a situação do processo da UC 38946823?",
 	}
 	for _, m := range nao {
 		if EhComando(m) {

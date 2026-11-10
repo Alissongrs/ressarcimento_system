@@ -203,23 +203,37 @@ O solicitante repassa a informação ao cliente. Para ele, **valor só de proces
 
 ## Pedido de número NOVO × ANTIGO da UC (Claro) — ex.: "qual o número novo da UC 60286180?", "essa UC nova era qual antes?"
 Autorizado pelo Alisson (04/11/2026): **execute direto quando pedido no chat** — é levantamento (leitura) e a
-resposta vai no `resultado`. Distribuidoras trocam a numeração (ex.: Copel avisou na fatura "A partir de 01/2026 o
-número da Unidade Consumidora possuirá 15 dígitos"; na prática veio com 12). Caminho que funcionou (UC 60286180 →
-335563503161):
+resposta vai no `resultado`. **Faça a busca completa, com a mesma profundidade de quando o Alisson pede direto
+(10/11/2026):** não pare no banco nem responda "não há número novo no sistema" sem ter passado pelos passos 1–5 —
+abrir as faturas (PDF) e os documentos faz parte do pedido. Distribuidoras trocam a numeração (ex.: Copel avisou na
+fatura "A partir de 01/2026 o número da Unidade Consumidora possuirá 15 dígitos"; na prática veio com 12; Elektro
+passou a usar o formato 2.959.734.045-69). Casos que funcionaram: UC 60286180 (Copel) → 335563503161 pela resposta da
+ouvidoria; UC 38946823 (Elektro) → 2.959.734.045-69 pelo **mesmo medidor** (B15497384) e mesmo endereço nas faturas
+a partir de 07/2026.
 1. **Processo e faturas da UC conhecida:** `FT_PROCESSOS.uc/uc_atual`; faturas em `FATURA_CLARO_DADOS_EXTRAIDOS`
-   por `numero_instalacao = '<uc>'` (indexado — nunca `LIKE '%…%'` aqui). Veja o último mês com o número antigo.
-2. **Abra a última fatura** (link do Drive → `rclone backend copyid`, ou o link) e procure aviso de troca de número,
-   o medidor e o histórico de consumo (kWh por mês).
-3. **E-mails do processo** (resposta da distribuidora/ouvidoria costuma trazer "Unidade Consumidora: <novo>"): pegue os
+   por `numero_instalacao = '<uc>'` (indexado — nunca `LIKE '%…%'` aqui). Veja o último mês com o número antigo,
+   o **medidor** (`numero_medidor`) e o endereço. Atenção: o `numero_instalacao` extraído às vezes vem trocado entre
+   faturas — confirme no PDF.
+2. **Pelo medidor e pelo Drive (é o caminho mais rápido):**
+   - banco: `numero_medidor = '<medidor>'` com `numero_instalacao <> '<uc>'` → faturas mais novas do mesmo medidor
+     com outro número de UC (= candidato ao número novo). `numero_medidor` **não tem índice**: filtre sempre junto por
+     `distribuidora LIKE '<dist>%'` e `mes_referencia >=` o último mês com o número antigo (os dois têm índice);
+     nunca a tabela inteira;
+   - Drive (série mensal COMPLETA — o banco é só parte): `rclone backend query gdrive: "fullText contains '<uc>'"`
+     e `"fullText contains '<medidor>'"` (sem pontuação e também com a pontuação impressa) → baixe com
+     `rclone backend copyid gdrive: <id> <pasta>` os PDFs dos meses depois do último com o número antigo e leia
+     (pdftotext/PyMuPDF): número da UC impresso, medidor, endereço, aviso de troca de numeração.
+3. **Abra a última fatura com o número antigo** e procure aviso de troca de número e o histórico de consumo (kWh por mês).
+4. **E-mails do processo** (resposta da distribuidora/ouvidoria costuma trazer "Unidade Consumidora: <novo>"): pegue os
    protocolos no `FT_HISTORICO_MOVIMENTACOES.comentario` (ANEEL 010.xxx…, ouvidoria) e procure por eles nas caixas via
    Microsoft Graph (`AZURE_*` do backend/.env; caixas complaint@, eliane.araujo@, paulo.passos@amee.com.br) —
    corpo e anexos PDF. **Só leia; não responda nem mova e-mail.**
-4. **Sem documento:** case pelo **histórico de consumo** — varra só `distribuidora LIKE '<dist>%'` em blocos de id
+5. **Sem documento nem medidor igual:** case pelo **histórico de consumo** — varra só `distribuidora LIKE '<dist>%'` em blocos de id
    (`WHERE id > a AND id <= b`, 50 mil por vez), comparando os meses do `historico` do `dados_json` (≥ 3 meses iguais)
    com os da UC antiga, excluindo a própria UC. Nunca uma consulta única na tabela inteira.
-5. **Confirme que é a mesma unidade** (mesmo endereço/medidor/histórico, ou o documento falando do mesmo caso) antes de
-   afirmar. Se não achar, diga o que foi procurado e sugira pedir à distribuidora.
-6. **Entregue** em linguagem simples: número novo (e antigo), onde está a prova (documento, data, caixa), o que mais o
+6. **Confirme que é a mesma unidade** (mesmo endereço/medidor/histórico, ou o documento falando do mesmo caso) antes de
+   afirmar. Se não achar, diga exatamente o que foi procurado (banco, medidor, Drive, e-mails) e sugira pedir à distribuidora.
+7. **Entregue** em linguagem simples: número novo (e antigo), onde está a prova (documento, data, caixa), o que mais o
    documento diz que importa para o processo (ex.: valor de devolução, pedido de dados bancários) e o processo no SURE.
    **Não grave** o número no processo (`uc_atual`) nem nas faturas — isso continua sendo pedido de alteração separado.
 
