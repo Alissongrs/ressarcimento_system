@@ -20,7 +20,7 @@ export default function ProtocolosAneelProcesso({ idProcesso, onToast, detalhe }
   const qc = useQueryClient();
   const { data } = useProtocolosAneelProcesso(idProcesso);
   const [novo, setNovo] = useState('');
-  const [registrar, setRegistrar] = useState(false);
+  const [registrar, setRegistrar] = useState(null); // null | 'endereco' | 'solicitacao'
   const [salvando, setSalvando] = useState(false);
   const itens = data?.itens || [];
   // ?protocolo=… (vindo do aviso do sininho): destaca a linha e rola até ela
@@ -103,14 +103,20 @@ export default function ProtocolosAneelProcesso({ idProcesso, onToast, detalhe }
         <button type="button" className="cpv2-btn cpv2-btn--sm" disabled={salvando || !novo.trim()} onClick={vincular}>
           Vincular protocolo
         </button>
-        {detalhe && !registrar && (
-          <button type="button" className="cpv2-btn cpv2-btn--sm" onClick={() => setRegistrar(true)}
-            title="Abre o formulário da Ouvidoria da ANEEL aqui; a extensão preenche no site (versão de teste: não envia)">
-            Registrar na ANEEL (teste)
-          </button>
+        {detalhe && (
+          <>
+            <button type="button" className={`cpv2-btn cpv2-btn--sm${registrar === 'endereco' ? ' cpv2-btn--primary' : ''}`} onClick={() => setRegistrar('endereco')}
+              title="Cadastra o endereço da UC na Ouvidoria da ANEEL (precisa estar cadastrado antes de protocolar). Teste: não salva">
+              Registrar endereço na ANEEL (teste)
+            </button>
+            <button type="button" className={`cpv2-btn cpv2-btn--sm${registrar === 'solicitacao' ? ' cpv2-btn--primary' : ''}`} onClick={() => setRegistrar('solicitacao')}
+              title="Abre o formulário da Ouvidoria da ANEEL aqui; a extensão preenche no site (versão de teste: não envia)">
+              Protocolar na ANEEL (teste)
+            </button>
+          </>
         )}
       </div>
-      {registrar && <RegistroAneelPainel detalhe={detalhe} onFechar={() => setRegistrar(false)} />}
+      {registrar && <RegistroAneelPainel detalhe={detalhe} foco={registrar} onFechar={() => setRegistrar(null)} />}
     </div>
   );
 }

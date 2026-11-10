@@ -23,6 +23,14 @@ extensão) — não vai para o SURE nem para o servidor. Sem login guardado, a j
 <label>Endereço do portal <input id="base" placeholder="https://clarobps-pdp.azurewebsites.net"></label>
 <p class="nota">O portal avisou que vai mudar para https://pdp.clarobpo.com — quando mudar, troque aqui.</p>
 <button id="salvar">Salvar</button><button id="apagar">Apagar login</button><span id="ok"></span>
+
+<h1 style="margin-top:32px">Ouvidoria da ANEEL — login do Fale Conosco</h1>
+<p class="nota">Usado pelo "Registrar endereço" / "Protocolar" do processo no SURE: a janela da ANEEL entra sozinha com este
+login. Fica só neste computador (armazenamento local da extensão) — não vai para o SURE nem para o servidor. O "Não sou
+um robô" e a verificação do site continuam sendo seus. Se o site recusar a senha, a extensão para de tentar.</p>
+<label>Usuário (o mesmo que você digita no login da Ouvidoria) <input id="aneelUsuario" autocomplete="off"></label>
+<label>Senha <input id="aneelSenha" type="password" autocomplete="new-password"></label>
+<button id="aneelSalvar">Salvar</button><button id="aneelApagar">Apagar login</button><span id="aneelOk" style="color:#1f9d6b;margin-left:8px"></span>
 <script src="opcoes.js"></script>
 </body>
 </html>

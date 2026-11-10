@@ -117,7 +117,10 @@ const OBRIG_PROCURADOR = [
   ['tel_procurador', 'Telefone do procurador'], ['cpf_procurador', 'CPF/CNPJ do procurador'],
 ];
 
-export default function RegistroAneelPainel({ detalhe, onFechar }) {
+export default function RegistroAneelPainel({ detalhe, onFechar, foco = 'solicitacao' }) {
+  // aba: 'endereco' (cadastro do endereço da UC no site) ou 'solicitacao' (protocolar)
+  const [aba, setAba] = useState(foco === 'endereco' ? 'endereco' : 'solicitacao');
+  useEffect(() => { setAba(foco === 'endereco' ? 'endereco' : 'solicitacao'); }, [foco]);
   const [f, setF] = useState(() => inicial(detalhe));
   const [temExt, setTemExt] = useState(() => !!document.documentElement.dataset.sureAneelExt);
   const [versaoExt, setVersaoExt] = useState(() => document.documentElement.dataset.sureExtVersao || '');
@@ -195,6 +198,14 @@ export default function RegistroAneelPainel({ detalhe, onFechar }) {
         formulário da solicitação ("Protocolar"). Neste teste <strong>nada é enviado</strong>: os botões de registrar do site ficam bloqueados e
         nada é gravado no SURE. Confira na janela da ANEEL se cada campo caiu no lugar certo.
       </p>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        <button type="button" className={`cpv2-btn cpv2-btn--sm${aba === 'endereco' ? ' cpv2-btn--primary' : ''}`} onClick={() => setAba('endereco')}>
+          1. Registrar endereço da UC
+        </button>
+        <button type="button" className={`cpv2-btn cpv2-btn--sm${aba === 'solicitacao' ? ' cpv2-btn--primary' : ''}`} onClick={() => setAba('solicitacao')}>
+          2. Protocolar
+        </button>
+      </div>
 
       <div className="cpv2-section-title">Quem registra</div>
       <div style={{ display: 'flex', gap: 16, fontSize: 13, marginBottom: 8 }}>
@@ -202,6 +213,7 @@ export default function RegistroAneelPainel({ detalhe, onFechar }) {
         <label><input type="radio" checked={f.titular === 'sim'} onChange={() => set('titular', 'sim')} /> O próprio titular</label>
       </div>
 
+      {aba === 'solicitacao' && (<>
       <div className="cpv2-section-title">Titular (representado)</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <Campo label="Nome do consumidor" nome="nome_consumidor" f={f} set={set} req />
@@ -221,22 +233,23 @@ export default function RegistroAneelPainel({ detalhe, onFechar }) {
           </div>
         </>
       )}
+      </>)}
 
       <div className="cpv2-section-title" style={{ marginTop: 10 }}>Unidade consumidora</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
         <Campo label="UC (número da instalação)" nome="end_uc" f={f} set={set} req ajuda="Usada para achar o endereço já cadastrado no site." />
-        <Campo label="Classe de consumo" nome="classe_consumo" f={f} set={set} req ajuda="Ex.: Comercial, Industrial, Rural" />
-        <Campo label="Grupo tarifário (A/B)" nome="grupo_tarifario" f={f} set={set} req />
+        {aba === 'solicitacao' && <Campo label="Classe de consumo" nome="classe_consumo" f={f} set={set} req ajuda="Ex.: Comercial, Industrial, Rural" />}
+        {aba === 'solicitacao' && <Campo label="Grupo tarifário (A/B)" nome="grupo_tarifario" f={f} set={set} req />}
       </div>
       <div className="cpv2-muted-sm" style={{ margin: '6px 0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {ucCadastrada === true && (
           <span style={{ color: 'var(--cpv2-success, #1f9d6b)' }}>
-            ✓ UC já cadastrada no site: {daUC[0].texto.slice(0, 110)}{daUC.length > 1 ? ` (+${daUC.length - 1})` : ''} — pode ir direto em "Protocolar".
+            ✓ UC já cadastrada no site: {daUC[0].texto.slice(0, 110)}{daUC.length > 1 ? ` (+${daUC.length - 1})` : ''} — pode ir direto em "2. Protocolar".
           </span>
         )}
         {ucCadastrada === false && (
           <span style={{ color: 'var(--cpv2-danger, #c0392b)' }}>
-            ✗ UC não está entre os {enderecos.length} endereços cadastrados no site — use "Registrar endereço" antes de protocolar.
+            ✗ UC não está entre os {enderecos.length} endereços cadastrados no site — registre o endereço (aba 1) antes de protocolar.
           </span>
         )}
         {ucCadastrada === null && conf && <span style={{ color: conf.tipo === 'erro' ? 'var(--cpv2-danger, #c0392b)' : undefined }}>{conf.texto}</span>}
@@ -247,7 +260,8 @@ export default function RegistroAneelPainel({ detalhe, onFechar }) {
         )}
       </div>
 
-      <div className="cpv2-section-title" style={{ marginTop: 10 }}>Endereço da UC (para o botão "Registrar endereço")</div>
+      {aba === 'endereco' && (<>
+      <div className="cpv2-section-title" style={{ marginTop: 10 }}>Endereço da UC</div>
       <div className="cpv2-muted-sm" style={{ marginBottom: 4 }}>
         O site só aceita protocolar para uma UC cujo endereço já esteja cadastrado na conta. Se a UC não aparecer no site, registre o endereço primeiro.
       </div>
@@ -263,6 +277,9 @@ export default function RegistroAneelPainel({ detalhe, onFechar }) {
           <Campo label="Complemento" nome="end_complemento" f={f} set={set} />
         </div>
       </div>
+      </>)}
+
+      {aba === 'solicitacao' && (<>
 
       <div className="cpv2-section-title">Registros anteriores na distribuidora</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
@@ -300,19 +317,23 @@ export default function RegistroAneelPainel({ detalhe, onFechar }) {
         <Campo label="Motivo do contato com a ANEEL" nome="mensagem" f={f} set={set} req area linhas={8} />
       </div>
       <p className="cpv2-muted-sm">Anexos ainda não entram neste teste (no site: até 10 arquivos, PDF/JPG/PNG, 5 MB somados).</p>
+      </>)}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
-        <button type="button" className="cpv2-btn" disabled={rodando || !temExt || !versaoOk} onClick={() => preencher('endereco')}
+        {aba === 'endereco' && <button type="button" className="cpv2-btn cpv2-btn--primary" disabled={rodando || !temExt || !versaoOk} onClick={() => preencher('endereco')}
           title={faltandoEnd.length ? `Em branco: ${faltandoEnd.join(', ')}` : 'Preenche o cadastro do endereço da UC no site (teste: não salva)'}>
-          Registrar endereço (teste)
-        </button>
-        <button type="button" className="cpv2-btn cpv2-btn--primary" disabled={rodando || !temExt || !versaoOk} onClick={() => preencher('solicitacao')}
+          {rodando ? 'Preenchendo…' : 'Registrar endereço (teste)'}
+        </button>}
+        {aba === 'solicitacao' && <button type="button" className="cpv2-btn cpv2-btn--primary" disabled={rodando || !temExt || !versaoOk} onClick={() => preencher('solicitacao')}
           title="Preenche o formulário da solicitação no site (teste: não envia)">
           {rodando ? 'Preenchendo…' : 'Protocolar (teste)'}
-        </button>
+        </button>}
         {!temExt && <span className="cpv2-muted-sm">Precisa da extensão do SURE instalada neste Chrome.</span>}
         {temExt && !versaoOk && <span className="cpv2-muted-sm">Atualize a extensão do SURE para a versão 1.4.0 ou mais nova (está {versaoExt || 'antiga'}).</span>}
-        {faltando.length > 0 && (
+        {aba === 'endereco' && faltandoEnd.length > 0 && (
+          <span className="cpv2-muted-sm">Em branco: {faltandoEnd.join(', ')}.</span>
+        )}
+        {aba === 'solicitacao' && faltando.length > 0 && (
           <span className="cpv2-muted-sm">Em branco (o site exige): {faltando.join(', ')}. Dá para testar mesmo assim.</span>
         )}
       </div>

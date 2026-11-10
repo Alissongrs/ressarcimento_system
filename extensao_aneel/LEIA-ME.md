@@ -17,6 +17,13 @@ Baixe o zip de novo, descompacte **por cima** da mesma pasta e, em `chrome://ext
 2. Abre a janela da Ouvidoria: se a sessão caiu, entre com o login e clique em **Entrar** (a verificação "não sou robô" é sempre sua).
 3. A extensão lê os protocolos ainda não concluídos, devolve ao SURE, que grava, e a janela fecha.
 
+## Registrar endereço / Protocolar na ANEEL (teste: preenche e não envia)
+1. Uma vez: nas **Opções da extensão**, seção "Ouvidoria da ANEEL", guarde o usuário e a senha do Fale Conosco
+   (ficam só neste computador). Sem isso, a janela da ANEEL espera você entrar.
+2. No processo → **Histórico**: **Registrar endereço na ANEEL** ou **Protocolar na ANEEL**. A janela da ANEEL entra sozinha
+   com o login guardado; se a tela tiver o "Não sou um robô", a extensão preenche usuário e senha e você marca e clica em Entrar.
+   Se o site recusar a senha (ou depois de 3 tentativas), a extensão para de tentar e você entra manualmente.
+
 ## Faturas Claro
 1. Uma vez: em `chrome://extensions` → **Detalhes** da extensão → **Opções da extensão**, guarde o usuário e a senha do portal PDP
    (ficam só neste computador). Sem isso, a janela do portal espera você entrar.
@@ -28,6 +35,6 @@ Baixe o zip de novo, descompacte **por cima** da mesma pasta e, em `chrome://ext
 
 ## O que ela faz e o que não faz
 - Só age nas janelas que o SURE pediu para abrir; quem grava no SURE é a página do SURE, com o login de quem clicou.
-- ANEEL: não digita senha nem passa pela verificação anti-robô.
+- ANEEL: a consulta de protocolos não digita senha; o Registrar/Protocolar usa o login guardado nas opções. Nunca passa pela verificação anti-robô.
 - Claro: usa o login do portal guardado nas opções deste computador e o código que chega por e-mail. Para falar com a fila
   da Claro no SURE usa o login da página do SURE que pediu, só durante a atualização (apagado no fim).

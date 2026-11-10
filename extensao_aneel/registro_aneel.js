@@ -1,6 +1,7 @@
 // "Registrar na ANEEL" — roda nas páginas da Ouvidoria (www2.aneel.gov.br/faleconosco). Só age na janela que o
 // SURE abriu (o registro_bg.js confere). VERSÃO DE TESTE: preenche e NÃO envia — o botão "Registrar Solicitação"
-// e o "Registrar endereço" ficam bloqueados nesta janela. Não digita senha, não mexe no "Não sou um robô".
+// e o "Registrar endereço" ficam bloqueados nesta janela. Login: usa o usuário/senha guardados nas opções da
+// extensão (se houver); o "Não sou um robô" do site fica sempre para a pessoa — a extensão não mexe nele.
 (() => {
   if (window.top !== window) return;
 
@@ -85,6 +86,33 @@
     for (const f of document.forms) {
       f.addEventListener('submit', (e) => { e.preventDefault(); e.stopImmediatePropagation(); faixa('SURE (teste): envio bloqueado.', '#b45309'); }, true);
     }
+  }
+
+  // login com o usuário/senha guardados nas opções da extensão. Se a tela tiver o "Não sou um robô", preenche e
+  // deixa a pessoa marcar e clicar em Entrar; sem verificação, entra sozinho.
+  function entrar(usuario, senha) {
+    const campoSenha = [...document.querySelectorAll('input[type=password]')].find(visivel);
+    if (!campoSenha) { faixa('SURE: não achei o campo de senha — entre manualmente.', '#b45309'); return; }
+    const form = campoSenha.form;
+    const campoUsuario = [...(form || document).querySelectorAll('input[type=text], input[type=email], input:not([type])')]
+      .filter(visivel).find((i) => i !== campoSenha);
+    if (!campoUsuario) { faixa('SURE: não achei o campo de usuário — entre manualmente.', '#b45309'); return; }
+    digitar(campoUsuario, usuario);
+    digitar(campoSenha, senha);
+    const captcha = document.querySelector('.g-recaptcha, iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"], [data-sitekey]');
+    if (captcha) {
+      faixa('SURE: usuário e senha preenchidos — marque "Não sou um robô" e clique em Entrar.', '#b45309');
+      captcha.scrollIntoView({ block: 'center' });
+      return;
+    }
+    faixa('SURE: entrando no site da ANEEL…');
+    const botao = (form || document).querySelector('input[type=submit], button[type=submit], input[type=image], button:not([type])') ||
+      [...document.querySelectorAll('input[type=button], button, a')].find((b) => visivel(b) && /^\s*(entrar|acessar|login|efetuar login|ok)\s*$/i.test(b.innerText || b.value || ''));
+    setTimeout(() => {
+      if (botao) botao.click();
+      else if (form) (form.requestSubmit ? form.requestSubmit() : form.submit());
+      else faixa('SURE: usuário e senha preenchidos — clique em Entrar.', '#b45309');
+    }, 400);
   }
 
   // ───────────────────────── formulário de solicitação ─────────────────────────
@@ -232,11 +260,14 @@
     // espera a página assentar (o site carrega listas por script depois do load)
     await esperar(800);
     const pagina = qualPagina();
-    const r = await pedir({ tipo: 'reg_pagina', pagina });
+    // mensagem de senha/usuário errados na tela de login → o background para de tentar sozinho
+    const erroLogin = pagina === 'login' && /(senha|usu[aá]rio|login)[^.\n]{0,60}(inv[aá]lid|incorret|n[aã]o confere|n[aã]o encontrad)|(inv[aá]lid|incorret)[^.\n]{0,40}(senha|usu[aá]rio)/i.test(texto());
+    const r = await pedir({ tipo: 'reg_pagina', pagina, erroLogin });
     if (!r || !r.acao) return; // não é a janela do SURE
     if (r.faixa) faixa(r.faixa, '#b45309');
     try {
       if (r.acao === 'ir') location.href = r.url;
+      else if (r.acao === 'login') entrar(r.usuario || '', r.senha || '');
       else if (r.acao === 'preencher_solicitacao') await preencherSolicitacao(r.dados || {});
       else if (r.acao === 'preencher_endereco') await preencherEndereco(r.dados || {});
       else if (r.acao === 'ler_enderecos') {

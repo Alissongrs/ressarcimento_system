@@ -1,7 +1,8 @@
 // Módulo "Registrar na ANEEL" — roda no service worker da extensão (carregado pelo claro_bg.js).
 //
 // VERSÃO DE TESTE (09/11/2026): o botão do processo no SURE manda os dados do formulário; a extensão abre a
-// Ouvidoria da ANEEL numa janela, espera a pessoa entrar (login e verificação anti-robô são dela) e, conforme o
+// Ouvidoria da ANEEL numa janela, entra com o login guardado nas opções da extensão (10/11; sem login guardado, a
+// pessoa entra; o "não sou robô"/Cloudflare é sempre da pessoa) e, conforme o
 // botão ("Registrar endereço" ou "Protocolar"), preenche o cadastro do endereço da UC SEM salvar ou o
 // formulário de solicitação SEM enviar (o botão "Registrar Solicitação" fica bloqueado). Nada é gravado.
 //
@@ -35,7 +36,7 @@ async function regIniciar(msg, sender) {
   const win = await chrome.windows.create(fase === 'conferir' ? { ...opcoes, state: 'minimized' } : { ...opcoes, focused: true });
   await regSalvar({
     sureTabId: sender.tab.id, windowId: win.id, dados: msg.dados || {}, teste: true,
-    fase, desvios: 0, avisouLogin: false,
+    fase, desvios: 0, avisouLogin: false, logins: 0, avisouRecusa: false,
   });
   return { ok: true };
 }
@@ -48,6 +49,22 @@ async function regTratar(msg, sender) {
 
   if (msg.tipo === 'reg_pagina') {
     const p = msg.pagina;
+    if (p === 'login') {
+      // login automático: usuário/senha guardados nas opções (só neste computador). Para se o site recusar a senha
+      // ou depois de 3 tentativas, para não bloquear a conta.
+      const { aneelUsuario, aneelSenha } = await chrome.storage.local.get(['aneelUsuario', 'aneelSenha']);
+      if (aneelUsuario && aneelSenha && !msg.erroLogin && !j.avisouRecusa && (j.logins || 0) < 3) {
+        j.logins = (j.logins || 0) + 1;
+        await regSalvar(j);
+        if (j.logins === 1) regParaSure(j, { texto: 'Entrando no site da ANEEL com o login guardado na extensão…' });
+        return { acao: 'login', usuario: aneelUsuario, senha: aneelSenha };
+      }
+      if (aneelUsuario && aneelSenha && !j.avisouRecusa) {
+        j.avisouRecusa = true;
+        await regSalvar(j);
+        regParaSure(j, { texto: 'O site da ANEEL não aceitou o login guardado — entre manualmente na janela e confira usuário/senha nas opções da extensão.' });
+      }
+    }
     if (p === 'login' || p === 'verificacao') {
       chrome.windows.update(j.windowId, { state: 'normal', focused: true }).catch(() => {}); // a pessoa precisa ver
       if (!j.avisouLogin) {
@@ -58,7 +75,7 @@ async function regTratar(msg, sender) {
           : 'A ANEEL pediu a verificação "não sou robô": resolva na janela que abriu.' });
       }
       return { acao: 'esperar', faixa: p === 'login'
-        ? (j.fase === 'conferir'
+        ? (j.avisouRecusa ? 'SURE: o login guardado não entrou — entre manualmente e confira as opções da extensão.' : j.fase === 'conferir'
           ? 'SURE: entre com o login da Ouvidoria para o SURE conferir os endereços cadastrados.'
           : 'SURE (teste): entre com o login da Ouvidoria. Depois a extensão abre o formulário e preenche — nada será enviado.')
         : 'SURE (teste): resolva a verificação do site para continuar.' };
