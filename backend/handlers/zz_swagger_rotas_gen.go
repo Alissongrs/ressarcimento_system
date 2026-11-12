@@ -2859,6 +2859,65 @@ func swaggerRotaGet_api_v2_auth_magic_verify() {}
 // @Router /api/v2/auth/me [get]
 func swaggerRotaGet_api_v2_auth_me() {}
 
+// @Summary Totp status
+// @Description Qualquer usuário autenticado. Handler: v2.TOTPStatus.
+// @Tags v2 · Auth
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/auth/totp [get]
+func swaggerRotaGet_api_v2_auth_totp() {}
+
+// @Summary Totp iniciar
+// @Description Qualquer usuário autenticado. Handler: v2.TOTPIniciar.
+// @Tags v2 · Auth
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/auth/totp/iniciar [post]
+func swaggerRotaPost_api_v2_auth_totp_iniciar() {}
+
+// @Summary Totp confirmar
+// @Description Qualquer usuário autenticado. Handler: v2.TOTPConfirmar.
+// @Tags v2 · Auth
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/auth/totp/confirmar [post]
+func swaggerRotaPost_api_v2_auth_totp_confirmar() {}
+
+// @Summary Totp desativar
+// @Description Qualquer usuário autenticado. Handler: v2.TOTPDesativar.
+// @Tags v2 · Auth
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/auth/totp/desativar [post]
+func swaggerRotaPost_api_v2_auth_totp_desativar() {}
+
+// @Summary Totp desativar usuario
+// @Description Qualquer usuário autenticado. Handler: v2.TOTPDesativarUsuario.
+// @Tags v2 · Auth
+// @Accept json
+// @Produce json
+// @Param id path string true "id"
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/auth/totp/desativar/{id} [post]
+func swaggerRotaPost_api_v2_auth_totp_desativar__id_() {}
+
 // @Summary Get dimensoes
 // @Description Qualquer usuário autenticado. Handler: v2.GetDimensoes.
 // @Tags v2 · dimensoes

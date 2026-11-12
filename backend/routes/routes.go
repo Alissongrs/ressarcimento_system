@@ -785,6 +785,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 	{
 		// Públicas (sem AuthMiddleware) — login/logout/register
 		handlersV2.RegisterAuthRoutesPublic(apiV2)
+		// Login por código do autenticador (TOTP) — alternativa ao link por e-mail; mesmo limite por IP do login.
+		apiV2.POST("/auth/totp/login", middleware.AuthRateLimit(), handlersV2.TOTPLogin)
 
 		// Autenticadas
 		authV2 := apiV2.Group("/")

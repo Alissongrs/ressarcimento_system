@@ -29,6 +29,14 @@ func RegisterAuthRoutesPublic(g *gin.RouterGroup) {
 
 func RegisterAuthRoutesAuthed(g *gin.RouterGroup) {
 	g.GET("/auth/me", Me)
+
+	// Autenticador (TOTP): ativar/confirmar/desativar em Minha Conta. O login
+	// (/auth/totp/login) é público e fica em routes.go, com limite por IP.
+	g.GET("/auth/totp", TOTPStatus)
+	g.POST("/auth/totp/iniciar", TOTPIniciar)
+	g.POST("/auth/totp/confirmar", TOTPConfirmar)
+	g.POST("/auth/totp/desativar", TOTPDesativar)
+	g.POST("/auth/totp/desativar/:id", TOTPDesativarUsuario)
 }
 
 // RegisterReadRoutes monta os handlers GET do Sprint 1.

@@ -59,6 +59,14 @@ func runAdditiveMigrations(db *sql.DB) error {
 	if _, err := db.Exec("ALTER TABLE DM_USUARIO MODIFY senha_hash VARCHAR(255) NULL"); err != nil {
 		log.Printf("[migrate-aditivo] senha_hash NULL: %v", err)
 	}
+	// Login por código do autenticador (TOTP), alternativa ao link por e-mail (12/11/2026).
+	// Segredo cifrado (AES-GCM) + pendente até o 1º código confirmar; último passo usado barra reuso;
+	// recuperação guarda só os hashes dos 8 códigos.
+	addColumnIfMissing(db, "DM_USUARIO", "totp_segredo", "VARCHAR(255)")
+	addColumnIfMissing(db, "DM_USUARIO", "totp_pendente", "VARCHAR(255)")
+	addColumnIfMissing(db, "DM_USUARIO", "totp_ativo", "TINYINT(1)")
+	addColumnIfMissing(db, "DM_USUARIO", "totp_ultimo_passo", "BIGINT")
+	addColumnIfMissing(db, "DM_USUARIO", "totp_recuperacao", "TEXT")
 	createTableIfNotExists(db, "FT_MAGIC_LINKS", `
 		CREATE TABLE IF NOT EXISTS FT_MAGIC_LINKS (
 		  jti         VARCHAR(64)  NOT NULL,

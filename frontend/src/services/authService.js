@@ -107,6 +107,33 @@ export const magicRequest = async (email) => {
   return data;
 };
 
+// ── Autenticador (código de 6 dígitos, TOTP) — alternativa ao link por e-mail ──
+// POST /api/v2/auth/totp/login { email, codigo } → { token }
+export const totpLogin = async (email, codigo) => {
+  const { data } = await authApi.post('/auth/totp/login', { email, codigo });
+  return data;
+};
+// GET /api/v2/auth/totp → { ativo, recuperacao_restantes, pendente }
+export const totpStatus = async () => {
+  const { data } = await authApi.get('/auth/totp');
+  return data;
+};
+// POST /api/v2/auth/totp/iniciar → { segredo, otpauth, qr, conta }
+export const totpIniciar = async () => {
+  const { data } = await authApi.post('/auth/totp/iniciar');
+  return data;
+};
+// POST /api/v2/auth/totp/confirmar { codigo } → { ok, recuperacao: [...] }
+export const totpConfirmar = async (codigo) => {
+  const { data } = await authApi.post('/auth/totp/confirmar', { codigo });
+  return data;
+};
+// POST /api/v2/auth/totp/desativar { codigo } → { ok }
+export const totpDesativar = async (codigo) => {
+  const { data } = await authApi.post('/auth/totp/desativar', { codigo });
+  return data;
+};
+
 // /me — GET /api/v2/auth/me (autenticado)
 export const me = async () => {
   const response = await authApi.get('/auth/me');

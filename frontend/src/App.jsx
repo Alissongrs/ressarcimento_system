@@ -141,7 +141,7 @@ function MailLinkMinimizedBar({ visible, onRestore }) {
   );
 }
 
-function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
+function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout, user }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const navigate = useNavigate();
   const baseItems = [
@@ -259,6 +259,20 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout }) {
                 <MailIcon className="top-nav-icon" />
               </button>
             </>
+          )}
+          {user && (
+            <button
+              type="button"
+              onClick={() => navigate('/conta')}
+              className="top-nav-link"
+              title="Minha conta: autenticador (código de 6 dígitos) e acesso"
+              aria-label="Minha conta"
+              style={{ maxWidth: 220 }}
+            >
+              <span className="top-nav-text" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {user.nome || user.email}
+              </span>
+            </button>
           )}
           <button type="button" onClick={onLogout} className="top-nav-link top-nav-logout">
             <LogOut className="top-nav-icon" />
@@ -1094,6 +1108,7 @@ function App() {
               mailUnread={mailUnread}
               onOpenAlertCalendar={() => setOpenAlertCalendar(true)}
               onLogout={logout}
+              user={user}
             />
           )}
 

@@ -1,7 +1,8 @@
 // src/pages/LoginPage.jsx
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { login as loginService, magicEnabled, magicRequest } from '../services/authService';
+import { login as loginService, magicEnabled, magicRequest, totpLogin } from '../services/authService';
+import { Smartphone } from 'lucide-react';
 import { Eye, EyeOff, Loader2, CheckCircle2, ArrowRight } from 'lucide-react';
 
 const DISPLAY = "'Space Grotesk', 'Inter', sans-serif";
@@ -73,6 +74,10 @@ const Login = () => {
   const [magicOn, setMagicOn] = useState(null);
   const [magicBusy, setMagicBusy] = useState(false);
   const [magicSent, setMagicSent] = useState(false);
+  // Alternativa ao link: código de 6 dígitos do app autenticador (não depende do e-mail).
+  const [totpMode, setTotpMode] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
+  const [totpBusy, setTotpBusy] = useState(false);
 
   const { login } = useAuth();
 
@@ -120,6 +125,34 @@ const Login = () => {
       setMagicSent(true);
     } finally {
       setMagicBusy(false);
+    }
+  };
+
+  const handleTotp = async (e) => {
+    if (e) e.preventDefault();
+    const email = formData.email.trim();
+    const codigo = totpCode.replace(/\s+/g, '');
+    setError('');
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      setError('Digite seu e-mail corporativo.');
+      return;
+    }
+    if (codigo.length < 6) {
+      setError('Digite o código de 6 dígitos do app (ou um código de recuperação).');
+      return;
+    }
+    setTotpBusy(true);
+    try {
+      const { token } = await totpLogin(email, codigo);
+      login(token);
+    } catch (err) {
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.error?.message || err?.response?.data?.error;
+      setError(status === 429
+        ? 'Muitas tentativas. Aguarde 5 minutos e tente de novo.'
+        : (typeof msg === 'string' && msg) || 'E-mail ou código inválido. O código muda a cada 30 segundos.');
+    } finally {
+      setTotpBusy(false);
     }
   };
 
@@ -223,7 +256,7 @@ const Login = () => {
           )}
 
           {/* ── CAMINHO PADRÃO: login só por link de e-mail ───────────────── */}
-          {magicOn === true && (magicSent ? (
+          {magicOn === true && !totpMode && (magicSent ? (
             <div style={{
               display: 'flex', alignItems: 'flex-start', gap: 10, padding: '14px 16px', borderRadius: 12,
               background: 'rgba(45,212,191,0.12)', border: '1px solid rgba(45,212,191,0.3)',
@@ -267,8 +300,54 @@ const Login = () => {
             </form>
           ))}
 
+          {/* ── ALTERNATIVA: código do app autenticador (não depende do e-mail) ── */}
+          {magicOn !== null && !magicSent && (totpMode ? (
+            <form onSubmit={handleTotp} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label htmlFor="email" style={{ display: 'block', fontSize: 12.5, fontWeight: 600, marginBottom: 7, color: 'rgba(255,255,255,0.95)' }}>
+                  E-mail corporativo
+                </label>
+                <input id="email" name="email" type="email" autoComplete="email" required autoFocus={!formData.email}
+                  placeholder="seu.email@amee.com.br" value={formData.email} onChange={handleChange}
+                  style={field} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div>
+                <label htmlFor="totp" style={{ display: 'block', fontSize: 12.5, fontWeight: 600, marginBottom: 7, color: 'rgba(255,255,255,0.95)' }}>
+                  Código do app autenticador
+                </label>
+                <input id="totp" name="totp" type="text" inputMode="numeric" autoComplete="one-time-code" required autoFocus={!!formData.email}
+                  placeholder="6 dígitos" value={totpCode} onChange={(e) => setTotpCode(e.target.value)}
+                  style={{ ...field, letterSpacing: '0.18em', fontVariantNumeric: 'tabular-nums' }} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <button type="submit" disabled={totpBusy}
+                style={{ ...primaryBtn, cursor: totpBusy ? 'default' : 'pointer', opacity: totpBusy ? 0.7 : 1 }}>
+                {totpBusy
+                  ? <><Loader2 size={16} className="sure-spin" /> Entrando…</>
+                  : <><Smartphone size={18} /> Entrar com o código</>}
+              </button>
+              <p className="lg-hint" style={{ fontSize: 12.5, lineHeight: 1.55, margin: '2px 0 0', textAlign: 'center' }}>
+                O código muda a cada 30 segundos. Perdeu o celular? Use um dos códigos de recuperação.
+                <br />
+                <button type="button" onClick={() => { setTotpMode(false); setError(''); }}
+                  style={{ background: 'none', border: 'none', color: '#5CC8FF', cursor: 'pointer', fontWeight: 600, fontSize: 12.5, padding: 0, marginTop: 6 }}>
+                  Voltar para o link por e-mail
+                </button>
+              </p>
+            </form>
+          ) : (
+            <button type="button" onClick={() => { setTotpMode(true); setError(''); }}
+              style={{
+                marginTop: 14, background: 'none', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 9,
+                color: 'rgba(255,255,255,0.9)', cursor: 'pointer', fontSize: 13, padding: '9px 12px',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%',
+              }}
+              title="Use quando o e-mail estiver fora do ar. Ative antes em Minha conta.">
+              <Smartphone size={16} /> Entrar com código do autenticador
+            </button>
+          ))}
+
           {/* ── EMERGÊNCIA: e-mail fora do ar → cai pro login por senha ────── */}
-          {magicOn === false && (
+          {magicOn === false && !totpMode && (
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{
                 fontSize: 12.5, color: '#fde68a', background: 'rgba(234,179,8,0.1)',
