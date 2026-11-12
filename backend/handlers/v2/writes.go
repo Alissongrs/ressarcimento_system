@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"ressarcimento-backend/services"
 )
 
 // ============================================================================
@@ -791,15 +793,12 @@ ON DUPLICATE KEY UPDATE
 		return
 	}
 
-	// Sincroniza FT_PROCESSOS pra Encerramento/Encerrado/aprovação
-	if _, err := tx.ExecContext(c.Request.Context(), `
-UPDATE FT_PROCESSOS SET
-  id_etapa_atual = 6,
-  id_status_atual = 7,
-  id_aprovacao_atual = ?,
-  id_instancia_atual = NULL,
-  ultima_atualizacao = CURRENT_TIMESTAMP
-WHERE id_processo = ?`, req.AprovacaoFinalID, id); err != nil {
+	// Encerramento/Encerrado/aprovação: pelo caminho único (histórico + espelho na mesma transação).
+	// Antes era um UPDATE direto em FT_PROCESSOS sem movimentação no histórico — origem de divergências.
+	etapaEnc, statusEnc, semInst := 6, 7, 0
+	if _, err := services.MudarStatusProcesso(c.Request.Context(), tx, id,
+		services.EstadoProcesso{Etapa: &etapaEnc, Status: &statusEnc, Instancia: &semInst, Aprovacao: &req.AprovacaoFinalID},
+		resolverUsuarioV2(c, db), "encerramento", "Encerramento registrado: "+req.Motivo); err != nil {
 		apiError(c, http.StatusInternalServerError, "DB_ERR", "sync processo: "+err.Error(), nil)
 		return
 	}
@@ -961,18 +960,9 @@ func AtualizarProcessoCompleto(c *gin.Context) {
 	if r.RessarcimentoEstimado != nil {
 		add("ressarcimento_estimado", *r.RessarcimentoEstimado)
 	}
-	if r.IdInstanciaAtual != nil {
-		add("id_instancia_atual", nilZeroInt(*r.IdInstanciaAtual))
-	}
-	if r.IdEtapaAtual != nil {
-		add("id_etapa_atual", *r.IdEtapaAtual)
-	}
-	if r.IdStatusAtual != nil {
-		add("id_status_atual", *r.IdStatusAtual)
-	}
-	if r.IdAprovacaoAtual != nil {
-		add("id_aprovacao_atual", nilZeroInt(*r.IdAprovacaoAtual))
-	}
+	// etapa/instância/status/aprovação NÃO entram no SET: vão pelo caminho único
+	// (services.MudarStatusProcesso), que grava a movimentação no histórico junto.
+	mudaStatus := r.IdInstanciaAtual != nil || r.IdEtapaAtual != nil || r.IdStatusAtual != nil || r.IdAprovacaoAtual != nil
 	if r.IdTipoIrreg != nil {
 		add("id_tipo_irregularidade", nilZeroInt(*r.IdTipoIrreg))
 	}
@@ -1024,6 +1014,14 @@ func AtualizarProcessoCompleto(c *gin.Context) {
 		q := "UPDATE FT_PROCESSOS SET " + strings.Join(setP, ", ") + ", ultima_atualizacao=NOW() WHERE id_processo = ?"
 		if _, err := tx.ExecContext(c.Request.Context(), q, append(argP, id)...); err != nil {
 			apiError(c, http.StatusInternalServerError, "DB_ERR", "processo: "+err.Error(), nil)
+			return
+		}
+	}
+	if mudaStatus {
+		if _, err := services.MudarStatusProcesso(c.Request.Context(), tx, id,
+			services.EstadoProcesso{Etapa: r.IdEtapaAtual, Instancia: r.IdInstanciaAtual, Status: r.IdStatusAtual, Aprovacao: r.IdAprovacaoAtual},
+			resolverUsuarioV2(c, db), "admin", "Status alterado pelo editor de processos"); err != nil {
+			apiError(c, http.StatusInternalServerError, "DB_ERR", "status: "+err.Error(), nil)
 			return
 		}
 	}

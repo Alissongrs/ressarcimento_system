@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ClipboardCheck, Play, RefreshCw, Server } from 'lucide-react';
 import api from '../services/apiClient.js';
 import BaixarExtensao from '../components/BaixarExtensao.jsx';
+import CartaoDivergencias from './tarefas/CartaoDivergencias.jsx';
 
 const card = { borderColor: 'var(--border)', background: 'var(--card)' };
 
@@ -363,6 +364,7 @@ export default function TarefasSistema() {
             {dados.tarefas.map((t) => (
               <CartaoTarefa key={t.job} t={t} atual={execucoes.find((e) => e.job === t.job)} onRodar={rodar} />
             ))}
+            <CartaoDivergencias />
           </div>
           <div className="rounded-lg border" style={card}>
             <div className="px-4 py-2 font-semibold border-b" style={{ borderColor: 'var(--border)' }}>Execuções (pela tela e pelo chat)</div>

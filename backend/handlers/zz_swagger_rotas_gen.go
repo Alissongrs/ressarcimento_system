@@ -2938,6 +2938,16 @@ func swaggerRotaGet_api_v2_dimensoes() {}
 // @Router /api/v2/processos [get]
 func swaggerRotaGet_api_v2_processos() {}
 
+// @Summary Admin
+// @Description Qualquer usuário autenticado. Handler: v2.admin.
+// @Tags v2 · divergencias
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/divergencias/status [get]
+func swaggerRotaGet_api_v2_divergencias_status() {}
+
 // @Summary Export auditoria
 // @Description Qualquer usuário autenticado. Handler: v2.ExportAuditoria.
 // @Tags v2 · auditoria
@@ -3164,6 +3174,18 @@ func swaggerRotaGet_api_v2_assistente_lista() {}
 // @Failure 401 {object} map[string]string
 // @Router /api/v2/processos/{id}/movimentar [post]
 func swaggerRotaPost_api_v2_processos__id__movimentar() {}
+
+// @Summary Admin
+// @Description Qualquer usuário autenticado. Handler: v2.admin.
+// @Tags v2 · divergencias
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/divergencias/status/corrigir [post]
+func swaggerRotaPost_api_v2_divergencias_status_corrigir() {}
 
 // @Summary Set relevancia
 // @Description Qualquer usuário autenticado. Handler: v2.SetRelevancia.

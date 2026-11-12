@@ -154,6 +154,9 @@ func startScheduler() {
 	s.Every(1).Hour().Do(services.ChecarPrazosRequisicoes)
 	// Tarefa 5: Checar prazos de processos (a cada 1 hora)
 	s.Every(1).Hour().Do(services.ChecarPrazosProcessos)
+	// Tarefa 5b: status × histórico — todo dia 06:30 conta os processos cujo espelho não bate
+	// com a última movimentação e avisa os administradores (Tarefas do sistema corrige um a um)
+	s.Every(1).Day().At("06:30").Do(services.ChecarDivergenciasStatus)
 
 	// Tarefa 5a: Atualizar cache de sugestão de cobrança/SR dos processos vencidos (a cada 1 hora)
 	s.Every(1).Hour().Do(handlers.ProcessarCobrancasCache)

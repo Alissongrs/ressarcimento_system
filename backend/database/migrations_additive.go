@@ -67,6 +67,18 @@ func runAdditiveMigrations(db *sql.DB) error {
 	addColumnIfMissing(db, "DM_USUARIO", "totp_ativo", "TINYINT(1)")
 	addColumnIfMissing(db, "DM_USUARIO", "totp_ultimo_passo", "BIGINT")
 	addColumnIfMissing(db, "DM_USUARIO", "totp_recuperacao", "TEXT")
+	// Status × histórico (12/11/2026): backup de cada correção feita pela tela Tarefas do sistema.
+	createTableIfNotExists(db, "FT_STATUS_RECONCILIACAO", `
+		CREATE TABLE IF NOT EXISTS FT_STATUS_RECONCILIACAO (
+		  id INT AUTO_INCREMENT PRIMARY KEY,
+		  id_processo INT NOT NULL,
+		  direcao VARCHAR(16) NOT NULL,
+		  antes_json MEDIUMTEXT NULL,
+		  depois_json TEXT NULL,
+		  id_usuario INT NULL,
+		  criado_em DATETIME NOT NULL,
+		  KEY idx_recon_processo (id_processo)
+		)`)
 	createTableIfNotExists(db, "FT_MAGIC_LINKS", `
 		CREATE TABLE IF NOT EXISTS FT_MAGIC_LINKS (
 		  jti         VARCHAR(64)  NOT NULL,
