@@ -1,17 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "SURE — ANEEL e Faturas Claro",
-  "version": "1.4.1",
-  "description": "Consulta os protocolos da Ouvidoria da ANEEL e manda as faturas novas da Claro (portal PDP) para o SURE processar no servidor.",
+  "name": "SURE — ANEEL",
+  "version": "1.5.0",
+  "description": "Consulta os protocolos da Ouvidoria da ANEEL e preenche o registro de endereço/solicitação no Fale Conosco para o SURE.",
   "permissions": [
     "storage",
     "scripting"
   ],
   "host_permissions": [
     "https://www2.aneel.gov.br/faleconosco/*",
-    "https://clarobps-pdp.azurewebsites.net/*",
-    "https://pdp.clarobpo.com/*",
-    "https://*.blob.core.windows.net/*",
     "https://sure.app.br/*",
     "http://sure.app.br/*",
     "http://179.127.26.37/*",
@@ -41,16 +38,6 @@
       "js": [
         "content_aneel.js",
         "registro_aneel.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://clarobps-pdp.azurewebsites.net/*",
-        "https://pdp.clarobpo.com/*"
-      ],
-      "js": [
-        "content_claro.js"
       ],
       "run_at": "document_idle"
     }
