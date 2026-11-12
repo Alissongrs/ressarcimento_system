@@ -62,14 +62,17 @@ Cada correção grava backup em `FT_STATUS_RECONCILIACAO`. Uma rotina do backend
 
 ## 5. Login
 
-- **Link por e-mail** (padrão): o SURE manda um link de 30 minutos. Se o e-mail da empresa estiver
-  fora do ar, ninguém recebe o link.
-- **Código do autenticador** (alternativa): quem ativou em *Minha conta* (clique no próprio nome, no
-  alto da tela) entra com e-mail + 6 dígitos do Microsoft Authenticator, sem depender do e-mail.
+- **Senha + código do autenticador** (padrão desde 12/11/2026): e-mail e senha; se a conta tem o
+  autenticador ativo, a tela pede em seguida o código de 6 dígitos do Microsoft Authenticator.
+  Quem ativa o autenticador faz isso em *Minha conta* (clique no próprio nome, no alto da tela).
   Perdeu o celular: use um código de recuperação (8 foram mostrados na ativação). Perdeu os dois:
   um administrador zera o autenticador da pessoa com `POST /api/v2/auth/totp/desativar/{id_usuario}`
   (pelo Swagger, logado como admin) e ela ativa de novo.
-- **Senha** só aparece na tela se o envio de e-mail estiver desconfigurado (emergência).
+- **Esqueci minha senha**: manda o link por e-mail; ao entrar por ele, a pessoa cai em *Minha conta*
+  e define a senha nova. Depende do e-mail da empresa estar no ar.
+- **Link por e-mail** continua como opção ("Entrar com link por e-mail"); é também o caminho do
+  primeiro acesso (cria o usuário) e de quem ainda não tem senha.
+- **Só com o código**: quem tem o autenticador ativo entra com e-mail + código, sem senha.
 - Novo usuário: criado sozinho no primeiro acesso com e-mail dos domínios permitidos
   (`REGISTER_ALLOWED_DOMAINS`), com perfil `solicitante`. Mudar o perfil: tela de administração.
 
