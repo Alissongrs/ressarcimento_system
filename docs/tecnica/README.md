@@ -24,6 +24,8 @@ Cada arquivo cobre um módulo. A ordem recomendada para quem está chegando:
 | 09 | [Segurança e pendências](09-seguranca-e-pendencias.md) | Achados de segurança, dívidas técnicas, itens de deploy |
 | 10 | [Protocolos ANEEL, tarefas, sininho e WhatsApp](10-protocolos-aneel-tarefas-avisos.md) | Monitor da Ouvidoria ANEEL (e-mail 15 min + extensão), tarefas com responsável, Ciente/Assumir, avisos no grupo, métricas e relatórios de protocolos |
 | 11 | [GitHub, CI/CD e deploy](11-github-cicd-deploy.md) | Repositório, o que fica fora do Git, Actions, deploy pelo botão, segredos/`ENV_FILE`, chave SSH, rollback |
+| 12 | [Runbook de operação](12-runbook-operacao.md) | O que fazer quando algo acontece: deploy e rollback, cron que falhou, reverter pedido do chat, status × histórico, login (link/autenticador), extensão, Claro, backups, onde ficam os scripts pontuais (`ops/`) |
+| 13 | [Dependências do pipeline de PDF](13-pdf-pipeline-dependencias.md) | Pacotes e binários que a extração de faturas precisa na VPS |
 
 ## Convenções
 

@@ -131,3 +131,24 @@ worker/engine/C:/
 worker/claro_fila/*
 !worker/claro_fila/ultimo_inicial.txt
 !worker/claro_fila/LEIAME.md
+
+# ========================================
+# Operação fora do código (12/11/2026): scripts pontuais, backups de correções,
+# planilhas, relatórios e binários ficam em ops/ (só o README e o manifesto vão no Git).
+# Pastas de código (backend/, worker/) não recebem mais esse tipo de arquivo.
+# ========================================
+/ops/*
+!/ops/README.md
+!/ops/MANIFESTO.md
+/Conferencia/
+backend/_*
+backend/*.exe
+backend/*.exe~
+backend/*.xlsx
+backend/startup.*
+backend/comparativo_*
+backend/schema_drift_*
+worker/backup_*.json
+worker/*.bak_*
+worker/jobs/backup_*.json
+*.tar.gz
