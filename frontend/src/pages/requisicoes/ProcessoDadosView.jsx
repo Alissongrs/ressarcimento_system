@@ -1,31 +1,61 @@
-// src/components/processos/ProcessoDadosView.jsx
-//
-// Painel "Informações" do drawer (UC, Cliente, Concessionária, Irregularidade, etc.).
-// Extraído de AdminPlanilha.jsx (linha 1216).
-//
-import React, { memo, useMemo } from 'react';
-import { Pencil } from 'lucide-react';
-import {
-  pickFirst,
-  formatPeriodosIrregularidade,
-  formatSnapshotValue,
-  formatCurrencyBR,
-  formatDateTimeBR,
-  toSentenceCase,
-} from '../../pages/utils/processosHelpers.js';
+// src/pages/requisicoes/ProcessoDadosView.jsx — extraído de Requisicoes.jsx em 12/11/2026 (melhoria 2: arquivos menores).
+// Conteúdo idêntico ao original; só mudou de arquivo e ganhou export/import.
 
-const ProcessoDadosView = memo(function ProcessoDadosView({
+import { memo, useMemo } from 'react';
+import { Pencil } from 'lucide-react';
+import { CANAIS_UI } from './constantes.js';
+import { pickFirst } from './util.js';
+import { formatCurrencyBR, formatDateTimeBR, formatPeriodosIrregularidade, formatSnapshotValue, toSentenceCase } from './processoHelpers.js';
+
+
+export const CanaisSelector = memo(function CanaisSelector({ canais, onToggle }) {
+  return (
+    <div className="flex items-center gap-3">
+      <img src="/Icones/contato.png" alt="" className="h-16 w-16 object-contain opacity-90" />
+      <div className="grid grid-cols-3 gap-2">
+        {CANAIS_UI.map(({ key, label }) => {
+          const ativo = !!canais?.[key];
+          return (
+            <button
+              key={key}
+              type="button"
+              className={`sap-chip transition ${ativo ? 'sap-chip--active' : ''}`}
+              onClick={() => onToggle(key)}
+              title={`Registrar no histórico como ${label}`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
+export const Field = memo(function Field({ label, hint, children }) {
+  return (
+    <div className="sap-field">
+      <label className="sap-label">{label}</label>
+      {children}
+      {hint ? <div className="sap-hint">{hint}</div> : null}
+    </div>
+  );
+});
+
+export const ProcessoDadosView = memo(function ProcessoDadosView({
   header,
   snapshotData,
   requisicaoData,
-  anexosData, // eslint-disable-line no-unused-vars
-  infoHistoryItems, // eslint-disable-line no-unused-vars
-  estimadoValue, // eslint-disable-line no-unused-vars
-  onChangeEstimado, // eslint-disable-line no-unused-vars
-  onSaveEstimado, // eslint-disable-line no-unused-vars
-  onDeleteAnexo, // eslint-disable-line no-unused-vars
+  anexosData,
+  infoHistoryItems,
+  estimadoValue,
+  onChangeEstimado,
+  onSaveEstimado,
+  onDeleteAnexo,
   onEditInfo,
 }) {
+  const anexos = Array.isArray(anexosData) ? anexosData : [];
+
   const merged = useMemo(
     () => ({ ...(header || {}), ...(snapshotData || {}), ...(requisicaoData || {}) }),
     [header, snapshotData, requisicaoData],
@@ -82,9 +112,11 @@ const ProcessoDadosView = memo(function ProcessoDadosView({
             </div>
           </div>
         </div>
+
+        {null}
       </div>
+
+      {null}
     </div>
   );
 });
-
-export default ProcessoDadosView;

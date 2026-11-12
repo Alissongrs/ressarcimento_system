@@ -1,27 +1,18 @@
-// src/components/processos/MovePane.jsx
-//
-// Pane lateral de movimentação de processo (escolha coluna + etapa + sub-etapa,
-// canais de comunicação, anexo opcional, comentário). Submete para
-// movimentarProcesso() do service.
-//
-// Extraído de AdminPlanilha.jsx (linha 2560).
-//
-import React from 'react';
-import { confirmAction } from '../../utils/confirm.js';
-import { movimentarProcesso } from '../../services/requisicaoService';
-import {
-  KANBAN_ETAPAS,
-  KANBAN_COLUNAS,
-  MAPA_COLUNAS_PARA_ETAPAS,
-  SUBETAPAS_DEFERIDOS,
-  DEFAULT_CANAIS,
-  pickFirst,
-  buildComentarioFinal,
-} from '../../pages/utils/processosHelpers.js';
-import Field from './Field.jsx';
-import CanaisSelector from './CanaisSelector.jsx';
+// src/pages/requisicoes/MovePane.jsx — extraído de Requisicoes.jsx em 12/11/2026 (melhoria 2: arquivos menores).
+// Conteúdo idêntico ao original; só mudou de arquivo e ganhou export/import.
 
-export default function MovePane({
+import { movimentarProcesso } from '../../services/requisicaoService';
+import { confirmAction } from '../../utils/confirm.js';
+import { DEFAULT_CANAIS, KANBAN_COLUNAS, KANBAN_ETAPAS, MAPA_COLUNAS_PARA_ETAPAS } from './constantes.js';
+import { pickFirst } from './util.js';
+import { buildComentarioFinal, SUBETAPAS_DEFERIDOS } from './processoHelpers.js';
+import { CanaisSelector, Field } from './ProcessoDadosView.jsx';
+
+
+// =======================
+// Pane: Movimentar
+// =======================
+export function MovePane({
   pid,
   etapaSubMap,
   moveTarget,
@@ -256,6 +247,8 @@ export default function MovePane({
               setToast({ open: true, type: 'error', text: err?.message || 'Erro ao mover processo.' });
               notifyNetworkChange(err);
               if (typeof stopSuccess === 'function') stopSuccess();
+              // eslint-disable-next-line no-undef
+              setSaveModal({ open: false, mensagem: '' });
             } finally {
               if (typeof stopQuick === 'function') stopQuick();
               setLoading(false);

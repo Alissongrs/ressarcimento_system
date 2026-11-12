@@ -1,21 +1,21 @@
-// src/components/requisicoes/ReqEmailModal.jsx
-//
-// Modal de geração e envio de email com IA para requisições.
-// Extraído de AdminPlanilha.jsx (linha 2831).
-//
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+// src/pages/requisicoes/ReqEmailModal.jsx — extraído de Requisicoes.jsx em 12/11/2026 (melhoria 2: arquivos menores).
+// Conteúdo idêntico ao original; só mudou de arquivo e ganhou export/import.
+
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { createPortal } from 'react-dom';
 import { Mail, X } from 'lucide-react';
-import {
-  pickFirst,
-  formatPeriodosIrregularidade,
-} from '../../pages/utils/processosHelpers.js';
 import api from '../../services/apiClient';
 import { useEmailCompose } from '../../context/EmailComposeContext.jsx';
+import { pickFirst } from './util.js';
+import { formatPeriodosIrregularidade } from './processoHelpers.js';
 
-const REQ_QUILL_MODULES = {
+
+// =======================
+// REQ EMAIL MODAL
+// =======================
+export const REQ_QUILL_MODULES = {
   toolbar: [
     [{ font: [] }, { size: ['small', false, 'large', 'huge'] }],
     ['bold', 'italic', 'underline', 'strike'],
@@ -27,14 +27,12 @@ const REQ_QUILL_MODULES = {
   ],
   clipboard: { matchVisual: false },
 };
-
-const REQ_SIGNATURE_HTML =
+export const REQ_SIGNATURE_HTML =
   '<br/><br/><img src="/assinatura_complaint.png" alt="assinatura" style="max-width:260px;height:auto;" />';
-
-const withReqSignature = (html) =>
+export const withReqSignature = (html) =>
   html && html.includes('assinatura_complaint.png') ? html : `${html || ''}${REQ_SIGNATURE_HTML}`;
 
-export default function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
+export function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
   const { openCompose } = useEmailCompose();
   const [to, setTo]           = useState('');
   const [cc, setCc]           = useState('');
@@ -93,6 +91,7 @@ export default function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
       const linkFatura  = pickFirst(reqInfo, ['link_fatura', 'linkFatura', 'link'], '');
       const endereco    = pickFirst(reqInfo, ['endereco_completo', 'enderecoCompleto', 'endereco'], '');
 
+      // Monta tabela de faturas como contexto extra
       let faturasCtx = '';
       if (Array.isArray(reqFaturas) && reqFaturas.length > 0) {
         faturasCtx = '\nFaturas vinculadas:\n' + reqFaturas
@@ -172,6 +171,7 @@ export default function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
         style={{ width: 760, height: '88vh', maxHeight: 740 }}
         onClick={e => e.stopPropagation()}
       >
+        {/* ── Header ── */}
         <div
           className="flex items-center justify-between px-5 py-3.5 flex-shrink-0 select-none"
           style={{ background: 'var(--gradient-primary)' }}
@@ -199,6 +199,7 @@ export default function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
           </button>
         </div>
 
+        {/* ── Campos de cabeçalho ── */}
         <div className="flex-shrink-0 border-b border-[var(--border)]">
           {[
             { label: 'Para', value: to, set: setTo, placeholder: 'destinatario@distribuidora.com' },
@@ -225,6 +226,7 @@ export default function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
           </div>
         </div>
 
+        {/* ── Corpo: loading ou editor ── */}
         {generating ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-4">
             <div className="w-12 h-12 rounded-2xl bg-[color-mix(in_srgb,var(--accent)_15%,transparent)] flex items-center justify-center">
@@ -252,6 +254,7 @@ export default function ReqEmailModal({ reqInfo, reqFaturas, onClose }) {
           </div>
         )}
 
+        {/* ── Rodapé ── */}
         <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-t border-[var(--border)] flex-shrink-0 bg-[var(--panel)]/50">
           <div className="flex items-center gap-2 flex-wrap">
             <button
