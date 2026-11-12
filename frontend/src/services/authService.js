@@ -19,14 +19,16 @@ const authApi = axios.create({
 });
 
 // Login — POST /api/v2/auth/login
-export const login = async (email, password) => {
+export const login = async (email, password, codigo = '') => {
   try {
-    const response = await authApi.post('/auth/login', { email, password });
+    const response = await authApi.post('/auth/login', codigo ? { email, password, codigo } : { email, password });
     return response.data;
   } catch (error) {
     if (import.meta.env.DEV) {
       console.error('[auth v2] login error:', error?.response?.status ?? error?.message);
     }
+    // guarda o código do erro antes de achatar a mensagem (a tela usa TOTP_NECESSARIO)
+    if (error?.response?.data?.error?.code) error.codigo = error.response.data.error.code;
     // Compatibilidade: o frontend antigo espera error.response.data.error como string
     if (error?.response?.data?.error?.message && !error.response.data.error?.code) {
       // já está no formato v1
@@ -102,8 +104,14 @@ export const magicEnabled = async () => {
 };
 
 // POST /api/v2/auth/magic { email } → envia o link de acesso
-export const magicRequest = async (email) => {
-  const { data } = await authApi.post('/auth/magic', { email });
+export const magicRequest = async (email, para = '') => {
+  const { data } = await authApi.post('/auth/magic', para ? { email, para } : { email });
+  return data;
+};
+
+// POST /api/v2/auth/senha { senha_atual, nova } → define (sem senha) ou altera a própria senha
+export const definirSenha = async (senhaAtual, nova) => {
+  const { data } = await authApi.post('/auth/senha', { senha_atual: senhaAtual || '', nova });
   return data;
 };
 

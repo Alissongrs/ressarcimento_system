@@ -497,6 +497,30 @@ func conferirCodigo(e *totpEstado, codigo string, agora time.Time) (passo int64,
 	return -1, nil, false
 }
 
+// registrarUsoTOTP marca o código como usado: passo >= 0 grava o último passo (o mesmo código
+// não entra duas vezes; erro se outro pedido já o usou); passo < 0 é código de recuperação e a
+// lista fica sem ele. Usado pelo login com senha (2º fator) e pelo login só com código.
+func registrarUsoTOTP(c *gin.Context, db *sql.DB, e *totpEstado, passo int64, restantes []string) error {
+	if passo >= 0 {
+		res, err := db.ExecContext(c.Request.Context(),
+			`UPDATE DM_USUARIO SET totp_ultimo_passo = ? WHERE id_usuario = ? AND (totp_ultimo_passo IS NULL OR totp_ultimo_passo < ?)`,
+			passo, e.id, passo)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return errors.New("código já usado")
+		}
+		return nil
+	}
+	hj, _ := json.Marshal(restantes)
+	if _, err := db.ExecContext(c.Request.Context(), `UPDATE DM_USUARIO SET totp_recuperacao = ? WHERE id_usuario = ?`, string(hj), e.id); err != nil {
+		return err
+	}
+	log.Printf("[totp] usuário %d entrou com código de recuperação (%d restantes)", e.id, len(restantes))
+	return nil
+}
+
 type totpLoginReq struct {
 	Email  string `json:"email"`
 	Codigo string `json:"codigo"`
@@ -540,22 +564,9 @@ func TOTPLogin(c *gin.Context) {
 		falha()
 		return
 	}
-	if passo >= 0 {
-		// marca o passo usado: o mesmo código não entra duas vezes
-		res, err := db.ExecContext(c.Request.Context(),
-			`UPDATE DM_USUARIO SET totp_ultimo_passo = ? WHERE id_usuario = ? AND (totp_ultimo_passo IS NULL OR totp_ultimo_passo < ?)`,
-			passo, e.id, passo)
-		if n, _ := res.RowsAffected(); err != nil || n != 1 {
-			falha()
-			return
-		}
-	} else {
-		hj, _ := json.Marshal(restantes)
-		if _, err := db.ExecContext(c.Request.Context(), `UPDATE DM_USUARIO SET totp_recuperacao = ? WHERE id_usuario = ?`, string(hj), e.id); err != nil {
-			apiError(c, http.StatusInternalServerError, "DB_ERR", err.Error(), nil)
-			return
-		}
-		log.Printf("[totp] usuário %d entrou com código de recuperação (%d restantes)", e.id, len(restantes))
+	if err := registrarUsoTOTP(c, db, e, passo, restantes); err != nil {
+		falha()
+		return
 	}
 	nome := e.nome
 	if strings.TrimSpace(nome) == "" {

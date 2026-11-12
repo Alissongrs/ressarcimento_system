@@ -76,6 +76,7 @@ func MagicConfig(c *gin.Context) {
 
 type magicReq struct {
 	Email string `json:"email" binding:"required,email"`
+	Para  string `json:"para"` // "/conta#senha" = veio de "esqueci minha senha": ao entrar, cai em Minha conta
 }
 
 // MagicRequest — POST /auth/magic  { email }
@@ -119,9 +120,14 @@ func MagicRequest(c *gin.Context) {
 
 	// gera token de uso único e registra o jti
 	jti := randToken()
+	para := ""
+	if in.Para == "/conta#senha" { // único destino permitido além da home
+		para = in.Para
+	}
 	claims := jwt.MapClaims{
 		"typ":   magicTyp,
 		"email": email,
+		"para":  para,
 		"jti":   jti,
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(magicTTL).Unix(),
@@ -218,7 +224,11 @@ func MagicVerify(c *gin.Context) {
 	}
 	// IMPORTANTE: redireciona para /login (não "/"). Deslogado, o app manda "/" →
 	// "/login" e perde o #mstoken no caminho. A tela de login é quem lê o token.
-	redirectFront(c, "/login", "mstoken="+token)
+	frag := "mstoken=" + token
+	if para := strClaim(claims, "para"); para == "/conta#senha" {
+		frag += "&ir=" + url.QueryEscape(para)
+	}
+	redirectFront(c, "/login", frag)
 }
 
 // findOrProvisionByEmail acha o usuário pelo e-mail ou cria (sem senha).

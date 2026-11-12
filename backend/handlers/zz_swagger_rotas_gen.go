@@ -2859,6 +2859,18 @@ func swaggerRotaGet_api_v2_auth_magic_verify() {}
 // @Router /api/v2/auth/me [get]
 func swaggerRotaGet_api_v2_auth_me() {}
 
+// @Summary Conta
+// @Description Qualquer usuário autenticado. Handler: v2.conta.
+// @Tags v2 · Auth
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/auth/senha [post]
+func swaggerRotaPost_api_v2_auth_senha() {}
+
 // @Summary Totp status
 // @Description Qualquer usuário autenticado. Handler: v2.TOTPStatus.
 // @Tags v2 · Auth

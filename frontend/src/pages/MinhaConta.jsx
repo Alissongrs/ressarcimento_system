@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   me as fetchMe, microsoftEnabled, microsoftStartUrl,
-  totpStatus, totpIniciar, totpConfirmar, totpDesativar,
+  totpStatus, totpIniciar, totpConfirmar, totpDesativar, definirSenha,
 } from '../services/authService';
 import { CheckCircle2, Copy, KeyRound, Link2, Loader2, ShieldCheck, ShieldOff, Smartphone } from 'lucide-react';
 
@@ -118,6 +118,11 @@ export default function MinhaConta() {
         )}
       </div>
 
+      {/* Senha */}
+      <div id="senha" style={{ ...card, marginBottom: 16 }}>
+        <Senha temSenha={!!info?.tem_senha} aoSalvar={carregar} destaque={window.location.hash === '#senha'} />
+      </div>
+
       {/* Autenticador */}
       <div id="autenticador" style={{ ...card, marginBottom: 16 }}>
         <Autenticador />
@@ -160,6 +165,82 @@ export default function MinhaConta() {
 
       <style>{`.sure-spin{animation:sureSpin .9s linear infinite}@keyframes sureSpin{to{transform:rotate(360deg)}}`}</style>
     </div>
+  );
+}
+
+// Senha: entrada padrão do SURE (com o código do autenticador, se ativo). Quem entrou pelo link por
+// e-mail define a senha aqui; "esqueci minha senha" na tela de login manda a pessoa para cá.
+function Senha({ temSenha, aoSalvar, destaque }) {
+  const [atual, setAtual] = useState('');
+  const [nova, setNova] = useState('');
+  const [confirma, setConfirma] = useState('');
+  const [erro, setErro] = useState('');
+  const [ok, setOk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [mostrar, setMostrar] = useState(false);
+
+  useEffect(() => {
+    if (destaque) setTimeout(() => document.getElementById('senha')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  }, [destaque]);
+
+  const salvar = async (e) => {
+    e.preventDefault();
+    setErro(''); setOk(false);
+    if (nova.length < 8) { setErro('A senha nova precisa ter pelo menos 8 caracteres.'); return; }
+    if (nova !== confirma) { setErro('A confirmação não confere com a senha nova.'); return; }
+    setBusy(true);
+    try {
+      await definirSenha(atual, nova);
+      setOk(true); setAtual(''); setNova(''); setConfirma('');
+      aoSalvar?.();
+    } catch (err) {
+      const m = err?.response?.data?.error?.message || err?.response?.data?.error;
+      setErro((typeof m === 'string' && m) || 'Não foi possível salvar a senha.');
+    } finally { setBusy(false); }
+  };
+
+  const campo = { ...campoCodigo, width: 260, letterSpacing: 'normal', fontSize: 14 };
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+        <KeyRound size={20} />
+        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Senha</h2>
+        <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: temSenha ? 'rgba(16,185,129,0.15)' : 'rgba(234,179,8,0.18)', color: temSenha ? '#059669' : '#b45309' }}>
+          {temSenha ? 'CADASTRADA' : 'SEM SENHA'}
+        </span>
+      </div>
+      <p style={{ fontSize: 13.5, color: 'var(--fg-muted, rgba(0,0,0,0.6))', margin: '0 0 14px', lineHeight: 1.55 }}>
+        {destaque && !temSenha
+          ? 'Você entrou pelo link por e-mail. Defina uma senha para entrar direto da próxima vez.'
+          : destaque
+            ? 'Você entrou pelo link por e-mail. Defina a senha nova abaixo.'
+            : 'A entrada padrão do SURE é e-mail + senha (e o código do autenticador, se você ativar abaixo).'}
+      </p>
+      {erro && <div style={{ marginBottom: 12, padding: '9px 12px', borderRadius: 9, fontSize: 13, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', color: '#b91c1c' }}>{erro}</div>}
+      {ok && <div style={{ ...caixaOk, marginBottom: 12 }}><CheckCircle2 size={18} color="#059669" /><span style={{ fontSize: 13.5 }}>Senha salva. Da próxima vez, entre com e-mail e senha.</span></div>}
+      <form onSubmit={salvar} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {temSenha && !destaque && (
+          <label style={{ fontSize: 13 }}>Senha atual<br />
+            <input type={mostrar ? 'text' : 'password'} value={atual} onChange={(e) => setAtual(e.target.value)} autoComplete="current-password" style={campo} required />
+          </label>
+        )}
+        {temSenha && destaque && (
+          <label style={{ fontSize: 13 }}>Senha atual (se lembrar; se não, deixe em branco)<br />
+            <input type={mostrar ? 'text' : 'password'} value={atual} onChange={(e) => setAtual(e.target.value)} autoComplete="current-password" style={campo} />
+          </label>
+        )}
+        <label style={{ fontSize: 13 }}>Senha nova (mínimo 8 caracteres)<br />
+          <input type={mostrar ? 'text' : 'password'} value={nova} onChange={(e) => setNova(e.target.value)} autoComplete="new-password" style={campo} required minLength={8} />
+        </label>
+        <label style={{ fontSize: 13 }}>Confirmar senha nova<br />
+          <input type={mostrar ? 'text' : 'password'} value={confirma} onChange={(e) => setConfirma(e.target.value)} autoComplete="new-password" style={campo} required />
+        </label>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button type="submit" style={btnPrimario} disabled={busy}>{busy ? <Loader2 size={16} className="sure-spin" /> : <KeyRound size={16} />} {temSenha ? 'Alterar senha' : 'Definir senha'}</button>
+          <label style={{ fontSize: 12.5, display: 'inline-flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={mostrar} onChange={(e) => setMostrar(e.target.checked)} /> mostrar</label>
+        </div>
+      </form>
+    </>
   );
 }
 

@@ -29,6 +29,7 @@ func RegisterAuthRoutesPublic(g *gin.RouterGroup) {
 
 func RegisterAuthRoutesAuthed(g *gin.RouterGroup) {
 	g.GET("/auth/me", Me)
+	g.POST("/auth/senha", DefinirSenha) // definir/alterar a própria senha (Minha conta)
 
 	// Autenticador (TOTP): ativar/confirmar/desativar em Minha Conta. O login
 	// (/auth/totp/login) é público e fica em routes.go, com limite por IP.

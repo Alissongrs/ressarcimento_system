@@ -75,6 +75,7 @@ func verifyPasswordV2(db *sql.DB, password, hash string, userID int64) (bool, er
 type loginReq struct {
 	Email    string `json:"email"    binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6,max=128"`
+	Codigo   string `json:"codigo"` // código do autenticador (2º fator) — exigido quando a conta tem TOTP ativo
 }
 
 // Login — POST /api/v2/auth/login
@@ -127,6 +128,29 @@ SELECT id_usuario, nome_usuario, senha_hash, perfil, usuario_ativo
 	if !ok {
 		apiError(c, http.StatusUnauthorized, "CREDENCIAIS_INVALIDAS", "Email ou senha inválidos", nil)
 		return
+	}
+
+	// 2º fator (12/11/2026): conta com autenticador ativo só entra com senha + código.
+	if e, errT := lerTOTP(c, db, "id_usuario = ?", userID); errT == nil && e.ativo == 1 {
+		if strings.TrimSpace(input.Codigo) == "" {
+			apiError(c, http.StatusUnauthorized, "TOTP_NECESSARIO", "Digite o código do app autenticador.", nil)
+			return
+		}
+		if totpBloqueado(email) {
+			apiError(c, http.StatusTooManyRequests, "TOTP_BLOQUEADO", "Muitas tentativas. Aguarde 5 minutos e tente de novo.", nil)
+			return
+		}
+		passo, restantes, okCod := conferirCodigo(e, input.Codigo, time.Now())
+		if !okCod {
+			totpRegistrarErro(email)
+			apiError(c, http.StatusUnauthorized, "TOTP_CODIGO_INVALIDO", "Código do autenticador inválido. Ele muda a cada 30 segundos.", nil)
+			return
+		}
+		if err := registrarUsoTOTP(c, db, e, passo, restantes); err != nil {
+			totpRegistrarErro(email)
+			apiError(c, http.StatusUnauthorized, "TOTP_CODIGO_INVALIDO", "Código já usado. Espere o próximo.", nil)
+			return
+		}
 	}
 
 	// Monta JWT — mesmas claims do v1 pra reusar middleware AuthMiddleware
@@ -251,6 +275,7 @@ SELECT id_usuario, nome_usuario, email, perfil, usuario_ativo, ms_oid, ms_email
 		"ativo":  ativo == 1,
 		"microsoft_vinculado": msOID.Valid && msOID.String != "",
 		"microsoft_email":     msEmail.String,
+		"tem_senha":           temSenha(c, db, id),
 	})
 }
 

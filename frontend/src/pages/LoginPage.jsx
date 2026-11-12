@@ -78,6 +78,11 @@ const Login = () => {
   const [totpMode, setTotpMode] = useState(false);
   const [totpCode, setTotpCode] = useState('');
   const [totpBusy, setTotpBusy] = useState(false);
+  // Padrão (12/11/2026): senha + código do autenticador. O link por e-mail vira opção (magicMode)
+  // e também faz o "esqueci minha senha": entra pelo link e define a senha nova em Minha conta.
+  const [magicMode, setMagicMode] = useState(false);
+  const [magicPara, setMagicPara] = useState(''); // '/conta#senha' quando veio de "esqueci minha senha"
+  const [precisaCodigo, setPrecisaCodigo] = useState(false); // conta com autenticador: pede o código depois da senha
 
   const { login } = useAuth();
 
@@ -92,7 +97,8 @@ const Login = () => {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
       if (token) {
         login(token);
-        window.location.href = `/?v=${Date.now()}`;
+        const ir = params.get('ir') || '';
+        window.location.href = ir.startsWith('/') && !ir.startsWith('//') ? ir : `/?v=${Date.now()}`;
         return;
       }
       const magicErr = params.get('magic');
@@ -118,7 +124,7 @@ const Login = () => {
     }
     setMagicBusy(true);
     try {
-      await magicRequest(email);
+      await magicRequest(email, magicPara);
       setMagicSent(true);
     } catch {
       // mesmo em erro, mostra confirmação genérica (não revela se o e-mail existe)
@@ -156,20 +162,28 @@ const Login = () => {
     }
   };
 
-  // Fallback de EMERGÊNCIA: só aparece se o envio de e-mail estiver fora do ar
-  // (magicOn === false). Garante que ninguém fique trancado pra fora se o
-  // Graph/SMTP cair. Em produção o e-mail está configurado → esta tela não aparece.
+  // Entrada padrão: e-mail + senha; se a conta tem autenticador ativo, o servidor responde
+  // TOTP_NECESSARIO e a tela pede o código de 6 dígitos como 2º passo.
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
     try {
-      const { token } = await loginService(formData.email, formData.password);
+      const { token } = await loginService(formData.email, formData.password, precisaCodigo ? totpCode.replace(/\s+/g, '') : '');
       login(token);
       window.location.href = `/?v=${Date.now()}`;
     } catch (err) {
-      console.error('Erro detalhado no login:', err);
-      setError(err?.response?.data?.error || 'E-mail ou senha incorretos. Tente novamente.');
+      const codigo = err?.codigo || err?.response?.data?.error?.code;
+      if (codigo === 'TOTP_NECESSARIO') {
+        setPrecisaCodigo(true);
+        setError('');
+        setTimeout(() => document.getElementById('codigo2')?.focus(), 50);
+        return;
+      }
+      const msg = err?.response?.data?.error?.message || err?.response?.data?.error;
+      setError(err?.response?.status === 429
+        ? 'Muitas tentativas. Aguarde 5 minutos e tente de novo.'
+        : (typeof msg === 'string' && msg) || 'E-mail ou senha incorretos. Tente novamente.');
     } finally {
       setIsLoading(false);
     }
@@ -256,7 +270,7 @@ const Login = () => {
           )}
 
           {/* ── CAMINHO PADRÃO: login só por link de e-mail ───────────────── */}
-          {magicOn === true && !totpMode && (magicSent ? (
+          {magicOn === true && magicMode && !totpMode && (magicSent ? (
             <div style={{
               display: 'flex', alignItems: 'flex-start', gap: 10, padding: '14px 16px', borderRadius: 12,
               background: 'rgba(45,212,191,0.12)', border: '1px solid rgba(45,212,191,0.3)',
@@ -295,13 +309,20 @@ const Login = () => {
               </button>
 
               <p className="lg-hint" style={{ fontSize: 12.5, lineHeight: 1.55, margin: '2px 0 0', textAlign: 'center' }}>
-                Enviaremos um link de acesso. No primeiro acesso, sua conta é criada automaticamente.
+                {magicPara
+                  ? 'Enviaremos um link de acesso. Ao entrar por ele, você define a senha nova em Minha conta.'
+                  : 'Enviaremos um link de acesso. No primeiro acesso, sua conta é criada automaticamente.'}
+                <br />
+                <button type="button" onClick={() => { setMagicMode(false); setMagicPara(''); setError(''); }}
+                  style={{ background: 'none', border: 'none', color: '#5CC8FF', cursor: 'pointer', fontWeight: 600, fontSize: 12.5, padding: 0, marginTop: 6 }}>
+                  Voltar para senha
+                </button>
               </p>
             </form>
           ))}
 
           {/* ── ALTERNATIVA: código do app autenticador (não depende do e-mail) ── */}
-          {magicOn !== null && !magicSent && (totpMode ? (
+          {totpMode && (
             <form onSubmit={handleTotp} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
                 <label htmlFor="email" style={{ display: 'block', fontSize: 12.5, fontWeight: 600, marginBottom: 7, color: 'rgba(255,255,255,0.95)' }}>
@@ -330,31 +351,23 @@ const Login = () => {
                 <br />
                 <button type="button" onClick={() => { setTotpMode(false); setError(''); }}
                   style={{ background: 'none', border: 'none', color: '#5CC8FF', cursor: 'pointer', fontWeight: 600, fontSize: 12.5, padding: 0, marginTop: 6 }}>
-                  Voltar para o link por e-mail
+                  Voltar para senha
                 </button>
               </p>
             </form>
-          ) : (
-            <button type="button" onClick={() => { setTotpMode(true); setError(''); }}
-              style={{
-                marginTop: 14, background: 'none', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 9,
-                color: 'rgba(255,255,255,0.9)', cursor: 'pointer', fontSize: 13, padding: '9px 12px',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%',
-              }}
-              title="Use quando o e-mail estiver fora do ar. Ative antes em Minha conta.">
-              <Smartphone size={16} /> Entrar com código do autenticador
-            </button>
-          ))}
+          )}
 
-          {/* ── EMERGÊNCIA: e-mail fora do ar → cai pro login por senha ────── */}
-          {magicOn === false && !totpMode && (
+          {/* ── PADRÃO: e-mail + senha (+ código do autenticador, se a conta tiver) ── */}
+          {magicOn !== null && !totpMode && !magicMode && (
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{
-                fontSize: 12.5, color: '#fde68a', background: 'rgba(234,179,8,0.1)',
-                border: '1px solid rgba(234,179,8,0.25)', borderRadius: 9, padding: '9px 12px',
-              }}>
-                O login por e-mail está indisponível no momento. Entre com e-mail e senha.
-              </div>
+              {magicOn === false && (
+                <div style={{
+                  fontSize: 12.5, color: '#fde68a', background: 'rgba(234,179,8,0.1)',
+                  border: '1px solid rgba(234,179,8,0.25)', borderRadius: 9, padding: '9px 12px',
+                }}>
+                  O envio de e-mail está fora do ar: o link por e-mail e o "esqueci minha senha" não funcionam agora.
+                </div>
+              )}
               <div>
                 <label htmlFor="email" style={{ display: 'block', fontSize: 12.5, fontWeight: 600, marginBottom: 7, color: 'rgba(255,255,255,0.95)' }}>
                   E-mail
@@ -382,12 +395,45 @@ const Login = () => {
                   </button>
                 </div>
               </div>
+              {precisaCodigo && (
+                <div>
+                  <label htmlFor="codigo2" style={{ display: 'block', fontSize: 12.5, fontWeight: 600, marginBottom: 7, color: 'rgba(255,255,255,0.95)' }}>
+                    Código do app autenticador
+                  </label>
+                  <input id="codigo2" name="codigo2" type="text" inputMode="numeric" autoComplete="one-time-code" required
+                    placeholder="6 dígitos (ou um código de recuperação)" value={totpCode} onChange={(e) => setTotpCode(e.target.value)}
+                    style={{ ...field, letterSpacing: '0.18em', fontVariantNumeric: 'tabular-nums' }} onFocus={onFocus} onBlur={onBlur} />
+                  <div className="lg-hint" style={{ fontSize: 12, marginTop: 6 }}>Sua conta tem o autenticador ativo: abra o app no celular e digite o código atual.</div>
+                </div>
+              )}
               <button type="submit" disabled={isLoading}
                 style={{ ...primaryBtn, cursor: isLoading ? 'default' : 'pointer', opacity: isLoading ? 0.7 : 1 }}
                 onMouseDown={(e) => (e.currentTarget.style.transform = 'translateY(1px)')}
                 onMouseUp={(e) => (e.currentTarget.style.transform = 'none')}>
                 {isLoading ? <><Loader2 size={16} className="sure-spin" /> Entrando…</> : <>Entrar <ArrowRight size={16} /></>}
               </button>
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '6px 18px', fontSize: 12.5, marginTop: 2 }}>
+                {magicOn === true && (
+                  <button type="button" onClick={() => { setMagicMode(true); setMagicPara('/conta#senha'); setError(''); }}
+                    style={{ background: 'none', border: 'none', color: '#5CC8FF', cursor: 'pointer', fontWeight: 600, padding: 0 }}>
+                    Esqueci minha senha
+                  </button>
+                )}
+                {magicOn === true && (
+                  <button type="button" onClick={() => { setMagicMode(true); setMagicPara(''); setError(''); }}
+                    style={{ background: 'none', border: 'none', color: '#5CC8FF', cursor: 'pointer', fontWeight: 600, padding: 0 }}>
+                    <MicrosoftLogo size={12} /> Entrar com link por e-mail
+                  </button>
+                )}
+                <button type="button" onClick={() => { setTotpMode(true); setError(''); }}
+                  style={{ background: 'none', border: 'none', color: '#5CC8FF', cursor: 'pointer', fontWeight: 600, padding: 0, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                  title="Para quem ativou o autenticador em Minha conta e não lembra a senha">
+                  <Smartphone size={13} /> Entrar só com o código
+                </button>
+              </div>
+              <p className="lg-hint" style={{ fontSize: 12, lineHeight: 1.5, margin: 0, textAlign: 'center' }}>
+                Primeiro acesso ou sem senha? Use "Entrar com link por e-mail" e defina sua senha em Minha conta.
+              </p>
             </form>
           )}
         </div>
