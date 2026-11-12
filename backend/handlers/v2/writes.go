@@ -196,6 +196,35 @@ func calcRepasse(credito, pct float64) float64 {
 	return credito * pct / 100.0
 }
 
+// percentuaisRepasse decide o percentual de cada lado do crédito: o override do processo
+// (percentual_repasse > 0) vale para simples e dobro; sem override, vale o par vigente da
+// empresa em DM_EMPRESA_PERCENTUAL na data de procedência; sem nada, 0 (quem chama não grava).
+// Pura, para ser testada com os casos históricos (testdata/repasse_casos_historicos.json).
+func percentuaisRepasse(override, vigenteS, vigenteD sql.NullFloat64) (pctS, pctD float64) {
+	if override.Valid && override.Float64 > 0 {
+		return override.Float64, override.Float64
+	}
+	return vigenteS.Float64, vigenteD.Float64
+}
+
+// repartir divide o valor único de repasse da tela entre simples e dobro: vai todo para o
+// lado que tem crédito; com os dois lados, mantém a proporção do repasse atual (ou, sem
+// ele, a dos créditos). Centavos: simples arredondado, dobro = resto.
+func repartir(total, creditoS, creditoD, repasseS, repasseD float64) (simples, dobro float64) {
+	switch {
+	case creditoD > 0 && creditoS <= 0:
+		return 0, total
+	case creditoS <= 0 || creditoD <= 0:
+		return total, 0
+	}
+	ps, pd := repasseS, repasseD
+	if ps+pd <= 0 {
+		ps, pd = creditoS, creditoD
+	}
+	simples = math.Round(total*ps/(ps+pd)*100) / 100
+	return simples, math.Round((total-simples)*100) / 100
+}
+
 func autoPersistRepasse(c *gin.Context, tx *sql.Tx, idProcesso int) {
 	ctx := c.Request.Context()
 	var creditoS, creditoD, override sql.NullFloat64
@@ -215,11 +244,8 @@ func autoPersistRepasse(c *gin.Context, tx *sql.Tx, idProcesso int) {
 	if cs <= 0 && cd <= 0 {
 		return
 	}
-	var pctS, pctD float64
-	if override.Valid && override.Float64 > 0 {
-		pctS, pctD = override.Float64, override.Float64
-	} else if codEmpresa.Valid {
-		var ps, pd sql.NullFloat64
+	var vigS, vigD sql.NullFloat64
+	if !(override.Valid && override.Float64 > 0) && codEmpresa.Valid {
 		_ = tx.QueryRowContext(ctx, `
 			SELECT percentual_simples, percentual_dobro
 			  FROM DM_EMPRESA_PERCENTUAL
@@ -227,9 +253,9 @@ func autoPersistRepasse(c *gin.Context, tx *sql.Tx, idProcesso int) {
 			   AND data_vigencia_inicio <= ?
 			   AND (data_vigencia_fim IS NULL OR data_vigencia_fim >= ?)
 			 ORDER BY data_vigencia_inicio DESC LIMIT 1`,
-			codEmpresa.Int64, ref.String, ref.String).Scan(&ps, &pd)
-		pctS, pctD = ps.Float64, pd.Float64
+			codEmpresa.Int64, ref.String, ref.String).Scan(&vigS, &vigD)
 	}
+	pctS, pctD := percentuaisRepasse(override, vigS, vigD)
 	if pctS <= 0 && pctD <= 0 {
 		return
 	}
@@ -320,11 +346,8 @@ func recomputeRepasse(c *gin.Context, tx *sql.Tx, idProcesso int) error {
 		return err
 	}
 	cs, cd := creditoS.Float64, creditoD.Float64
-	var pctS, pctD float64
-	if override.Valid && override.Float64 > 0 {
-		pctS, pctD = override.Float64, override.Float64
-	} else if codEmpresa.Valid {
-		var ps, pd sql.NullFloat64
+	var vigS, vigD sql.NullFloat64
+	if !(override.Valid && override.Float64 > 0) && codEmpresa.Valid {
 		_ = tx.QueryRowContext(ctx, `
 			SELECT percentual_simples, percentual_dobro
 			  FROM DM_EMPRESA_PERCENTUAL
@@ -332,9 +355,9 @@ func recomputeRepasse(c *gin.Context, tx *sql.Tx, idProcesso int) error {
 			   AND data_vigencia_inicio <= ?
 			   AND (data_vigencia_fim IS NULL OR data_vigencia_fim >= ?)
 			 ORDER BY data_vigencia_inicio DESC LIMIT 1`,
-			codEmpresa.Int64, ref.String, ref.String).Scan(&ps, &pd)
-		pctS, pctD = ps.Float64, pd.Float64
+			codEmpresa.Int64, ref.String, ref.String).Scan(&vigS, &vigD)
 	}
+	pctS, pctD := percentuaisRepasse(override, vigS, vigD)
 	// sem percentual conhecido → não mexe (evita zerar repasse existente)
 	if pctS <= 0 && pctD <= 0 {
 		return nil
@@ -515,18 +538,8 @@ WHERE p.id_processo = ?`, idProcesso).Scan(&cs, &cd, &rs, &rd)
 	if err != nil && err != sql.ErrNoRows {
 		return 0, 0, err
 	}
-	switch {
-	case cd.Float64 > 0 && cs.Float64 <= 0:
-		return 0, total, nil
-	case cs.Float64 <= 0 || cd.Float64 <= 0:
-		return total, 0, nil
-	}
-	ps, pd := rs.Float64, rd.Float64
-	if ps+pd <= 0 {
-		ps, pd = cs.Float64, cd.Float64
-	}
-	simples := math.Round(total*ps/(ps+pd)*100) / 100
-	return simples, math.Round((total-simples)*100) / 100, nil
+	simples, dobro := repartir(total, cs.Float64, cd.Float64, rs.Float64, rd.Float64)
+	return simples, dobro, nil
 }
 
 // gravarRepasseSplit grava o split nas duas tabelas onde o repasse vive

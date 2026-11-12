@@ -611,7 +611,7 @@ func percentualCliente(db *sql.DB, cliente string) (float64, float64, error) {
 		if len(nn) < 3 {
 			continue
 		}
-		if nc == nn || strings.HasPrefix(nc, nn+" ") || strings.HasPrefix(nn, nc+" ") {
+		if casaNome(nc, nn) {
 			matches[pc{ps.Float64, pd.Float64}] = true
 		}
 	}
@@ -649,6 +649,12 @@ func extractProcesso(msg string) (string, bool) {
 		return m[1], true
 	}
 	return "", false
+}
+
+// casaNome: os dois nomes já normalizados são iguais, ou um é o outro seguido de mais
+// palavras ("CLARO" casa "CLARO NXT"; "VIA" NÃO casa "VIAVAREJO", porque exige espaço).
+func casaNome(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+" ") || strings.HasPrefix(b, a+" ")
 }
 
 var sufixos = map[string]bool{"SA": true, "S": true, "A": true, "LTDA": true, "ME": true, "EIRELI": true, "EPP": true, "CIA": true}

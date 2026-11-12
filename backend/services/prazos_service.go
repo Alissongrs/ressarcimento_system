@@ -147,28 +147,31 @@ WHERE p.id_status_atual IN (` + placeholders + `)
 			continue
 		}
 		p.DataBase = dataBase.Time
-
-		regra, ok := PrazoPorInstancia[p.IDInstancia]
-		p.TemRegra = ok
-		if !ok {
-			// Sem instância/regra conhecida: não classifica como vencido (evita falso positivo).
-			out = append(out, p)
-			continue
-		}
-		p.PrazoDias = regra.Dias
-		p.PrazoUteis = regra.Uteis
-
-		if regra.Uteis {
-			p.DiasDecorridos = DiasUteisEntre(p.DataBase, now)
-		} else {
-			p.DiasDecorridos = DiasCorridosEntre(p.DataBase, now)
-		}
-		p.DiasRestantes = regra.Dias - p.DiasDecorridos
-		p.Atrasado = p.DiasDecorridos > regra.Dias // mostra a partir do dia N+1
-
+		aplicarPrazo(&p, now)
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// aplicarPrazo preenche prazo, dias decorridos/restantes e atraso a partir da regra da
+// instância, contando desde DataBase até now. Sem instância/regra conhecida só marca
+// TemRegra=false e não classifica como vencido (evita falso positivo). Pura, testada em
+// prazos_test.go.
+func aplicarPrazo(p *ProcessoPrazo, now time.Time) {
+	regra, ok := PrazoPorInstancia[p.IDInstancia]
+	p.TemRegra = ok
+	if !ok {
+		return
+	}
+	p.PrazoDias = regra.Dias
+	p.PrazoUteis = regra.Uteis
+	if regra.Uteis {
+		p.DiasDecorridos = DiasUteisEntre(p.DataBase, now)
+	} else {
+		p.DiasDecorridos = DiasCorridosEntre(p.DataBase, now)
+	}
+	p.DiasRestantes = regra.Dias - p.DiasDecorridos
+	p.Atrasado = p.DiasDecorridos > regra.Dias // mostra a partir do dia N+1
 }
 
 // CriarAlertasDePrazoVencido cria um alerta (FT_ALERTAS) por processo vencido, para
