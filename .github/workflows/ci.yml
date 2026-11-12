@@ -336,6 +336,23 @@ jobs:
             exit 1
           fi
 
+          # Arquivo solto na VPS (fora do Git) que a versão nova passa a versionar travaria o pull
+          # ("untracked working tree files would be overwritten by merge"). Igual ao novo: só sai do
+          # caminho. Diferente: cópia em .deploy_backups e vale o do Git (o repositório é a referência).
+          for arq in $(git diff --name-only --diff-filter=A HEAD "$ALVO" --); do
+            [ -e "$arq" ] || continue
+            git ls-files --error-unmatch -- "$arq" >/dev/null 2>&1 && continue
+            blob_alvo=$(git rev-parse -q --verify "$ALVO:$arq" 2>/dev/null || true)
+            if [ -n "$blob_alvo" ] && [ "$(git hash-object -- "$arq")" = "$blob_alvo" ]; then
+              echo "↺ $arq existia solto na VPS, igual ao novo — passa a vir do Git"
+            else
+              BKS=".deploy_backups/vps_solto_$STAMP"; mkdir -p "$BKS/$(dirname "$arq")"
+              cp -p "$arq" "$BKS/$arq"
+              echo "⚠ $arq existia solto na VPS e é DIFERENTE do novo: cópia em $BKS/$arq; vale o do Git"
+            fi
+            rm -f -- "$arq"
+          done
+
           git checkout "$REF"
           git pull --ff-only
           docker compose build backend frontend
