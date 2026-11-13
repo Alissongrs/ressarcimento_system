@@ -155,6 +155,7 @@ func rodarBusca(c *whatsmeow.Client, soChat string) {
 	n := prog.Novas
 	progMu.Unlock()
 	log.Printf("[whatsapp] busca de histórico: %d conversas, %d mensagens novas", len(convs), n)
+	_, _ = AtualizarNomesContatos() // conversas novas que apareceram ganham o nome da agenda
 }
 
 // pedirMaisAntigas pede ao celular 50 mensagens anteriores à mais antiga gravada da conversa e espera a

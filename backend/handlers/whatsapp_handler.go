@@ -236,6 +236,19 @@ func WhatsappAnexosRetentar(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "na_fila": whatsapp.RetentarAnexos()})
 }
 
+// POST /whatsapp/contatos/atualizar — grava o nome da agenda do celular nas conversas (admin)
+func WhatsappContatosAtualizar(c *gin.Context) {
+	if _, ok := waAdmin(c); !ok {
+		return
+	}
+	n, err := whatsapp.AtualizarNomesContatos()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "atualizadas": n})
+}
+
 // GET /whatsapp/historico — progresso da busca das conversas inteiras
 func WhatsappHistorico(c *gin.Context) {
 	if _, ok := waEquipe(c); !ok {

@@ -262,6 +262,11 @@ func aoEvento(ev any) {
 		}
 		mu.Unlock()
 		log.Printf("[whatsapp] conectado como %s", est.Numero)
+		// a agenda chega pelo app state logo depois de conectar; espera um pouco e preenche os nomes
+		go func() {
+			time.Sleep(45 * time.Second)
+			_, _ = AtualizarNomesContatos()
+		}()
 	case *events.PairSuccess:
 		mu.Lock()
 		est.Vinculado, est.Numero, est.Nome, est.QR = true, v.ID.User, v.BusinessName, ""
@@ -429,8 +434,12 @@ func gravarRecebida(v *events.Message, alertar bool) bool {
 	chatNome := ""
 	if info.IsGroup {
 		chatNome = nomeGrupo(info.Chat)
-	} else if !info.IsFromMe {
-		chatNome = info.PushName
+	} else {
+		// nome da agenda do celular primeiro; senão o nome de exibição que a pessoa configurou
+		chatNome = nomeContato(chat)
+		if chatNome == "" && !info.IsFromMe {
+			chatNome = info.PushName
+		}
 	}
 	remetente := info.Sender.ToNonAD().User
 	if info.SenderAlt.Server == types.DefaultUserServer {

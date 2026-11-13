@@ -652,6 +652,18 @@ func swaggerRotaPost_api_v1_whatsapp_anexos_retentar() {}
 // @Router /api/v1/whatsapp/enviar-arquivo [post]
 func swaggerRotaPost_api_v1_whatsapp_enviar_arquivo() {}
 
+// @Summary Whatsapp contatos atualizar
+// @Description Qualquer usuário autenticado. Handler: handlers.WhatsappContatosAtualizar.
+// @Tags WhatsApp
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/whatsapp/contatos/atualizar [post]
+func swaggerRotaPost_api_v1_whatsapp_contatos_atualizar() {}
+
 // @Summary Regras tipo de mudança → analista (legado)
 // @Description Qualquer usuário autenticado. Handler: handlers.ListarRegrasTarefa.
 // @Tags Tarefas

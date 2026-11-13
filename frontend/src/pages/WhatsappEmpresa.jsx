@@ -64,7 +64,7 @@ function Anexo({ m }) {
 }
 
 // Busca das conversas inteiras no celular (admin) + progresso; aparece acima da lista de conversas.
-function HistoricoCompleto({ isAdmin, conectado, chat, onErro }) {
+function HistoricoCompleto({ isAdmin, conectado, chat, onErro, onNomes }) {
   const [p, setP] = useState(null);
   const [busy, setBusy] = useState(false);
   const ler = useCallback(async () => {
@@ -94,6 +94,8 @@ function HistoricoCompleto({ isAdmin, conectado, chat, onErro }) {
       {isAdmin && rodando && <button className="pa-btn ml-auto" disabled={busy} onClick={() => chamar('/whatsapp/historico/parar')}>Parar</button>}
       {isAdmin && !rodando && <button className="pa-btn" disabled={busy} title="Tenta baixar de novo os anexos que ficaram pendentes ou com erro"
         onClick={() => chamar('/whatsapp/anexos/retentar')}>Retentar anexos</button>}
+      {isAdmin && conectado && !rodando && <button className="pa-btn" disabled={busy} title="Grava nas conversas o nome como está na agenda do celular do departamento"
+        onClick={async () => { await chamar('/whatsapp/contatos/atualizar'); onNomes && onNomes(); }}>Atualizar nomes</button>}
     </div>
   );
 }
@@ -224,7 +226,7 @@ function Conversas({ conectado, inicial, onErro, isAdmin }) {
 
   return (
     <div className="rounded-xl border" style={card}>
-    <HistoricoCompleto isAdmin={isAdmin} conectado={conectado} chat={chat} onErro={onErro} />
+    <HistoricoCompleto isAdmin={isAdmin} conectado={conectado} chat={chat} onErro={onErro} onNomes={carregarLista} />
     <div className="grid" style={{ gridTemplateColumns: 'minmax(260px, 340px) 1fr', minHeight: 520 }}>
       <div className="border-r flex flex-col" style={{ borderColor: 'var(--border)' }}>
         <div className="p-2 flex gap-2 border-b" style={{ borderColor: 'var(--border)' }}>

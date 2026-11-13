@@ -326,6 +326,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.POST("/whatsapp/historico/parar", handlers.WhatsappHistoricoParar)
 			authRequired.POST("/whatsapp/anexos/retentar", handlers.WhatsappAnexosRetentar)
 			authRequired.POST("/whatsapp/enviar-arquivo", handlers.WhatsappEnviarArquivo)
+			authRequired.POST("/whatsapp/contatos/atualizar", handlers.WhatsappContatosAtualizar)
 			authRequired.GET("/tarefas/regras", handlers.ListarRegrasTarefa)
 			authRequired.POST("/tarefas/regras", handlers.SalvarRegraTarefa)
 			authRequired.POST("/tarefas/:id/direcionar", handlers.DirecionarTarefa)

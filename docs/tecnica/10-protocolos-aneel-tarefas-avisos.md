@@ -146,6 +146,10 @@ em `pages/controleProcessosV2.css`). A rota `/processos/:id` é de gestor/admin.
   `arquivo`, até 25 MB; toda a equipe): sobe para o WhatsApp (`Upload`), manda como imagem/vídeo/áudio/documento
   e grava em FT_WHATSAPP_MENSAGENS (origem sistema) com a cópia local em `midia/`. Na tela, o clipe ao lado do
   "Enviar"; o texto digitado vira a legenda.
+- **Nomes (`whatsapp/contatos.go`):** a agenda do celular chega pelo app state `critical_unblock_low` e fica em
+  `Store.Contacts`; `nomeContato(jid)` (agenda > nome de exibição; resolve `@lid` → telefone) é usado ao gravar,
+  e `AtualizarNomesContatos()` regrava `chat_nome` de todas as conversas diretas: 45 s depois de conectar, ao fim
+  da busca de histórico e no botão "Atualizar nomes" (`POST /whatsapp/contatos/atualizar`, admin).
 - Avisos enviados ao grupo (`whatsapp.AvisarGrupo`): conclusão de protocolo ("— para *Nome*" ou
   "— *sem responsável* (admin direciona)"), tarefa direcionada, tarefa assumida.
 - ⚠️ Enquanto nenhum grupo for escolhido, nada sai pelo WhatsApp (só sininho).
