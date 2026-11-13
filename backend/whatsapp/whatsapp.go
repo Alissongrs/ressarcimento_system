@@ -297,7 +297,14 @@ func importarHistorico(v *events.HistorySync) {
 		return
 	}
 	n, novas := 0, 0
+	fim, semAcesso := false, false
 	for _, conv := range v.Data.GetConversations() {
+		switch conv.GetEndOfHistoryTransferType() {
+		case waHistorySync.Conversation_COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY:
+			fim = true
+		case waHistorySync.Conversation_COMPLETE_ON_DEMAND_SYNC_WITH_MORE_MSG_ON_PRIMARY_BUT_NO_ACCESS:
+			semAcesso = true
+		}
 		jid, err := types.ParseJID(conv.GetID())
 		if err != nil {
 			continue
@@ -318,10 +325,10 @@ func importarHistorico(v *events.HistorySync) {
 			n++
 		}
 	}
-	log.Printf("[whatsapp] histórico do celular: %d mensagens, %d novas (%s)", n, novas, v.Data.GetSyncType())
+	log.Printf("[whatsapp] histórico do celular: %d mensagens, %d novas (%s) fim=%v sem_acesso=%v", n, novas, v.Data.GetSyncType(), fim, semAcesso)
 	if v.Data.GetSyncType() == waHistorySync.HistorySync_ON_DEMAND {
 		select { // resposta a um pedido de PuxarHistorico
-		case respostaCh <- respostaDemanda{recebidas: n, novas: novas}:
+		case respostaCh <- respostaDemanda{recebidas: n, novas: novas, fim: fim, semAcesso: semAcesso}:
 		default:
 		}
 	}

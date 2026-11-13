@@ -24,12 +24,18 @@ type Progresso struct {
 	Feitas       int        `json:"feitas"`
 	Total        int        `json:"total"`
 	Novas        int        `json:"novas"`
+	SemAcesso    int        `json:"sem_acesso"` // conversas em que o celular tem mais, mas não libera
 	Inicio       *time.Time `json:"inicio"`
 	Fim          *time.Time `json:"fim"`
 	Erro         string     `json:"erro"`
 }
 
-type respostaDemanda struct{ recebidas, novas int }
+// respostaDemanda: o que veio numa resposta ON_DEMAND. fim = o celular avisou que não há mais nada
+// antes; semAcesso = há mais, mas o celular não libera (conversa arquivada/limitada).
+type respostaDemanda struct {
+	recebidas, novas int
+	fim, semAcesso   bool
+}
 
 var (
 	progMu     sync.Mutex
@@ -126,15 +132,20 @@ func rodarBusca(c *whatsmeow.Client, soChat string) {
 		progMu.Lock()
 		prog.Conversa, prog.ConversaNome, prog.Feitas = cv.chat, cv.nome, i
 		progMu.Unlock()
-		for rodada := 0; rodada < 400; rodada++ { // 400 × 50 = 20 mil mensagens por conversa, no máximo
+		for rodada := 0; rodada < 200; rodada++ { // 200 × 50 = 10 mil mensagens por conversa, no máximo
 			if deveParar() {
 				break
 			}
 			r, fim := pedirMaisAntigas(c, db, cv.chat)
 			progMu.Lock()
 			prog.Novas += r.novas
+			if r.semAcesso {
+				prog.SemAcesso++
+			}
 			progMu.Unlock()
-			if fim || r.recebidas == 0 {
+			// para quando: deu erro/tempo esgotado; o celular avisou que acabou; ou não veio NADA novo
+			// (o celular repete as mesmas mensagens quando não tem mais antigas — sem isso o laço não parava)
+			if fim || r.fim || r.semAcesso || r.recebidas == 0 || r.novas == 0 {
 				break
 			}
 		}
@@ -173,6 +184,7 @@ func pedirMaisAntigas(c *whatsmeow.Client, db *sql.DB, chat string) (respostaDem
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	log.Printf("[whatsapp] busca: pedindo 50 anteriores a %s (%s) em %s", waID, enviada.Format("2006-01-02 15:04"), chat)
 	if _, err := c.SendPeerMessage(ctx, c.BuildHistorySyncRequest(&info, 50)); err != nil {
 		setProgErro("pedido ao celular: " + err.Error())
 		return respostaDemanda{}, true

@@ -81,9 +81,9 @@ function HistoricoCompleto({ isAdmin, conectado, chat, onErro }) {
   return (
     <div className="px-3 py-2 border-b text-xs flex flex-wrap items-center gap-2" style={{ borderColor: 'var(--border)' }}>
       {rodando ? (
-        <span>Buscando no celular: {p.feitas}/{p.total} conversas · {p.novas} mensagens novas{p.conversa_nome ? ` · ${p.conversa_nome}` : ''}</span>
+        <span>Buscando no celular: {p.feitas}/{p.total} conversas · {p.novas} mensagens novas{p.conversa_nome ? ` · ${p.conversa_nome}` : ''}{p.erro ? ` · ${p.erro}` : ''}</span>
       ) : p?.fim ? (
-        <span className="opacity-70">Última busca: {p.novas} mensagens novas em {p.total} conversas{p.erro ? ` · ${p.erro}` : ''}</span>
+        <span className="opacity-70">Última busca: {p.novas} mensagens novas em {p.total} conversas{p.sem_acesso ? ` · ${p.sem_acesso} conversa(s) com mensagens que o celular não libera` : ''}{p.erro ? ` · ${p.erro}` : ''}</span>
       ) : <span className="opacity-70">O celular manda só parte do histórico ao parear; a busca pede o resto ao próprio celular do departamento, conversa por conversa, sem enviar nada a ninguém.</span>}
       {isAdmin && conectado && !rodando && (
         <button className="pa-btn ml-auto" disabled={busy} onClick={() => chamar('/whatsapp/historico/puxar', {})}>Buscar conversas inteiras</button>
