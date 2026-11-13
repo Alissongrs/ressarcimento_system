@@ -101,7 +101,7 @@ function Conexao({ estado, isAdmin, onAtualizar, onErro }) {
 // ── Conversas (monitor) ──────────────────────────────────────────────────────
 function Conversas({ conectado, inicial, onErro }) {
   const [q, setQ] = useState('');
-  const [dias, setDias] = useState(30);
+  const [dias, setDias] = useState(0); // 0 = tudo
   const [lista, setLista] = useState([]);
   const [chat, setChat] = useState(null);
   const [msgs, setMsgs] = useState([]);
@@ -151,7 +151,7 @@ function Conversas({ conectado, inicial, onErro }) {
               className="text-sm py-1 bg-transparent outline-none w-full" />
           </div>
           <select value={dias} onChange={(e) => setDias(Number(e.target.value))} className="text-sm rounded border px-1" style={card}>
-            <option value={7}>7 dias</option><option value={30}>30 dias</option><option value={90}>90 dias</option><option value={365}>1 ano</option>
+            <option value={0}>tudo</option><option value={7}>7 dias</option><option value={30}>30 dias</option><option value={90}>90 dias</option><option value={365}>1 ano</option>
           </select>
         </div>
         {conectado && (
@@ -162,7 +162,7 @@ function Conversas({ conectado, inicial, onErro }) {
           </div>
         )}
         <div className="overflow-y-auto" style={{ maxHeight: 600 }}>
-          {!lista.length && <div className="p-4 text-sm opacity-60">Nenhuma conversa no período. As mensagens aparecem aqui a partir da conexão do WhatsApp.</div>}
+          {!lista.length && <div className="p-4 text-sm opacity-60">{dias ? 'Nenhuma conversa neste período. Escolha "tudo" para ver o histórico importado do celular.' : 'Nenhuma conversa gravada ainda. Ao parear pelo QR code, o celular manda o histórico e ele aparece aqui.'}</div>}
           {lista.map((c) => (
             <button key={c.chat} type="button" onClick={() => setChat(c)}
               className="w-full text-left px-3 py-2 border-b text-sm"

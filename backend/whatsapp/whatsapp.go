@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -99,6 +101,7 @@ func Iniciar() {
 	container = c
 	est.Ligado = true
 	mu.Unlock()
+	pedirHistoricoCompleto()
 	if err := novoCliente(); err != nil {
 		setErro(err.Error())
 		return
@@ -110,6 +113,30 @@ func Iniciar() {
 		if err := cli.Connect(); err != nil {
 			setErro("conectar: " + err.Error())
 		}
+	}
+}
+
+// pedirHistoricoCompleto faz o celular mandar as conversas inteiras ao parear, e não só o
+// "histórico recente" (umas 10 mensagens por conversa). Vale a partir do PRÓXIMO pareamento
+// (desconectar e ler o QR code de novo); o que já está gravado não se perde (wa_id é único).
+// WHATSAPP_HISTORICO_DIAS limita o período (padrão 365; 0 = tudo o que o celular tiver).
+func pedirHistoricoCompleto() {
+	sim := true
+	store.DeviceProps.RequireFullSync = &sim
+	dias := 365
+	if v := strings.TrimSpace(os.Getenv("WHATSAPP_HISTORICO_DIAS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			dias = n
+		}
+	}
+	if store.DeviceProps.HistorySyncConfig == nil {
+		return
+	}
+	if dias > 0 {
+		lim := uint32(dias)
+		store.DeviceProps.HistorySyncConfig.FullSyncDaysLimit = &lim
+	} else {
+		store.DeviceProps.HistorySyncConfig.FullSyncDaysLimit = nil
 	}
 }
 

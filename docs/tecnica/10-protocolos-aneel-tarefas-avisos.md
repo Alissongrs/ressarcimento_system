@@ -123,7 +123,14 @@ em `pages/controleProcessosV2.css`). A rota `/processos/:id` é de gestor/admin.
 - Um número só, conectado por **QR code** (biblioteca whatsmeow = mesma conexão do WhatsApp Web, não a
   API oficial). Sessão em SQLite no volume `whatsapp_data` (`WHATSAPP_DIR=/app/whatsapp_sessao`).
   `WHATSAPP_DESLIGADO=1` desliga (usar em backend local apontado para o banco de produção).
-- Página `/whatsapp` (admin): QR, monitor de conversas, responder, escolher o **grupo de avisos**.
+- Página `/whatsapp`: toda a equipe interna vê conversas, mensagens e insights e pode responder pelo número
+  do departamento; só o **admin** conecta/desconecta e escolhe o **grupo de avisos**. Solicitante não vê.
+- **Histórico (13/11/2026):** ao parear pelo QR code o celular manda as conversas e `importarHistorico`
+  grava em `FT_WHATSAPP_MENSAGENS` (`wa_id` único, sem duplicar). `pedirHistoricoCompleto()` marca
+  `RequireFullSync` + `FullSyncDaysLimit` (env `WHATSAPP_HISTORICO_DIAS`, padrão 365; 0 = tudo) — sem isso
+  o WhatsApp manda só o "recente" (~10 mensagens por conversa). Vale a partir do próximo pareamento:
+  desconectar e ler o QR de novo. Na aba Conversas o filtro de período tem "tudo" (padrão); `GET
+  /whatsapp/conversas?dias=0` = sem filtro.
 - Avisos enviados ao grupo (`whatsapp.AvisarGrupo`): conclusão de protocolo ("— para *Nome*" ou
   "— *sem responsável* (admin direciona)"), tarefa direcionada, tarefa assumida.
 - ⚠️ Enquanto nenhum grupo for escolhido, nada sai pelo WhatsApp (só sininho).

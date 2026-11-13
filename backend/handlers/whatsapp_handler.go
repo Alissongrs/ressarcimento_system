@@ -83,11 +83,17 @@ func WhatsappConversas(c *gin.Context) {
 	if _, ok := waEquipe(c); !ok {
 		return
 	}
-	dias, _ := strconv.Atoi(c.DefaultQuery("dias", "30"))
-	if dias <= 0 || dias > 365 {
-		dias = 30
+	// dias=0 (padrão) = tudo o que está gravado, inclusive o histórico importado do celular
+	dias, _ := strconv.Atoi(c.DefaultQuery("dias", "0"))
+	if dias < 0 || dias > 3650 {
+		dias = 0
 	}
-	args := []any{dias}
+	args := []any{}
+	periodo := ""
+	if dias > 0 {
+		periodo = " WHERE m.enviada_em >= NOW() - INTERVAL ? DAY"
+		args = append(args, dias)
+	}
 	filtro := ""
 	if q := strings.TrimSpace(c.Query("q")); q != "" {
 		filtro = " HAVING nome LIKE ? OR chat LIKE ?"
@@ -101,8 +107,7 @@ func WhatsappConversas(c *gin.Context) {
 			(SELECT COALESCE(x.texto,'') FROM FT_WHATSAPP_MENSAGENS x WHERE x.chat = m.chat ORDER BY x.enviada_em DESC, x.id DESC LIMIT 1) AS ultimo_texto,
 			(SELECT x.tipo FROM FT_WHATSAPP_MENSAGENS x WHERE x.chat = m.chat ORDER BY x.enviada_em DESC, x.id DESC LIMIT 1) AS ultimo_tipo,
 			(SELECT x.de_mim FROM FT_WHATSAPP_MENSAGENS x WHERE x.chat = m.chat ORDER BY x.enviada_em DESC, x.id DESC LIMIT 1) = 1 AS ultima_de_mim
-		FROM FT_WHATSAPP_MENSAGENS m
-		WHERE m.enviada_em >= NOW() - INTERVAL ? DAY
+		FROM FT_WHATSAPP_MENSAGENS m`+periodo+`
 		GROUP BY m.chat`+filtro+`
 		ORDER BY ultima_em DESC LIMIT 300`, args...).Scan(&out)
 	// grupos do número que ainda não têm mensagem gravada também aparecem na lista
