@@ -21,15 +21,19 @@ log() { echo "[$(ts)] $*" >> "$LOG"; }
 exec 9>"$LOCK" || exit 0
 if ! flock -n 9; then log "já em execução — pulando."; exit 0; fi
 cd "$REPO" || { log "repo não encontrado: $REPO"; exit 0; }
+. "$WORKER_DIR/rotina_lib.sh"; rotina_ping worker
 
 N="$(PYTHONUTF8=1 "$PYTHON" "$WORKER_DIR/has_work.py" 2>>"$LOG")"; RC=$?
 if [ $RC -eq 1 ]; then exit 0
 elif [ $RC -ne 0 ]; then log "has_work falhou (rc=$RC) — abortando."; exit 0; fi
 
 log "fila com $N pedido(s) — acionando worker…"
+rotina_inicio worker "fila com $N pedido(s)"
 # shellcheck disable=SC2086
 timeout "$MAX_SECONDS" "$CLAUDE_BIN" -p $CLAUDE_FLAGS < "$PROMPT_FILE" >> "$LOG" 2>&1; RC=$?
-if [ $RC -eq 124 ]; then log "worker excedeu ${MAX_SECONDS}s (timeout)."
-elif [ $RC -ne 0 ]; then log "worker terminou com erro (rc=$RC)."
-else log "worker concluiu a rodada."; fi
+if [ $RC -eq 124 ]; then MSG="worker excedeu ${MAX_SECONDS}s (timeout)"
+elif [ $RC -ne 0 ]; then MSG="worker terminou com erro (rc=$RC)"
+else MSG="worker concluiu a rodada: $N pedido(s)"; fi
+log "$MSG."
+rotina_fim "$RC" "$MSG"
 exit 0

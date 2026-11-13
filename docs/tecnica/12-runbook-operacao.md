@@ -34,8 +34,17 @@ As rotinas estão em `worker/crontab.sure` (horários no fuso da VPS). Cada uma 
 | Protocolos ANEEL (`job_aneel.sh`) | 05:30 | `worker/aneel.log` | `worker/job_aneel.sh` |
 | Backup (`backup_sistema.sh`) | 03:00 (sex: semanal) | `/opt/ressarcimento/backups/backup.log` | `worker/backup_sistema.sh rotativo` |
 
+Desde 13/11/2026 cada rotina registra no banco que rodou (`worker/registrar_execucao.py`, chamado
+pelos `.sh` via `rotina_lib.sh`) e o que fez. O cartão **Tarefas do sistema → Rotinas** mostra cada uma
+com o estado (OK, atrasada, erro, travada, rodando, sem sinal), o último sinal e o histórico das
+execuções. O backend confere a cada 15 min e avisa **uma pessoa** (escolhida no próprio cartão: alerta
+na tela e, se houver celular e o WhatsApp do departamento estiver conectado, mensagem no WhatsApp);
+repete o mesmo problema só depois de 24 h e avisa quando volta ao normal. Tabelas:
+`FT_ROTINAS_HEARTBEAT`, `FT_ROTINAS_EXECUCOES`, `FT_ROTINAS_AVISOS`; o catálogo do que se espera de
+cada rotina está em `backend/saude/saude.go`.
+
 Passos:
-1. Na tela **Tarefas do sistema** veja se a execução aparece e com que resultado.
+1. Na tela **Tarefas do sistema**, cartão **Rotinas**: veja o estado e o motivo; abra o histórico da rotina.
 2. Na VPS, `tail -100` do log da rotina. As mensagens dizem o motivo (sem credencial).
 3. Se foi falta de rede ou um arquivo travado, rode à mão com o comando da tabela. Todas as rotinas
    usam `flock`: não rodam duas ao mesmo tempo.

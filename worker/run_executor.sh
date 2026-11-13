@@ -14,10 +14,12 @@ SERVICE="${SURE_BACKEND_SERVICE:-backend}"
 exec 8>"$LOCK" || exit 0
 flock -n 8 || exit 0
 cd "$REPO" || { echo "[$(date '+%F %T')] repo não encontrado: $REPO" >> "$LOG"; exit 0; }
+. "$REPO/worker/rotina_lib.sh"; rotina_ping executor
 
 out="$(docker compose exec -T "$SERVICE" /app/executor_solicitacoes 2>&1)"; rc=$?
 # só registra quando houve trabalho ou erro (evita 1 linha "nada a fazer" por minuto)
 if [ $rc -ne 0 ] || ! grep -q "nada a fazer" <<<"$out"; then
   { echo "[$(date '+%F %T')] rc=$rc"; echo "$out"; } >> "$LOG"
+  rotina_registrar executor "$rc" "$(printf '%s' "$out" | tail -c 400)"
 fi
 exit 0

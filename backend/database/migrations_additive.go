@@ -285,6 +285,38 @@ func runAdditiveMigrations(db *sql.DB) error {
 		  KEY idx_wa_data (enviada_em)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
 
+	// Saúde das rotinas (melhoria 5, 13/11/2026): sinal de vida + execuções das rotinas do cron da VPS
+	// (worker/registrar_execucao.py) e do agendador do backend (pacote saude); avisos já dados ao responsável.
+	createTableIfNotExists(db, "FT_ROTINAS_HEARTBEAT", `
+		CREATE TABLE IF NOT EXISTS FT_ROTINAS_HEARTBEAT (
+		  rotina      VARCHAR(40) NOT NULL,
+		  ultimo_ping DATETIME    NOT NULL,
+		  host        VARCHAR(60) NULL,
+		  PRIMARY KEY (rotina)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
+	createTableIfNotExists(db, "FT_ROTINAS_EXECUCOES", `
+		CREATE TABLE IF NOT EXISTS FT_ROTINAS_EXECUCOES (
+		  id        BIGINT       NOT NULL AUTO_INCREMENT,
+		  rotina    VARCHAR(40)  NOT NULL,
+		  inicio    DATETIME     NOT NULL,
+		  fim       DATETIME     NULL,
+		  status    VARCHAR(10)  NOT NULL DEFAULT 'rodando',
+		  rc        INT          NULL,
+		  resumo    VARCHAR(500) NULL,
+		  host      VARCHAR(60)  NULL,
+		  criado_em DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		  PRIMARY KEY (id),
+		  KEY idx_rotina_inicio (rotina, inicio),
+		  KEY idx_rotina_status (rotina, status)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
+	createTableIfNotExists(db, "FT_ROTINAS_AVISOS", `
+		CREATE TABLE IF NOT EXISTS FT_ROTINAS_AVISOS (
+		  rotina        VARCHAR(40) NOT NULL,
+		  ultimo_estado VARCHAR(10) NOT NULL,
+		  ultimo_aviso  DATETIME    NOT NULL,
+		  PRIMARY KEY (rotina)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
+
 	// ↑ Próximas mudanças ADITIVAS entram acima desta linha.
 	log.Println("[migrate-aditivo] concluído")
 	return nil

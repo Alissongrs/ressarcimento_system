@@ -25,6 +25,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from has_work import ler_dsn  # noqa: E402
+import registrar_execucao as reg  # noqa: E402
 
 RCLONE = os.environ.get("SURE_RCLONE_BIN", "rclone")
 REMOTE = os.environ.get("SURE_RCLONE_REMOTE", "gdrive")
@@ -107,14 +108,17 @@ def limpar_antigos(con):
 
 
 def main():
+    reg.ping("drive_sync_anexos")
     # checa rclone + remote antes
     try:
         v = rclone("--version", timeout=30)
         if v.returncode != 0:
             print("rclone não encontrado/funcional. Instale e configure o remote '%s'." % REMOTE, file=sys.stderr)
+            reg.registrar("drive_sync_anexos", 2, "rclone não encontrado/funcional")
             sys.exit(2)
     except Exception as e:  # noqa: BLE001
-        print("rclone indisponível:", e, file=sys.stderr); sys.exit(2)
+        print("rclone indisponível:", e, file=sys.stderr)
+        reg.registrar("drive_sync_anexos", 2, "rclone indisponível: %s" % str(e)[:300]); sys.exit(2)
 
     con = conectar()
     try:
@@ -131,6 +135,7 @@ def main():
             print("[drive] nada a subir.")
             return
         print("[drive] %d anexo(s) para subir ao Drive (%s:%s)" % (len(pend), REMOTE, DRIVE_DIR))
+        eid = reg.inicio("drive_sync_anexos", "%d anexo(s) para subir" % len(pend))
         ok = 0
         with con.cursor() as cur:
             for aid, idsol, nome, conteudo in pend:
@@ -139,6 +144,7 @@ def main():
                 else:
                     con.rollback()
         print("[drive] concluído: %d/%d com link." % (ok, len(pend)))
+        reg.fim(eid, 0 if ok == len(pend) else 1, "%d/%d anexo(s) com link no Drive" % (ok, len(pend)))
     finally:
         con.close()
 

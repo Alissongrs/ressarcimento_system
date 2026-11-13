@@ -19,8 +19,9 @@ log() { echo "[$(ts)] $*" >> "$LOG"; }
 
 exec 7>"$LOCK" || exit 0
 flock -n 7 || { log "já em execução — pulando."; exit 0; }
+. "$BUNDLE/rotina_lib.sh"; rotina_inicio agua
 
-cd "$AGUA_DIR" || { log "pasta não encontrada: $AGUA_DIR"; exit 0; }
+cd "$AGUA_DIR" || { log "pasta não encontrada: $AGUA_DIR"; rotina_fim 1 "pasta não encontrada: $AGUA_DIR"; exit 0; }
 
 DESDE="$(date +%F)"  # faturas inseridas a partir de agora
 
@@ -37,6 +38,8 @@ log "água terminou (rc=$RC)."
 # 3) regras de água (pico FA02 + cobrança sem medição FA05) — motor do BACKEND desde 03/11/2026
 #    (jobs/agua_motor.py e jobs/agua_sem_medicao.py não rodam mais). O backend grava com backup.
 log "água: regras de água no backend (pico + sem medição)…"
-PYTHONUTF8=1 "$PYTHON" "$BUNDLE/regras_agua.py" apply --desde "$DESDE" >> "$LOG" 2>&1
-log "regras de água terminaram (rc=$?)."
+PYTHONUTF8=1 "$PYTHON" "$BUNDLE/regras_agua.py" apply --desde "$DESDE" >> "$LOG" 2>&1; RC2=$?
+log "regras de água terminaram (rc=$RC2)."
+if [ "$RC" -ne 0 ]; then RCF=$RC; else RCF=$RC2; fi
+rotina_fim "$RCF" "agua_sync rc=$RC; regras de água rc=$RC2"
 exit 0

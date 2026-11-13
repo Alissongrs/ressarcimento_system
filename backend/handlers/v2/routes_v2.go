@@ -58,6 +58,8 @@ func RegisterReadRoutes(g *gin.RouterGroup) {
 
 	g.GET("/processos", ListProcessos)
 	g.GET("/divergencias/status", ListarDivergenciasStatus) // status × histórico (admin)
+	g.GET("/rotinas/saude", RotinasSaude)                    // saúde das rotinas (admin)
+	g.GET("/rotinas/saude/execucoes", RotinasSaudeExecucoes)
 	g.GET("/auditoria/processos", ExportAuditoria)
 	g.GET("/processos/:id", GetProcesso)
 	g.GET("/processos/:id/historico", GetHistorico)
@@ -100,6 +102,8 @@ func RegisterReadRoutes(g *gin.RouterGroup) {
 func RegisterWriteRoutes(g *gin.RouterGroup) {
 	g.POST("/processos/:id/movimentar", Movimentar)
 	g.POST("/divergencias/status/corrigir", CorrigirDivergenciaStatus) // status × histórico (admin)
+	g.POST("/rotinas/saude/aviso", RotinasSaudeDefinirAviso)           // quem recebe os avisos das rotinas (admin)
+	g.POST("/rotinas/saude/aviso/testar", RotinasSaudeTestarAviso)
 	g.PATCH("/processos/:id/relevancia", SetRelevancia)
 
 	g.POST("/processos/:id/deferimento", SalvarDeferimento)

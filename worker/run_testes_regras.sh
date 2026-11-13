@@ -23,14 +23,18 @@ log() { echo "[$(ts)] $*" >> "$LOG"; }
 exec 9>"$LOCK" || exit 0
 if ! flock -n 9; then exit 0; fi
 cd "$REPO" || { log "repo não encontrado: $REPO"; exit 0; }
+. "$WORKER_DIR/rotina_lib.sh"; rotina_ping testes_regras
 
 N="$(PYTHONUTF8=1 "$PYTHON" "$WORKER_DIR/testes_regras.py" pendentes 2>>"$LOG")"; RC=$?
 if [ $RC -eq 1 ]; then exit 0
 elif [ $RC -ne 0 ]; then log "testes_regras pendentes falhou (rc=$RC) — abortando."; exit 0; fi
 
 log "fila com $N teste(s) — acionando agente…"
+rotina_inicio testes_regras "fila com $N teste(s)"
 PYTHONUTF8=1 timeout "$MAX_SECONDS" "$CLAUDE_BIN" "${CLAUDE_ARGS[@]}" < "$PROMPT_FILE" >> "$LOG" 2>&1; RC=$?
-if [ $RC -eq 124 ]; then log "agente excedeu ${MAX_SECONDS}s (timeout) — testes presos expiram sozinhos."
-elif [ $RC -ne 0 ]; then log "agente terminou com erro (rc=$RC)."
-else log "agente concluiu a rodada."; fi
+if [ $RC -eq 124 ]; then MSG="agente excedeu ${MAX_SECONDS}s (timeout) — testes presos expiram sozinhos"
+elif [ $RC -ne 0 ]; then MSG="agente terminou com erro (rc=$RC)"
+else MSG="agente concluiu a rodada: $N teste(s)"; fi
+log "$MSG."
+rotina_fim "$RC" "$MSG"
 exit 0

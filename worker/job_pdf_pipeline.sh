@@ -29,13 +29,14 @@ log() { echo "[$(ts)] $*" >> "$LOG"; }
 
 exec 8>"$LOCK" || exit 0
 flock -n 8 || { log "já em execução — pulando."; exit 0; }
+. "$BUNDLE/rotina_lib.sh"; rotina_inicio pdf_pipeline "empresas: $EMPRESAS"
 
 # 1) BACKUP antes (reversão): dump rotativo do banco
 log "backup pré-pipeline…"
 bash "$BUNDLE/backup_sistema.sh" rotativo >> "$LOG" 2>&1 || log "aviso: backup pré-pipeline falhou"
 
 # 2) Extração (--skip-processadas = idempotente; sem --workers por sua escolha)
-cd "$IA_DIR" || { log "pasta não encontrada: $IA_DIR"; exit 0; }
+cd "$IA_DIR" || { log "pasta não encontrada: $IA_DIR"; rotina_fim 1 "pasta não encontrada: $IA_DIR"; exit 0; }
 # mysql-connector-python 8.0.x (visto na 8.0.30, 8.0.31 e 8.0.33) tem um defeito que impede conectar no banco de origem das faturas
 # (MariaDB 10.4: "Character set 'utf8' unsupported" — reproduzido em 04/11/2026; a 8.4.0 conecta).
 # Se for uma dessas, troca uma vez pela 8.4.0 (testada nos dois bancos) só para o usuário que roda o job.
@@ -65,4 +66,5 @@ log "iniciando pdf_pipeline para empresas: $EMPRESAS"
 PYTHONUTF8=1 "$PYTHON" pdf_pipeline.py --prod --empresa $EMPRESAS --no-ocr --skip-processadas >> "$LOG" 2>&1
 RC=$?
 log "pdf_pipeline terminou (rc=$RC). Confira as filas de conferência no front."
+rotina_fim "$RC" "pdf_pipeline terminou (rc=$RC); empresas: $EMPRESAS"
 exit 0

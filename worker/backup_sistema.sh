@@ -26,11 +26,14 @@ mkdir -p "$DIR"
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(ts)] [$MODO] $*" >> "$LOG"; }
 STAMP="$(date '+%Y%m%d_%H%M%S')"
+. "$(cd "$(dirname "$0")" && pwd)/rotina_lib.sh"
+if [ "$MODO" = "semanal" ]; then ROT=backup_semanal; else ROT=backup; fi
+rotina_inicio "$ROT"
 
 # --- lê DB_APP_URL do .env (user:senha@tcp(host:porta)/db) ---
 DSN="$(grep -E '^DB_APP_URL' "$ENV" | head -1 | cut -d= -f2- | tr -d '"'"'"' ')"
 if [[ ! "$DSN" =~ ^([^:]+):(.*)@tcp\(([^:]+):([0-9]+)\)/([^?]+) ]]; then
-  log "DB_APP_URL ausente/ inválida em $ENV"; exit 1
+  log "DB_APP_URL ausente/ inválida em $ENV"; rotina_fim 1 "DB_APP_URL ausente/inválida"; exit 1
 fi
 DB_USER="${BASH_REMATCH[1]}"; DB_PASS="${BASH_REMATCH[2]}"
 DB_HOST="${BASH_REMATCH[3]}"; DB_PORT="${BASH_REMATCH[4]}"; DB_NAME="${BASH_REMATCH[5]}"
@@ -45,7 +48,7 @@ log "iniciando dump de $DB_NAME (dados excluídos: ${EXCLUDE_TABLES:-nenhuma}) .
 MYSQL_PWD="$DB_PASS" mysqldump -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" \
     --single-transaction --quick --routines --events --no-tablespaces \
     "${EXARGS[@]}" "$DB_NAME" 2>>"$LOG" | gzip -c > "$SQLGZ"
-if [ "${PIPESTATUS[0]}" != "0" ]; then log "FALHA no mysqldump"; rm -f "$SQLGZ"; exit 1; fi
+if [ "${PIPESTATUS[0]}" != "0" ]; then log "FALHA no mysqldump"; rm -f "$SQLGZ"; rotina_fim 1 "FALHA no mysqldump"; exit 1; fi
 # 2) só a ESTRUTURA (sem dados) das tabelas de faturas, anexada ao mesmo .gz
 #    (membros gzip concatenados descompactam normalmente). Falha aqui não é fatal.
 if [ -n "$EXCLUDE_TABLES" ]; then
@@ -75,3 +78,4 @@ rotaciona() {
 rotaciona 'db_*.sql.gz'
 rotaciona 'files_*.tar.gz'
 log "concluído."
+rotina_fim 0 "dump $(basename "$SQLGZ") ($(du -h "$SQLGZ" | cut -f1))"

@@ -1,23 +1,7 @@
 // src/services/divergenciasService.js
 // Status × histórico: processos cujo espelho (FT_PROCESSOS) não bate com a última
 // movimentação. Só administradores. Backend: handlers/v2/divergencias.go.
-import axios from 'axios';
-import { getRawToken } from './api';
-
-function v2BaseURL() {
-  const base = String(import.meta?.env?.VITE_API_BASE || '/api/v1').trim();
-  return base.replace(/\/api\/v1\/?$/, '/api/v2');
-}
-
-const apiV2 = axios.create({ baseURL: v2BaseURL(), withCredentials: true });
-apiV2.interceptors.request.use((config) => {
-  const token = String(getRawToken() || '').trim().replace(/^['"]+|['"]+$/g, '');
-  if (token) {
-    config.headers = config.headers || {};
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+import apiV2 from './apiV2';
 
 // GET /api/v2/divergencias/status → { total, itens: [...] }
 export async function listarDivergencias() {

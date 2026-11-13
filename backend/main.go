@@ -23,6 +23,7 @@ import (
 	"ressarcimento-backend/repositories"
 	"ressarcimento-backend/rotinas"
 	"ressarcimento-backend/routes"
+	"ressarcimento-backend/saude"
 	"ressarcimento-backend/services"
 	"ressarcimento-backend/utils"
 	"ressarcimento-backend/whatsapp"
@@ -135,7 +136,7 @@ func startScheduler() {
 	// Tarefa 0: Ler e-mails recebidos a cada 5 minutos (desabilitado por padrão)
 	// Habilite definindo IMAP_ENABLE=1 no ambiente
 	if os.Getenv("IMAP_ENABLE") == "1" {
-		s.Every(1).Minutes().Do(services.LerEmailsRecebidos)
+		s.Every(1).Minutes().Do(saude.ComPing("emails", services.LerEmailsRecebidos))
 	} else {
 		log.Println("IMAP desabilitado (defina IMAP_ENABLE=1 para habilitar)")
 	}
@@ -153,10 +154,10 @@ func startScheduler() {
 	// Tarefa 4: Checar prazos de requisições (a cada 1 hora)
 	s.Every(1).Hour().Do(services.ChecarPrazosRequisicoes)
 	// Tarefa 5: Checar prazos de processos (a cada 1 hora)
-	s.Every(1).Hour().Do(services.ChecarPrazosProcessos)
+	s.Every(1).Hour().Do(saude.ComPing("prazos", services.ChecarPrazosProcessos))
 	// Tarefa 5b: status × histórico — todo dia 06:30 conta os processos cujo espelho não bate
 	// com a última movimentação e avisa os administradores (Tarefas do sistema corrige um a um)
-	s.Every(1).Day().At("06:30").Do(services.ChecarDivergenciasStatus)
+	s.Every(1).Day().At("06:30").Do(saude.Executar("divergencias_status", services.ChecarDivergenciasStatus))
 
 	// Tarefa 5a: Atualizar cache de sugestão de cobrança/SR dos processos vencidos (a cada 1 hora)
 	s.Every(1).Hour().Do(handlers.ProcessarCobrancasCache)
@@ -185,10 +186,14 @@ func startScheduler() {
 	s.Every(1).Hour().Do(services.AtualizarScoreModelAsync)
 
 	// Tarefa 9: rotinas aprovadas (#rotina no chat) + e-mail dos lembretes com hora marcada (a cada 1 minuto)
-	s.Every(1).Minutes().Do(rotinas.RodarDevidas)
+	s.Every(1).Minutes().Do(saude.ComPing("rotinas_chat", rotinas.RodarDevidas))
 
 	// Tarefa 10: protocolos ANEEL — lê e-mails da ANEEL, atualiza situação e cria tarefas (a cada 15 minutos)
-	s.Every(15).Minutes().Do(protocolos.RodarAgendado)
+	s.Every(15).Minutes().Do(saude.ComPing("protocolos_aneel", protocolos.RodarAgendado))
+	// Tarefa 11: saúde das rotinas (melhoria 5) — sinal de vida do agendador a cada minuto e, a cada 15 min,
+	// confere o catálogo (cron da VPS + backend) e avisa o responsável configurado em Tarefas do sistema → Rotinas
+	s.Every(1).Minutes().Do(func() { saude.Ping("backend_agendador") })
+	s.Every(15).Minutes().Do(saude.Monitorar)
 	// WhatsApp da empresa: reabre a sessão vinculada por QR code (avisos das tarefas + monitor)
 	go whatsapp.Iniciar()
 

@@ -19,11 +19,17 @@ log() { echo "[$(ts)] $*" >> "$LOG"; }
 exec 6>"$LOCK" || exit 0
 flock -n 6 || { log "já em execução — pulando."; exit 0; }
 
+. "$BUNDLE/rotina_lib.sh"
 if [ -z "$TOKEN" ]; then
   log "CRON_TOKEN ausente — defina no backend/.env (e no ambiente do backend) antes de habilitar."
+  rotina_registrar regras 1 "CRON_TOKEN ausente no backend/.env"
   exit 0
 fi
 
-resp="$(curl -s -m 60 -X POST "$API/rules/aplicar-agendadas" -H "X-Cron-Token: $TOKEN" 2>>"$LOG")"
-log "aplicar-agendadas → ${resp:-<sem resposta>}"
+TMP="$(mktemp)"
+code="$(curl -s -m 60 -o "$TMP" -w '%{http_code}' -X POST "$API/rules/aplicar-agendadas" -H "X-Cron-Token: $TOKEN" 2>>"$LOG")"; RC=$?
+resp="$(cat "$TMP" 2>/dev/null)"; rm -f "$TMP"
+[ $RC -eq 0 ] && [ "${code:-000}" != "200" ] && RC=1
+log "aplicar-agendadas → HTTP ${code:-?} ${resp:-<sem resposta>}"
+rotina_registrar regras "$RC" "HTTP ${code:-?} ${resp:-sem resposta do backend}"
 exit 0

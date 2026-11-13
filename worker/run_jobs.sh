@@ -18,7 +18,11 @@ fi
 exec 7>"$LOCK" || exit 0
 flock -n 7 || exit 0
 cd "$REPO" || { echo "[$(date '+%F %T')] repo não encontrado: $REPO" >> "$LOG"; exit 0; }
+. "$REPO/worker/rotina_lib.sh"; rotina_ping jobs
 
-out="$(PYTHONUTF8=1 "$PYTHON" worker/run_jobs.py 2>&1)"
-[ -n "$out" ] && { echo "[$(date '+%F %T')]"; echo "$out"; } >> "$LOG"
+out="$(PYTHONUTF8=1 "$PYTHON" worker/run_jobs.py 2>&1)"; rc=$?
+if [ -n "$out" ] || [ $rc -ne 0 ]; then
+  { echo "[$(date '+%F %T')]"; echo "$out"; } >> "$LOG"
+  rotina_registrar jobs "$rc" "$(printf '%s' "$out" | tail -c 400)"
+fi
 exit 0

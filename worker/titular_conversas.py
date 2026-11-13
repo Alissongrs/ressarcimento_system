@@ -19,6 +19,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from has_work import ler_dsn  # noqa: E402
+import registrar_execucao as reg  # noqa: E402
 
 CLAUDE = os.environ.get("SURE_CLAUDE_BIN", "claude")
 MAX_CONV = int(os.environ.get("SURE_TITULO_LOTE", "20"))
@@ -91,13 +92,19 @@ def limpar_titulo(t):
 
 
 def main():
+    reg.ping("titular_conversas")
     con = conectar()
     try:
         convs = pegar_pendentes(con)
         if not convs:
             print("[titular] nada pendente.")
             return
-        titulos = chamar_claude(montar_prompt(convs))
+        eid = reg.inicio("titular_conversas", "%d conversa(s) com título automático" % len(convs))
+        try:
+            titulos = chamar_claude(montar_prompt(convs))
+        except Exception as e:  # noqa: BLE001
+            reg.fim(eid, 1, "claude -p falhou: %s" % str(e)[:300])
+            raise
         n = 0
         with con.cursor() as cur:
             for cv in convs:
@@ -112,6 +119,7 @@ def main():
                 n += cur.rowcount
         con.commit()
         print("[titular] %d título(s) refinado(s) pela IA." % n)
+        reg.fim(eid, 0, "%d título(s) refinado(s) pela IA" % n)
     finally:
         con.close()
 

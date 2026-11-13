@@ -19,12 +19,18 @@ log() { echo "[$(ts)] $*" >> "$LOG"; }
 exec 6>"$LOCK" || exit 0
 flock -n 6 || { log "já em execução — pulando."; exit 0; }
 
+. "$BUNDLE/rotina_lib.sh"
 if [ -z "$TOKEN" ]; then
   log "CRON_TOKEN ausente — defina no backend/.env (e no ambiente do backend) antes de habilitar."
+  rotina_registrar aneel 1 "CRON_TOKEN ausente no backend/.env"
   exit 0
 fi
 
 # a ANEEL pode demorar: até 10 min
-resp="$(curl -s -m 600 -X POST "$API/parametros/aneel/importar-cron" -H "X-Cron-Token: $TOKEN" 2>>"$LOG")"
-log "importar-cron → ${resp:-<sem resposta>}"
+TMP="$(mktemp)"
+code="$(curl -s -m 600 -o "$TMP" -w '%{http_code}' -X POST "$API/parametros/aneel/importar-cron" -H "X-Cron-Token: $TOKEN" 2>>"$LOG")"; RC=$?
+resp="$(cat "$TMP" 2>/dev/null)"; rm -f "$TMP"
+[ $RC -eq 0 ] && [ "${code:-000}" != "200" ] && RC=1
+log "importar-cron → HTTP ${code:-?} ${resp:-<sem resposta>}"
+rotina_registrar aneel "$RC" "HTTP ${code:-?} ${resp:-sem resposta do backend}"
 exit 0

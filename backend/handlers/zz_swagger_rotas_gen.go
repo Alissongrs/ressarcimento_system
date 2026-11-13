@@ -2960,6 +2960,26 @@ func swaggerRotaGet_api_v2_processos() {}
 // @Router /api/v2/divergencias/status [get]
 func swaggerRotaGet_api_v2_divergencias_status() {}
 
+// @Summary Admin
+// @Description Qualquer usuário autenticado. Handler: v2.admin.
+// @Tags v2 · Rotinas
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/rotinas/saude [get]
+func swaggerRotaGet_api_v2_rotinas_saude() {}
+
+// @Summary Rotinas saude execucoes
+// @Description Qualquer usuário autenticado. Handler: v2.RotinasSaudeExecucoes.
+// @Tags v2 · Rotinas
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/rotinas/saude/execucoes [get]
+func swaggerRotaGet_api_v2_rotinas_saude_execucoes() {}
+
 // @Summary Export auditoria
 // @Description Qualquer usuário autenticado. Handler: v2.ExportAuditoria.
 // @Tags v2 · auditoria
@@ -3198,6 +3218,30 @@ func swaggerRotaPost_api_v2_processos__id__movimentar() {}
 // @Failure 401 {object} map[string]string
 // @Router /api/v2/divergencias/status/corrigir [post]
 func swaggerRotaPost_api_v2_divergencias_status_corrigir() {}
+
+// @Summary Admin
+// @Description Qualquer usuário autenticado. Handler: v2.admin.
+// @Tags v2 · Rotinas
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/rotinas/saude/aviso [post]
+func swaggerRotaPost_api_v2_rotinas_saude_aviso() {}
+
+// @Summary Rotinas saude testar aviso
+// @Description Qualquer usuário autenticado. Handler: v2.RotinasSaudeTestarAviso.
+// @Tags v2 · Rotinas
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v2/rotinas/saude/aviso/testar [post]
+func swaggerRotaPost_api_v2_rotinas_saude_aviso_testar() {}
 
 // @Summary Set relevancia
 // @Description Qualquer usuário autenticado. Handler: v2.SetRelevancia.
