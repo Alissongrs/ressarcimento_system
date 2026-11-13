@@ -152,3 +152,6 @@ worker/backup_*.json
 worker/*.bak_*
 worker/jobs/backup_*.json
 *.tar.gz
+
+# cache sqlite da consulta SEFAZ criado pelo motor ao rodar (worker/engine)
+worker/engine/_cache_sefaz.db

@@ -19,13 +19,17 @@ Organizado em 29/10/2026. Até então o código ia para a VPS copiado à mão; a
 | `backend/.env` | segredos | VPS (+ segredo `ENV_FILE` no GitHub) |
 | `backend/ocr_prod/`, `backend/ocr_service/` | têm senha do banco escrita no código | só na VPS (o build usa a cópia de lá) |
 | scripts avulsos `backend/_*.py`, `worker/entregar_*`, `worker/executar_pedido_*` | uso único / senha no código | PC |
-| `worker/engine/` (3 arquivos com senha) | senha no código | PC / VPS |
+| `worker/engine/_work/`, `worker/engine/C:/` | pastas de trabalho/log do motor | VPS |
 | backups `.json`, planilhas `.xlsx/.csv`, `.exe`, logs, `.tar.gz` | dados de cliente / binários / tamanho | PC |
 | `ia/`, `backups/`, `node_modules/`, `dist/`, `uploads/` | `.gitignore` | — |
 | `.env.novo`, `.env_backups/` | gerados pelo deploy | VPS |
 
 > ⚠️ Antes de subir arquivo novo: procurar senha escrita no código. Arquivo com credencial **não** vai
 > para o Git; o certo é ler do `.env`.
+
+> Desde 13/11/2026 o motor inteiro (`worker/engine/`, inclusive `pdf_pipeline.py`, `extrator_complementar.py`
+> e `completar_vision_5_4.py`) está no Git: as conexões passaram a vir do `backend/.env` via `worker/engine/db_env.py`
+> (`DB_APP_URL` destino, `DB_FATURAS` origem sgeeasy, `DB_VTAL` origem VTAL). A VPS precisa ter essas três chaves no `.env`.
 
 ## GitHub Actions — `.github/workflows/ci.yml`
 
@@ -35,6 +39,7 @@ Roda em todo push/PR para `dev`/`main` e no disparo manual (`workflow_dispatch`)
 |-----|-----------|-------------------|
 | **Backend Tests (Go)** | `go mod download`, golangci-lint, `go vet`, `go test -race -coverprofile` (MySQL de teste no container) | `vet` e testes **sim**; golangci-lint **não** (informativo — o código nunca passou nele) |
 | **Frontend Tests (React)** | `npm ci`, `npm run lint` (máx. **250** warnings, 0 erros), `npm run build` | sim |
+| **Extração golden (motor de faturas)** | Python 3.12 + `worker/engine/requirements-golden.txt`; roda `worker/engine/tests/golden_test.py`: cada PDF de `tests/faturas/` tem de dar os campos gravados em `tests/golden/` (sem banco, OCR, SEFAZ ou LLM) | sim — regressão na extração barra o deploy; melhoria intencional = regravar com `--atualizar` e commitar |
 | **Security Scan** | Trivy no repositório, upload SARIF, `govulncheck`, `npm audit` | **não** (informativos: repo privado sem Advanced Security; excelize v2.10.0 tem CVEs só corrigidas em commit sem versão) |
 | **Docker Build** | build das imagens backend (`load: true`) e frontend + Trivy na imagem; cria `backend/ocr_prod` vazio só para o build no CI | sim |
 | **Deploy VPS (manual)** | só em `workflow_dispatch`, ambiente `production` com aprovação | — |

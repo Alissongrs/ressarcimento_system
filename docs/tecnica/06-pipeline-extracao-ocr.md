@@ -89,6 +89,20 @@ GD consistente, leitura, SEFAZ). Grava a coluna `validador_gate`.
 - **Dedup = `uid`** (único na FDE), vindo do `UID` da linha de origem (**não** recomputado
   pelo pipeline). Sem uid → linha ignorada. `fid` (id da origem) **não** é a chave.
 
+### Testes golden (CI) — `worker/engine/tests/`
+- `worker/engine/extrair_fatura.py` → `extrair_campos(pdf_bytes)`: o mesmo caminho do `pdf_pipeline.py` para
+  uma fatura com camada de texto (plumber → liteparse → bbox → extrator_v2 → cascata → complementos →
+  coordenadas → validador → colunas SQL de `atualizar_colunas_db._coleta_campos`), **parando antes de gravar**.
+  Sem banco, sem OCR (`PDF_PIPELINE_NO_OCR=1`), sem SEFAZ (`SKIP_SEFAZ=1`), sem LLM, sem enriquecimento
+  pela origem (precisa de uid). Serve também para conferir uma fatura na mão: `python extrair_fatura.py x.pdf`.
+- `tests/faturas/*.pdf` + `tests/golden/*.json`: fatura → campos esperados (mapa, layout, gate, score, nº de
+  itens e todas as colunas). `python tests/golden_test.py` compara (números com tolerância de 0,005; sentinela
+  `__SET_NULL__` = vazio) e sai com 1 se algo mudou; `--atualizar` regrava; `--so NOME.pdf` filtra.
+- O golden é gerado no ambiente de `requirements-golden.txt` (versões fixas, sem Tesseract/img2table/gmft);
+  gere e confira **nesse** ambiente, senão o CI vai divergir. O job `extracao-golden` do CI trava o deploy.
+- Determinismo: o scorer de UC (`extrair_identificadores_scoring`) passou a percorrer os candidatos em
+  ordem de posição no texto; antes era ordem de `set` (hash), e em empate a UC mudava a cada processo.
+
 ## (B) Serviço HTTP de OCR — `ocr_service/app.py` (FastAPI)
 
 Endpoints: `GET /ping`; `POST /ocr/upload`, `/ocr/analyze`, `/analyze`, `/ocr/quick`,

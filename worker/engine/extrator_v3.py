@@ -91,7 +91,20 @@ def pymupdf4llm_markdown(pdf_path: str) -> dict:
     """
     try:
         import pymupdf4llm
-        md = pymupdf4llm.to_markdown(pdf_path)
+        # --no-ocr (PDF_PIPELINE_NO_OCR=1): o pymupdf4llm 1.27+ roda OCR por conta própria nas
+        # páginas quando acha tessdata (lento, e o texto muda conforme a máquina tem ou não
+        # Tesseract). Com a flag, OCR nunca; sem a flag, comportamento padrão do pacote.
+        kw = {}
+        if os.getenv("PDF_PIPELINE_NO_OCR", "") == "1":
+            try:
+                from pymupdf4llm.ocr import OCRMode
+                kw["use_ocr"] = OCRMode.NEVER
+            except Exception:
+                pass
+        try:
+            md = pymupdf4llm.to_markdown(pdf_path, **kw)
+        except TypeError:  # versão antiga sem use_ocr
+            md = pymupdf4llm.to_markdown(pdf_path)
         # Conta tabelas no markdown (padrão | col | col |)
         n_tabelas = len(re.findall(r"^\|[^\n]+\|$", md, re.MULTILINE))
         return {"markdown": md, "n_tabelas_md": n_tabelas, "chars": len(md)}

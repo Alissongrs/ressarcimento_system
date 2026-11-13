@@ -1,0 +1,14 @@
+# Ambiente dos testes golden de extração (CI) — o mínimo para o caminho de texto do motor:
+# pdfplumber → liteparse → bbox (PyMuPDF) → extrator_v2/v3 → complementos → validador.
+# Sem OCR (Tesseract), sem img2table, sem gmft, sem markitdown: o golden é gerado NESTE
+# ambiente (tests/golden_test.py --atualizar), então as versões ficam fixas de propósito.
+pymupdf==1.27.2.3
+pymupdf4llm==1.27.2.3
+pdfplumber==0.11.9
+liteparse==2.0.8
+pypdfium2==5.8.0
+mysql-connector-python==9.7.0
+requests==2.32.5
+numpy==2.2.6
+opencv-python-headless==4.12.0.88
+pillow==12.2.0

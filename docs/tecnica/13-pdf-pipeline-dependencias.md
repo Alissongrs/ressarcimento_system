@@ -77,10 +77,12 @@ sudo apt-get install -y tesseract-ocr tesseract-ocr-por
 ```
 
 ## 8. Configuração / variáveis de ambiente
-- **Bancos são HARDCODED no `pdf_pipeline.py`** — não precisa `.env` para o motor:
-  - origem sgeeasy: `179.127.27.122 / sgeeasy_clientes_novo`
-  - origem VTAL (`--vtal`): `179.127.26.89 / quivere_vtal`
-  - destino: `db-acesso-ressarcimento...rds.amazonaws.com / db_ressarcimento`
+- **Bancos vêm do `backend/.env`** (desde 13/11/2026; antes eram escritos no código). `worker/engine/db_env.py`
+  acha o `.env` subindo a árvore (ou `SURE_ENV`) e lê DSNs no formato do Go `usuario:senha@tcp(host:porta)/banco`:
+  - `DB_APP_URL` → destino `db_ressarcimento` (onde grava)
+  - `DB_FATURAS` (fallback `DB_FATURAS_URL`) → origem sgeeasy `179.127.27.122 / sgeeasy_clientes_novo`
+  - `DB_VTAL` → origem VTAL (`--vtal`) `179.127.26.89 / quivere_vtal`
+  Sem a chave, o módulo importa normalmente e só a conexão falha (com aviso `db_env` no log).
 - `FDE_TABLE` → tabela destino (default `FATURA_DADOS_EXTRAIDOS_COPIA`; use `FATURA_DADOS_EXTRAIDOS` p/ PROD, ou a flag `--prod`).
 - `OPENAI_API_KEY` → **não é necessária** para o motor. (No deploy, o `completar_vision_5_4.py`
   foi ajustado para apenas **avisar** no import, em vez de `sys.exit` — então o pipeline sobe sem chave.)
