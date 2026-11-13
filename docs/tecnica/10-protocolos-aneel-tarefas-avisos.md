@@ -131,6 +131,21 @@ em `pages/controleProcessosV2.css`). A rota `/processos/:id` é de gestor/admin.
   o WhatsApp manda só o "recente" (~10 mensagens por conversa). Vale a partir do próximo pareamento:
   desconectar e ler o QR de novo. Na aba Conversas o filtro de período tem "tudo" (padrão); `GET
   /whatsapp/conversas?dias=0` = sem filtro.
+- **Conversas inteiras (`whatsapp/historico.go`):** `PuxarHistorico(chat)` pede ao celular, conversa por conversa,
+  as 50 mensagens anteriores à mais antiga gravada (`BuildHistorySyncRequest` + `SendPeerMessage`) e espera a
+  resposta `HistorySync ON_DEMAND`; repete até o celular não mandar mais. É sinal interno aparelho↔celular,
+  igual ao WhatsApp Web rolando para cima: **nenhum contato recebe nada**. Rotas: `GET /whatsapp/historico`
+  (progresso), `POST /whatsapp/historico/puxar {chat?}` e `/parar` (admin). Celular precisa estar ligado e online.
+- **Anexos (`whatsapp/anexos.go`):** imagem/vídeo/áudio/documento/figurinha são baixados (3 por vez) para
+  `WHATSAPP_DIR/midia/AAAA/MM/<id>.<ext>` (volume `whatsapp_data`); colunas `anexo_*` em FT_WHATSAPP_MENSAGENS
+  (`anexo_proto` guarda o proto para tentar de novo). Mídia antiga que já saiu do WhatsApp (404/410) → pedido
+  de reenvio ao celular (`SendMediaRetryReceipt`, resposta em `events.MediaRetry`) — também interno, sem mensagem
+  a ninguém; se o celular não tiver mais o arquivo, fica `erro`. `GET /whatsapp/anexo/:id` serve o arquivo
+  (cookie, Bearer ou `?token=`); `POST /whatsapp/anexos/retentar` (admin) refaz pendentes/erros.
+- **Enviar arquivo (`whatsapp/envio_arquivo.go`):** `POST /whatsapp/enviar-arquivo` (multipart `para`, `legenda`,
+  `arquivo`, até 25 MB; toda a equipe): sobe para o WhatsApp (`Upload`), manda como imagem/vídeo/áudio/documento
+  e grava em FT_WHATSAPP_MENSAGENS (origem sistema) com a cópia local em `midia/`. Na tela, o clipe ao lado do
+  "Enviar"; o texto digitado vira a legenda.
 - Avisos enviados ao grupo (`whatsapp.AvisarGrupo`): conclusão de protocolo ("— para *Nome*" ou
   "— *sem responsável* (admin direciona)"), tarefa direcionada, tarefa assumida.
 - ⚠️ Enquanto nenhum grupo for escolhido, nada sai pelo WhatsApp (só sininho).

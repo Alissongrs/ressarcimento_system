@@ -317,6 +317,15 @@ func runAdditiveMigrations(db *sql.DB) error {
 		  PRIMARY KEY (rotina)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
 
+	// WhatsApp (13/11/2026): anexos das mensagens baixados para WHATSAPP_DIR/midia (ver whatsapp/anexos.go)
+	addColumnIfMissing(db, "FT_WHATSAPP_MENSAGENS", "anexo_status", "VARCHAR(12)")
+	addColumnIfMissing(db, "FT_WHATSAPP_MENSAGENS", "anexo_caminho", "VARCHAR(300)")
+	addColumnIfMissing(db, "FT_WHATSAPP_MENSAGENS", "anexo_mime", "VARCHAR(100)")
+	addColumnIfMissing(db, "FT_WHATSAPP_MENSAGENS", "anexo_nome", "VARCHAR(255)")
+	addColumnIfMissing(db, "FT_WHATSAPP_MENSAGENS", "anexo_tamanho", "INT")
+	addColumnIfMissing(db, "FT_WHATSAPP_MENSAGENS", "anexo_erro", "VARCHAR(200)")
+	addColumnIfMissing(db, "FT_WHATSAPP_MENSAGENS", "anexo_proto", "MEDIUMBLOB")
+
 	// ↑ Próximas mudanças ADITIVAS entram acima desta linha.
 	log.Println("[migrate-aditivo] concluído")
 	return nil

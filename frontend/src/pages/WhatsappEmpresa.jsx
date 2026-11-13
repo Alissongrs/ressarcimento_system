@@ -3,8 +3,8 @@
 // conversas (mensagens recebidas e enviadas pelo número do departamento) e responde. Conectar,
 // desconectar e escolher o grupo dos avisos são só do admin. Backend: backend/whatsapp.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { MessageCircle, RefreshCw, Search, Send, Smartphone } from 'lucide-react';
-import api from '../services/apiClient.js';
+import { MessageCircle, Paperclip, RefreshCw, Search, Send, Smartphone } from 'lucide-react';
+import api, { withAuthToken } from '../services/apiClient.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import WhatsappInsights from './WhatsappInsights.jsx';
 import './protocolosAneel.css';
@@ -31,6 +31,71 @@ const TIPO_ICONE = { imagem: '📷', 'vídeo': '🎬', 'áudio': '🎤', documen
 function resumo(tipo, texto) {
   if (tipo === 'texto') return texto;
   return `${TIPO_ICONE[tipo] || ''} ${tipo}${texto ? `: ${texto}` : ''}`;
+}
+
+function tamanho(n) {
+  if (!n) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Anexo de uma mensagem: imagem/vídeo/áudio em linha, documento como link; estados de espera e erro.
+function Anexo({ m }) {
+  if (!m.anexo_status) return null;
+  if (m.anexo_status !== 'ok') {
+    const txt = m.anexo_status === 'pedido' ? 'anexo antigo: aguardando o celular do departamento mandar o arquivo (ninguém recebe mensagem)'
+      : m.anexo_status === 'pendente' ? 'anexo: baixando…'
+      : `anexo indisponível${m.anexo_erro ? `: ${m.anexo_erro}` : ''}`;
+    return <div className="text-[11px] opacity-70 italic mt-1">{txt}</div>;
+  }
+  const url = withAuthToken(`/api/v1/whatsapp/anexo/${m.id}`);
+  const mime = m.anexo_mime || '';
+  if (mime.startsWith('image/')) {
+    return <a href={url} target="_blank" rel="noreferrer"><img src={url} alt={m.anexo_nome || 'imagem'} loading="lazy" className="rounded mt-1" style={{ maxWidth: 280, maxHeight: 320 }} /></a>;
+  }
+  if (mime.startsWith('audio/')) return <audio controls src={url} className="mt-1" style={{ maxWidth: 280 }} />;
+  if (mime.startsWith('video/')) return <video controls src={url} className="rounded mt-1" style={{ maxWidth: 280 }} />;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 mt-1 underline">
+      📎 {m.anexo_nome || 'arquivo'} <span className="opacity-60 no-underline">{tamanho(m.anexo_tamanho)}</span>
+    </a>
+  );
+}
+
+// Busca das conversas inteiras no celular (admin) + progresso; aparece acima da lista de conversas.
+function HistoricoCompleto({ isAdmin, conectado, chat, onErro }) {
+  const [p, setP] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const ler = useCallback(async () => {
+    try { const { data } = await api.get('/whatsapp/historico'); setP(data); } catch { /* sem progresso */ }
+  }, []);
+  useEffect(() => { ler(); const t = setInterval(ler, 5000); return () => clearInterval(t); }, [ler]);
+  const chamar = async (url, body) => {
+    setBusy(true);
+    try { const { data } = await api.post(url, body || {}); setP(data); }
+    catch (e) { onErro(e?.response?.data?.error || 'Falha ao falar com o servidor.'); }
+    finally { setBusy(false); }
+  };
+  const rodando = !!p?.rodando;
+  return (
+    <div className="px-3 py-2 border-b text-xs flex flex-wrap items-center gap-2" style={{ borderColor: 'var(--border)' }}>
+      {rodando ? (
+        <span>Buscando no celular: {p.feitas}/{p.total} conversas · {p.novas} mensagens novas{p.conversa_nome ? ` · ${p.conversa_nome}` : ''}</span>
+      ) : p?.fim ? (
+        <span className="opacity-70">Última busca: {p.novas} mensagens novas em {p.total} conversas{p.erro ? ` · ${p.erro}` : ''}</span>
+      ) : <span className="opacity-70">O celular manda só parte do histórico ao parear; a busca pede o resto ao próprio celular do departamento, conversa por conversa, sem enviar nada a ninguém.</span>}
+      {isAdmin && conectado && !rodando && (
+        <button className="pa-btn ml-auto" disabled={busy} onClick={() => chamar('/whatsapp/historico/puxar', {})}>Buscar conversas inteiras</button>
+      )}
+      {isAdmin && conectado && !rodando && chat && !chat.novo && (
+        <button className="pa-btn" disabled={busy} onClick={() => chamar('/whatsapp/historico/puxar', { chat: chat.chat })}>Mais antigas desta conversa</button>
+      )}
+      {isAdmin && rodando && <button className="pa-btn ml-auto" disabled={busy} onClick={() => chamar('/whatsapp/historico/parar')}>Parar</button>}
+      {isAdmin && !rodando && <button className="pa-btn" disabled={busy} title="Tenta baixar de novo os anexos que ficaram pendentes ou com erro"
+        onClick={() => chamar('/whatsapp/anexos/retentar')}>Retentar anexos</button>}
+    </div>
+  );
 }
 
 // ── Conexão ──────────────────────────────────────────────────────────────────
@@ -99,7 +164,7 @@ function Conexao({ estado, isAdmin, onAtualizar, onErro }) {
 }
 
 // ── Conversas (monitor) ──────────────────────────────────────────────────────
-function Conversas({ conectado, inicial, onErro }) {
+function Conversas({ conectado, inicial, onErro, isAdmin }) {
   const [q, setQ] = useState('');
   const [dias, setDias] = useState(0); // 0 = tudo
   const [lista, setLista] = useState([]);
@@ -109,6 +174,7 @@ function Conversas({ conectado, inicial, onErro }) {
   const [novo, setNovo] = useState('');
   const [enviando, setEnviando] = useState(false);
   const fimRef = useRef(null);
+  const arquivoRef = useRef(null);
   // vindo dos Insights: abre a conversa clicada
   useEffect(() => { if (inicial?.chat) setChat({ chat: inicial.chat, nome: inicial.nome }); }, [inicial]);
 
@@ -141,8 +207,25 @@ function Conversas({ conectado, inicial, onErro }) {
     finally { setEnviando(false); }
   };
 
+  // arquivo escolhido no clipe: sobe pelo número do departamento; o texto digitado vira a legenda
+  const enviarArquivo = async (para, file) => {
+    if (!para || !file) return;
+    if (file.size > 25 * 1024 * 1024) { onErro('Arquivo maior que 25 MB.'); return; }
+    setEnviando(true);
+    try {
+      const fd = new FormData();
+      fd.append('para', para); fd.append('legenda', texto); fd.append('arquivo', file, file.name);
+      await api.post('/whatsapp/enviar-arquivo', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setTexto('');
+      await carregarLista(); await carregarMsgs();
+    } catch (e) { onErro(e?.response?.data?.error || 'Falha ao enviar o arquivo.'); }
+    finally { setEnviando(false); if (arquivoRef.current) arquivoRef.current.value = ''; }
+  };
+
   return (
-    <div className="rounded-xl border grid" style={{ ...card, gridTemplateColumns: 'minmax(260px, 340px) 1fr', minHeight: 520 }}>
+    <div className="rounded-xl border" style={card}>
+    <HistoricoCompleto isAdmin={isAdmin} conectado={conectado} chat={chat} onErro={onErro} />
+    <div className="grid" style={{ gridTemplateColumns: 'minmax(260px, 340px) 1fr', minHeight: 520 }}>
       <div className="border-r flex flex-col" style={{ borderColor: 'var(--border)' }}>
         <div className="p-2 flex gap-2 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-1 flex-1 rounded border px-2" style={card}>
@@ -195,6 +278,7 @@ function Conversas({ conectado, inicial, onErro }) {
                     style={{ background: m.de_mim ? 'color-mix(in srgb, var(--success) 14%, var(--card))' : 'var(--menu-hover)' }}>
                     {!m.de_mim && chat.grupo && <div className="text-[11px] font-semibold opacity-70">{m.remetente_nome || m.remetente}</div>}
                     <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{resumo(m.tipo, m.texto)}</div>
+                    <Anexo m={m} />
                     <div className="text-[10px] opacity-60 mt-1 text-right">
                       {m.origem === 'sistema' ? (m.enviado_por ? `pelo SURE (${m.enviado_por}) · ` : 'aviso automático do SURE · ') : ''}
                       {fmt(m.enviada_em)}
@@ -210,6 +294,12 @@ function Conversas({ conectado, inicial, onErro }) {
                 <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={2} placeholder="Responder pelo WhatsApp da empresa…"
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar(chat.chat, texto, setTexto); } }}
                   className="flex-1 text-sm rounded border px-2 py-1" style={card} />
+                <input ref={arquivoRef} type="file" className="hidden" onChange={(e) => enviarArquivo(chat.chat, e.target.files?.[0])}
+                  accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip" />
+                <button className="pa-btn" type="button" disabled={enviando} title="Enviar arquivo (o texto digitado vai como legenda)"
+                  onClick={() => arquivoRef.current?.click()}>
+                  <Paperclip size={14} />
+                </button>
                 <button className="pa-btn" disabled={enviando || !texto.trim()} onClick={() => enviar(chat.chat, texto, setTexto)}>
                   <Send size={14} /> Enviar
                 </button>
@@ -218,6 +308,7 @@ function Conversas({ conectado, inicial, onErro }) {
           </>
         )}
       </div>
+    </div>
     </div>
   );
 }
@@ -314,7 +405,7 @@ export default function WhatsappEmpresa() {
         ))}
       </div>
       {aba === 'insights' && <WhatsappInsights onAbrirConversa={abrirConversa} onErro={onErro} />}
-      {aba === 'conversas' && <Conversas conectado={!!estado?.conectado} inicial={chatInicial} onErro={onErro} />}
+      {aba === 'conversas' && <Conversas conectado={!!estado?.conectado} inicial={chatInicial} onErro={onErro} isAdmin={isAdmin} />}
       {aba === 'avisos' && isAdmin && <GrupoAvisos conectado={!!estado?.conectado} onErro={onErro} />}
     </div>
   );

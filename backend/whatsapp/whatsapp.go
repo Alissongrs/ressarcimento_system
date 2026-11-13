@@ -34,6 +34,7 @@ import (
 	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -281,6 +282,8 @@ func aoEvento(ev any) {
 		gravarRecebida(v, true)
 	case *events.HistorySync:
 		go importarHistorico(v)
+	case *events.MediaRetry: // celular respondeu ao pedido de reenvio de uma mídia antiga
+		go aoReenvio(v)
 	}
 }
 
@@ -293,7 +296,7 @@ func importarHistorico(v *events.HistorySync) {
 	if c == nil || v.Data == nil {
 		return
 	}
-	n := 0
+	n, novas := 0, 0
 	for _, conv := range v.Data.GetConversations() {
 		jid, err := types.ParseJID(conv.GetID())
 		if err != nil {
@@ -309,11 +312,19 @@ func importarHistorico(v *events.HistorySync) {
 			if err != nil {
 				continue
 			}
-			gravarRecebida(msg, false)
+			if gravarRecebida(msg, false) {
+				novas++
+			}
 			n++
 		}
 	}
-	log.Printf("[whatsapp] histórico do celular: %d mensagens (%s)", n, v.Data.GetSyncType())
+	log.Printf("[whatsapp] histórico do celular: %d mensagens, %d novas (%s)", n, novas, v.Data.GetSyncType())
+	if v.Data.GetSyncType() == waHistorySync.HistorySync_ON_DEMAND {
+		select { // resposta a um pedido de PuxarHistorico
+		case respostaCh <- respostaDemanda{recebidas: n, novas: novas}:
+		default:
+		}
+	}
 }
 
 // ── mensagens ───────────────────────────────────────────────────────────────
@@ -392,18 +403,20 @@ func nomeGrupo(jid types.JID) string {
 	return n
 }
 
-func gravarRecebida(v *events.Message, alertar bool) {
+// gravarRecebida grava a mensagem (INSERT IGNORE: wa_id único) e dispara o download do anexo, se houver.
+// Devolve true quando a mensagem era nova.
+func gravarRecebida(v *events.Message, alertar bool) bool {
 	info := v.Info
 	if info.Chat.Server == types.BroadcastServer || info.Chat.Server == types.NewsletterServer {
-		return // status / canais
+		return false // status / canais
 	}
 	texto, tipo := textoETipo(v.Message)
 	if tipo == "" {
-		return
+		return false
 	}
 	db := gdb()
 	if db == nil {
-		return
+		return false
 	}
 	chat := chatDe(info)
 	chatNome := ""
@@ -423,12 +436,18 @@ func gravarRecebida(v *events.Message, alertar bool) {
 		info.IsFromMe, tipo, texto, info.Timestamp)
 	if err != nil {
 		log.Printf("[whatsapp] gravar mensagem: %v", err)
-		return
+		return false
+	}
+	n, _ := res.RowsAffected()
+	// anexo: baixa mesmo quando a mensagem já existia (ex.: veio sem mídia num histórico anterior)
+	if midiaDe(v.Message) != nil {
+		go baixarAnexo(string(info.ID), info, v.Message)
 	}
 	// mensagem nova (não repetida), de outra pessoa, em conversa direta → alerta na tela
-	if n, _ := res.RowsAffected(); alertar && n == 1 && !info.IsFromMe && !info.IsGroup && tipo != "reação" {
+	if alertar && n == 1 && !info.IsFromMe && !info.IsGroup && tipo != "reação" {
 		avisarNovaMensagem(chat, chatNome, texto, tipo)
 	}
+	return n == 1
 }
 
 func nullSe(s string) any {

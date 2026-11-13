@@ -34,6 +34,15 @@ func swaggerRotaPost_api_v1_processos__id__historico__hid__anexos() {}
 // @Router /api/v1/processos/{id}/historico/{hid}/extrair-email [post]
 func swaggerRotaPost_api_v1_processos__id__historico__hid__extrair_email() {}
 
+// @Summary Whatsapp anexo
+// @Description Pública. Handler: handlers.WhatsappAnexo.
+// @Tags WhatsApp
+// @Produce json
+// @Param id path string true "id"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/whatsapp/anexo/{id} [get]
+func swaggerRotaGet_api_v1_whatsapp_anexo__id_() {}
+
 // @Summary Criar solicitacao
 // @Description Qualquer usuário autenticado. Handler: handlers.CriarSolicitacao.
 // @Tags Solicitações
@@ -584,6 +593,64 @@ func swaggerRotaGet_api_v1_whatsapp_grupos() {}
 // @Failure 401 {object} map[string]string
 // @Router /api/v1/whatsapp/grupo-avisos [post]
 func swaggerRotaPost_api_v1_whatsapp_grupo_avisos() {}
+
+// @Summary Whatsapp historico
+// @Description Qualquer usuário autenticado. Handler: handlers.WhatsappHistorico.
+// @Tags WhatsApp
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/whatsapp/historico [get]
+func swaggerRotaGet_api_v1_whatsapp_historico() {}
+
+// @Summary Whatsapp historico puxar
+// @Description Qualquer usuário autenticado. Handler: handlers.WhatsappHistoricoPuxar.
+// @Tags WhatsApp
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/whatsapp/historico/puxar [post]
+func swaggerRotaPost_api_v1_whatsapp_historico_puxar() {}
+
+// @Summary Whatsapp historico parar
+// @Description Qualquer usuário autenticado. Handler: handlers.WhatsappHistoricoParar.
+// @Tags WhatsApp
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/whatsapp/historico/parar [post]
+func swaggerRotaPost_api_v1_whatsapp_historico_parar() {}
+
+// @Summary Whatsapp anexos retentar
+// @Description Qualquer usuário autenticado. Handler: handlers.WhatsappAnexosRetentar.
+// @Tags WhatsApp
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/whatsapp/anexos/retentar [post]
+func swaggerRotaPost_api_v1_whatsapp_anexos_retentar() {}
+
+// @Summary Whatsapp enviar arquivo
+// @Description Qualquer usuário autenticado. Handler: handlers.WhatsappEnviarArquivo.
+// @Tags WhatsApp
+// @Accept json
+// @Produce json
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/whatsapp/enviar-arquivo [post]
+func swaggerRotaPost_api_v1_whatsapp_enviar_arquivo() {}
 
 // @Summary Regras tipo de mudança → analista (legado)
 // @Description Qualquer usuário autenticado. Handler: handlers.ListarRegrasTarefa.

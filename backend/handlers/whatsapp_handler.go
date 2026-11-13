@@ -6,7 +6,11 @@ package handlers
 // escolher o grupo dos avisos continuam só do admin.
 
 import (
+	"fmt"
+	"io"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -138,6 +142,11 @@ type waMensagem struct {
 	StatusEnvio   string     `json:"status_envio"`
 	Erro          string     `json:"erro"`
 	EnviadoPor    string     `json:"enviado_por"`
+	AnexoStatus   string     `json:"anexo_status"`
+	AnexoNome     string     `json:"anexo_nome"`
+	AnexoMime     string     `json:"anexo_mime"`
+	AnexoTamanho  int64      `json:"anexo_tamanho"`
+	AnexoErro     string     `json:"anexo_erro"`
 }
 
 // GET /whatsapp/mensagens?chat=
@@ -149,11 +158,116 @@ func WhatsappMensagens(c *gin.Context) {
 	database.GormDB_App.Raw(`SELECT * FROM (
 			SELECT m.id, m.de_mim, m.origem, m.tipo, COALESCE(m.texto,'') AS texto, COALESCE(m.remetente,'') AS remetente,
 				COALESCE(m.remetente_nome,'') AS remetente_nome, m.enviada_em, m.status_envio, COALESCE(m.erro,'') AS erro,
-				COALESCE(u.nome_usuario,'') AS enviado_por
+				COALESCE(u.nome_usuario,'') AS enviado_por,
+				COALESCE(m.anexo_status,'') AS anexo_status, COALESCE(m.anexo_nome,'') AS anexo_nome,
+				COALESCE(m.anexo_mime,'') AS anexo_mime, COALESCE(m.anexo_tamanho,0) AS anexo_tamanho, COALESCE(m.anexo_erro,'') AS anexo_erro
 			FROM FT_WHATSAPP_MENSAGENS m LEFT JOIN DM_USUARIO u ON u.id_usuario = m.enviado_por
 			WHERE m.chat = ? ORDER BY m.enviada_em DESC, m.id DESC LIMIT 300) t
 		ORDER BY enviada_em, id`, c.Query("chat")).Scan(&out)
 	c.JSON(http.StatusOK, out)
+}
+
+// POST /whatsapp/enviar-arquivo (multipart: para, legenda, arquivo) — manda um arquivo pela conversa
+func WhatsappEnviarArquivo(c *gin.Context) {
+	u, ok := waEquipe(c)
+	if !ok {
+		return
+	}
+	para := strings.TrimSpace(c.PostForm("para"))
+	fh, err := c.FormFile("arquivo")
+	if para == "" || err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "informe o número e o arquivo"})
+		return
+	}
+	if fh.Size > whatsapp.LimiteArquivo {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("arquivo maior que %d MB", whatsapp.LimiteArquivo>>20)})
+		return
+	}
+	f, err := fh.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "não consegui ler o arquivo"})
+		return
+	}
+	defer f.Close()
+	dados, err := io.ReadAll(io.LimitReader(f, whatsapp.LimiteArquivo+1))
+	if err != nil || len(dados) > whatsapp.LimiteArquivo {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "não consegui ler o arquivo (ou ele passa do limite)"})
+		return
+	}
+	mimeTipo := strings.TrimSpace(fh.Header.Get("Content-Type"))
+	if mimeTipo == "" || mimeTipo == "application/octet-stream" {
+		if m := mime.TypeByExtension(strings.ToLower(filepath.Ext(fh.Filename))); m != "" {
+			mimeTipo = m
+		}
+	}
+	if err := whatsapp.EnviarArquivo(para, filepath.Base(fh.Filename), mimeTipo, dados, c.PostForm("legenda"), u.id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// GET /whatsapp/anexo/:id — o arquivo do anexo (imagem, PDF, áudio…). Aceita cookie, Bearer ou ?token=.
+func WhatsappAnexo(c *gin.Context) {
+	if _, ok := waEquipe(c); !ok {
+		return
+	}
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	caminho, mimeTipo, nome, err := whatsapp.ArquivoAnexo(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	disp := "attachment"
+	if strings.HasPrefix(mimeTipo, "image/") || strings.HasPrefix(mimeTipo, "audio/") || strings.HasPrefix(mimeTipo, "video/") || mimeTipo == "application/pdf" {
+		disp = "inline"
+	}
+	c.Header("Content-Type", mimeTipo)
+	c.Header("Content-Disposition", fmt.Sprintf("%s; filename=%q", disp, nome))
+	c.Header("Cache-Control", "private, max-age=86400")
+	c.File(caminho)
+}
+
+// POST /whatsapp/anexos/retentar — tenta de novo os anexos que não baixaram (admin)
+func WhatsappAnexosRetentar(c *gin.Context) {
+	if _, ok := waAdmin(c); !ok {
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "na_fila": whatsapp.RetentarAnexos()})
+}
+
+// GET /whatsapp/historico — progresso da busca das conversas inteiras
+func WhatsappHistorico(c *gin.Context) {
+	if _, ok := waEquipe(c); !ok {
+		return
+	}
+	c.JSON(http.StatusOK, whatsapp.ProgressoHistorico())
+}
+
+// POST /whatsapp/historico/puxar {chat?} — pede ao celular as mensagens anteriores às gravadas (admin).
+// Sem chat = todas as conversas.
+func WhatsappHistoricoPuxar(c *gin.Context) {
+	if _, ok := waAdmin(c); !ok {
+		return
+	}
+	var b struct {
+		Chat string `json:"chat"`
+	}
+	_ = c.ShouldBindJSON(&b)
+	if err := whatsapp.PuxarHistorico(strings.TrimSpace(b.Chat)); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, whatsapp.ProgressoHistorico())
+}
+
+// POST /whatsapp/historico/parar — interrompe a busca (admin)
+func WhatsappHistoricoParar(c *gin.Context) {
+	if _, ok := waAdmin(c); !ok {
+		return
+	}
+	whatsapp.PararHistorico()
+	c.JSON(http.StatusOK, whatsapp.ProgressoHistorico())
 }
 
 // POST /whatsapp/enviar {para, texto} — para = telefone ou o "chat" de uma conversa

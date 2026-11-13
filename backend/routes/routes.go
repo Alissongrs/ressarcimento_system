@@ -211,6 +211,8 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 		// ===== SSE oficiais =====
 		apiV1.GET("/alertas/stream", middleware.AuthOrQueryToken(), handlers.StreamAlertas)
 		apiV1.GET("/events", middleware.AuthOrQueryToken(), handlers.StreamGlobalEvents)
+		// anexo do WhatsApp: <img src> e links abrem sem header, então aceita cookie ou ?token=
+		apiV1.GET("/whatsapp/anexo/:id", middleware.AuthOrQueryToken(), handlers.WhatsappAnexo)
 		apiV1.GET("/processos/:id/events", middleware.AuthOrQueryToken(), handlers.StreamProcessoEvents)
 		apiV1.GET("/anexos/:anexoId/download", middleware.AuthOrQueryToken(), handlers.DownloadAnexoByID)
 
@@ -319,6 +321,11 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			authRequired.POST("/whatsapp/enviar", handlers.WhatsappEnviar)
 			authRequired.GET("/whatsapp/grupos", handlers.WhatsappGrupos)
 			authRequired.POST("/whatsapp/grupo-avisos", handlers.WhatsappDefinirGrupo)
+			authRequired.GET("/whatsapp/historico", handlers.WhatsappHistorico)
+			authRequired.POST("/whatsapp/historico/puxar", handlers.WhatsappHistoricoPuxar)
+			authRequired.POST("/whatsapp/historico/parar", handlers.WhatsappHistoricoParar)
+			authRequired.POST("/whatsapp/anexos/retentar", handlers.WhatsappAnexosRetentar)
+			authRequired.POST("/whatsapp/enviar-arquivo", handlers.WhatsappEnviarArquivo)
 			authRequired.GET("/tarefas/regras", handlers.ListarRegrasTarefa)
 			authRequired.POST("/tarefas/regras", handlers.SalvarRegraTarefa)
 			authRequired.POST("/tarefas/:id/direcionar", handlers.DirecionarTarefa)
