@@ -9,9 +9,12 @@ package whatsapp
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"mime"
 	"os"
@@ -24,6 +27,8 @@ import (
 	"go.mau.fi/whatsmeow/proto/waMmsRetry"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"go.mau.fi/whatsmeow/util/cbcutil"
+	"go.mau.fi/whatsmeow/util/hkdfutil"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -245,7 +250,7 @@ func aoReenvio(v *events.MediaRetry) {
 	defer func() { <-semAnexo }()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	data, err := c.Download(ctx, md.dl)
+	data, err := baixarReenviado(ctx, c, notif.GetDirectPath(), md.chave, whatsmeow.GetMediaType(md.dl))
 	if err != nil {
 		marcarAnexo(db, id, AnexoErro, "depois do reenvio: "+err.Error())
 		return
@@ -253,17 +258,67 @@ func aoReenvio(v *events.MediaRetry) {
 	gravarArquivo(db, id, md, data)
 }
 
-// RetentarAnexos tenta de novo os anexos que não baixaram (pendente/erro/pedido). Devolve quantos entraram na fila.
-func RetentarAnexos() int {
+// baixarReenviado baixa a mídia que o celular reenviou pelo caminho novo. A biblioteca conferiria os
+// hashes gravados na mensagem original (ciphertext e conteúdo), que não valem para o arquivo re-cifrado;
+// aqui conferimos o MAC com a chave de mídia (a mesma da mensagem) e deciframos — integridade garantida.
+func baixarReenviado(ctx context.Context, c *whatsmeow.Client, directPath string, mediaKey []byte, tipo whatsmeow.MediaType) ([]byte, error) {
+	if !strings.HasPrefix(directPath, "/") {
+		return nil, fmt.Errorf("caminho inválido no reenvio")
+	}
+	mms := map[whatsmeow.MediaType]string{whatsmeow.MediaImage: "image", whatsmeow.MediaVideo: "video", whatsmeow.MediaAudio: "audio", whatsmeow.MediaDocument: "document"}[tipo]
+	if mms == "" {
+		mms = "document"
+	}
+	conn, err := c.DangerousInternals().RefreshMediaConn(ctx, false)
+	if err != nil {
+		return nil, fmt.Errorf("servidores de mídia: %w", err)
+	}
+	exp := hkdfutil.SHA256(mediaKey, nil, []byte(tipo), 112)
+	iv, cipherKey, macKey := exp[:16], exp[16:48], exp[48:80]
+	var ultimo error = fmt.Errorf("nenhum servidor de mídia")
+	for _, h := range conn.Hosts {
+		url := fmt.Sprintf("https://%s%s&mms-type=%s&__wa-mms=", h.Hostname, directPath, mms)
+		resp, err := c.DangerousInternals().DoMediaDownloadRequest(ctx, url)
+		if err != nil {
+			ultimo = err
+			continue
+		}
+		data, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			ultimo = err
+			continue
+		}
+		if len(data) <= 10 {
+			ultimo = fmt.Errorf("arquivo curto demais")
+			continue
+		}
+		file, mac := data[:len(data)-10], data[len(data)-10:]
+		mh := hmac.New(sha256.New, macKey)
+		mh.Write(iv)
+		mh.Write(file)
+		if !hmac.Equal(mh.Sum(nil)[:10], mac) {
+			return nil, fmt.Errorf("o reenvio veio com chave de mídia diferente")
+		}
+		return cbcutil.Decrypt(cipherKey, iv, file)
+	}
+	return nil, ultimo
+}
+
+// RetentarAnexos tenta de novo os anexos que não baixaram (pendente/erro/pedido) e, para as mensagens de
+// mídia antigas que nunca chegaram com as chaves (sem anexo_proto), pede ao celular a cópia da mensagem
+// (a resposta chega como mensagem normal → gravarRecebida → baixarAnexo). Devolve (na fila, pedidas).
+func RetentarAnexos() (int, int) {
 	db := gdb()
 	if db == nil {
-		return 0
+		return 0, 0
 	}
+	pedidas := pedirCopiasSemProto(db)
 	rows, err := db.Query(`SELECT id, wa_id, chat, COALESCE(remetente,''), de_mim, anexo_proto FROM FT_WHATSAPP_MENSAGENS
 		WHERE anexo_proto IS NOT NULL AND (anexo_status IS NULL OR anexo_status IN (?,?,?)) ORDER BY id DESC LIMIT 500`,
 		AnexoPendente, AnexoErro, AnexoPedido)
 	if err != nil {
-		return 0
+		return 0, pedidas
 	}
 	defer rows.Close()
 	n := 0
@@ -288,7 +343,56 @@ func RetentarAnexos() int {
 		go baixarAnexo(waID, info, m)
 		n++
 	}
-	return n
+	return n, pedidas
+}
+
+// pedirCopiasSemProto pede ao celular (sinal interno, ninguém recebe nada) a cópia das mensagens de mídia
+// gravadas antes de o download existir, que não têm as chaves do arquivo. Até 300 por vez, espaçadas.
+func pedirCopiasSemProto(db *sql.DB) int {
+	mu.Lock()
+	c := cli
+	mu.Unlock()
+	if c == nil || !c.IsConnected() {
+		return 0
+	}
+	rows, err := db.Query(`SELECT wa_id, chat, COALESCE(remetente,''), de_mim FROM FT_WHATSAPP_MENSAGENS
+		WHERE origem='whatsapp' AND wa_id IS NOT NULL AND anexo_proto IS NULL AND anexo_status IS NULL
+		  AND tipo IN ('imagem','vídeo','áudio','documento','figurinha') ORDER BY enviada_em DESC LIMIT 300`)
+	if err != nil {
+		return 0
+	}
+	type alvo struct {
+		waID, chat, remetente string
+		deMim                 bool
+	}
+	var alvos []alvo
+	for rows.Next() {
+		var a alvo
+		if rows.Scan(&a.waID, &a.chat, &a.remetente, &a.deMim) == nil {
+			alvos = append(alvos, a)
+		}
+	}
+	rows.Close()
+	go func() {
+		n := 0
+		for _, a := range alvos {
+			info, ok := infoDe(a.waID, a.chat, a.remetente, a.deMim, time.Time{})
+			if !ok {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			_, err := c.SendPeerMessage(ctx, c.BuildUnavailableMessageRequest(info.Chat, info.Sender, a.waID))
+			cancel()
+			if err != nil {
+				log.Printf("[whatsapp] pedir cópia de %s: %v", a.waID, err)
+				continue
+			}
+			n++
+			time.Sleep(400 * time.Millisecond)
+		}
+		log.Printf("[whatsapp] cópias de mensagens de mídia pedidas ao celular: %d de %d", n, len(alvos))
+	}()
+	return len(alvos)
 }
 
 // infoDe reconstrói a identificação da mensagem a partir do que está gravado (para reenvio/pedidos ao celular).

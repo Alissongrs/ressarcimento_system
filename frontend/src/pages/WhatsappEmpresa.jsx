@@ -41,8 +41,12 @@ function tamanho(n) {
 }
 
 // Anexo de uma mensagem: imagem/vídeo/áudio em linha, documento como link; estados de espera e erro.
+const TIPOS_MIDIA = new Set(['imagem', 'vídeo', 'áudio', 'documento', 'figurinha']);
 function Anexo({ m }) {
-  if (!m.anexo_status) return null;
+  if (!m.anexo_status) {
+    if (!TIPOS_MIDIA.has(m.tipo)) return null;
+    return <div className="text-[11px] opacity-70 italic mt-1">anexo ainda não baixado (mensagem antiga): use "Retentar anexos"</div>;
+  }
   if (m.anexo_status !== 'ok') {
     const txt = m.anexo_status === 'pedido' ? 'anexo antigo: aguardando o celular do departamento mandar o arquivo (ninguém recebe mensagem)'
       : m.anexo_status === 'pendente' ? 'anexo: baixando…'

@@ -233,7 +233,8 @@ func WhatsappAnexosRetentar(c *gin.Context) {
 	if _, ok := waAdmin(c); !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "na_fila": whatsapp.RetentarAnexos()})
+	naFila, pedidas := whatsapp.RetentarAnexos()
+	c.JSON(http.StatusOK, gin.H{"ok": true, "na_fila": naFila, "pedidas_ao_celular": pedidas})
 }
 
 // POST /whatsapp/contatos/atualizar — grava o nome da agenda do celular nas conversas (admin)
