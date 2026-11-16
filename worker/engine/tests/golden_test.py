@@ -81,6 +81,24 @@ def _resumo(v) -> str:
     return s if len(s) <= 90 else s[:87] + "…"
 
 
+def _onde_difere(a, b, caminho="") -> str:
+    """Caminho e valores do PRIMEIRO ponto em que dois valores (já normalizados) divergem — para JSONs
+    grandes (medicao_grandezas_json) o resumo truncado não mostra nada."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in sorted(set(a) | set(b)):
+            if k not in a or k not in b:
+                return f"{caminho}.{k}: só em {'golden' if k in a else 'atual'}"
+            if not _igual(a[k], b[k]):
+                return _onde_difere(a[k], b[k], f"{caminho}.{k}")
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return f"{caminho}: golden tem {len(a)} elemento(s), atual {len(b)}"
+        for i, (x, y) in enumerate(zip(a, b)):
+            if not _igual(x, y):
+                return _onde_difere(x, y, f"{caminho}[{i}]")
+    return f"{caminho}: golden={json.dumps(a, ensure_ascii=False, default=str)[:200]}  atual={json.dumps(b, ensure_ascii=False, default=str)[:200]}"
+
+
 def _achatar(r: dict) -> dict:
     """{mapa, layout, gate, score, n_itens, colunas.*} → dict plano de campo → valor."""
     plano = {}
@@ -140,6 +158,9 @@ def main(argv: list[str]) -> int:
             print(f"FALHOU  {p.name} ({dt:.1f}s): {len(difs)} campo(s) diferente(s)")
             for k, g, a in difs:
                 print(f"    {k}: golden={_resumo(g)}  atual={_resumo(a)}")
+                gn, an = _normalizar(g), _normalizar(a)
+                if isinstance(gn, (list, dict)) or isinstance(an, (list, dict)):
+                    print(f"      onde: {_onde_difere(gn, an)}")
         else:
             ok += 1
             print(f"ok      {p.name} ({dt:.1f}s) mapa={atual.get('mapa')} gate={atual.get('gate')} "
