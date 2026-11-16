@@ -163,6 +163,16 @@ GD consistente, leitura, SEFAZ). Grava a coluna `validador_gate`.
   ponta 100 %, fora ponta 89 %; leituras 88 %; total 82 %; PIS/COFINS 89 % — o resto fica vazio (PDF-imagem sem medição
   conferível, Amazonas com itens incompletos); o rateio sai como `outro`. Relatório:
   tests/CONFERENCIA_VISUAL_2026-11-16_etapa3_leitura_visual.md. Uma chamada leva 40 a 90 s; 300 faturas ≈ 5 h.
+- Limites medidos (16/11, antes do 1º deploy): (1) repetibilidade — 3 faturas lidas 3× cada: 76/76 campos idênticos, 17–35 s
+  por leitura; (2) escaneadas reais — 7 PDFs só imagem baixados da base (Energisa S/SE, Enel SP, Equatorial MA amassada,
+  Brasília, Enel CE, CPFL borrada, Coelba Azul), verdade conferida na imagem em `tests/gabarito_escaneadas.json`:
+  identificação, medidor, leituras, constante, consumo, tributos e demandas 100 %, total 6/7 (Brasília com total zero por
+  devolução); relatório `tests/CONFERENCIA_VISUAL_2026-11-16_escaneadas.md`. Achados: "sem texto" na base NÃO é PDF-imagem
+  para as faturas da Claro (o caminho da Claro não guarda texto_plumber; o PDF tem 3–9 mil caracteres) — a rotina agora mede
+  a camada de texto depois de baixar e marca `tem_texto` sem gastar chamada; PDFs protegidos por senha (Elektro) viram
+  `erro` sem ir para a fila humana; "Consumo Reativo" era classificado como energia ativa e dobrava o consumo da Coelba
+  Azul (corrigido em medicao.classificar_grandeza, goldens inalterados); medição que fecha na física mas não bate com
+  nenhum item kWh da fatura não é gravada.
 
 ### Testes golden (CI) — `worker/engine/tests/`
 - `worker/engine/extrair_fatura.py` → `extrair_campos(pdf_bytes)`: o mesmo caminho do `pdf_pipeline.py` para

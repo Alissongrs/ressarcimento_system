@@ -116,10 +116,31 @@ def baixar(url: str) -> bytes | None:
         return r.content if b"%PDF-" in r.content[:1024] else None
 
 
-def renderizar(pdf_bytes: bytes, base: Path, max_paginas: int = MAX_PAGINAS, dpi: int = DPI) -> list[Path]:
+def abrir(pdf_bytes: bytes):
+    """Abre o PDF; protegido por senha vazia é destravado, senão levanta ValueError('PDF protegido')."""
     import fitz
-    base.parent.mkdir(parents=True, exist_ok=True)
     d = fitz.open(stream=pdf_bytes, filetype="pdf")
+    if d.is_encrypted and not d.authenticate(""):
+        raise ValueError("PDF protegido por senha")
+    try:
+        d[0]
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"PDF protegido/ilegível: {e}") from e
+    return d
+
+
+def texto_do_pdf(pdf_bytes: bytes, max_paginas: int = 3) -> int:
+    """Tamanho da camada de texto (0 = só imagem). Decide se a fatura é mesmo caso de leitura visual."""
+    try:
+        d = abrir(pdf_bytes)
+        return sum(len(pg.get_text()) for i, pg in enumerate(d) if i < max_paginas)
+    except Exception:
+        return 0
+
+
+def renderizar(pdf_bytes: bytes, base: Path, max_paginas: int = MAX_PAGINAS, dpi: int = DPI) -> list[Path]:
+    base.parent.mkdir(parents=True, exist_ok=True)
+    d = abrir(pdf_bytes)
     out = []
     for i, pg in enumerate(d):
         if i >= max_paginas:
@@ -319,6 +340,17 @@ def validar_leitura(resp: dict) -> dict:
         ok_itens = (not ok_fisica and bool(com_consumo) and all(r.leit_ant == r.leit_atu and _item_bate(r.consumo) for r in com_consumo))
         if ok_itens:
             obs.append("física não fecha (leituras iguais); consumo confirmado pelos itens")
+        # física fecha mas CONTRADIZ os itens kWh da própria fatura (nenhum consumo bate, nem com perda de até 10 %):
+        # algum registro foi lido/classificado errado — não grava medição
+        if ok_fisica and qs_kwh and com_consumo:
+            tot_posto: dict[str, float] = {}
+            for r in com_consumo:
+                tot_posto[r.posto] = tot_posto.get(r.posto, 0.0) + r.consumo
+            def _perto(v):
+                return any(q and (abs(q - v) <= max(0.02, 0.003 * v) or 1.005 <= q / v <= 1.10) for q in qs_kwh)
+            if not any(_perto(v) for v in tot_posto.values()):
+                ok_fisica = False
+                obs.append("medição fecha na física mas nenhum consumo bate com os itens kWh da fatura: não gravada")
         if ok_fisica or ok_itens:
             blocos["medicao"] = True
             fator = 1 + (perda or 0) / 100 if (origem in ("linha",) and ok_fisica) else 1.0
@@ -441,7 +473,7 @@ SELECT f.id, f.uid, f.link_fatura, f.cod_empresa, f.distribuidora, f.validador_g
   LEFT JOIN FT_LEITURA_VISUAL v ON v.id_fatura = f.id
  WHERE f.link_fatura LIKE 'http%%'
    AND (f.texto_plumber IS NULL OR LENGTH(f.texto_plumber) < 200 OR f.validador_gate = 'reprovado')
-   AND (v.id_fatura IS NULL OR (v.status NOT IN ('ok','humano','outro') AND v.tentativas < 2))
+   AND (v.id_fatura IS NULL OR (v.status NOT IN ('ok','humano','outro','tem_texto') AND v.tentativas < 2))
  ORDER BY (f.texto_plumber IS NULL OR LENGTH(f.texto_plumber) < 200) DESC, f.mes_referencia DESC, f.id DESC
  LIMIT %s"""
 
@@ -475,7 +507,7 @@ def gravar_tentativa(con, fid: int, uid: str | None, resp: dict | None, val: dic
                  json.dumps(antes, ensure_ascii=False, default=str) if antes else None, 1 if gravado else 0,
                  (erro or "")[:500] or None))
     # 2ª falha → humano
-    cur.execute("UPDATE FT_LEITURA_VISUAL SET status='humano' WHERE id_fatura=%s AND status IN ('falhou','parcial','erro') AND tentativas >= 2", (fid,))
+    cur.execute("UPDATE FT_LEITURA_VISUAL SET status='humano' WHERE id_fatura=%s AND status IN ('falhou','parcial','erro') AND tentativas >= 2 AND erro NOT LIKE 'PDF protegido%%'", (fid,))
     con.commit()
     cur.close()
 
@@ -601,6 +633,11 @@ def processar(con, row: dict, gravar: bool) -> tuple[str, str]:
     if not pdf:
         gravar_tentativa(con, fid, row.get("uid"), None, None, "erro", "download vazio / não é PDF", None, False)
         return "erro", "download vazio"
+    # "sem texto" na base nem sempre é PDF-imagem (o caminho da Claro não guarda texto_plumber): se o PDF tem
+    # camada de texto, não é caso de leitura visual — é do pipeline determinístico (--revalidar). Registra e pula.
+    if row.get("validador_gate") != "reprovado" and texto_do_pdf(pdf) >= int(os.environ.get("SURE_VISUAL_MIN_TEXTO", "200")):
+        gravar_tentativa(con, fid, row.get("uid"), None, None, "tem_texto", "PDF tem camada de texto: cabe ao pipeline determinístico", None, False)
+        return "tem_texto", ""
     foco = foco_anterior(con, fid)
     resp, val, erro = ler_pdf(pdf, f"f{fid}", foco)
     if erro and not val:
