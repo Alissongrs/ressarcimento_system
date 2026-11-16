@@ -151,7 +151,18 @@ GD consistente, leitura, SEFAZ). Grava a coluna `validador_gate`.
   Gravação em FATURA_DADOS_EXTRAIDOS DESLIGADA por padrão (`SURE_VISUAL_GRAVAR=0`): a rotina lê, valida e registra;
   com `=1` preenche SÓ colunas vazias (fonte_extracao='visual', extracao_modelo_revisor='claude-visual') e guarda os
   valores anteriores — `python leitura_visual.py desfazer <id>` volta. `fila` conta candidatas; `ler x.pdf` testa local.
-- Medido no gabarito visual: 11 documentos lidos por imagem com a assinatura local (10 faturas de 9 layouts + 1 rateio): nenhum valor gravado errado — distribuidora, UC, grupo, constante, medidor, dias e demanda contratada 10/10 ou 8/8; leituras 7/8; consumo fora ponta 7/9, ponta 4/5; total 9/11; tributos 7/9; o que não fechou (soma dos itens, ICMS base × alíquota, leituras iguais) ficou vazio em vez de errado; o rateio saiu como 'outro'. Relatório: tests/CONFERENCIA_VISUAL_2026-11-16_etapa3_leitura_visual.md. Uma chamada leva 40 a 90 s; 300 faturas cabem em cerca de 5 h.
+- 2ª tentativa dirigida: quem não fechou tudo na 1ª é relido em 220 dpi com o pedido apontando os blocos e os motivos que
+  não bateram (soma dos itens, ICMS base × alíquota, dígitos da medição). Regras herdadas do molde de texto: demanda
+  faturada = item de demanda (um só, ou o mais perto da medida), leituras iguais com consumo confirmado item a item
+  valem pelos itens (Coelba livre), perda de transformação só nos itens (razão constante 1,005–1,10 → faturado = item).
+- Disjuntor: `SURE_VISUAL_MAX_ERROS_SEGUIDOS` (5) erros seguidos do `claude -p` (limite de uso, sessão) param a noite com
+  rc 1 no painel de rotinas. Divergências: valor lido e validado ≠ valor já gravado fica em validacao_json.divergencias
+  (nada é sobrescrito) — matéria-prima da etapa 4.
+- Medido no gabarito visual (11 documentos de 9 layouts, assinatura local, com a 2ª leitura): NENHUM valor errado;
+  distribuidora, UC, grupo, modalidade, dias, constante, medidor, ICMS, demanda contratada e faturada 100 %; consumo
+  ponta 100 %, fora ponta 89 %; leituras 88 %; total 82 %; PIS/COFINS 89 % — o resto fica vazio (PDF-imagem sem medição
+  conferível, Amazonas com itens incompletos); o rateio sai como `outro`. Relatório:
+  tests/CONFERENCIA_VISUAL_2026-11-16_etapa3_leitura_visual.md. Uma chamada leva 40 a 90 s; 300 faturas ≈ 5 h.
 
 ### Testes golden (CI) — `worker/engine/tests/`
 - `worker/engine/extrair_fatura.py` → `extrair_campos(pdf_bytes)`: o mesmo caminho do `pdf_pipeline.py` para

@@ -116,7 +116,7 @@ def baixar(url: str) -> bytes | None:
         return r.content if b"%PDF-" in r.content[:1024] else None
 
 
-def renderizar(pdf_bytes: bytes, base: Path, max_paginas: int = MAX_PAGINAS) -> list[Path]:
+def renderizar(pdf_bytes: bytes, base: Path, max_paginas: int = MAX_PAGINAS, dpi: int = DPI) -> list[Path]:
     import fitz
     base.parent.mkdir(parents=True, exist_ok=True)
     d = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -125,14 +125,24 @@ def renderizar(pdf_bytes: bytes, base: Path, max_paginas: int = MAX_PAGINAS) -> 
         if i >= max_paginas:
             break
         p = base.with_name(f"{base.name}_p{i + 1}.png")
-        pg.get_pixmap(dpi=DPI).save(str(p))
+        pg.get_pixmap(dpi=dpi).save(str(p))
         out.append(p)
     return out
 
 
-def chamar_claude(imagens: list[Path]) -> tuple[dict | None, str]:
-    """Uma chamada `claude -p` por fatura; só a ferramenta Read. Devolve (json, saída bruta)."""
+def chamar_claude(imagens: list[Path], foco: dict | None = None) -> tuple[dict | None, str]:
+    """Uma chamada `claude -p` por fatura; só a ferramenta Read. Devolve (json, saída bruta).
+    `foco` (2ª tentativa) diz o que não fechou na 1ª: o pedido continua o JSON inteiro, mas com atenção dirigida."""
     prompt = PROMPT + "\n".join(f"- {p.resolve()}" for p in imagens) + "\n"
+    if foco:
+        blocos = ", ".join(foco.get("blocos") or []) or "nenhum bloco"
+        prompt += ("\nSEGUNDA LEITURA. Na primeira, estes blocos NÃO fecharam nas contas: " + blocos + ".\n"
+                   "Motivos: " + "; ".join(foco.get("obs") or []) + "\n"
+                   "Releia com cuidado redobrado: (1) em 'itens', liste TODAS as linhas da tabela de faturamento, inclusive "
+                   "créditos negativos, bandeira, iluminação pública, juros, multa e parcelas, com o valor exato de cada uma — "
+                   "a soma tem de bater com o total; (2) na tabela de medição, copie cada número dígito a dígito, leitura "
+                   "anterior, atual, constante e consumo na ordem impressa; (3) para o ICMS, use a BASE DE CÁLCULO do quadro de "
+                   "tributos (não o total da fatura) e a alíquota impressa. Devolva o JSON completo de novo.\n")
     flags = os.environ.get("SURE_VISUAL_CLAUDE_FLAGS", "-p --permission-mode acceptEdits --allowedTools Read")
     args = [CLAUDE] + [a for a in flags.split(" ") if a]
     try:
@@ -298,9 +308,20 @@ def validar_leitura(resp: dict) -> dict:
         perda, origem = validar(regs, perda_linha)
         ativa = [r for r in regs if r.grandeza == "energia_ativa"]
         conf = [r for r in ativa if r.ok is not None]
-        if conf and all(r.ok for r in conf):
+        qs_kwh = [_num(i.get("quantidade")) for i in itens if str(i.get("unidade") or "").lower().startswith("kwh")]
+
+        def _item_bate(v):
+            return bool(v) and any(q and abs(q - v) <= max(0.02, 0.003 * v) for q in qs_kwh)
+
+        ok_fisica = bool(conf) and all(r.ok for r in conf)
+        com_consumo = [r for r in ativa if r.consumo]
+        # leituras iguais com consumo impresso e confirmado item a item (Coelba livre): vale pelos itens
+        ok_itens = (not ok_fisica and bool(com_consumo) and all(r.leit_ant == r.leit_atu and _item_bate(r.consumo) for r in com_consumo))
+        if ok_itens:
+            obs.append("física não fecha (leituras iguais); consumo confirmado pelos itens")
+        if ok_fisica or ok_itens:
             blocos["medicao"] = True
-            fator = 1 + (perda or 0) / 100 if origem in ("linha",) else 1.0
+            fator = 1 + (perda or 0) / 100 if (origem in ("linha",) and ok_fisica) else 1.0
             por_posto: dict[str, float] = {}
             for r in ativa:
                 if r.consumo is not None:
@@ -321,6 +342,24 @@ def validar_leitura(resp: dict) -> dict:
                 cols["leit_ant_ativa_ponta"], cols["leit_atu_ativa_ponta"] = lp.leit_ant, lp.leit_atu
             if lfp:
                 cols["leit_ant_ativa_fponta"], cols["leit_atu_ativa_fponta"] = lfp.leit_ant, lfp.leit_atu
+            # perda de transformação só nos itens (CPFL, Amazonas: tabela imprime o medido; o item kWh vem ×1,025).
+            # Mesma regra do medicao.py: itens kWh com a MESMA razão 1,005–1,10 sobre o medido → o faturado é o item
+            if fator == 1.0 and not any(_item_bate(v) for v in (cp, cfp) if v):
+                razoes = {}
+                for posto, base in (("p", cp), ("fp", cfp)):
+                    if not base:
+                        continue
+                    for q in qs_kwh:
+                        if q and 1.005 <= q / base <= 1.10:
+                            razoes[posto] = (q / base, q)
+                            break
+                zs = [z for z, _ in razoes.values()]
+                if zs and max(zs) - min(zs) < 0.004 and len(razoes) == sum(1 for v in (cp, cfp) if v):
+                    if "p" in razoes:
+                        cp = razoes["p"][1]
+                    if "fp" in razoes:
+                        cfp = razoes["fp"][1]
+                    obs.append(f"perda de {round((sum(zs) / len(zs) - 1) * 100, 2)}% inferida pelos itens: consumo faturado = item")
             if cp is not None:
                 cols["consumo_ativo_ponta_kwh"] = _r3(cp)
             if cfp is not None:
@@ -329,9 +368,8 @@ def validar_leitura(resp: dict) -> dict:
                 cols["kwh_total"] = _r3((cp or 0) + (cfp or 0) + (por_posto.get("reservado") or 0) * 1.0)
             cols["medicao_grandezas_json"] = json.dumps([r.dict() for r in regs], ensure_ascii=False)
             # consumo confirmado por um item kWh? (reforço, não condição)
-            qs = [_num(i.get("quantidade")) for i in itens if str(i.get("unidade") or "").lower().startswith("kwh")]
             for alvo in (cp, cfp):
-                if alvo and any(q and abs(q - alvo) <= max(0.02, 0.003 * alvo) for q in qs):
+                if _item_bate(alvo):
                     obs.append(f"consumo {alvo} confirmado por item kWh")
         else:
             falhas = "; ".join(f"{r.grandeza_txt} {r.posto_txt}: {r.consumo} ≠ {r.regra} = {r.calc}" for r in ativa if r.ok is False)
@@ -347,12 +385,42 @@ def validar_leitura(resp: dict) -> dict:
             v = _num(dem.get(k))
             if v is not None and v > 0:
                 cols[c] = v
+        # mesma regra do molde de texto (medicao.py): o item de demanda da fatura prevalece; com vários itens,
+        # o mais perto da demanda medida fora ponta (CPFL imprime duas demandas)
+        dem_itens = _demanda_itens(itens)
+        dm_fp = max([r.consumo for r in regs if r.grandeza == "demanda" and r.posto == "fp" and r.consumo], default=None)
+        azul = "azul" in normalizar(str(ident.get("modalidade") or ""))
+        if dem_itens and not azul:
+            if len(dem_itens) == 1:
+                cols["demanda_faturada_fponta_kw"] = dem_itens[0]
+            elif dm_fp:
+                perto = min(dem_itens, key=lambda v: abs(v - dm_fp))
+                if abs(perto - dm_fp) <= 0.05 * dm_fp:
+                    cols["demanda_faturada_fponta_kw"] = perto
+                    obs.append(f"demanda faturada = item {perto} (mais perto da medida {dm_fp})")
+        elif dem_itens and azul and len(dem_itens) == 2:
+            cols["demanda_faturada_ponta_kw"], cols["demanda_faturada_fponta_kw"] = dem_itens[0], dem_itens[1]
 
     cols = {k: v for k, v in cols.items() if v is not None}
     if tipo != "fatura":  # rateio, nota de comercializadora, outro: não é fatura de distribuidora — nada a gravar
         blocos = {k: False for k in blocos}
         cols = {}
     return {"blocos": blocos, "colunas": cols, "obs": obs, "tipo_documento": tipo}
+
+
+def _demanda_itens(itens: list) -> list[float]:
+    """Quantidades (kW) dos itens de demanda faturada lidos — exclui diferença/retroativa/ultrapassagem/reativa/etc."""
+    vals = []
+    for it in itens:
+        d = normalizar(str(it.get("descricao") or ""))
+        u = str(it.get("unidade") or "").upper().replace(" ", "")
+        q = _num(it.get("quantidade"))
+        if "demanda" not in d or not u.startswith("KW") or u.startswith("KWH") or not q or q <= 0:
+            continue
+        if re.search(r"diferen|retroativ|ultrapass|reativ|lei estadual|geracao|complement|isent|exced|sem icms|nao utiliz", d):
+            continue
+        vals.append(round(q, 3))
+    return sorted(set(vals))
 
 
 def status_de(val: dict) -> str:
@@ -454,16 +522,20 @@ def desfazer(con, fid: int) -> int:
 
 
 # ─── uma fatura ───────────────────────────────────────────────────────────────
-def ler_pdf(pdf_bytes: bytes, nome: str) -> tuple[dict | None, dict | None, str | None]:
-    """(resposta, validação, erro) de um PDF em bytes."""
+DPI_SEGUNDA = int(os.environ.get("SURE_VISUAL_DPI_SEGUNDA", "220"))
+
+
+def ler_pdf(pdf_bytes: bytes, nome: str, foco: dict | None = None) -> tuple[dict | None, dict | None, str | None]:
+    """(resposta, validação, erro) de um PDF em bytes. Com `foco` é a 2ª tentativa: páginas em mais resolução
+    e pedido dirigido ao que não fechou."""
     base = WORK / re.sub(r"[^A-Za-z0-9_.-]", "_", nome)
     try:
-        imagens = renderizar(pdf_bytes, base)
+        imagens = renderizar(pdf_bytes, base, dpi=DPI_SEGUNDA if foco else DPI)
     except Exception as e:  # noqa: BLE001
         return None, None, f"não renderizou: {e}"
     if not imagens:
         return None, None, "PDF sem páginas"
-    resp, bruto = chamar_claude(imagens)
+    resp, bruto = chamar_claude(imagens, foco)
     for p in imagens:
         try:
             p.unlink()
@@ -478,28 +550,74 @@ def ler_pdf(pdf_bytes: bytes, nome: str) -> tuple[dict | None, dict | None, str 
     return resp, val, None
 
 
-def processar(con, row: dict, gravar: bool) -> str:
+def foco_anterior(con, fid: int) -> dict | None:
+    """Se já houve uma tentativa, o que não fechou nela (blocos + motivos) para dirigir a 2ª leitura."""
+    cur = con.cursor(dictionary=True)
+    cur.execute("SELECT tentativas, validacao_json, erro FROM FT_LEITURA_VISUAL WHERE id_fatura=%s", (fid,))
+    row = cur.fetchone()
+    cur.close()
+    if not row or not row.get("tentativas"):
+        return None
+    try:
+        val = json.loads(row.get("validacao_json") or "{}")
+    except ValueError:
+        val = {}
+    blocos = [k for k, v in (val.get("blocos") or {}).items() if not v] or ["identificacao", "medicao", "financeiro", "tributos"]
+    return {"blocos": blocos, "obs": (val.get("obs") or []) + ([row["erro"]] if row.get("erro") else [])}
+
+
+def divergencias(con, fid: int, cols: dict) -> list[dict]:
+    """Colunas já preenchidas na base cujo valor difere do lido e validado — matéria-prima da etapa 4; nada é sobrescrito."""
+    nomes = [k for k in cols if k != "medicao_grandezas_json"]
+    if not nomes:
+        return []
+    cur = con.cursor(dictionary=True)
+    cur.execute(f"SELECT {', '.join(nomes)} FROM FATURA_DADOS_EXTRAIDOS WHERE id=%s", (fid,))
+    atual = cur.fetchone() or {}
+    cur.close()
+    out = []
+    for k in nomes:
+        a, l = atual.get(k), cols[k]
+        if a in (None, ""):
+            continue
+        an, ln_ = _num(a), _num(l)
+        if an is not None and ln_ is not None:
+            if abs(an - ln_) > max(0.011, 0.005 * abs(ln_)):
+                out.append({"coluna": k, "atual": an, "lido": ln_})
+        elif str(a).strip()[:10] != str(l).strip()[:10] and normalizar(str(a)) != normalizar(str(l)):
+            out.append({"coluna": k, "atual": str(a), "lido": str(l)})
+    return out
+
+
+def processar(con, row: dict, gravar: bool) -> tuple[str, str]:
+    """Devolve (status, detalhe). Detalhe começa com 'claude:' quando a falha foi na chamada da IA (disjuntor)."""
     fid = row["id"]
     pdf = None
     try:
         pdf = baixar(row["link_fatura"])
     except Exception as e:  # noqa: BLE001
         gravar_tentativa(con, fid, row.get("uid"), None, None, "erro", f"download: {e}", None, False)
-        return "erro"
+        return "erro", f"download: {e}"
     if not pdf:
         gravar_tentativa(con, fid, row.get("uid"), None, None, "erro", "download vazio / não é PDF", None, False)
-        return "erro"
-    resp, val, erro = ler_pdf(pdf, f"f{fid}")
+        return "erro", "download vazio"
+    foco = foco_anterior(con, fid)
+    resp, val, erro = ler_pdf(pdf, f"f{fid}", foco)
     if erro and not val:
         gravar_tentativa(con, fid, row.get("uid"), resp, None, "erro", erro, None, False)
-        return "erro"
+        return "erro", ("claude: " + erro) if (erro.startswith("sem JSON") or erro.startswith("timeout") or "falha ao chamar" in erro) else erro
     status = status_de(val)
+    val["tentativa"] = 2 if foco else 1
+    try:
+        val["divergencias"] = divergencias(con, fid, val["colunas"])
+    except Exception as e:  # noqa: BLE001
+        val["divergencias"] = [{"erro": str(e)[:200]}]
     antes, gravadas = ({}, [])
     if gravar and status in ("ok", "parcial") and val["colunas"]:
         antes, gravadas = aplicar_colunas(con, fid, val["colunas"])
         val["colunas_gravadas"] = gravadas
     gravar_tentativa(con, fid, row.get("uid"), resp, val, status, None, antes or None, bool(gravadas))
-    return status
+    return status, (f"{len(val['divergencias'])} divergência(s)" if val["divergencias"] else "")
 
 
 # ─── comandos ─────────────────────────────────────────────────────────────────
@@ -520,19 +638,30 @@ def cmd_rodar(argv: list[str]) -> int:
         return 0
     eid = reg.inicio("leitura_visual", f"{len(rows)} fatura(s); gravar={'sim' if gravar else 'não (só registra)'}")
     fim = time.time() + minutos * 60
+    max_seguidos = int(os.environ.get("SURE_VISUAL_MAX_ERROS_SEGUIDOS", "5"))
     cont: dict[str, int] = {}
+    seguidos, parado, rc = 0, "", 0
     for i, row in enumerate(rows, 1):
         if time.time() > fim:
             _log(f"tempo esgotado após {i - 1} fatura(s)")
             break
-        st = processar(con, row, gravar)
+        st, det = processar(con, row, gravar)
         cont[st] = cont.get(st, 0) + 1
-        _log(f"{i}/{len(rows)} fatura {row['id']} ({row.get('distribuidora') or '?'}, gate={row.get('validador_gate')}): {st}")
+        _log(f"{i}/{len(rows)} fatura {row['id']} ({row.get('distribuidora') or '?'}, gate={row.get('validador_gate')}): {st} {det}")
+        # disjuntor: a IA falhando seguidamente (limite de uso, sessão expirada) — para a noite em vez de queimar a fila
+        seguidos = seguidos + 1 if det.startswith("claude:") else 0
+        if seguidos >= max_seguidos:
+            parado = f"parado: {seguidos} erros seguidos do claude ({det[8:80]})"
+            rc = 1
+            _log(parado)
+            break
     con.close()
     resumo = ", ".join(f"{k}: {v}" for k, v in sorted(cont.items())) + ("; gravou colunas vazias" if gravar else "; sem gravar (SURE_VISUAL_GRAVAR=0)")
-    reg.fim(eid, 0, resumo)
+    if parado:
+        resumo = parado + "; " + resumo
+    reg.fim(eid, rc, resumo)
     _log(resumo)
-    return 0
+    return rc
 
 
 def cmd_ler(argv: list[str]) -> int:
@@ -545,6 +674,13 @@ def cmd_ler(argv: list[str]) -> int:
         p = Path(a)
         t0 = time.time()
         resp, val, erro = ler_pdf(p.read_bytes(), p.stem)
+        if "--segunda" in argv and (erro or not all((val or {}).get("blocos", {}).values())):
+            foco = {"blocos": [k for k, v in ((val or {}).get("blocos") or {}).items() if not v] or ["todos"],
+                    "obs": ((val or {}).get("obs") or []) + ([erro] if erro else [])}
+            print(f"   2ª leitura ({p.name}): foco {foco['blocos']}")
+            resp2, val2, erro2 = ler_pdf(p.read_bytes(), p.stem, foco)
+            if val2 and (not val or sum(val2["blocos"].values()) >= sum(val["blocos"].values())):
+                resp, val, erro = resp2, val2, erro2
         if pasta_json:
             Path(pasta_json).mkdir(parents=True, exist_ok=True)
             Path(pasta_json, p.stem + ".json").write_text(json.dumps(
