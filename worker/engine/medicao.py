@@ -358,6 +358,10 @@ def validar(regs: list[Registro], perda_linha: float | None) -> tuple[float | No
             if r.consumo > 0 and melhor[1] > 0:
                 razoes.append(r.consumo / melhor[1])
     perda, origem = perda_linha, ("linha" if perda_linha else None)
+    # perda impressa (linha/texto) MAS a coluna consumo só fecha com o fator → a perda já está embutida na
+    # coluna (Energisa MT); quem monta o faturado não pode aplicar de novo
+    if perda_linha and any(r.ok and "×" in (r.regra or "") for r in regs if r.grandeza == "energia_ativa"):
+        origem = "embutida"
     # perda embutida na coluna: todas as linhas que falharam têm a mesma razão (1,0 < r < 1,12)
     if razoes and all(1.001 < z < 1.12 for z in razoes) and max(razoes) - min(razoes) < 0.004:
         f = sum(razoes) / len(razoes)

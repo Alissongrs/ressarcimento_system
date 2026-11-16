@@ -136,6 +136,23 @@ GD consistente, leitura, SEFAZ). Grava a coluna `validador_gate`.
   11/42, fora ponta 15/44). Faltam só PDFs-imagem, o rateio de condomínio e as notas ACL de 6 páginas.
   `tests/conferir_medicao.py` mede o módulo sozinho.
 
+### Leitura visual na VPS — `worker/engine/leitura_visual.py` (etapa 3, 16/11/2026)
+- Para o que o motor determinístico não fecha (PDF só imagem — ~5.600 na base — ou gate `reprovado`, ~4.400):
+  o cron `worker/job_leitura_visual.sh` (todo dia 04:30, teto `SURE_VISUAL_TETO`=300 faturas, tempo máximo
+  `SURE_VISUAL_MAX_MIN`=300 min) baixa o PDF pelo `link_fatura`, renderiza até 3 páginas em PNG (150 dpi) e faz
+  UMA chamada `claude -p --allowedTools Read` por fatura (assinatura do Claude Code da VPS, sem API paga) pedindo
+  um JSON fixo: identificação, medição (registros da tabela de medição), demandas, itens, tributos, tipo de documento.
+- O JSON passa pelas contas da fatura antes de virar coluna: medição = `medicao.validar` ((atual − anterior) × K =
+  consumo, por registro); financeiro = soma dos itens = total a pagar; tributos = ICMS base × alíquota; identificação =
+  mês válido, vencimento ≥ emissão, UC presente, distribuidora pelo CNPJ/alias do catálogo. Cada bloco só grava se fecha.
+  Rateio, nota de comercializadora etc. saem como `outro` e nada é gravado.
+- Cada tentativa fica em `FT_LEITURA_VISUAL` (id_fatura, tentativas, status ok/parcial/falhou/erro/outro/humano,
+  resposta_json, validacao_json, colunas_json, antes_json, gravado). Duas falhas → `humano` (fila de revisão).
+  Gravação em FATURA_DADOS_EXTRAIDOS DESLIGADA por padrão (`SURE_VISUAL_GRAVAR=0`): a rotina lê, valida e registra;
+  com `=1` preenche SÓ colunas vazias (fonte_extracao='visual', extracao_modelo_revisor='claude-visual') e guarda os
+  valores anteriores — `python leitura_visual.py desfazer <id>` volta. `fila` conta candidatas; `ler x.pdf` testa local.
+- Medido no gabarito visual: 11 documentos lidos por imagem com a assinatura local (10 faturas de 9 layouts + 1 rateio): nenhum valor gravado errado — distribuidora, UC, grupo, constante, medidor, dias e demanda contratada 10/10 ou 8/8; leituras 7/8; consumo fora ponta 7/9, ponta 4/5; total 9/11; tributos 7/9; o que não fechou (soma dos itens, ICMS base × alíquota, leituras iguais) ficou vazio em vez de errado; o rateio saiu como 'outro'. Relatório: tests/CONFERENCIA_VISUAL_2026-11-16_etapa3_leitura_visual.md. Uma chamada leva 40 a 90 s; 300 faturas cabem em cerca de 5 h.
+
 ### Testes golden (CI) — `worker/engine/tests/`
 - `worker/engine/extrair_fatura.py` → `extrair_campos(pdf_bytes)`: o mesmo caminho do `pdf_pipeline.py` para
   uma fatura com camada de texto (plumber → liteparse → bbox → extrator_v2 → cascata → complementos →

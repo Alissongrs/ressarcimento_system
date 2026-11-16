@@ -43,3 +43,9 @@ Para atualizar de novo: copiar de `ia/Copia/essencial` os .py listados aqui e as
   as colunas vêm de `_medicao['aplicar']` em `atualizar_colunas_db._coleta_campos`; `PDF_PIPELINE_MEDICAO=0` desliga.
 - `python medicao.py fatura.pdf` mostra os registros e o que fechou; `tests/conferir_medicao.py` mede o módulo
   sozinho contra `tests/gabarito_visual.json`.
+
+## 16/11/2026 — leitura visual na VPS (etapa 3 da captura de alto nível)
+
+- `leitura_visual.py`: faturas sem texto ou reprovadas → PNG → `claude -p` (Read) → JSON → mesmas contas do motor →
+  `FT_LEITURA_VISUAL`; só grava colunas vazias e só com `SURE_VISUAL_GRAVAR=1`. Cron `worker/job_leitura_visual.sh`
+  04:30, teto 300/noite. `python leitura_visual.py ler fatura.pdf` testa local; `fila` mostra o estoque; `desfazer <id>`.

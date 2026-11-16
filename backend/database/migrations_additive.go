@@ -326,6 +326,30 @@ func runAdditiveMigrations(db *sql.DB) error {
 	addColumnIfMissing(db, "FT_WHATSAPP_MENSAGENS", "anexo_erro", "VARCHAR(200)")
 	addColumnIfMissing(db, "FT_WHATSAPP_MENSAGENS", "anexo_proto", "MEDIUMBLOB")
 
+	// Leitura visual (16/11/2026, etapa 3 da captura de alto nível): uma linha por fatura lida pelo
+	// claude -p na VPS (worker/engine/leitura_visual.py) — resposta, validação, colunas que fecharam,
+	// valores anteriores (desfazer) e status (ok / parcial / falhou / erro / humano = fila de revisão).
+	createTableIfNotExists(db, "FT_LEITURA_VISUAL", `
+		CREATE TABLE IF NOT EXISTS FT_LEITURA_VISUAL (
+		  id_fatura      INT          NOT NULL,
+		  uid            VARCHAR(200) NULL,
+		  tentativas     INT          NOT NULL DEFAULT 0,
+		  status         VARCHAR(12)  NOT NULL,
+		  modelo         VARCHAR(40)  NULL,
+		  resposta_json  JSON         NULL,
+		  validacao_json JSON         NULL,
+		  colunas_json   JSON         NULL,
+		  antes_json     JSON         NULL,
+		  gravado        TINYINT(1)   NOT NULL DEFAULT 0,
+		  erro           VARCHAR(500) NULL,
+		  revisado_por   INT          NULL,
+		  revisado_em    DATETIME     NULL,
+		  criado_em      DATETIME     NOT NULL,
+		  atualizado_em  DATETIME     NOT NULL,
+		  PRIMARY KEY (id_fatura),
+		  KEY ix_lv_status (status, atualizado_em)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
+
 	// ↑ Próximas mudanças ADITIVAS entram acima desta linha.
 	log.Println("[migrate-aditivo] concluído")
 	return nil

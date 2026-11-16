@@ -47,3 +47,8 @@ W=/opt/ressarcimento/ressarcimento_system/worker
 
 # 7) Tarifas homologadas e bandeiras da ANEEL (dados abertos) — todo dia 05:30  (precisa CRON_TOKEN)
 30 5 * * *   $W/job_aneel.sh >/dev/null 2>&1
+
+# 8) Leitura visual (claude -p) das faturas que o motor não fechou — todo dia 04:30, teto 300/noite.
+#    SURE_VISUAL_GRAVAR=0 = lê, valida e registra em FT_LEITURA_VISUAL sem tocar nas colunas;
+#    troque para 1 (só preenche colunas vazias) depois de conferir as primeiras noites.
+30 4 * * *   SURE_VISUAL_TETO=300 SURE_VISUAL_GRAVAR=0 $W/job_leitura_visual.sh >/dev/null 2>&1
