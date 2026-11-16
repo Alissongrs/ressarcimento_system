@@ -27,3 +27,11 @@ Para atualizar de novo: copiar de `ia/Copia/essencial` os .py listados aqui e as
   Roda no CI (`extracao-golden`) com `requirements-golden.txt`. Para regravar: criar venv com esse
   requirements, `python tests/golden_test.py --atualizar`, conferir os valores e commitar.
 - Scorer de UC determinístico (candidatos em ordem de posição no texto, não ordem de `set`).
+
+## 16/11/2026 — identificação por quadro (etapa 1 da captura de alto nível)
+
+- `identificacao.py` + `distribuidoras.json`: distribuidora pelo CNPJ/chave NF3e (catálogo por raiz), UC, mês,
+  vencimento, total, NF, emissão, dias e classificação lidos pelos quadros (rótulo em texto + fonte grande do
+  cabeçalho). Ligado em `_rodar_pipeline_v3` (passo 2.65); `PDF_PIPELINE_IDENT=0` desliga.
+- Régua: `tests/gabarito_visual.json` (48 faturas conferidas na imagem), `tests/conferir_identificacao.py`
+  (módulo) e `tests/conferir_gabarito.py` (pipeline inteiro, a partir da saída de `extrair_fatura.py`).

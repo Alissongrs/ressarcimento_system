@@ -3434,6 +3434,20 @@ def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown,
         except Exception as e:
             log.warning(f"  [v3.36 coord_campos] erro: {e}")
 
+    # 2.65) Identificação por quadro (etapa 1, 16/11/2026): distribuidora pelo CNPJ/chave, UC, mês,
+    # vencimento, total, NF, emissão, dias e classificação lidos nos quadros da fatura (rótulo + fonte
+    # grande). Sobrescreve os campos de identificação do v2_out; PDF_PIPELINE_IDENT=0 desliga.
+    if isinstance(v2_out, dict) and pdf_bytes and os.getenv("PDF_PIPELINE_IDENT", "1") != "0":
+        t_etapa = time.time()
+        try:
+            from identificacao import aplicar_identificacao
+            aplicar_identificacao(v2_out, pdf_bytes)
+            _id = v2_out.get("_identificacao") or {}
+            log.info(f"  [v3.65 identificacao] dist={_id.get('distribuidora')} uc={_id.get('uc')} mes={_id.get('mes')} "
+                     f"venc={_id.get('vencimento')} total={_id.get('total')} tipo={_id.get('tipo_documento')} ({time.time()-t_etapa:.1f}s)")
+        except Exception as e:
+            log.warning(f"  [v3.65 identificacao] erro: {e}")
+
     # 2.7) Validador determinístico — score + gate (aprovado/revisao/reprovado/scaneada)
     # Anexa em v2_out["_qualidade"] pra atualizar_colunas_individuais ler o score.
     qualidade = {}

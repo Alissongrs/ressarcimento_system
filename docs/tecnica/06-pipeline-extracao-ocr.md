@@ -89,6 +89,23 @@ GD consistente, leitura, SEFAZ). Grava a coluna `validador_gate`.
 - **Dedup = `uid`** (único na FDE), vindo do `UID` da linha de origem (**não** recomputado
   pelo pipeline). Sem uid → linha ignorada. `fid` (id da origem) **não** é a chave.
 
+### Identificação por quadro — `worker/engine/identificacao.py` (etapa 1, 16/11/2026)
+- Roda dentro de `_rodar_pipeline_v3` (passo 2.65, antes do validador) e sobrescreve no `v2_out` os campos de
+  identificação: distribuidora (+CNPJ, UF), UC/instalação, código do cliente, mês de referência, vencimento,
+  total a pagar, nº da NF, emissão, dias faturados, grupo/subgrupo/modalidade. `PDF_PIPELINE_IDENT=0` desliga.
+  Tudo que leu fica em `v2_out['_identificacao']` com a origem de cada valor.
+- Três sinais, nesta ordem: rótulo em texto na mesma linha ("INSTALAÇÃO: 3920909", "DATA DE EMISSÃO:"), fonte
+  grande no topo da página 1 (os quadros coloridos de UC, mês, vencimento e total têm rótulo desenhado, que
+  nenhuma biblioteca lê, mas o valor em destaque é reconhecível pela forma), rótulo com valor abaixo/à direita.
+  Dias = inteiro na linha das datas de leitura, ou diferença entre elas.
+- Distribuidora pelo catálogo `distribuidoras.json` (raiz do CNPJ → nome canônico, UF, grupo, família de mapa):
+  CNPJ completo do cabeçalho; senão dígitos 7-20 da chave de acesso NF3e (cabeçalho em imagem: Light, Brasília);
+  senão alias/grupo + UF do endereço. Nunca mais a raiz usada para escolher o mapa (CPFL Paulista não é
+  "Santa Cruz"). Raízes de cliente (33.041.260 Via Varejo) não entram no catálogo.
+- Medido no gabarito visual (45 faturas com texto): distribuidora 45/45, UC 45/46, mês 45/45, vencimento 46/46,
+  total 45/46, emissão 45/45, dias 41/41, grupo 44/44, modalidade 43/43. PDFs só imagem ficam `sem_texto`.
+  `tests/conferir_identificacao.py` mede o módulo sozinho; `tests/conferir_gabarito.py` mede o pipeline inteiro.
+
 ### Testes golden (CI) — `worker/engine/tests/`
 - `worker/engine/extrair_fatura.py` → `extrair_campos(pdf_bytes)`: o mesmo caminho do `pdf_pipeline.py` para
   uma fatura com camada de texto (plumber → liteparse → bbox → extrator_v2 → cascata → complementos →
