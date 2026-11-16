@@ -107,6 +107,11 @@ _TOK_RES = {"reservado", "hr", "res", "reserv", "rsv"}
 _TOK_UNI = {"unico", "total", "tp", "geral"}
 
 
+def descolar(s: str) -> str:
+    """O liteparse às vezes cola palavras do posto ("F PONTAINDU", "PONTACAP") conforme a plataforma; separa."""
+    return re.sub(r"\bponta(indu|cap)\b", r"ponta \1", s)
+
+
 def classificar_posto(s: str) -> tuple[str, str | None]:
     """Posto pelas palavras, em qualquer posição: 'F PONTA INDU' → ('fp', 'indu'); 'Consumo Ativo NP Reg' → ('p', None);
     'En Ativa F-Pta' → ('fp', None); '' / 'Único' / 'Total' → ('unico', None)."""
@@ -264,10 +269,10 @@ def _ler_enel(itens: list[Item]) -> tuple[list[Registro], float | None] | None:
         if not palavras and not nums:
             continue
         y_ult = ln[0].y
-        texto_p = " ".join(palavras)
-        m = RE_POSTO.search(normalizar(texto_p))
+        texto_p = descolar(normalizar(" ".join(palavras)))
+        m = RE_POSTO.search(texto_p)
         posto_txt = m.group("posto") if m else ""
-        grand_txt = normalizar(texto_p)[: m.start()].strip(" -") if m else normalizar(texto_p)
+        grand_txt = texto_p[: m.start()].strip(" -") if m else texto_p
         # linha quebrada em duas (Enel Ceará): "PONTA" numa, "Energia Reativa-kVArh 183,87 ..." na outra
         if pendente is not None and (not palavras or (not posto_txt and nums)) and len(nums) >= 3:
             if nums and pendente.leit_ant is None:
@@ -626,9 +631,10 @@ def _ler_generico(itens: list[Item]) -> tuple[list[Registro], float | None, dict
                 medidor = next((t for t, _ in antes if RE_MEDIDOR.match(t) and sum(ch.isdigit() for ch in t) >= 4), None)
                 palavras = [t for t, _ in antes if t != medidor and not RE_MEDIDOR.match(t)]
                 txt = " ".join(palavras)
-                grandeza = classificar_grandeza(txt) if txt else "outra"
+                txt_n = descolar(normalizar(txt))
+                grandeza = classificar_grandeza(txt_n) if txt else "outra"
                 if grandeza not in ("outra", "perda") and (medidor or len(palavras) >= 1):
-                    posto, sub = classificar_posto(txt)
+                    posto, sub = classificar_posto(txt_n)
                     escolhido = quase = None
                     for a, u, k, c, nome in _ordenacoes(run):
                         r = Registro(medidor, grandeza, txt, posto, sub, "", a, u, k, c)
