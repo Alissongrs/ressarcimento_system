@@ -766,6 +766,15 @@ def _coleta_campos(out_v2: dict) -> dict:
         if k in _tarifas:
             cols[k] = _tarifas[k]
 
+    # 16/11/2026 (etapa 2, captura de alto nível): medição lida pelo molde do layout e validada pela
+    # física ((atual − anterior) × K = consumo). Quando validada, as colunas de medição vêm dela —
+    # medidor, constante, leituras, consumo por posto, kWh total, demanda faturada/contratada,
+    # medicao_grandezas_json — por cima do agregado dos itens e do regex v1 (ver medicao.py).
+    _med = out_v2.get("_medicao") or {}
+    for k, v in (_med.get("aplicar") or {}).items():
+        if v is not None:
+            cols[k] = v
+
     return cols
 
 

@@ -3448,6 +3448,24 @@ def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown,
         except Exception as e:
             log.warning(f"  [v3.65 identificacao] erro: {e}")
 
+    # 2.66) Medição por molde (etapa 2, 16/11/2026): tabela medidor/grandeza/posto/leituras/constante/
+    # consumo lida pelas linhas posicionadas e validada por (atual − anterior) × K = consumo.
+    # Deixa v2_out['_medicao'] (com 'aplicar' → colunas); PDF_PIPELINE_MEDICAO=0 desliga.
+    if isinstance(v2_out, dict) and pdf_bytes and os.getenv("PDF_PIPELINE_MEDICAO", "1") != "0":
+        t_etapa = time.time()
+        try:
+            from medicao import aplicar_medicao
+            aplicar_medicao(v2_out, pdf_bytes)
+            _md = v2_out.get("_medicao") or {}
+            if _md:
+                log.info(f"  [v3.66 medicao] molde={_md.get('molde')} medidor={_md.get('medidor')} K={_md.get('constante')} "
+                         f"validado={_md.get('validado')} {_md.get('n_ok')}/{_md.get('n_registros')} "
+                         f"consumo={_md.get('consumo_faturado')} perda={_md.get('perda_pct')} ({time.time()-t_etapa:.1f}s)")
+            else:
+                log.info(f"  [v3.66 medicao] nenhum molde reconheceu a tabela ({time.time()-t_etapa:.1f}s)")
+        except Exception as e:
+            log.warning(f"  [v3.66 medicao] erro: {e}")
+
     # 2.7) Validador determinístico — score + gate (aprovado/revisao/reprovado/scaneada)
     # Anexa em v2_out["_qualidade"] pra atualizar_colunas_individuais ler o score.
     qualidade = {}

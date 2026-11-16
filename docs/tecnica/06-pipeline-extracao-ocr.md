@@ -106,6 +106,36 @@ GD consistente, leitura, SEFAZ). Grava a coluna `validador_gate`.
   total 45/46, emissão 45/45, dias 41/41, grupo 44/44, modalidade 43/43. PDFs só imagem ficam `sem_texto`.
   `tests/conferir_identificacao.py` mede o módulo sozinho; `tests/conferir_gabarito.py` mede o pipeline inteiro.
 
+### Medição por molde — `worker/engine/medicao.py` (etapa 2, 16/11/2026)
+- Roda em `_rodar_pipeline_v3` (passo 2.66, depois da identificação) e lê a TABELA DE MEDIÇÃO da fatura
+  pelas linhas posicionadas: medidor, grandeza, posto, leitura anterior, leitura atual, constante, consumo.
+  Cada registro é validado pela física — energia: (atual − anterior) × K = consumo; demanda: atual × K (Enel SP)
+  ou (atual − anterior) × K (Enel Rio). Só quando TODOS os registros de energia ativa fecham a medição é
+  `validado` e sobrescreve as colunas (`_medicao['aplicar']`, lido em `atualizar_colunas_db._coleta_campos`):
+  numero_medidor, constante_k, leit_ant/atu_ativa_ponta/fponta, consumo_ativo_ponta/fponta_kwh, kwh_total
+  (= ponta + fora ponta + reservado), demanda_faturada/contratada_fponta_kw, medicao_grandezas_json (todos os
+  registros, com `ok`/`calc`/`regra`). `PDF_PIPELINE_MEDICAO=0` desliga.
+- Moldes: `enel` (cabeçalho "Medidor | Grandezas | Postos | Leitura Anterior | Leitura Atual | Const. | Consumo":
+  Enel SP/Rio/Ceará, Light, Neoenergia, Equatorial), `cemig_a` (pág. "Demonstrativo de grandezas faturadas":
+  leituras por segmento HFP/HP/HR, constantes, tabelas Energia/Demanda com Registrado/Contratado/Faturado),
+  `cemig_b` ("Tipo de Medição | Medição | …"), `elektro` (medidor + constante numa linha, "CONSUMO ant atu" noutra,
+  consumo no item CONSUMO TE/TUSD) e `generico` (qualquer linha "[medidor] grandeza/posto n1 n2 n3 [n4]" em que a
+  física fecha: CPFL/RGE, Copel, Energisa PB/MT, Equatorial Goiás, EDP, Celesc, Amazonas — este com atual antes
+  da anterior). Linhas de itens (mês na descrição, R$, %, mais de 6 números) e histórico não entram.
+- Perda de transformação: linha "PERDA DE TRANSF.- 2,5%" (Enel ML), razão constante embutida na coluna (Enel
+  Rio: inferida), itens kWh com a mesma razão 1,005–1,10 sobre o medido (CPFL, EDP ML) ou percentual escrito no
+  texto ("Perdas: 2.5", "PERDAS DE TRANSFORMAÇÃO / RAMAL: 2,50 %"). O consumo das colunas é o FATURADO
+  (medido × fator); o medido fica em `_medicao['consumo_medido']`. Leituras iguais com consumo impresso e
+  confirmado pelos itens (Coelba ML) valem pelos itens (`validado_por = 'itens'`).
+- Demanda faturada: item de demanda da fatura (um só, ou o mais perto da medida); sem item, cativo = maior entre
+  medida e contratada, mercado livre = medida; sem medida não se chuta. Contratada pelo rótulo
+  ("Demanda - KW", "DEMANDA FORA PONTA - KW", "Demanda Contratada Única (kW):", "D. Ctda F.Pta:").
+- Medido no gabarito visual de 48 faturas, pipeline inteiro (`tests/CONFERENCIA_VISUAL_2026-11-16_etapa2.md`):
+  medidor 42/42, constante 39/39, leituras 39/40, consumo ponta 17/17, fora ponta 43/44, kWh total 43/48,
+  demanda contratada 13/17, demanda faturada 12/16 (antes da etapa: leituras 0/40, constante 0/39, medidor
+  11/42, fora ponta 15/44). Faltam só PDFs-imagem, o rateio de condomínio e as notas ACL de 6 páginas.
+  `tests/conferir_medicao.py` mede o módulo sozinho.
+
 ### Testes golden (CI) — `worker/engine/tests/`
 - `worker/engine/extrair_fatura.py` → `extrair_campos(pdf_bytes)`: o mesmo caminho do `pdf_pipeline.py` para
   uma fatura com camada de texto (plumber → liteparse → bbox → extrator_v2 → cascata → complementos →

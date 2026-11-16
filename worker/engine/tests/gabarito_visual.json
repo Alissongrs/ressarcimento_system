@@ -10,8 +10,14 @@
   "consumo_ativo_fponta_kwh": 16851.45,
   "consumo_ativo_ponta_kwh": 945.46,
   "kwh_total": 17796.91,
-  "leit_ant_ativa_fponta": 51358.884,
-  "leit_atu_ativa_fponta": 51769.895,
+  "leit_ant_ativa_fponta": [
+   51358.884,
+   51358884
+  ],
+  "leit_atu_ativa_fponta": [
+   51769.895,
+   51769895
+  ],
   "constante_k": 0.04,
   "numero_medidor": "ASH003304",
   "dias_faturados": 31,
@@ -85,8 +91,14 @@
   "consumo_ativo_fponta_kwh": 9380.7,
   "consumo_ativo_ponta_kwh": 1454.6,
   "kwh_total": 10835.3,
-  "leit_ant_ativa_fponta": 2322.311,
-  "leit_atu_ativa_fponta": 2349.113,
+  "leit_ant_ativa_fponta": [
+   2322.311,
+   2322311
+  ],
+  "leit_atu_ativa_fponta": [
+   2349.113,
+   2349113
+  ],
   "constante_k": 0.35,
   "numero_medidor": "36050016131",
   "dias_faturados": 31,
@@ -322,8 +334,14 @@
   "modalidade_tarifaria": "Convencional",
   "consumo_ativo_fponta_kwh": 10897,
   "kwh_total": 10897,
-  "leit_ant_ativa_fponta": 587.118,
-  "leit_atu_ativa_fponta": 598.015,
+  "leit_ant_ativa_fponta": [
+   587.118,
+   587118
+  ],
+  "leit_atu_ativa_fponta": [
+   598.015,
+   598015
+  ],
   "constante_k": 1,
   "numero_medidor": "37100014433",
   "dias_faturados": 32,

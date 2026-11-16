@@ -35,3 +35,11 @@ Para atualizar de novo: copiar de `ia/Copia/essencial` os .py listados aqui e as
   cabeçalho). Ligado em `_rodar_pipeline_v3` (passo 2.65); `PDF_PIPELINE_IDENT=0` desliga.
 - Régua: `tests/gabarito_visual.json` (48 faturas conferidas na imagem), `tests/conferir_identificacao.py`
   (módulo) e `tests/conferir_gabarito.py` (pipeline inteiro, a partir da saída de `extrair_fatura.py`).
+
+## 16/11/2026 — medição por molde (etapa 2 da captura de alto nível)
+
+- `medicao.py`: tabela de medição lida pelas linhas posicionadas e validada pela física ((atual − anterior) × K =
+  consumo). Moldes `enel`, `cemig_a`, `cemig_b`, `elektro`, `generico`. Ligado em `_rodar_pipeline_v3` (passo 2.66);
+  as colunas vêm de `_medicao['aplicar']` em `atualizar_colunas_db._coleta_campos`; `PDF_PIPELINE_MEDICAO=0` desliga.
+- `python medicao.py fatura.pdf` mostra os registros e o que fechou; `tests/conferir_medicao.py` mede o módulo
+  sozinho contra `tests/gabarito_visual.json`.
