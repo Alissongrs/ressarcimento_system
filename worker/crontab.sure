@@ -52,3 +52,7 @@ W=/opt/ressarcimento/ressarcimento_system/worker
 #    SURE_VISUAL_GRAVAR=0 = lê, valida e registra em FT_LEITURA_VISUAL sem tocar nas colunas;
 #    troque para 1 (só preenche colunas vazias) depois de conferir as primeiras noites.
 30 4 * * *   SURE_VISUAL_TETO=300 SURE_VISUAL_GRAVAR=0 $W/job_leitura_visual.sh >/dev/null 2>&1
+
+# 9) Faturas `tem_texto` (PDF com texto que a base não guardou) → pdf_pipeline --force (etapas 1 e 2), com backup;
+#    todo dia 10:30, até 300 por rodada; usa o lock do pdf_pipeline (não roda junto com ele).
+30 10 * * *  SURE_REPROC_LIMITE=300 $W/job_reprocessar_tem_texto.sh >/dev/null 2>&1

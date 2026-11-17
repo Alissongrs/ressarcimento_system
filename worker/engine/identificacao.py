@@ -350,11 +350,21 @@ def _cabecalho(itens: list[Item], ph: float) -> dict:
                 out["vencimento"] = (antes[-1][1], f"destaque:{texto[:40]}")
         elif mes and len(datas_puras) == 1 and "vencimento" not in out:
             out["vencimento"] = (datas_puras[0][1], f"destaque:{texto[:40]}")
-        for g in grupo:  # identificadores "puros" (a linha é só o número)
+        # identificadores "puros" (o item é só o número). O liteparse parte números grandes em dois itens
+        # ("1.081" + ".866.036-84", CPFL): junta o pedaço que começa com ./,/- ao anterior quando o gap é mínimo
+        juntos: list[tuple[str, float, float]] = []  # (texto, h, y)
+        x_fim_ant = None
+        for g in sorted(grupo, key=lambda i: i.x):
             t = g.text.strip()
+            if juntos and t[:1] in ".,-" and re.search(r"\d$", juntos[-1][0]) and x_fim_ant is not None and g.x - x_fim_ant < 3:
+                juntos[-1] = (juntos[-1][0] + t, max(juntos[-1][1], g.h), juntos[-1][2])
+            else:
+                juntos.append((t, g.h, g.y))
+            x_fim_ant = g.x + g.w
+        for t, gh, gy in juntos:
             v_uc = parse_uc(t) if RE_ID_PURO.match(t) else None
             if v_uc and 6 <= len(re.sub(r"\D", "", v_uc)) <= 15 and not RE_DATA.search(t) and not re.fullmatch(r"\d{2}/\d{4}", t):
-                ucs.append((g.h, g.y, v_uc))
+                ucs.append((gh, gy, v_uc))
     if "vencimento" not in out and y_mes is not None and y_total is not None:  # quadros empilhados: mês, vencimento, total
         lo, hi = min(y_mes, y_total), max(y_mes, y_total)
         entre = [d for yy, d in datas_soltas if lo < yy < hi]

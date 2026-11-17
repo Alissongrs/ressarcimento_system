@@ -479,7 +479,7 @@ SELECT f.id, f.uid, f.link_fatura, f.cod_empresa, f.distribuidora, f.validador_g
  WHERE f.link_fatura LIKE 'http%%'
    AND (((f.texto_plumber IS NULL OR LENGTH(f.texto_plumber) < 200) AND COALESCE(f.validador_gate,'') NOT IN ('aprovado','revisao'))
         OR f.validador_gate = 'reprovado')
-   AND (v.id_fatura IS NULL OR (v.status NOT IN ('ok','humano','outro','tem_texto') AND v.tentativas < 2))
+   AND (v.id_fatura IS NULL OR (v.status NOT IN ('ok','humano','outro','tem_texto','reprocessada') AND v.tentativas < 2))
  ORDER BY (f.texto_plumber IS NULL OR LENGTH(f.texto_plumber) < 200) DESC, f.mes_referencia DESC, f.id DESC
  LIMIT %s"""
 
@@ -783,6 +783,52 @@ def cmd_fila() -> int:
     return 0
 
 
+def cmd_tem_texto_ids(argv: list[str]) -> int:
+    """Faturas marcadas `tem_texto` (PDF com camada de texto que a base não guardou) → ids da ORIGEM
+    (Faturas_Registradas_Cache.id, via uid) num arquivo, para o pdf_pipeline reprocessar com --force.
+    uso: tem-texto-ids --saida ids.txt [--limite 300]"""
+    import mysql.connector
+    from db_env import conexao
+    saida = _arg(argv, "--saida", "tem_texto_ids.txt")
+    limite = int(_arg(argv, "--limite", os.environ.get("SURE_REPROC_LIMITE", "300")))
+    con = _con()
+    cur = con.cursor()
+    cur.execute("""SELECT v.id_fatura, f.uid FROM FT_LEITURA_VISUAL v JOIN FATURA_DADOS_EXTRAIDOS f ON f.id = v.id_fatura
+                    WHERE v.status = 'tem_texto' AND f.uid IS NOT NULL AND f.uid <> '' ORDER BY v.atualizado_em LIMIT %s""", (limite,))
+    pares = cur.fetchall()
+    con.close()
+    if not pares:
+        Path(saida).write_text("", encoding="utf-8")
+        print("0 fatura(s) tem_texto")
+        return 0
+    uids = [u for _, u in pares]
+    orig = mysql.connector.connect(**conexao("DB_FATURAS", "DB_FATURAS_URL"))
+    oc = orig.cursor()
+    ids = []
+    for i in range(0, len(uids), 500):
+        bloco = uids[i:i + 500]
+        oc.execute(f"SELECT id FROM Faturas_Registradas_Cache WHERE UID IN ({','.join(['%s'] * len(bloco))})", bloco)
+        ids += [r[0] for r in oc.fetchall()]
+    orig.close()
+    Path(saida).write_text("\n".join(str(i) for i in sorted(set(ids))) + "\n", encoding="utf-8")
+    print(f"{len(pares)} fatura(s) tem_texto → {len(set(ids))} id(s) da origem em {saida}")
+    return 0
+
+
+def cmd_tem_texto_marcar(argv: list[str]) -> int:
+    """Depois do reprocesso: tem_texto → reprocessada (não volta à fila). uso: tem-texto-marcar [--limite 300]"""
+    limite = int(_arg(argv, "--limite", os.environ.get("SURE_REPROC_LIMITE", "300")))
+    con = _con()
+    cur = con.cursor()
+    cur.execute("""UPDATE FT_LEITURA_VISUAL SET status = 'reprocessada', erro = 'PDF com texto: reprocessado pelo pdf_pipeline --force',
+                    atualizado_em = NOW() WHERE status = 'tem_texto' ORDER BY atualizado_em LIMIT %s""", (limite,))
+    n = cur.rowcount
+    con.commit()
+    con.close()
+    print(f"{n} fatura(s) marcada(s) como reprocessada")
+    return 0
+
+
 def _arg(argv, nome, default=None):
     return argv[argv.index(nome) + 1] if nome in argv and argv.index(nome) + 1 < len(argv) else default
 
@@ -808,6 +854,10 @@ def main(argv: list[str]) -> int:
         return cmd_ler(resto)
     if cmd == "fila":
         return cmd_fila()
+    if cmd == "tem-texto-ids":
+        return cmd_tem_texto_ids(resto)
+    if cmd == "tem-texto-marcar":
+        return cmd_tem_texto_marcar(resto)
     if cmd == "desfazer":
         con = _con()
         n = desfazer(con, int(resto[0]))

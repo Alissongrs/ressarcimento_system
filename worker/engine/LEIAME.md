@@ -49,3 +49,5 @@ Para atualizar de novo: copiar de `ia/Copia/essencial` os .py listados aqui e as
 - `leitura_visual.py`: faturas sem texto ou reprovadas → PNG → `claude -p` (Read) → JSON → mesmas contas do motor →
   `FT_LEITURA_VISUAL`; só grava colunas vazias e só com `SURE_VISUAL_GRAVAR=1`. Cron `worker/job_leitura_visual.sh`
   04:30, teto 300/noite. `python leitura_visual.py ler fatura.pdf` testa local; `fila` mostra o estoque; `desfazer <id>`.
+- `leitura_visual.py tem-texto-ids` / `tem-texto-marcar` + `worker/job_reprocessar_tem_texto.sh` (cron 10:30): faturas com
+  texto que a base não guardou voltam ao pdf_pipeline com `--force` (ids da origem via uid), com backup.

@@ -173,6 +173,14 @@ GD consistente, leitura, SEFAZ). Grava a coluna `validador_gate`.
   `erro` sem ir para a fila humana; "Consumo Reativo" era classificado como energia ativa e dobrava o consumo da Coelba
   Azul (corrigido em medicao.classificar_grandeza, goldens inalterados); medição que fecha na física mas não bate com
   nenhum item kWh da fatura não é gravada.
+- Encaminhamento `tem_texto` → pipeline determinístico (17/11): `worker/job_reprocessar_tem_texto.sh` (cron 10:30, até
+  `SURE_REPROC_LIMITE`=300 por rodada, mesmo lock do pdf_pipeline, backup antes). `leitura_visual.py tem-texto-ids` mapeia
+  FATURA_DADOS_EXTRAIDOS.uid → Faturas_Registradas_Cache.id (banco de origem, DB_FATURAS) e o job roda
+  `pdf_pipeline.py --prod --force --no-ocr --id-file` (o `--revalidar` NÃO serve: usa o texto já salvo, que essas não
+  têm); depois `tem-texto-marcar` → status `reprocessada`. Validado em dry-run com 2 faturas Claro/Piratininga.
+- Correção da etapa 1 achada nesse teste: o liteparse parte a UC da CPFL em dois itens ("1.081" + ".866.036-84") e
+  o cabeçalho pegava o Nº do medidor como UC; `_cabecalho` agora junta pedaços com gap < 3 px (gabarito: codigo_uc 45
+  certo / 0 errado; golden B3_18650495 regravado — a UC inventada virou vazio).
 
 ### Testes golden (CI) — `worker/engine/tests/`
 - `worker/engine/extrair_fatura.py` → `extrair_campos(pdf_bytes)`: o mesmo caminho do `pdf_pipeline.py` para
