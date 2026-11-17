@@ -66,9 +66,12 @@ def inicio(rotina, resumo=""):
             with con.cursor() as cur:
                 cur.execute("""INSERT INTO FT_ROTINAS_EXECUCOES (rotina, inicio, status, resumo, host)
                                VALUES (%s, NOW(), 'rodando', %s, %s)""", (rotina, _resumo(resumo), HOST))
+                # o id tem de ser lido ANTES do upsert do heartbeat: depois dele lastrowid/insert_id é o da
+                # outra tabela (ou 0) e a execução ficava "rodando" para sempre (visto em 17/11/2026)
+                eid = int(cur.lastrowid or con.insert_id() or 0)
                 cur.execute("""INSERT INTO FT_ROTINAS_HEARTBEAT (rotina, ultimo_ping, host) VALUES (%s, NOW(), %s)
                                ON DUPLICATE KEY UPDATE ultimo_ping = NOW(), host = VALUES(host)""", (rotina, HOST))
-                return int(con.insert_id() or cur.lastrowid or 0)
+                return eid
         finally:
             con.close()
     except Exception as e:  # noqa: BLE001
