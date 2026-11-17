@@ -128,8 +128,85 @@ def _itens_fitz(pdf_bytes: bytes, max_paginas: int):
     return itens, pw, ph
 
 
+OCR_ZOOM = float(os.getenv("TESS_ZOOM", "3"))
+ULTIMA_FONTE = "texto"  # "ocr" quando itens_do_pdf caiu no OCR (medicao.py afrouxa a tolerância de linha)  # 3x ≈ 216 dpi, igual ao OCR do pdf_pipeline
+
+
+def _itens_ocr(pdf_bytes: bytes, max_paginas: int) -> tuple[list[Item], float, float]:
+    """PDF só imagem: linhas posicionadas pelo Tesseract (image_to_data agrupado por linha), em pontos do PDF.
+    Gratuito e local — é o caminho das escaneadas quando a leitura por imagem (claude -p) não cabe."""
+    import fitz
+    import pytesseract
+    from PIL import Image
+    tessdata = os.getenv("TESS_TESSDATA", r"C:\paddleocr\tessdata")
+    if tessdata and Path(tessdata).is_dir() and not os.getenv("TESSDATA_PREFIX"):
+        os.environ["TESSDATA_PREFIX"] = tessdata
+    exe = os.getenv("TESSERACT_EXE", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+    if exe and Path(exe).is_file():
+        pytesseract.pytesseract.tesseract_cmd = exe
+    d = fitz.open(stream=pdf_bytes, filetype="pdf")
+    if d.is_encrypted and not d.authenticate(""):
+        raise ValueError("PDF protegido")
+    itens, pw, ph = [], 0.0, 0.0
+    for pi, pg in enumerate(d):
+        if pi >= max_paginas:
+            break
+        if pi == 0:
+            pw, ph = float(pg.rect.width), float(pg.rect.height)
+        pix = pg.get_pixmap(matrix=fitz.Matrix(OCR_ZOOM, OCR_ZOOM))
+        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        try:
+            dados = pytesseract.image_to_data(img, lang=os.getenv("TESS_LANG", "por"), config=os.getenv("TESS_PSM_CFG", "--oem 1 --psm 3"),
+                                              output_type=pytesseract.Output.DICT)
+        except pytesseract.TesseractError:
+            dados = pytesseract.image_to_data(img, lang="eng", config=os.getenv("TESS_PSM_CFG", "--oem 1 --psm 3"), output_type=pytesseract.Output.DICT)
+        linhas: dict[tuple, list] = collections.defaultdict(list)
+        for k in range(len(dados["text"])):
+            t = (dados["text"][k] or "").strip()
+            if not t or int(dados["conf"][k]) < 0:
+                continue
+            chave = (dados["block_num"][k], dados["par_num"][k], dados["line_num"][k])
+            linhas[chave].append((dados["left"][k], dados["top"][k], dados["width"][k], dados["height"][k], t))
+        for _, pal in linhas.items():
+            pal.sort(key=lambda w: w[0])
+            # quebra a linha do Tesseract onde o espaço entre palavras é grande (colunas de tabela viram itens separados)
+            seg: list = []
+            for w in pal:
+                if seg and w[0] - (seg[-1][0] + seg[-1][2]) > 2.5 * max(seg[-1][3], 1):
+                    itens.append(_item_de_palavras(seg, pi))
+                    seg = []
+                seg.append(w)
+            if seg:
+                itens.append(_item_de_palavras(seg, pi))
+    return itens, pw, ph
+
+
+def _item_de_palavras(pal: list, pagina: int) -> Item:
+    x0 = min(w[0] for w in pal) / OCR_ZOOM
+    y0 = min(w[1] for w in pal) / OCR_ZOOM
+    x1 = max(w[0] + w[2] for w in pal) / OCR_ZOOM
+    h = max(w[3] for w in pal) / OCR_ZOOM
+    txt = " ".join(w[4] for w in pal)
+    return Item(txt, normalizar(txt), x0, y0, x1 - x0, h, pagina)
+
+
+def _itens_ocr_externo(pdf_bytes: bytes) -> tuple[list[Item], float, float]:
+    """Itens de OCR pré-calculados (ocr_itens.py --lote, RapidOCR) na pasta SURE_ITENS_OCR_DIR, achados pelo hash do PDF."""
+    import hashlib
+    p = Path(os.environ["SURE_ITENS_OCR_DIR"]) / (hashlib.sha1(pdf_bytes).hexdigest()[:16] + ".itens.json")
+    if not p.is_file():
+        raise FileNotFoundError(p)
+    d = json.loads(p.read_text(encoding="utf-8"))
+    itens = [Item(i["text"], normalizar(i["text"]), float(i["x"]), float(i["y"]), float(i["w"]), float(i["h"]), int(i["page"]))
+             for i in d["itens"] if (i.get("text") or "").strip()]
+    return itens, float(d.get("pw") or 0), float(d.get("ph") or 0)
+
+
 def itens_do_pdf(pdf_bytes: bytes, max_paginas: int = 2) -> tuple[list[Item], float, float]:
-    """Linhas posicionadas: liteparse; se vier pouco (PDF estranho), PyMuPDF."""
+    """Linhas posicionadas: liteparse; se vier pouco (PDF estranho), PyMuPDF; se continuar sem texto (PDF só imagem)
+    e o OCR não estiver desligado (PDF_PIPELINE_NO_OCR=1), Tesseract."""
+    global ULTIMA_FONTE
+    ULTIMA_FONTE = "texto"
     try:
         itens, pw, ph = _itens_liteparse(pdf_bytes, max_paginas)
     except Exception:
@@ -139,6 +216,14 @@ def itens_do_pdf(pdf_bytes: bytes, max_paginas: int = 2) -> tuple[list[Item], fl
             itens2, pw2, ph2 = _itens_fitz(pdf_bytes, max_paginas)
             if len(itens2) > len(itens):
                 itens, pw, ph = itens2, pw2, ph2
+        except Exception:
+            pass
+    if len([i for i in itens if i.page == 0]) < 15 and os.getenv("PDF_PIPELINE_NO_OCR", "") != "1":
+        try:
+            itens3, pw3, ph3 = _itens_ocr_externo(pdf_bytes) if os.getenv("SURE_ITENS_OCR_DIR") else _itens_ocr(pdf_bytes, max_paginas)
+            if len(itens3) > len(itens):
+                itens, pw, ph = itens3, pw3, ph3
+                ULTIMA_FONTE = "ocr"
         except Exception:
             pass
     itens.sort(key=lambda i: (i.page, round(i.y / 2), i.x))

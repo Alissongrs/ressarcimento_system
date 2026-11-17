@@ -51,12 +51,25 @@ RE_PCT = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
 RE_NUM_PONTO3 = re.compile(r"^-?\d{4,}\.\d{3}$")  # "1463.000" (EDP): 4+ dígitos antes do ponto → decimal
 
 
+RE_NUM_PONTO2 = re.compile(r"^-?\d+\.\d{1,2}$")  # OCR (RapidOCR) escreve "45789.00", "1.00": ponto decimal, sem milhar
+
+
+RE_UNID_COLADA = re.compile(r"^(-?[\d.,]+)\s*(kwh|kw|kvarh|kvar|un)$", re.I)  # OCR cola a unidade: "2.857kWh"
+RE_SEP_MISTO = re.compile(r"^-?\d{1,3}(?:[.,]\d{3})+[.,]\d{1,2}$")  # OCR troca separadores: "500.880.00", "47.487.60"
+
+
 def parse_num(tok: str) -> float | None:
     t = tok.strip()
-    if RE_NUM_PONTO.match(t) or RE_NUM_PONTO3.match(t):
+    m = RE_UNID_COLADA.match(t)
+    if m:
+        t = m.group(1)
+    if RE_NUM_PONTO.match(t) or RE_NUM_PONTO3.match(t) or RE_NUM_PONTO2.match(t):
         return float(t)
     if RE_NUM_BR.match(t):
         return float(t.replace(".", "").replace(",", "."))
+    if RE_SEP_MISTO.match(t):  # o último separador é o decimal (1–2 casas); os outros são de milhar
+        k = max(t.rfind("."), t.rfind(","))
+        return float(re.sub(r"[.,]", "", t[:k]) + "." + t[k + 1:])
     return None
 
 
@@ -65,8 +78,11 @@ def eh_num(tok: str) -> bool:
 
 
 # ─── linhas e pedaços ─────────────────────────────────────────────────────────
-def agrupar_linhas(itens: list[Item], tol: float = 2.2) -> list[list[Item]]:
-    """Agrupa itens em linhas por proximidade de y (mesma página)."""
+def agrupar_linhas(itens: list[Item], tol: float | None = None) -> list[list[Item]]:
+    """Agrupa itens em linhas por proximidade de y (mesma página). Itens de OCR oscilam mais em y: tolerância maior."""
+    if tol is None:
+        import identificacao as _idn
+        tol = 3.5 if getattr(_idn, "ULTIMA_FONTE", "") == "ocr" else 2.2
     linhas: list[list[Item]] = []
     for it in sorted(itens, key=lambda i: (i.page, i.y, i.x)):
         if linhas and linhas[-1][0].page == it.page and abs(linhas[-1][0].y - it.y) <= tol:
@@ -97,8 +113,8 @@ def pedacos(itens_linha: list[Item]) -> list[tuple[str, float]]:
 
 # ─── vocabulário ──────────────────────────────────────────────────────────────
 RE_POSTO = re.compile(
-    r"(?P<posto>f ponta indu|f ponta cap|f ponta|fora de ponta|fora ponta|ponta indu|ponta cap|ponta|"
-    r"unico|reservad\w*|intermediari\w*|hfp|hp|hr|na)\s*$")
+    r"(?<![a-z])(?P<posto>f ponta indu|f ponta cap|f ponta|fora de ponta|fora ponta|ponta indu|ponta cap|ponta|"
+    r"unico|reservad\w*|intermediari\w*|hfp|hp|hr|na)\s*$")  # (?<![a-z]): "foraponta" não é "ponta"
 
 
 _TOK_FP = {"fp", "fpta", "f-pta", "hfp", "fponta", "f.pta", "fora"}
@@ -109,7 +125,9 @@ _TOK_UNI = {"unico", "total", "tp", "geral"}
 
 def descolar(s: str) -> str:
     """O liteparse às vezes cola palavras do posto ("F PONTAINDU", "PONTACAP") conforme a plataforma; separa."""
-    return re.sub(r"\bponta(indu|cap)\b", r"ponta \1", s)
+    s = re.sub(r"\bponta(indu|cap)\b", r"ponta \1", s)
+    s = re.sub(r"\bforaponta\b", "fora ponta", s)  # OCR cola "ForaPonta"
+    return re.sub(r"\bfponta\b", "f ponta", s)
 
 
 def classificar_posto(s: str) -> tuple[str, str | None]:
@@ -189,32 +207,37 @@ RE_MES = re.compile(r"\b(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)/\d{2,4
 
 
 def _cabecalho_enel(linhas: list[list[Item]]) -> dict | None:
-    """Acha a faixa de cabeçalho da tabela de medição. Devolve x das colunas e y do fim do cabeçalho."""
+    """Acha a faixa de cabeçalho da tabela de medição. Devolve x das colunas e y do fim do cabeçalho.
+    Trabalha por PALAVRA (não por item): o OCR entrega "Postos Leitura Leitura Const. Consumo" num item só."""
     for i, ln in enumerate(linhas):
-        med = [it for it in ln if it.norm == "medidor"]
+        med = [(w, x, it) for it in ln for w, x in pedacos([it]) if normalizar(w) == "medidor" and it.x <= x <= it.x + 2]
         if not med:
             continue
+        w0, x_med, it_med = med[0]
         # cabeçalho = até 3 linhas (Medidor/Grandezas, Postos/Leitura/Leitura/Const./Consumo, Tarifários/...)
         # só palavras de cabeçalho (sem dígitos): a 1ª linha de dados fica a poucos pontos do cabeçalho
-        faixa = [it for l2 in linhas[max(0, i - 2): i + 3] if l2[0].page == ln[0].page
-                 for it in l2 if abs(it.y - med[0].y) <= 14 and not re.search(r"\d", it.text)]
-        normas = {it.norm for it in faixa}
+        palavras: list[tuple[str, float, float]] = []  # (norm, x, y)
+        for l2 in linhas[max(0, i - 2): i + 3]:
+            if l2[0].page != ln[0].page:
+                continue
+            for it in l2:
+                if abs(it.y - it_med.y) <= 14 and not re.search(r"\d", it.text):
+                    for w, x in pedacos([it]):
+                        palavras.append((normalizar(w), x, it.y))
+        normas = {w for w, _, _ in palavras}
         if not any(n.startswith("grandeza") for n in normas) or not any("leitura" in n for n in normas):
             continue
-        x_med = med[0].x
-        x_gr = min((it.x for it in faixa if it.norm.startswith("grandeza")), default=x_med + 40)
-        x_cons = max((it.x for it in faixa if it.norm.startswith("consumo")), default=None)
+        x_gr = min((x for w, x, _ in palavras if w.startswith("grandeza")), default=x_med + 40)
+        x_cons = max((x for w, x, _ in palavras if w.startswith("consumo")), default=None)
         if x_cons is None:
             continue
-        direita = [it.x for it in faixa if it.x > x_cons + 10 and (it.norm.startswith("itens") or it.norm.startswith("unid")
-                                                                  or it.norm.startswith("descri"))]
+        direita = [x for w, x, _ in palavras if x > x_cons + 10 and (w.startswith("itens") or w.startswith("unid") or w.startswith("descri"))]
         x_fim = (min(direita) - 2) if direita else x_cons + 75
         # o cabeçalho termina na linha "Anterior / Atual" (a 1ª linha de dados vem logo abaixo, e suas
         # palavras — ENRG ATV, PONTA — não têm dígitos; por isso não se usa o max y da faixa inteira)
-        fim = [it.y for it in faixa if it.norm in ("anterior", "atual")]
-        y_fim = (max(fim) if fim else med[0].y + 4) + 2
-        return {"page": med[0].page, "y_fim": y_fim, "x_med": x_med, "x_gr": x_gr,
-                "x_cons": x_cons, "x_fim": x_fim}
+        fim = [y for w, _, y in palavras if w in ("anterior", "atual")]
+        y_fim = (max(fim) if fim else it_med.y + 4) + 2
+        return {"page": it_med.page, "y_fim": y_fim, "x_med": x_med, "x_gr": x_gr, "x_cons": x_cons, "x_fim": x_fim}
     return None
 
 

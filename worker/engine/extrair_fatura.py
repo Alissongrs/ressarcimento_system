@@ -43,13 +43,21 @@ def extrair_campos(pdf_bytes: bytes, nome: str = "") -> dict:
 
     texto_plumber, _campos_regex = pp.extrair_plumber(pdf_bytes)
     texto_md = pp.extrair_markdown(pdf_bytes)
+    # PDF só imagem com OCR permitido (PDF_PIPELINE_NO_OCR != 1): Tesseract local alimenta o texto e, dentro do
+    # pipeline, identificacao.itens_do_pdf cai no mesmo OCR posicionado — caminho gratuito das escaneadas
+    texto_ocr = ""
+    if os.environ.get("PDF_PIPELINE_NO_OCR", "") != "1" and len(texto_plumber or "") < 200:
+        try:
+            texto_ocr, _ = pp.extrair_ocr(pdf_bytes, 0)
+        except Exception:
+            texto_ocr = ""
     try:
         texto_bbox = extrair_texto_bbox_ordenado(pdf_bytes) or ""
     except Exception:
         texto_bbox = ""
 
     payload = pp._rodar_pipeline_v3(
-        None, None, 0, pdf_bytes, texto_plumber, texto_md, "",
+        None, None, 0, pdf_bytes, texto_plumber, texto_md, texto_ocr,
         uid=None, force=False, texto_bbox=texto_bbox or None, dryrun=True,
     ) or {}
     v2 = payload.get("v2") if isinstance(payload, dict) else None
