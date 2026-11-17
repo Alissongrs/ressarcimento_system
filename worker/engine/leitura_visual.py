@@ -244,8 +244,8 @@ def _distribuidora(nome: str | None, cnpj: str | None) -> tuple[str | None, str 
         for raiz, d in raizes.items():
             if not isinstance(d, dict):
                 continue
-            for a in [d.get("nome", "")] + list(d.get("aliases") or []):
-                if a and normalizar(a) and normalizar(a) in n:
+            for a in [d.get("nome", ""), d.get("sigla", "")] + list(d.get("aliases") or []):
+                if a and normalizar(a) and (normalizar(a) in n or n == normalizar(a)):
                     return d.get("nome"), raiz
     return (str(nome).strip() if nome else None), None
 
@@ -437,7 +437,12 @@ def validar_leitura(resp: dict) -> dict:
     if tipo != "fatura":  # rateio, nota de comercializadora, outro: não é fatura de distribuidora — nada a gravar
         blocos = {k: False for k in blocos}
         cols = {}
-    return {"blocos": blocos, "colunas": cols, "obs": obs, "tipo_documento": tipo}
+    # Enel SP imprime "UC / instalação" no mesmo quadro e a origem grava o 2º número: todos os identificadores lidos
+    # contam como "a mesma UC" na comparação com o que já está na base
+    uc_alt = [p.strip() for p in re.split(r"[/|]", str(ident.get("uc") or "")) if p.strip()]
+    if ident.get("codigo_cliente"):
+        uc_alt.append(str(ident["codigo_cliente"]).strip())
+    return {"blocos": blocos, "colunas": cols, "obs": obs, "tipo_documento": tipo, "uc_alternativas": uc_alt}
 
 
 def _demanda_itens(itens: list) -> list[float]:
@@ -598,7 +603,7 @@ def foco_anterior(con, fid: int) -> dict | None:
     return {"blocos": blocos, "obs": (val.get("obs") or []) + ([row["erro"]] if row.get("erro") else [])}
 
 
-def divergencias(con, fid: int, cols: dict) -> list[dict]:
+def divergencias(con, fid: int, cols: dict, uc_alternativas: list | None = None) -> list[dict]:
     """Colunas já preenchidas na base cujo valor difere do lido e validado — matéria-prima da etapa 4; nada é sobrescrito."""
     nomes = [k for k in cols if k != "medicao_grandezas_json"]
     if not nomes:
@@ -611,6 +616,28 @@ def divergencias(con, fid: int, cols: dict) -> list[dict]:
     for k in nomes:
         a, l = atual.get(k), cols[k]
         if a in (None, ""):
+            continue
+        if k in ("codigo_uc", "numero_medidor", "numero_fatura"):
+            # formato não é divergência: "585359105940 - DDG" (origem com sufixo) = "5.853.591.059-40"
+            sa = re.sub(r"[^0-9A-Za-z]", "", str(a).split(" - ")[0]).upper().lstrip("0")
+            candidatos = [str(l)] + (list(uc_alternativas or []) if k == "codigo_uc" else [])
+            if sa not in {re.sub(r"[^0-9A-Za-z]", "", c).upper().lstrip("0") for c in candidatos}:
+                out.append({"coluna": k, "atual": str(a), "lido": str(l)})
+            continue
+        if k == "distribuidora":
+            # mesma distribuidora com grafia diferente ("ENERGISA SUL/SUDESTE" × "Energisa Sul-Sudeste"): compara pelo catálogo
+            ca, _ = _distribuidora(str(a), None)
+            cl, _ = _distribuidora(str(l), None)
+            comp_a = re.sub(r"[^a-z0-9]", "", normalizar(ca or str(a)))
+            comp_l = re.sub(r"[^a-z0-9]", "", normalizar(cl or str(l)))
+            # "EQUATORIAL MAR" (origem abrevia) é prefixo de "equatorialmaranhao": mesma distribuidora
+            mesma = comp_a == comp_l or (min(len(comp_a), len(comp_l)) >= 8 and (comp_l.startswith(comp_a) or comp_a.startswith(comp_l)))
+            if not mesma:
+                out.append({"coluna": k, "atual": str(a), "lido": str(l)})
+            continue
+        if k in ("modalidade_tarifaria", "subgrupo_tarifario", "grupo_tarifario"):
+            if normalizar(str(a)) != normalizar(str(l)):
+                out.append({"coluna": k, "atual": str(a), "lido": str(l)})
             continue
         an, ln_ = _num(a), _num(l)
         if an is not None and ln_ is not None:
@@ -646,7 +673,7 @@ def processar(con, row: dict, gravar: bool) -> tuple[str, str]:
     status = status_de(val)
     val["tentativa"] = 2 if foco else 1
     try:
-        val["divergencias"] = divergencias(con, fid, val["colunas"])
+        val["divergencias"] = divergencias(con, fid, val["colunas"], val.get("uc_alternativas"))
     except Exception as e:  # noqa: BLE001
         val["divergencias"] = [{"erro": str(e)[:200]}]
     antes, gravadas = ({}, [])
