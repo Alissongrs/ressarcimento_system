@@ -51,7 +51,10 @@ W=/opt/ressarcimento/ressarcimento_system/worker
 # 8) Leitura visual (claude -p) das faturas que o motor não fechou — todo dia 04:30, teto 300/noite.
 #    SURE_VISUAL_GRAVAR=0 = lê, valida e registra em FT_LEITURA_VISUAL sem tocar nas colunas;
 #    troque para 1 (só preenche colunas vazias) depois de conferir as primeiras noites.
-30 4 * * *   SURE_VISUAL_TETO=300 SURE_VISUAL_GRAVAR=0 $W/job_leitura_visual.sh >/dev/null 2>&1
+#    DESLIGADA em 17/11/2026: a leitura por imagem consome o limite de 5 h da assinatura do Claude Code (61 faturas
+#    esgotaram a janela). Fica como reserva manual (python3 engine/leitura_visual.py rodar --teto N); o caminho
+#    gratuito para PDF-imagem é o OCR local do próprio pipeline (ver job_ocr_sem_texto.sh quando existir).
+#30 4 * * *   SURE_VISUAL_TETO=300 SURE_VISUAL_GRAVAR=0 $W/job_leitura_visual.sh >/dev/null 2>&1
 
 # 9) Faturas `tem_texto` (PDF com texto que a base não guardou) → pdf_pipeline --force (etapas 1 e 2), com backup;
 #    todo dia 10:30, até 300 por rodada; usa o lock do pdf_pipeline (não roda junto com ele).
