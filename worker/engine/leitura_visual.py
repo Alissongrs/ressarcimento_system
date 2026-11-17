@@ -498,12 +498,14 @@ def candidatas(con, teto: int, ids: list[int] | None = None) -> list[dict]:
 
 
 def gravar_tentativa(con, fid: int, uid: str | None, resp: dict | None, val: dict | None, status: str, erro: str | None,
-                     antes: dict | None, gravado: bool) -> None:
+                     antes: dict | None, gravado: bool, conta: bool = True) -> None:
+    """conta=False: a falha foi da IA (limite de uso, timeout), não da fatura — não gasta uma das 2 tentativas."""
     cur = con.cursor()
-    cur.execute("""INSERT INTO FT_LEITURA_VISUAL (id_fatura, uid, tentativas, status, modelo, resposta_json, validacao_json,
+    inc = 1 if conta else 0
+    cur.execute(f"""INSERT INTO FT_LEITURA_VISUAL (id_fatura, uid, tentativas, status, modelo, resposta_json, validacao_json,
                      colunas_json, antes_json, gravado, erro, criado_em, atualizado_em)
-                   VALUES (%s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                   ON DUPLICATE KEY UPDATE tentativas = tentativas + 1, status = VALUES(status), modelo = VALUES(modelo),
+                   VALUES (%s, %s, {inc}, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                   ON DUPLICATE KEY UPDATE tentativas = tentativas + {inc}, status = VALUES(status), modelo = VALUES(modelo),
                      resposta_json = VALUES(resposta_json), validacao_json = VALUES(validacao_json),
                      colunas_json = VALUES(colunas_json), antes_json = COALESCE(VALUES(antes_json), antes_json),
                      gravado = gravado OR VALUES(gravado), erro = VALUES(erro), atualizado_em = NOW()""",
@@ -669,8 +671,9 @@ def processar(con, row: dict, gravar: bool) -> tuple[str, str]:
     foco = foco_anterior(con, fid)
     resp, val, erro = ler_pdf(pdf, f"f{fid}", foco)
     if erro and not val:
-        gravar_tentativa(con, fid, row.get("uid"), resp, None, "erro", erro, None, False)
-        return "erro", ("claude: " + erro) if (erro.startswith("sem JSON") or erro.startswith("timeout") or "falha ao chamar" in erro) else erro
+        da_ia = erro.startswith("sem JSON") or erro.startswith("timeout") or "falha ao chamar" in erro
+        gravar_tentativa(con, fid, row.get("uid"), resp, None, "erro", erro, None, False, conta=not da_ia)
+        return "erro", ("claude: " + erro) if da_ia else erro
     status = status_de(val)
     val["tentativa"] = 2 if foco else 1
     try:
@@ -718,7 +721,20 @@ def cmd_rodar(argv: list[str]) -> int:
         if st not in ("tem_texto",) and not det.startswith("download"):
             lidas += 1
         _log(f"{i}/{len(rows)} fatura {row['id']} ({row.get('distribuidora') or '?'}, gate={row.get('validador_gate')}): {st} {det}")
-        # disjuntor: a IA falhando seguidamente (limite de uso, sessão expirada) — para a noite em vez de queimar a fila
+        # limite de 5 h da assinatura ("You've hit your 5-hour limit · resets 2:30pm"): espera o reset e segue,
+        # se couber no orçamento de minutos; a fatura volta à fila (o erro da IA não contou tentativa)
+        espera = _segundos_ate_reset(det) if det.startswith("claude:") else None
+        if espera is not None:
+            if time.time() + espera + 60 < fim:
+                _log(f"limite de uso da assinatura: dormindo {espera // 60} min até o reset")
+                time.sleep(espera + 60)
+                seguidos = 0
+                continue
+            parado = f"parado: limite de uso da assinatura, reset só em {espera // 60} min (fora do orçamento)"
+            rc = 1
+            _log(parado)
+            break
+        # disjuntor: a IA falhando seguidamente (sessão expirada, binário, rede) — para a noite em vez de queimar a fila
         seguidos = seguidos + 1 if det.startswith("claude:") else 0
         if seguidos >= max_seguidos:
             parado = f"parado: {seguidos} erros seguidos do claude ({det[8:80]})"
@@ -827,6 +843,27 @@ def cmd_tem_texto_marcar(argv: list[str]) -> int:
     con.close()
     print(f"{n} fatura(s) marcada(s) como reprocessada")
     return 0
+
+
+def _segundos_ate_reset(det: str) -> int | None:
+    """'…hit your 5-hour limit · resets 2:30pm (America/Sao_Paulo)' → segundos até lá (hora local da máquina)."""
+    if "limit" not in det or "reset" not in det:
+        return None
+    m = re.search(r"resets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", det, re.I)
+    if not m:
+        return 3600
+    h, mi, ampm = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower()
+    if ampm == "pm" and h < 12:
+        h += 12
+    if ampm == "am" and h == 12:
+        h = 0
+    agora = dt.datetime.now()
+    alvo = agora.replace(hour=h % 24, minute=mi, second=0, microsecond=0)
+    if alvo <= agora:
+        if (agora - alvo) < dt.timedelta(hours=6):
+            return 0  # o reset já passou (a mensagem é de antes dele): segue em frente
+        alvo += dt.timedelta(days=1)
+    return int((alvo - agora).total_seconds())
 
 
 def _arg(argv, nome, default=None):
