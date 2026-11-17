@@ -182,6 +182,35 @@ GD consistente, leitura, SEFAZ). Grava a coluna `validador_gate`.
   o cabeçalho pegava o Nº do medidor como UC; `_cabecalho` agora junta pedaços com gap < 3 px (gabarito: codigo_uc 45
   certo / 0 errado; golden B3_18650495 regravado — a UC inventada virou vazio).
 
+### OCR gratuito das faturas sem texto — `worker/engine/ocr_itens.py` + `ocr_fila.py` (17/11/2026)
+- Por que: a leitura visual por `claude -p` consome o limite de 5 h da assinatura (61 faturas esgotaram a janela);
+  o cron dela (04:30) foi DESLIGADO e ela ficou como reserva manual (`leitura_visual.py rodar --teto N`). O caminho
+  gratuito para PDF-imagem é o OCR local do próprio pipeline.
+- Motor: **RapidOCR** (`rapidocr_onnxruntime`, modelos do PaddleOCR em ONNX, CPU, sem GPU, sem limite; ~40 s por
+  fatura). Lê a fonte pequena da tabela de medição que o Tesseract não lê. `ocr_itens.itens_rapidocr(pdf)` devolve as
+  linhas posicionadas (mesmo formato do liteparse) e `texto_rapidocr(pdf)` o texto corrido (uma string por linha
+  visual); a última fatura fica em cache pelo sha1, porque três pontos pedem o mesmo PDF. Sem o pacote (ou
+  `SURE_OCR_MOTOR=tesseract`) tudo cai no Tesseract de sempre.
+- Onde entra (só quando `PDF_PIPELINE_NO_OCR` ≠ 1): `identificacao.itens_do_pdf` (quando o liteparse/PyMuPDF trazem
+  menos de 15 itens na 1ª página → `ULTIMA_FONTE="ocr"`, que afrouxa a tolerância de linha da medição para 3,5 pt) e
+  `pdf_pipeline.extrair_ocr` (texto_ocr → itens da fatura pelo extrator_v2). `SURE_OCR_PAGINAS` (default 3).
+- **Trava do modo OCR** (`medicao.aplicar_medicao`): a física não pega posto trocado (CPFL: ponta lida como fora ponta,
+  tudo fechando) nem dígito errado que ainda feche; por isso, com `fonte="ocr"`, cada posto com consumo tem de bater
+  com um item kWh da fatura, senão a medição NÃO é gravada (fica vazia, obs "OCR: consumo não confirmado pelos itens")
+  e a demanda contratada (sem conferência nenhuma) nunca é gravada. Medidor e constante (física) gravam normalmente.
+- Fila própria `FT_OCR_SEM_TEXTO` (criada por `ocr_fila.py` se não existir): quase todas as faturas sem texto já têm
+  um `texto_ocr` antigo do Tesseract, então olhar `ocr_gerado_em` não serve. `ocr_fila.py ids` escolhe
+  FATURA_DADOS_EXTRAIDOS com texto_plumber < 200 chars, gate fora de aprovado/revisao, link http, não visitada e não
+  `tem_texto` (essas vão pelo job 9), mapeia uid → id da origem e grava status `fila`; `marcar` fecha com o
+  gate/medidor/kWh de depois; `resumo` mostra o estoque (≈1.180 com link em 17/11: Claro 474, 359 204, 183 102…).
+- Job `worker/job_ocr_sem_texto.sh` (cron 20:00, `SURE_OCR_LIMITE`=200/rodada ≈ 2 h 30, mesmo lock do pdf_pipeline,
+  backup antes): instala o `rapidocr_onnxruntime` uma vez (pip --user, opencv headless + `--no-deps`), roda
+  `pdf_pipeline.py --prod --force --id-file` SEM `--no-ocr` e marca a fila. Log em `worker/ocr_sem_texto.log` e no
+  painel de rotinas (`ocr_sem_texto`).
+- Medido nas 7 escaneadas reais (`tests/gabarito_escaneadas.json`, módulo): medidor 7/7, constante 6/6, leituras e
+  consumo certos em 4/7 (Enel CE, Brasília, Equatorial MA, Coelba), 2 ilegíveis (vazio), 1 posto trocado (CPFL —
+  barrado pela trava). Tesseract no mesmo lote: medição 2/7.
+
 ### Testes golden (CI) — `worker/engine/tests/`
 - `worker/engine/extrair_fatura.py` → `extrair_campos(pdf_bytes)`: o mesmo caminho do `pdf_pipeline.py` para
   uma fatura com camada de texto (plumber → liteparse → bbox → extrator_v2 → cascata → complementos →

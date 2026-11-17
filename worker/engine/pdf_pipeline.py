@@ -1853,6 +1853,20 @@ def extrair_ocr(pdf_bytes: bytes, fatura_id: int) -> tuple[str, dict]:
     Fallback de idioma: se o traineddata 'por' não estiver instalado, tenta 'eng'.
     """
     pdf_kb = len(pdf_bytes) / 1024
+    # 17/11/2026: RapidOCR (modelos do PaddleOCR em CPU, pacote rapidocr_onnxruntime) na frente — lê a fonte pequena
+    # das tabelas que o Tesseract não lê; o mesmo OCR posicionado alimenta identificacao/medicao (cache por PDF).
+    # Sem o pacote (ou SURE_OCR_MOTOR=tesseract) segue o Tesseract de sempre.
+    if os.getenv("SURE_OCR_MOTOR", "rapidocr") != "tesseract":
+        try:
+            import ocr_itens
+            if ocr_itens.disponivel():
+                t0 = time.time()
+                linhas = ocr_itens.texto_rapidocr(pdf_bytes, ocr_itens.MAX_PAGINAS)
+                log.info(f"  [ocr] RapidOCR (PDF {pdf_kb:.0f}KB): {len(linhas)} linhas | {time.time() - t0:.1f}s")
+                if linhas:
+                    return "\n".join(linhas), parse_regex(linhas)
+        except Exception as e:
+            log.warning(f"    OCR (rapidocr): {e} — caindo no Tesseract")
     log.info(f"  [ocr] Tesseract (PDF {pdf_kb:.0f}KB, lang={TESS_LANG}, zoom={TESS_ZOOM:g})...")
     linhas, exc = _executar_ocr(pdf_bytes, fatura_id)
 

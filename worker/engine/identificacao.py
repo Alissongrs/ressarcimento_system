@@ -190,21 +190,21 @@ def _item_de_palavras(pal: list, pagina: int) -> Item:
     return Item(txt, normalizar(txt), x0, y0, x1 - x0, h, pagina)
 
 
-def _itens_ocr_externo(pdf_bytes: bytes) -> tuple[list[Item], float, float]:
-    """Itens de OCR pré-calculados (ocr_itens.py --lote, RapidOCR) na pasta SURE_ITENS_OCR_DIR, achados pelo hash do PDF."""
-    import hashlib
-    p = Path(os.environ["SURE_ITENS_OCR_DIR"]) / (hashlib.sha1(pdf_bytes).hexdigest()[:16] + ".itens.json")
-    if not p.is_file():
-        raise FileNotFoundError(p)
-    d = json.loads(p.read_text(encoding="utf-8"))
+def _itens_rapidocr(pdf_bytes: bytes, max_paginas: int) -> tuple[list[Item], float, float]:
+    """PDF só imagem: linhas posicionadas pelo RapidOCR (ocr_itens.py — modelos do PaddleOCR em CPU, gratuito).
+    Lê a fonte pequena da tabela de medição que o Tesseract não lê; o resultado fica em cache para a medição e o
+    texto corrido (pdf_pipeline.extrair_ocr) não refazerem o OCR da mesma fatura."""
+    import ocr_itens
+    bruto, pw, ph = ocr_itens.itens_rapidocr(pdf_bytes, max_paginas)
     itens = [Item(i["text"], normalizar(i["text"]), float(i["x"]), float(i["y"]), float(i["w"]), float(i["h"]), int(i["page"]))
-             for i in d["itens"] if (i.get("text") or "").strip()]
-    return itens, float(d.get("pw") or 0), float(d.get("ph") or 0)
+             for i in bruto if (i.get("text") or "").strip()]
+    return itens, pw, ph
 
 
 def itens_do_pdf(pdf_bytes: bytes, max_paginas: int = 2) -> tuple[list[Item], float, float]:
     """Linhas posicionadas: liteparse; se vier pouco (PDF estranho), PyMuPDF; se continuar sem texto (PDF só imagem)
-    e o OCR não estiver desligado (PDF_PIPELINE_NO_OCR=1), Tesseract."""
+    e o OCR não estiver desligado (PDF_PIPELINE_NO_OCR=1), RapidOCR (ou Tesseract, se o pacote não estiver instalado;
+    SURE_OCR_MOTOR=tesseract força o Tesseract)."""
     global ULTIMA_FONTE
     ULTIMA_FONTE = "texto"
     try:
@@ -219,13 +219,20 @@ def itens_do_pdf(pdf_bytes: bytes, max_paginas: int = 2) -> tuple[list[Item], fl
         except Exception:
             pass
     if len([i for i in itens if i.page == 0]) < 15 and os.getenv("PDF_PIPELINE_NO_OCR", "") != "1":
-        try:
-            itens3, pw3, ph3 = _itens_ocr_externo(pdf_bytes) if os.getenv("SURE_ITENS_OCR_DIR") else _itens_ocr(pdf_bytes, max_paginas)
-            if len(itens3) > len(itens):
-                itens, pw, ph = itens3, pw3, ph3
-                ULTIMA_FONTE = "ocr"
-        except Exception:
-            pass
+        itens3, pw3, ph3 = [], 0.0, 0.0
+        if os.getenv("SURE_OCR_MOTOR", "rapidocr") != "tesseract":
+            try:
+                itens3, pw3, ph3 = _itens_rapidocr(pdf_bytes, max_paginas)
+            except Exception:
+                itens3 = []
+        if not itens3:
+            try:
+                itens3, pw3, ph3 = _itens_ocr(pdf_bytes, max_paginas)
+            except Exception:
+                itens3 = []
+        if len(itens3) > len(itens):
+            itens, pw, ph = itens3, pw3, ph3
+            ULTIMA_FONTE = "ocr"
     itens.sort(key=lambda i: (i.page, round(i.y / 2), i.x))
     return itens, pw, ph
 

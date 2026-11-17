@@ -51,3 +51,14 @@ Para atualizar de novo: copiar de `ia/Copia/essencial` os .py listados aqui e as
   04:30, teto 300/noite. `python leitura_visual.py ler fatura.pdf` testa local; `fila` mostra o estoque; `desfazer <id>`.
 - `leitura_visual.py tem-texto-ids` / `tem-texto-marcar` + `worker/job_reprocessar_tem_texto.sh` (cron 10:30): faturas com
   texto que a base não guardou voltam ao pdf_pipeline com `--force` (ids da origem via uid), com backup.
+
+## 17/11/2026 — OCR gratuito das faturas sem texto (no lugar da leitura visual automática)
+
+- `ocr_itens.py`: RapidOCR (`rapidocr_onnxruntime`, CPU) → linhas posicionadas (`itens_rapidocr`) e texto corrido
+  (`texto_rapidocr`), com cache da última fatura. `identificacao.itens_do_pdf` e `pdf_pipeline.extrair_ocr` usam
+  quando `PDF_PIPELINE_NO_OCR` ≠ 1; sem o pacote, Tesseract. `python ocr_itens.py fatura.pdf` mostra as linhas.
+- `medicao.aplicar_medicao`: no modo OCR só grava consumo confirmado pelos itens da fatura (posto a posto) e nunca a
+  demanda contratada.
+- `ocr_fila.py ids | marcar | resumo` + `worker/job_ocr_sem_texto.sh` (cron 20:00, 200/rodada): fila `FT_OCR_SEM_TEXTO`,
+  ids da origem via uid, `pdf_pipeline --prod --force --id-file` com OCR ligado, backup antes.
+- Cron da leitura visual (04:30) desligado; `leitura_visual.py rodar --teto N` continua como reserva manual.

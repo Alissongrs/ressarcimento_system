@@ -6,9 +6,15 @@ do PDF no mesmo formato que identificacao.itens_do_pdf usa ({text, x, y, w, h, p
 linha são juntadas quando o espaço entre elas é pequeno (menor que 1,5 altura), para rótulos de várias palavras
 ("Data de Emissão:") ficarem num item só, como no liteparse; colunas de tabela ficam separadas.
 
+No pipeline (PDF_PIPELINE_NO_OCR != 1) é o OCR das faturas sem camada de texto: identificacao.itens_do_pdf pede as
+linhas posicionadas (etapas 1 e 2) e pdf_pipeline.extrair_ocr pede o texto corrido (itens da fatura pelo extrator_v2).
+O resultado da última fatura fica em cache (sha1 do PDF), porque as duas chamadas e a medição pedem o mesmo PDF.
+Sem o pacote (rapidocr_onnxruntime) as duas caem no Tesseract, como antes.
+
 Uso:  python ocr_itens.py fatura.pdf [--json saida.json] [--paginas 3] [--zoom 3]
       python ocr_itens.py --lote pasta_pdfs pasta_json          (um JSON por PDF, nome = <pdf>.itens.json)
-Como módulo:  itens = ocr_itens.itens_rapidocr(pdf_bytes, max_paginas)  → lista de dicts
+Como módulo:  itens, pw, ph = ocr_itens.itens_rapidocr(pdf_bytes, max_paginas)  → lista de dicts
+              texto = ocr_itens.texto_rapidocr(pdf_bytes, max_paginas)           → linhas (uma por linha visual)
 """
 from __future__ import annotations
 
@@ -18,6 +24,17 @@ import sys
 from pathlib import Path
 
 _ENGINE = None
+_CACHE: dict = {}  # sha1(pdf)[:16]:zoom → (itens, pw, ph, páginas lidas) da última fatura (uma entrada só)
+MAX_PAGINAS = int(os.getenv("SURE_OCR_PAGINAS", "3"))
+
+
+def disponivel() -> bool:
+    """True se o pacote rapidocr_onnxruntime importa (não carrega os modelos)."""
+    try:
+        import rapidocr_onnxruntime  # noqa: F401
+        return True
+    except Exception:
+        return False
 
 
 def _motor():
@@ -29,6 +46,38 @@ def _motor():
 
 
 def itens_rapidocr(pdf_bytes: bytes, max_paginas: int = 3, zoom: float = 3.0) -> tuple[list[dict], float, float]:
+    """OCR de até max(max_paginas, MAX_PAGINAS) páginas, uma vez por PDF: a identificação pede 2 páginas, a medição e o
+    texto corrido pedem 3 — o cache guarda o lote maior e devolve só as páginas pedidas."""
+    import hashlib
+    chave = hashlib.sha1(pdf_bytes).hexdigest()[:16] + f":{zoom:g}"
+    pags = max(int(max_paginas), MAX_PAGINAS)
+    ent = _CACHE.get(chave)
+    if ent is None or ent[3] < pags:
+        itens, pw, ph = _itens_rapidocr(pdf_bytes, pags, zoom)
+        _CACHE.clear()
+        ent = _CACHE[chave] = ([dict(i) for i in itens], pw, ph, pags)
+    return [dict(i) for i in ent[0] if i["page"] < max_paginas], ent[1], ent[2]
+
+
+def texto_rapidocr(pdf_bytes: bytes, max_paginas: int = 3) -> list[str]:
+    """Texto corrido do OCR: uma string por linha visual (itens da mesma linha, em ordem de x, separados por
+    dois espaços), página a página — o que o pdf_pipeline guarda em texto_ocr e o extrator_v2 lê."""
+    itens, _, _ = itens_rapidocr(pdf_bytes, max_paginas)
+    linhas: list[str] = []
+    atual: list[dict] = []
+    for it in sorted(itens, key=lambda i: (i["page"], i["y"], i["x"])):
+        if atual and atual[0]["page"] == it["page"] and abs(atual[0]["y"] - it["y"]) <= max(atual[0]["h"], it["h"]) * 0.6:
+            atual.append(it)
+        else:
+            if atual:
+                linhas.append("  ".join(i["text"] for i in sorted(atual, key=lambda i: i["x"])))
+            atual = [it]
+    if atual:
+        linhas.append("  ".join(i["text"] for i in sorted(atual, key=lambda i: i["x"])))
+    return linhas
+
+
+def _itens_rapidocr(pdf_bytes: bytes, max_paginas: int, zoom: float) -> tuple[list[dict], float, float]:
     import fitz
     import numpy as np
     d = fitz.open(stream=pdf_bytes, filetype="pdf")

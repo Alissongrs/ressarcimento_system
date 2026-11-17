@@ -1008,6 +1008,18 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     med["itens_confirmam"] = confirma
     dem_itens = _demanda_item(itens)
     med["demanda_itens_kw"] = dem_itens
+    # Trava do modo OCR (PDF-imagem lido pelo RapidOCR/Tesseract): a física não pega posto trocado nem dígito
+    # lido errado que ainda feche a conta; só se grava a medição quando cada posto com consumo bate com um item
+    # kWh da fatura. Sem confirmação fica vazio (fila humana / leitura visual à mão), nunca um valor inventado.
+    import identificacao as _idn
+    med["fonte"] = "ocr" if getattr(_idn, "ULTIMA_FONTE", "") == "ocr" else "texto"
+    if med["fonte"] == "ocr" and med["validado"]:
+        postos = [p for p, c in (("p", cons_p), ("fp", cons_fp)) if c is not None]  # fp lido como 0 conta (troca)
+        # com um posto só não há troca possível e a física (3 números que fecham) basta; com ponta E fora ponta,
+        # cada um tem de bater com um item kWh
+        if len(postos) > 1 and not all(confirma.get(p) for p in postos):
+            med["validado"], med["validado_por"] = False, None
+            med["obs"].append("OCR: consumo por posto não confirmado pelos itens da fatura; medição não gravada")
     aplicar: dict = {}
     if med.get("medidor"):
         aplicar["numero_medidor"] = med["medidor"]
@@ -1029,8 +1041,8 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             aplicar["consumo_ativo_ponta_kwh"] = cons_p
         if cons_fp is not None:
             aplicar["consumo_ativo_fponta_kwh"] = cons_fp
-        if cons_p is not None or cons_fp is not None:
-            aplicar["kwh_total"] = _r3((cons_p or 0) + (cons_fp or 0) + (cons_res or 0))
+        if cons_fp is not None:  # só ponta lida (fora ponta ilegível) não é total
+            aplicar["kwh_total"] = _r3((cons_p or 0) + cons_fp + (cons_res or 0))
         dc = med["demanda_contratada"]
         df = med.get("demanda_faturada") or {}
         azul = "azul" in modalidade
@@ -1056,10 +1068,10 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             aplicar["demanda_faturada_fponta_kw"] = dm["fp"] if livre else _r3(max(dm["fp"], dc.get("fp") or 0))
             if dm.get("p") is not None and azul:
                 aplicar["demanda_faturada_ponta_kw"] = dm["p"] if livre else _r3(max(dm["p"], dc.get("p") or 0))
-        if dc.get("fp") is not None:
+        if dc.get("fp") is not None and med["fonte"] != "ocr":  # OCR: a contratada não tem conferência → fica vazia
             aplicar["demanda_contratada_fponta_kw"] = dc["fp"]
             lt.setdefault("demanda_contratada_fponta_kw", dc["fp"])
-        if dc.get("p") is not None:
+        if dc.get("p") is not None and med["fonte"] != "ocr":
             aplicar["demanda_contratada_ponta_kw"] = dc["p"]
             lt.setdefault("demanda_contratada_ponta_kw", dc["p"])
     if med["registros"]:
