@@ -477,7 +477,8 @@ SELECT f.id, f.uid, f.link_fatura, f.cod_empresa, f.distribuidora, f.validador_g
   FROM FATURA_DADOS_EXTRAIDOS f
   LEFT JOIN FT_LEITURA_VISUAL v ON v.id_fatura = f.id
  WHERE f.link_fatura LIKE 'http%%'
-   AND (f.texto_plumber IS NULL OR LENGTH(f.texto_plumber) < 200 OR f.validador_gate = 'reprovado')
+   AND (((f.texto_plumber IS NULL OR LENGTH(f.texto_plumber) < 200) AND COALESCE(f.validador_gate,'') NOT IN ('aprovado','revisao'))
+        OR f.validador_gate = 'reprovado')
    AND (v.id_fatura IS NULL OR (v.status NOT IN ('ok','humano','outro','tem_texto') AND v.tentativas < 2))
  ORDER BY (f.texto_plumber IS NULL OR LENGTH(f.texto_plumber) < 200) DESC, f.mes_referencia DESC, f.id DESC
  LIMIT %s"""
@@ -512,7 +513,7 @@ def gravar_tentativa(con, fid: int, uid: str | None, resp: dict | None, val: dic
                  json.dumps(antes, ensure_ascii=False, default=str) if antes else None, 1 if gravado else 0,
                  (erro or "")[:500] or None))
     # 2ª falha → humano
-    cur.execute("UPDATE FT_LEITURA_VISUAL SET status='humano' WHERE id_fatura=%s AND status IN ('falhou','parcial','erro') AND tentativas >= 2 AND erro NOT LIKE 'PDF protegido%%'", (fid,))
+    cur.execute("UPDATE FT_LEITURA_VISUAL SET status='humano' WHERE id_fatura=%s AND status IN ('falhou','parcial','erro') AND tentativas >= 2 AND erro NOT LIKE '%%PDF protegido%%'", (fid,))
     con.commit()
     cur.close()
 
@@ -695,7 +696,7 @@ def cmd_rodar(argv: list[str]) -> int:
     ids = [int(a) for a in _args(argv, "--id")]
     reg.ping("leitura_visual")
     con = _con()
-    rows = candidatas(con, teto, ids or None)
+    rows = candidatas(con, teto * 3, ids or None)  # sobra para os pulos (tem_texto, download); o teto conta leituras
     if not rows:
         _log("nada a ler.")
         reg.registrar("leitura_visual", 0, "nenhuma fatura candidata")
@@ -704,13 +705,18 @@ def cmd_rodar(argv: list[str]) -> int:
     fim = time.time() + minutos * 60
     max_seguidos = int(os.environ.get("SURE_VISUAL_MAX_ERROS_SEGUIDOS", "5"))
     cont: dict[str, int] = {}
-    seguidos, parado, rc = 0, "", 0
+    seguidos, parado, rc, lidas = 0, "", 0, 0
     for i, row in enumerate(rows, 1):
         if time.time() > fim:
             _log(f"tempo esgotado após {i - 1} fatura(s)")
             break
+        if lidas >= teto:
+            _log(f"teto de {teto} leituras atingido")
+            break
         st, det = processar(con, row, gravar)
         cont[st] = cont.get(st, 0) + 1
+        if st not in ("tem_texto",) and not det.startswith("download"):
+            lidas += 1
         _log(f"{i}/{len(rows)} fatura {row['id']} ({row.get('distribuidora') or '?'}, gate={row.get('validador_gate')}): {st} {det}")
         # disjuntor: a IA falhando seguidamente (limite de uso, sessão expirada) — para a noite em vez de queimar a fila
         seguidos = seguidos + 1 if det.startswith("claude:") else 0
