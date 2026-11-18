@@ -3301,7 +3301,7 @@ def normalizar_via_llm(v2_out: dict, texto: str) -> dict:
     return dbg
 
 
-def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown, texto_ocr, uid: str = None, force: bool = False, texto_bbox: str = None, dryrun: bool = False):
+def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown, texto_ocr, uid: str = None, force: bool = False, texto_bbox: str = None, dryrun: bool = False, origem: dict = None):
     """Executa pipeline determinístico unificado (3 extratores + camadas auxiliares).
 
     Args:
@@ -3479,6 +3479,47 @@ def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown,
                 log.info(f"  [v3.66 medicao] nenhum molde reconheceu a tabela ({time.time()-t_etapa:.1f}s)")
         except Exception as e:
             log.warning(f"  [v3.66 medicao] erro: {e}")
+
+    # 2.67) Tributos por molde (etapa 2b, 17/11/2026): ICMS/PIS/COFINS lidos pelas linhas posicionadas e conferidos
+    # por base × alíquota = valor. Deixa v2_out['_tributos'] (com 'aplicar' → colunas); PDF_PIPELINE_TRIBUTOS=0 desliga.
+    if isinstance(v2_out, dict) and pdf_bytes and os.getenv("PDF_PIPELINE_TRIBUTOS", "1") != "0":
+        t_etapa = time.time()
+        try:
+            from tributos import aplicar_tributos
+            aplicar_tributos(v2_out, pdf_bytes)
+            _tr = v2_out.get("_tributos") or {}
+            if _tr:
+                log.info(f"  [v3.67 tributos] icms={(_tr.get('icms') or {}).get('valor')} pis={(_tr.get('pis') or {}).get('valor')} "
+                         f"cofins={(_tr.get('cofins') or {}).get('valor')} obs={_tr.get('obs')} ({time.time()-t_etapa:.1f}s)")
+            else:
+                log.info(f"  [v3.67 tributos] nenhum tributo fechou ({time.time()-t_etapa:.1f}s)")
+        except Exception as e:
+            log.warning(f"  [v3.67 tributos] erro: {e}")
+
+    # 2.675) Segunda leitura do OCR por recorte (17/11/2026): só no modo OCR, quando a medição ou um tributo não
+    # fechou — recorta o quadro pelas âncoras da 1ª leitura, lê em zoom 6 e vota (ocr_reforco.py). PDF_PIPELINE_REFORCO=0 desliga.
+    if isinstance(v2_out, dict) and pdf_bytes and v2_out.get("_fonte_itens") == "ocr" and os.getenv("PDF_PIPELINE_REFORCO", "1") != "0":
+        t_etapa = time.time()
+        try:
+            from ocr_reforco import aplicar as _reforco
+            _reforco(v2_out, pdf_bytes)
+            log.info(f"  [v3.675 ocr_reforco] {v2_out.get('_ocr_reforco')} ({time.time()-t_etapa:.1f}s)")
+        except Exception as e:
+            log.warning(f"  [v3.675 ocr_reforco] erro: {e}")
+
+    # 2.68) Confiança por fontes (17/11/2026): quantas fontes independentes confirmam cada campo — física da fatura,
+    # itens, histórico, dígito verificador, origem sgeeasy (linha da Faturas_Registradas_Cache) e fatura anterior da
+    # mesma UC. Só anota (v2_out['_confianca'] → coluna confianca_json); nunca sobrescreve o impresso.
+    # PDF_PIPELINE_CONFIANCA=0 desliga.
+    if isinstance(v2_out, dict) and os.getenv("PDF_PIPELINE_CONFIANCA", "1") != "0":
+        t_etapa = time.time()
+        try:
+            from confirmacao import aplicar as _conf_aplicar, resumo as _conf_resumo
+            _conf_aplicar(v2_out, cur=cur, uid=uid, origem=origem)
+            log.info(f"  [v3.68 confianca] {_conf_resumo(v2_out.get('_confianca') or {})} "
+                     f"fontes={v2_out.get('_confianca_fontes')} ({time.time()-t_etapa:.1f}s)")
+        except Exception as e:
+            log.warning(f"  [v3.68 confianca] erro: {e}")
 
     # 2.7) Validador determinístico — score + gate (aprovado/revisao/reprovado/scaneada)
     # Anexa em v2_out["_qualidade"] pra atualizar_colunas_individuais ler o score.
@@ -3908,7 +3949,10 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
                frc.KWH_Reservado, frc.RS_KWH_Reservado, frc.KWH_Total, frc.RS_KWH_Total, frc.RS_Total_Fatura,
                frc.KW_Contratada_Ponta, frc.KW_Contratada_FPonta, frc.KW_Registrada_Ponta, frc.KW_Registrada_FPonta,
                frc.UFER_Ponta, frc.UFER_FPonta, frc.UFER_Reservado, frc.KWH_Total_Injet,
-               frc.UCs_Anteriores, frc.RAZAO_SOCIAL, frc.Empresa
+               frc.UCs_Anteriores, frc.RAZAO_SOCIAL, frc.Empresa,
+               frc.Cod_UC, frc.UC, frc.Mes_Ref, frc.Modalidade_Tarifaria, frc.Chave_Acesso, frc.Dt_Emissao_NF, frc.Dt_Venc_NF,
+               frc.Leitura_Anterior_KWH_FP, frc.Leitura_Atual_KWH_FP, frc.Leitura_Anterior_KWH_P, frc.Leitura_Atual_KWH_P,
+               frc.Constante_KWH_FP, frc.Base_de_Calculo_ICMS, frc.Aliquota_ICMS, frc.ICMS_RS, frc.PIS_RS, frc.COFINS_RS
         FROM Faturas_Registradas_Cache frc
         WHERE {where}
         ORDER BY frc.id {ordem}
@@ -4169,7 +4213,7 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
                             texto_plumber, texto_markitdown, texto_ocr,
                             uid=uid_neg, force=force,
                             texto_bbox=texto_bbox or None,
-                            dryrun=True,
+                            dryrun=True, origem=row,
                         )
                         v2_dbg = (payload_v3 or {}).get("v2") if isinstance(payload_v3, dict) else {}
                         log.info(
@@ -4202,7 +4246,7 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
                                        texto_plumber, texto_markitdown, texto_ocr,
                                        uid=uid_neg, force=force,
                                        texto_bbox=texto_bbox or None,
-                                       dryrun=False)
+                                       dryrun=False, origem=row)
                 except Exception as _e_v3:
                     log.warning(f"  [v3] excecao: {_e_v3}")
 

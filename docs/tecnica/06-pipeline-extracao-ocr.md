@@ -211,6 +211,90 @@ GD consistente, leitura, SEFAZ). Grava a coluna `validador_gate`.
   consumo certos em 4/7 (Enel CE, Brasília, Equatorial MA, Coelba), 2 ilegíveis (vazio), 1 posto trocado (CPFL —
   barrado pela trava). Tesseract no mesmo lote: medição 2/7.
 
+### Tributos por molde — `worker/engine/tributos.py` (etapa 2b, 17/11/2026)
+- Toda distribuidora imprime o quadro de tributos do mesmo jeito: rótulo (ICMS, PIS/PASEP, COFINS) e, à direita,
+  base, alíquota e valor — às vezes dentro de uma linha que também carrega colunas dos itens (Coelba, Energisa,
+  CPFL, EDP, Enel). O molde acha o rótulo nas linhas posicionadas, toma os números à direita (até o próximo rótulo,
+  ou na linha vizinha quando o rótulo fecha a linha) e só aceita o trio que fecha **base × alíquota = valor**
+  (R$ 0,02 ou 0,5 %). Isento ("0,00 0,00") grava 0. OCR sem vírgula ("067", "8523") entra pela tentativa /100.
+- Regras aprendidas no gabarito: rótulo precedido de "sem", "com", "isento", "cob.", "subvenção" é descrição de
+  item, não tributo (Light "Demanda sem ICMS", CPFL "TUSD Com ICMS"); rótulo numa linha de cabeçalho ("(R$)",
+  "Alíquota", "Base") é título de coluna e não puxa a linha vizinha; várias linhas por item + total → vale o
+  total (base igual à soma das outras), só linhas por item (CPFL livre, créditos "20,77-") → soma; base não
+  impressa ao lado (Light B "PASEP 1,25 1,15", CEMIG GD "COFINS 4,6445% 204,63") fecha quando a base implícita
+  bate com a do outro tributo — PIS e COFINS têm a mesma base.
+- Ligado em `_rodar_pipeline_v3` (passo 2.67); colunas `icms_valor/icms_base_calculo/icms_aliquota`,
+  `pis_valor/pis_aliquota`, `cofins_valor/cofins_aliquota` vêm de `_tributos['aplicar']` em
+  `atualizar_colunas_db._coleta_campos`, por cima do extrator antigo; `PDF_PIPELINE_TRIBUTOS=0` desliga.
+  `python tributos.py fatura.pdf` mostra o que fechou.
+- Medido (módulo, gabarito de 48 com texto): ICMS 36 certo / 0 errado / 8 vazio; PIS 43 / 0 / 2; COFINS 43 / 0 / 2.
+  Vazios: Light A (só o valor impresso, sem base), ICMS por coluna de item sem linha de total (Elektro, CEMIG GD,
+  Energisa GD, CPFL livre). Nas 7 escaneadas (OCR): ICMS 6/7, PIS 6/6, COFINS 5/6, nenhum errado — antes, pelo
+  extrator antigo sobre o texto do OCR, 1/7, 2/7 e 2/7.
+- Modo OCR (`_fonte_itens="ocr"`, marcado por `medicao.aplicar_medicao`): `atualizar_colunas_db` deixa vazias
+  as colunas de consumo, leituras, demandas e tributos que não vieram de um molde com conferência
+  (`OCR_SO_COM_CONFERENCIA`); o extrator antigo gravava kWh e tributo errados a partir do texto do OCR. Demanda
+  faturada no modo OCR só por item da fatura (sem item, vazio).
+
+### O extrator grava o impresso; a regra julga (17/11/2026)
+- Princípio acertado com o usuário: usar a conta da fatura (física, base × alíquota) como PORTA de gravação escondia
+  o erro da concessionária — o apontamento que o sistema existe para achar. Agora a conta só **escolhe entre
+  leituras** (qual número é a base, qual linha é o total) e nunca decide se grava:
+  - `tributos.py`: trio na posição do rótulo que não fecha é gravado igual, com `fecha=False` (texto exato) — a F39
+    aponta. No OCR continua exigindo fechar (dúvida é de leitura, não da concessionária).
+  - `medicao.py`: com texto exato e molde estrutural (enel/cemig/elektro), leituras, constante e consumo impressos
+    entram mesmo quando (atual − anterior) × K ≠ consumo — a F01 aponta. Sem valores calculados: demanda faturada só
+    de item impresso ou da linha "Demanda Faturada-kW" da tabela (nada de max(medida, contratada)); consumo não é mais
+    multiplicado pela perda escrita no texto — a perda impressa (linha ou texto) vai para
+    `perda_transformacao_percentual`; a inferida pelos itens fica só em observação.
+- Goldens regravados: além das colunas de tributo, A_18649884 (Amazonas) passou a trazer o consumo medido 10.956 +
+  perda 2,5 % em vez do faturado calculado 11.229,9; demanda faturada calculada saiu de 3 goldens (A_18651768,
+  ML_18640885) e a impressa entrou (ML_18651965: 60,98 da linha "Demanda Faturada").
+
+### Confiança por fontes — `worker/engine/confirmacao.py` (17/11/2026, sem fila humana)
+- Em vez de pessoa, redundância: cada campo guarda quantas fontes independentes dizem o mesmo número.
+  `extrator` (toda coluna preenchida), `fisica` (conta da fatura fechou), `itens` (consumo bate com item kWh),
+  `historico` (consumo do mês na tabela de 13 meses), `dv` (dígito verificador da chave NF3e e do CNPJ), `origem`
+  (sgeeasy `Faturas_Registradas_Cache`, mesma fatura pelo UID: leituras, constante, medidor, consumo, contratada,
+  tributos, total, emissão, vencimento, dias, UC, chave, modalidade) e `anterior` (fatura anterior da UC na FDE:
+  leitura anterior de hoje = leitura atual de lá; medidor, K, contratada, modalidade, UC iguais; pelo prefixo do uid
+  e, se o prefixo mudou entre meses, por empresa + dígitos da UC).
+- Fonte que diz outro valor fica em `divergente` — nada é sobrescrito. Passo 2.68 do pipeline (`cur` + linha da
+  origem, que o SELECT da origem passou a trazer; `--revalidar`/sem linha busca pelo UID); `extrair_fatura.py --uid`
+  liga as fontes de banco só leitura; goldens/CI só fontes internas. Coluna `confianca_json` (migração aditiva
+  `{"n":{coluna: fontes}, "div":{coluna: {fonte: valor}}}`; gravação tolera a coluna ainda não existir).
+- Motor (Go): `uFat.conf`, `confirmado(f, campos…)` e `nivelConf` — numa base extraída o achado volta a ser ERRO
+  quando os campos que o sustentam têm ≥ 2 fontes; F39 deixou de pular o trio "colunas trocadas" quando ele está
+  confirmado. Medido: Equatorial (OCR) 17 campos com 2–3 fontes e 0 divergentes; Light/CEMIG (texto) 21–22; Copel
+  acusou consumo ponta 67 ≠ 265 da origem e kWh total 67 ≠ 4.673 — erro de extração que antes passaria calado.
+- Índice recomendado (o usuário cria à mão): `(cod_empresa, codigo_uc, mes_referencia)` na FDE, para a busca da
+  fatura anterior por UC.
+
+### Segunda leitura do OCR por recorte — `worker/engine/ocr_reforco.py` (17/11/2026)
+- Só no modo OCR, quando a medição ou um tributo não fechou: recorta o quadro pelas âncoras que a 1ª leitura achou
+  (cabeçalho "Leitura/Anterior/Atual/Const"; rótulos ICMS/PIS/COFINS), renderiza só ali em zoom 6
+  (`ocr_itens.itens_recorte`) e lê de novo; o campo entra se a releitura fecha a conta. Passo 2.675;
+  `PDF_PIPELINE_REFORCO=0` desliga. `python ocr_reforco.py fatura.pdf` mostra antes/depois.
+
+### Modelo pago só na confiança baixa — `leitura_visual.py --fila confianca --motor openai` (17/11/2026)
+- Teste em 3 escaneadas difíceis (relatórios `tests/CONFERENCIA_VISUAL_2026-11-17_openai_{nano,mini}_3escaneadas.md`):
+  **gpt-5.4-nano inventa números que fecham na própria conta** (CPFL: ICMS 2.031,79 sobre base 11.287,69 × 18 %,
+  real 2.791,94 sobre 15.510,79; tributos 0 certo / 2 errado) — descartado. **gpt-5.4-mini**: ICMS 3/3, emissão 3/3,
+  medição inteira da Energisa (fora ponta 32.947,6 que o OCR não lê, confirmado pela origem); errou PIS/COFINS da CPFL
+  (alíquota no lugar do valor) e um dígito do medidor da Enel SP. 6.000–6.800 tokens de entrada e 1.300–1.900 de saída
+  por fatura de 3 páginas; US$ 0,75/M entrada e 4,50/M saída → ≈ US$ 0,013 por fatura (Batch: metade).
+- Desenho (pedido do usuário: não substitui o sistema, só pega confiança baixa): `candidatas_confianca` escolhe faturas
+  cujo `confianca_json` tem campo-chave (consumo, leituras, K, tributos, total, contratada) com n < 2, divergente ou
+  ausente. O modelo lê a fatura inteira (mesmo prompt e validação da leitura visual; motor `chamar_openai`, chat
+  completions com imagens em base64, resposta JSON) e vira a fonte "llm" em `integrar_confianca`: valor igual ao da
+  base → n + 1; vazio na base → preenche só se a origem sgeeasy diz o mesmo ou, para leituras/constante/consumo, se a
+  leitura fechou na física E bate com item kWh; diferente → divergência "llm". Nunca grava sozinho.
+- `worker/job_llm_confianca.sh` (cron 11, de hora em hora às :15): `SURE_LLM_POR_HORA`=10 chamadas, descontando as da
+  última hora (FT_LEITURA_VISUAL, modelo `openai:gpt-5.4-mini`); tokens em `validacao_json.tokens`;
+  `SURE_VISUAL_GRAVAR=0` só registra. Rotina `llm_confianca` no painel. Chave `OPENAI_API_KEY` do backend/.env.
+- Custo: 1.000 faturas ≈ US$ 13–17 (1.000–1.300 chamadas com 2ª leitura); as 8.720 que não fecharam na base ≈ US$ 115
+  (36 dias a 10/h); base inteira (190 k) ≈ US$ 2.470 — não compensa, as com texto já fecham sem modelo.
+
 ### Testes golden (CI) — `worker/engine/tests/`
 - `worker/engine/extrair_fatura.py` → `extrair_campos(pdf_bytes)`: o mesmo caminho do `pdf_pipeline.py` para
   uma fatura com camada de texto (plumber → liteparse → bbox → extrator_v2 → cascata → complementos →

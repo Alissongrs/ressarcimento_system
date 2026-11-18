@@ -40,6 +40,11 @@ from medicao import Registro, _r3, classificar_grandeza, classificar_posto, vali
 
 CLAUDE = os.environ.get("SURE_CLAUDE_BIN", "claude")
 MODELO = "claude-visual"
+# motor da leitura: "claude" (claude -p, assinatura da VPS, limite de 5 h) ou "openai" (API, paga por token;
+# SURE_VISUAL_MODELO = gpt-5.4-nano | gpt-5.4-mini | gpt-4.1-mini). Chave OPENAI_API_KEY do backend/.env (db_env).
+MOTOR = os.environ.get("SURE_VISUAL_MOTOR", "claude")
+MODELO_OPENAI = os.environ.get("SURE_VISUAL_MODELO", "gpt-5.4-nano")
+ULTIMO_USO: dict = {}  # tokens da última chamada OpenAI (custo)
 TIMEOUT_CLAUDE = int(os.environ.get("SURE_VISUAL_TIMEOUT", "240"))
 MAX_PAGINAS = int(os.environ.get("SURE_VISUAL_PAGINAS", "3"))
 DPI = int(os.environ.get("SURE_VISUAL_DPI", "150"))
@@ -484,6 +489,56 @@ SELECT f.id, f.uid, f.link_fatura, f.cod_empresa, f.distribuidora, f.validador_g
  LIMIT %s"""
 
 
+# campos-chave: fatura entra na fila do modelo quando algum deles tem uma fonte só, está vazio ou diverge entre fontes
+CAMPOS_CHAVE = ("consumo_ativo_fponta_kwh", "consumo_ativo_ponta_kwh", "kwh_total", "leit_ant_ativa_fponta",
+                "leit_atu_ativa_fponta", "constante_k", "icms_valor", "pis_valor", "cofins_valor", "valor_total_fatura",
+                "demanda_contratada_fponta_kw")
+CAMPOS_OBRIGATORIOS = ("consumo_ativo_fponta_kwh", "valor_total_fatura", "icms_valor")  # vazio aqui = confiança baixa
+
+
+def confianca_baixa(conf_json: str | None) -> list[str]:
+    """Campos-chave com n < 2, divergência ou ausentes (dos obrigatórios), a partir do confianca_json."""
+    try:
+        c = json.loads(conf_json or "")
+    except ValueError:
+        return []
+    n, div = c.get("n") or {}, c.get("div") or {}
+    baixos = [k for k in CAMPOS_CHAVE if k in n and int(n[k]) < 2]
+    baixos += [k for k in CAMPOS_CHAVE if k in div and k not in baixos]
+    baixos += [k for k in CAMPOS_OBRIGATORIOS if k not in n and k not in baixos]
+    return baixos
+
+
+def candidatas_confianca(con, teto: int) -> list[dict]:
+    """Fila do modelo: faturas com confianca_json (pipeline novo) e campo-chave de confiança baixa, ainda não lidas
+    pelo modelo (FT_LEITURA_VISUAL com modelo openai e status ok/humano/outro, ou 2 tentativas)."""
+    cur = con.cursor(dictionary=True)
+    cur.execute("""SELECT f.id, f.uid, f.link_fatura, f.cod_empresa, f.distribuidora, f.validador_gate, f.mes_referencia, f.confianca_json
+                     FROM FATURA_DADOS_EXTRAIDOS f
+                     LEFT JOIN FT_LEITURA_VISUAL v ON v.id_fatura = f.id
+                    WHERE f.link_fatura LIKE 'http%%' AND f.confianca_json IS NOT NULL AND f.confianca_json <> ''
+                      AND (v.id_fatura IS NULL OR (v.status NOT IN ('ok','humano','outro') AND v.tentativas < 2))
+                    ORDER BY f.mes_referencia DESC, f.id DESC LIMIT %s""", (max(teto * 20, 500),))
+    rows = []
+    for r in cur.fetchall():
+        baixos = confianca_baixa(r.get("confianca_json"))
+        if baixos:
+            r["_baixos"] = baixos
+            rows.append(r)
+        if len(rows) >= teto * 3:
+            break
+    cur.close()
+    return rows
+
+
+def llm_na_ultima_hora(con) -> int:
+    cur = con.cursor()
+    cur.execute("SELECT COUNT(*) FROM FT_LEITURA_VISUAL WHERE modelo LIKE 'openai:%%' AND atualizado_em >= NOW() - INTERVAL 1 HOUR")
+    n = int(cur.fetchone()[0] or 0)
+    cur.close()
+    return n
+
+
 def candidatas(con, teto: int, ids: list[int] | None = None) -> list[dict]:
     cur = con.cursor(dictionary=True)
     if ids:
@@ -565,7 +620,65 @@ def desfazer(con, fid: int) -> int:
 DPI_SEGUNDA = int(os.environ.get("SURE_VISUAL_DPI_SEGUNDA", "220"))
 
 
-def ler_pdf(pdf_bytes: bytes, nome: str, foco: dict | None = None) -> tuple[dict | None, dict | None, str | None]:
+def _chave_openai() -> str | None:
+    k = os.environ.get("OPENAI_API_KEY")
+    if k:
+        return k
+    try:
+        env = AQUI.parent.parent / "backend" / ".env"
+        for ln in env.read_text(encoding="utf-8", errors="replace").splitlines():
+            if ln.strip().startswith("OPENAI_API_KEY="):
+                return ln.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return None
+
+
+def chamar_openai(imagens: list[Path], foco: dict | None = None, modelo: str | None = None) -> tuple[dict | None, str]:
+    """Mesmo prompt da leitura visual, pela API da OpenAI (chat completions, imagens em base64, resposta JSON).
+    Guarda os tokens em ULTIMO_USO. Devolve (json, saída bruta)."""
+    global ULTIMO_USO
+    import base64
+    import urllib.request
+    import urllib.error
+    chave = _chave_openai()
+    if not chave:
+        return None, "OPENAI_API_KEY ausente"
+    modelo = modelo or MODELO_OPENAI
+    texto = PROMPT.rstrip() + "\nAs imagens das páginas estão anexadas nesta mensagem, na ordem.\n"
+    if foco:
+        blocos = ", ".join(foco.get("blocos") or []) or "nenhum bloco"
+        texto += ("\nSEGUNDA LEITURA. Na primeira, estes blocos NÃO fecharam nas contas: " + blocos + ".\n"
+                  "Motivos: " + "; ".join(foco.get("obs") or []) + "\n"
+                  "Releia com cuidado redobrado e devolva o JSON completo de novo.\n")
+    conteudo: list = [{"type": "text", "text": texto}]
+    for p in imagens:
+        b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+        conteudo.append({"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64, "detail": "high"}})
+    corpo = {"model": modelo, "messages": [{"role": "user", "content": conteudo}],
+             "response_format": {"type": "json_object"}, "max_completion_tokens": 6000}
+    req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=json.dumps(corpo).encode("utf-8"),
+                                 headers={"Authorization": "Bearer " + chave, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_CLAUDE) as r:
+            d = json.load(r)
+    except urllib.error.HTTPError as e:
+        return None, f"HTTP {e.code}: {e.read()[:300].decode('utf-8', 'replace')}"
+    except Exception as e:  # noqa: BLE001
+        return None, f"falha ao chamar openai: {e}"
+    ULTIMO_USO = dict(d.get("usage") or {})
+    ULTIMO_USO["modelo"] = modelo
+    saida = ((d.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+    m = re.search(r"\{.*\}", saida, re.S)
+    if not m:
+        return None, saida[:800]
+    try:
+        return json.loads(m.group(0)), saida
+    except ValueError as e:
+        return None, f"JSON inválido ({e}): {saida[:600]}"
+
+
+def ler_pdf(pdf_bytes: bytes, nome: str, foco: dict | None = None, motor: str | None = None) -> tuple[dict | None, dict | None, str | None]:
     """(resposta, validação, erro) de um PDF em bytes. Com `foco` é a 2ª tentativa: páginas em mais resolução
     e pedido dirigido ao que não fechou."""
     base = WORK / re.sub(r"[^A-Za-z0-9_.-]", "_", nome)
@@ -575,7 +688,7 @@ def ler_pdf(pdf_bytes: bytes, nome: str, foco: dict | None = None) -> tuple[dict
         return None, None, f"não renderizou: {e}"
     if not imagens:
         return None, None, "PDF sem páginas"
-    resp, bruto = chamar_claude(imagens, foco)
+    resp, bruto = chamar_openai(imagens, foco) if (motor or MOTOR) == "openai" else chamar_claude(imagens, foco)
     for p in imagens:
         try:
             p.unlink()
@@ -651,8 +764,12 @@ def divergencias(con, fid: int, cols: dict, uc_alternativas: list | None = None)
     return out
 
 
-def processar(con, row: dict, gravar: bool) -> tuple[str, str]:
-    """Devolve (status, detalhe). Detalhe começa com 'claude:' quando a falha foi na chamada da IA (disjuntor)."""
+def processar(con, row: dict, gravar: bool, motor: str | None = None, modo: str = "visual") -> tuple[str, str]:
+    """Devolve (status, detalhe). Detalhe começa com 'claude:' quando a falha foi na chamada da IA (disjuntor).
+    modo="confianca": fila de confiança baixa — o modelo é fonte; grava só com outra fonte concordando."""
+    global MODELO
+    motor = motor or MOTOR
+    MODELO = ("openai:" + MODELO_OPENAI) if motor == "openai" else "claude-visual"
     fid = row["id"]
     pdf = None
     try:
@@ -665,11 +782,11 @@ def processar(con, row: dict, gravar: bool) -> tuple[str, str]:
         return "erro", "download vazio"
     # "sem texto" na base nem sempre é PDF-imagem (o caminho da Claro não guarda texto_plumber): se o PDF tem
     # camada de texto, não é caso de leitura visual — é do pipeline determinístico (--revalidar). Registra e pula.
-    if row.get("validador_gate") != "reprovado" and texto_do_pdf(pdf) >= int(os.environ.get("SURE_VISUAL_MIN_TEXTO", "200")):
+    if modo != "confianca" and row.get("validador_gate") != "reprovado" and texto_do_pdf(pdf) >= int(os.environ.get("SURE_VISUAL_MIN_TEXTO", "200")):
         gravar_tentativa(con, fid, row.get("uid"), None, None, "tem_texto", "PDF tem camada de texto: cabe ao pipeline determinístico", None, False)
         return "tem_texto", ""
     foco = foco_anterior(con, fid)
-    resp, val, erro = ler_pdf(pdf, f"f{fid}", foco)
+    resp, val, erro = ler_pdf(pdf, f"f{fid}", foco, motor=motor)
     if erro and not val:
         da_ia = erro.startswith("sem JSON") or erro.startswith("timeout") or "falha ao chamar" in erro
         gravar_tentativa(con, fid, row.get("uid"), resp, None, "erro", erro, None, False, conta=not da_ia)
@@ -681,11 +798,96 @@ def processar(con, row: dict, gravar: bool) -> tuple[str, str]:
     except Exception as e:  # noqa: BLE001
         val["divergencias"] = [{"erro": str(e)[:200]}]
     antes, gravadas = ({}, [])
-    if gravar and status in ("ok", "parcial") and val["colunas"]:
+    if motor == "openai":
+        val["tokens"] = dict(ULTIMO_USO)
+    if modo == "confianca":
+        val["campos_baixos"] = row.get("_baixos") or []
+        try:
+            preencher, conf = integrar_confianca(con, fid, row.get("uid"), val)
+            val["preencher"] = preencher
+            val["confianca"] = conf
+            if gravar:
+                if preencher:
+                    antes, gravadas = aplicar_colunas(con, fid, preencher)
+                    val["colunas_gravadas"] = gravadas
+                gravar_confianca(con, fid, conf)
+        except Exception as e:  # noqa: BLE001
+            val["erro_confianca"] = str(e)[:200]
+    elif gravar and status in ("ok", "parcial") and val["colunas"]:
         antes, gravadas = aplicar_colunas(con, fid, val["colunas"])
         val["colunas_gravadas"] = gravadas
     gravar_tentativa(con, fid, row.get("uid"), resp, val, status, None, antes or None, bool(gravadas))
-    return status, (f"{len(val['divergencias'])} divergência(s)" if val["divergencias"] else "")
+    det = f"{len(val['divergencias'])} divergência(s)" if val["divergencias"] else ""
+    if modo == "confianca":
+        det += f" baixos={val.get('campos_baixos')} preencher={list((val.get('preencher') or {}).keys())}"
+    return status, det.strip()
+
+
+def integrar_confianca(con, fid: int, uid: str | None, val: dict) -> tuple[dict, dict]:
+    """O modelo como fonte "llm" na confiança por campo. Devolve (colunas que podem ser preenchidas, conf atualizada).
+    - campo já na base e o modelo concorda → fonte "llm" entra (n + 1);
+    - campo vazio na base: preenche só se a origem (sgeeasy) diz o mesmo, ou, na medição, se a leitura do modelo
+      fechou na física E bate com item kWh (o nano inventou tributos que fechavam na conta: tributo/total/contratada
+      exigem a origem);
+    - discorda → divergência "llm" registrada. Nunca grava sozinho."""
+    from confirmacao import CAMPOS_ORIGEM, iguais, origem_por_uid, TIPO_COL
+    cur = con.cursor(dictionary=True)
+    try:
+        cur.execute("SELECT confianca_json FROM FATURA_DADOS_EXTRAIDOS WHERE id=%s", (fid,))
+        r = cur.fetchone() or {}
+    except Exception:  # coluna ainda não existe (antes do deploy da migração): só a origem como outra fonte
+        r = {}
+    cur.close()
+    try:
+        conf = json.loads(r.get("confianca_json") or "{}")
+    except ValueError:
+        conf = {}
+    conf.setdefault("n", {}); conf.setdefault("div", {}); conf.setdefault("fontes_llm", [])
+    origem = origem_por_uid(uid) if uid else None
+    atuais = {d["coluna"]: d for d in (val.get("divergencias") or [])}
+    cols = val.get("colunas") or {}
+    blocos = val.get("blocos") or {}
+    medicao_ok = bool(blocos.get("medicao")) and any("confirmado por item" in o for o in (val.get("obs") or []))
+    preencher: dict = {}
+    for k, v in cols.items():
+        if k == "medicao_grandezas_json" or v in (None, ""):
+            continue
+        tipo = TIPO_COL.get(k, "num") if k in TIPO_COL else ("data" if k.startswith(("data_", "mes_")) else "num")
+        if k in ("distribuidora", "grupo_tarifario", "subgrupo_tarifario", "numero_fatura"):
+            tipo = "ident"
+        if k in atuais:  # a base tem outro valor: divergência do modelo, nada muda
+            conf["div"].setdefault(k, {})["llm"] = str(v)
+            continue
+        if k in conf["n"]:  # a base tem o mesmo valor (não divergiu): o modelo confirma
+            if "llm" not in conf["fontes_llm"]:
+                pass
+            conf["n"][k] = int(conf["n"][k]) + 1
+            if k not in conf["fontes_llm"]:
+                conf["fontes_llm"].append(k)
+            continue
+        # vazio na base: precisa de outra fonte concordando
+        col_o = (CAMPOS_ORIGEM.get(k) or (None, None))[0]
+        ok_origem = bool(origem) and col_o is not None and iguais(k, CAMPOS_ORIGEM[k][1], v, origem.get(col_o)) is True
+        # física + item só sustenta o que a física confere: leituras, constante, consumo e total em kWh (demanda não)
+        ok_fisica = medicao_ok and k in ("constante_k", "leit_ant_ativa_ponta", "leit_atu_ativa_ponta", "leit_ant_ativa_fponta",
+                                         "leit_atu_ativa_fponta", "consumo_ativo_ponta_kwh", "consumo_ativo_fponta_kwh", "kwh_total")
+        if ok_origem or ok_fisica:
+            preencher[k] = v
+            conf["n"][k] = 2 + (1 if (ok_origem and ok_fisica) else 0)
+            conf["fontes_llm"].append(k)
+        else:
+            conf["div"].setdefault(k, {})["llm"] = str(v) + " (sem outra fonte)"
+    return preencher, conf
+
+
+def gravar_confianca(con, fid: int, conf: dict) -> None:
+    cur = con.cursor()
+    try:
+        cur.execute("UPDATE FATURA_DADOS_EXTRAIDOS SET confianca_json=%s WHERE id=%s", (json.dumps(conf, ensure_ascii=False, default=str), fid))
+        con.commit()
+    except Exception:
+        pass  # coluna ainda não existe
+    cur.close()
 
 
 # ─── comandos ─────────────────────────────────────────────────────────────────
@@ -697,14 +899,40 @@ def cmd_rodar(argv: list[str]) -> int:
     minutos = int(_arg(argv, "--minutos", os.environ.get("SURE_VISUAL_MAX_MIN", "300")))
     gravar = "--gravar" in argv or os.environ.get("SURE_VISUAL_GRAVAR", "0") == "1"
     ids = [int(a) for a in _args(argv, "--id")]
-    reg.ping("leitura_visual")
+    fila = _arg(argv, "--fila", "visual")  # visual (sem texto / reprovadas) | confianca (campo-chave com 1 fonte ou divergente)
+    motor = _arg(argv, "--motor", MOTOR)
+    global MODELO_OPENAI
+    MODELO_OPENAI = _arg(argv, "--modelo", MODELO_OPENAI)
+    rotina = "llm_confianca" if fila == "confianca" else "leitura_visual"
+    reg.ping(rotina)
     con = _con()
-    rows = candidatas(con, teto * 3, ids or None)  # sobra para os pulos (tem_texto, download); o teto conta leituras
+    if motor == "openai":  # limite por hora da API paga (SURE_LLM_POR_HORA, padrão 10): desconta o que já rodou na última hora
+        por_hora = int(os.environ.get("SURE_LLM_POR_HORA", "10"))
+        ja = llm_na_ultima_hora(con)
+        if ja >= por_hora and not ids:
+            _log(f"limite de {por_hora} leituras por hora já usado ({ja} na última hora)")
+            reg.registrar(rotina, 0, f"limite por hora: {ja}/{por_hora} já usados")
+            con.close()
+            return 0
+        teto = min(teto, por_hora - ja) if not ids else teto
+    if fila == "confianca" and not ids:
+        rows = candidatas_confianca(con, teto)
+    else:
+        rows = candidatas(con, teto * 3, ids or None)  # sobra para os pulos (tem_texto, download); o teto conta leituras
+        if fila == "confianca":
+            for r in rows:
+                cur = con.cursor(dictionary=True)
+                try:
+                    cur.execute("SELECT confianca_json FROM FATURA_DADOS_EXTRAIDOS WHERE id=%s", (r["id"],))
+                    r["_baixos"] = confianca_baixa((cur.fetchone() or {}).get("confianca_json")) or ["(sem confianca_json)"]
+                except Exception:
+                    r["_baixos"] = ["(sem confianca_json)"]
+                cur.close()
     if not rows:
         _log("nada a ler.")
-        reg.registrar("leitura_visual", 0, "nenhuma fatura candidata")
+        reg.registrar(rotina, 0, "nenhuma fatura candidata")
         return 0
-    eid = reg.inicio("leitura_visual", f"{len(rows)} fatura(s); gravar={'sim' if gravar else 'não (só registra)'}")
+    eid = reg.inicio(rotina, f"{len(rows)} fatura(s); motor={motor}; gravar={'sim' if gravar else 'não (só registra)'}")
     fim = time.time() + minutos * 60
     max_seguidos = int(os.environ.get("SURE_VISUAL_MAX_ERROS_SEGUIDOS", "5"))
     cont: dict[str, int] = {}
@@ -716,7 +944,7 @@ def cmd_rodar(argv: list[str]) -> int:
         if lidas >= teto:
             _log(f"teto de {teto} leituras atingido")
             break
-        st, det = processar(con, row, gravar)
+        st, det = processar(con, row, gravar, motor=motor, modo=("confianca" if fila == "confianca" else "visual"))
         cont[st] = cont.get(st, 0) + 1
         if st not in ("tem_texto",) and not det.startswith("download"):
             lidas += 1
@@ -753,18 +981,23 @@ def cmd_rodar(argv: list[str]) -> int:
 def cmd_ler(argv: list[str]) -> int:
     como_json = "--json" in argv
     pasta_json = _arg(argv, "--pasta-json")  # grava {arquivo, gate, colunas} por PDF → tests/conferir_gabarito.py
-    pular = {"--pasta-json": True}
+    motor = _arg(argv, "--motor", MOTOR)  # --motor openai [--modelo gpt-5.4-nano]
+    global MODELO_OPENAI
+    MODELO_OPENAI = _arg(argv, "--modelo", MODELO_OPENAI)
+    pular = {"--pasta-json": True, "--motor": True, "--modelo": True}
     for i, a in enumerate(argv):
         if a.startswith("--") or (i > 0 and argv[i - 1] in pular):
             continue
         p = Path(a)
         t0 = time.time()
-        resp, val, erro = ler_pdf(p.read_bytes(), p.stem)
+        resp, val, erro = ler_pdf(p.read_bytes(), p.stem, motor=motor)
+        if motor == "openai" and ULTIMO_USO:
+            print(f"   tokens: entrada {ULTIMO_USO.get('prompt_tokens')} saída {ULTIMO_USO.get('completion_tokens')} ({ULTIMO_USO.get('modelo')})")
         if "--segunda" in argv and (erro or not all((val or {}).get("blocos", {}).values())):
             foco = {"blocos": [k for k, v in ((val or {}).get("blocos") or {}).items() if not v] or ["todos"],
                     "obs": ((val or {}).get("obs") or []) + ([erro] if erro else [])}
             print(f"   2ª leitura ({p.name}): foco {foco['blocos']}")
-            resp2, val2, erro2 = ler_pdf(p.read_bytes(), p.stem, foco)
+            resp2, val2, erro2 = ler_pdf(p.read_bytes(), p.stem, foco, motor=motor)
             if val2 and (not val or sum(val2["blocos"].values()) >= sum(val["blocos"].values())):
                 resp, val, erro = resp2, val2, erro2
         if pasta_json:

@@ -326,6 +326,11 @@ func runAdditiveMigrations(db *sql.DB) error {
 	addColumnIfMissing(db, "FT_WHATSAPP_MENSAGENS", "anexo_erro", "VARCHAR(200)")
 	addColumnIfMissing(db, "FT_WHATSAPP_MENSAGENS", "anexo_proto", "MEDIUMBLOB")
 
+	// Confiança por fontes (17/11/2026, worker/engine/confirmacao.py): por campo, quantas fontes independentes
+	// confirmam o valor extraído (física da fatura, itens, histórico, dígito verificador, origem sgeeasy, fatura
+	// anterior da UC) e as divergências. As regras do motor apontam forte com n ≥ 2 e só alertam com n = 1.
+	addColumnIfMissing(db, "FATURA_DADOS_EXTRAIDOS", "confianca_json", "TEXT")
+
 	// Leitura visual (16/11/2026, etapa 3 da captura de alto nível): uma linha por fatura lida pelo
 	// claude -p na VPS (worker/engine/leitura_visual.py) — resposta, validação, colunas que fecharam,
 	// valores anteriores (desfazer) e status (ok / parcial / falhou / erro / humano = fila de revisão).

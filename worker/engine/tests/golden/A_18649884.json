@@ -19,10 +19,11 @@
   "cofins_aliquota": null,
   "cofins_valor": null,
   "composicao_base_icms": null,
+  "confianca_json": "{\"n\": {\"codigo_uc\": 1, \"numero_instalacao\": 1, \"numero_fatura\": 1, \"numero_medidor\": 1, \"nome_cliente\": 1, \"cpf_cnpj\": 1, \"subgrupo_tarifario\": 1, \"grupo_tarifario\": 1, \"data_leitura_anterior\": 1, \"data_leitura_atual\": 1, \"dias_faturados\": 1, \"mes_referencia\": 1, \"valor_total_fatura\": 1, \"flag_fatura_revisao\": 1, \"flag_acumulo_art113\": 1, \"valor_total_origem\": 1, \"qtd_itens_origem\": 1, \"tipo_bandeira_tarifaria\": 1, \"tipo_bandeira\": 1, \"consumo_ativo_ponta_kwh\": 2, \"consumo_ativo_fponta_kwh\": 2, \"kwh_total\": 2, \"demanda_contratada_ponta_kw\": 1, \"demanda_contratada_fponta_kw\": 1, \"itens_cobrados\": 1, \"distribuidora\": 1, \"cnpj_distribuidora_filial\": 2, \"uf_distribuidora\": 1, \"validador_gate\": 1, \"extracao_score_confianca\": 1, \"extracao_versao\": 1, \"data_vencimento\": 1, \"fator_potencia_status\": 1, \"flag_legado_pre_2023\": 1, \"flag_faturamento_media\": 1, \"flag_acumulo_pos_media\": 1, \"chave_nfe\": 2, \"data_emissao_nf\": 1, \"ie_cliente\": 1, \"endereco_distribuidora\": 1, \"perda_transformacao_percentual\": 1, \"cip_iluminacao_publica_rs\": 1, \"valor_cip_cosip\": 1, \"leit_ant_ativa_fponta\": 2, \"leit_atu_ativa_fponta\": 2, \"validacao_deterministica\": 1, \"constante_k\": 2, \"leit_ant_ativa_ponta\": 2, \"leit_atu_ativa_ponta\": 2}, \"div\": {}}",
   "conjunto_uc": null,
   "constante_k": 60.0,
-  "consumo_ativo_fponta_kwh": 11229.9,
-  "consumo_ativo_ponta_kwh": 1125.45,
+  "consumo_ativo_fponta_kwh": 10956.0,
+  "consumo_ativo_ponta_kwh": 1098.0,
   "consumo_reativo_excedente_kvarh": null,
   "cpf_cnpj": "02.341.467/0001-20",
   "data_apresentacao": null,
@@ -39,7 +40,6 @@
   "dec_anual_horas": null,
   "demanda_contratada_fponta_kw": 70.0,
   "demanda_contratada_ponta_kw": 70.0,
-  "demanda_faturada_fponta_kw": 70.0,
   "demanda_reativa_excedente_kvar": null,
   "dias_faturados": 31,
   "dicri_horas": null,
@@ -76,7 +76,7 @@
   "indicador_geracao_distribuida": null,
   "itens_cobrados": "[{\"descricao\": \"Consumo Ponta\", \"valor_brl_numerico\": 2046.21, \"_fonte\": \"esp_amazonas\"}, {\"descricao\": \"Demanda\", \"valor_brl_numerico\": 992.73, \"_fonte\": \"esp_amazonas\"}, {\"descricao\": \"Demanda\", \"valor_brl_numerico\": 623.34, \"_fonte\": \"esp_amazonas\"}, {\"descricao\": \"Consumo F/Ponta\", \"valor_brl_numerico\": 6488.87, \"_fonte\": \"esp_amazonas\"}, {\"descricao\": \"Contribuição de Iluminação Pública (COSIP)\", \"valor_brl_numerico\": 231.83, \"_fonte\": \"esp_amazonas\"}]",
   "kwh_acumulado_art113": null,
-  "kwh_total": 12355.35,
+  "kwh_total": 12054.0,
   "leit_ant_ativa_fponta": 5867.5,
   "leit_ant_ativa_ponta": 260.9,
   "leit_ant_reativa": null,
@@ -94,7 +94,7 @@
   "numero_instalacao": "2448575-6",
   "numero_medidor": "11824711",
   "perda_ramal_kwh": null,
-  "perda_transformacao_percentual": null,
+  "perda_transformacao_percentual": 2.5,
   "periodo_bandeira": null,
   "pis_aliquota": null,
   "pis_valor": null,
@@ -132,6 +132,361 @@
   "valor_total_fatura": 10382.98,
   "valor_total_origem": "extrator",
   "vrc_indicador_continuidade": null
+ },
+ "confianca": {
+  "chave_nfe": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "dv"
+   ],
+   "n": 2
+  },
+  "cip_iluminacao_publica_rs": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "cnpj_distribuidora_filial": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "dv"
+   ],
+   "n": 2
+  },
+  "codigo_uc": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "constante_k": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "consumo_ativo_fponta_kwh": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "consumo_ativo_ponta_kwh": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "cpf_cnpj": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "data_emissao_nf": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "data_leitura_anterior": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "data_leitura_atual": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "data_vencimento": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "demanda_contratada_fponta_kw": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "demanda_contratada_ponta_kw": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "dias_faturados": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "distribuidora": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "endereco_distribuidora": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "extracao_score_confianca": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "extracao_versao": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "fator_potencia_status": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_acumulo_art113": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_acumulo_pos_media": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_fatura_revisao": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_faturamento_media": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_legado_pre_2023": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "grupo_tarifario": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "ie_cliente": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "itens_cobrados": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "kwh_total": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "leit_ant_ativa_fponta": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "leit_ant_ativa_ponta": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "leit_atu_ativa_fponta": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "leit_atu_ativa_ponta": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "mes_referencia": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "nome_cliente": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "numero_fatura": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "numero_instalacao": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "numero_medidor": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "perda_transformacao_percentual": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "qtd_itens_origem": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "subgrupo_tarifario": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "tipo_bandeira": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "tipo_bandeira_tarifaria": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "uf_distribuidora": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "validacao_deterministica": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "validador_gate": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "valor_cip_cosip": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "valor_total_fatura": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "valor_total_origem": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  }
  },
  "gate": "aprovado",
  "layout": "layout_variante_amazonas",

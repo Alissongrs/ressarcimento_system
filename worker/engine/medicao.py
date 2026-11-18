@@ -919,6 +919,10 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     Nunca levanta exceção."""
     try:
         itens_pdf, _, _ = itens_do_pdf(pdf_bytes, 3)
+        import identificacao as _idn
+        # fonte das linhas (camada de texto ou OCR): atualizar_colunas_db só deixa o extrator antigo gravar
+        # consumo/tributo/demanda quando é texto
+        v2_out["_fonte_itens"] = "ocr" if getattr(_idn, "ULTIMA_FONTE", "") == "ocr" else "texto"
         med = ler_medicao(pdf_bytes, itens_pdf)
     except Exception as e:  # pragma: no cover
         v2_out["_medicao"] = {"erro": str(e)[:200]}
@@ -988,8 +992,7 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             confirma = {p: p in razoes for p in ("p", "fp")}
         else:
             pt = _perda_texto(itens_pdf)
-            if pt:
-                fator = 1 + pt / 100
+            if pt:  # só informação: o consumo gravado é o impresso (medido); a regra decide se a perda devia incidir
                 med["perda_pct"], med["perda_origem"] = pt, "texto"
         if fator:
             cons_p = _r3(cons_p * fator) if cons_p is not None else None
@@ -1011,8 +1014,7 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     # Trava do modo OCR (PDF-imagem lido pelo RapidOCR/Tesseract): a física não pega posto trocado nem dígito
     # lido errado que ainda feche a conta; só se grava a medição quando cada posto com consumo bate com um item
     # kWh da fatura. Sem confirmação fica vazio (fila humana / leitura visual à mão), nunca um valor inventado.
-    import identificacao as _idn
-    med["fonte"] = "ocr" if getattr(_idn, "ULTIMA_FONTE", "") == "ocr" else "texto"
+    med["fonte"] = v2_out.get("_fonte_itens") or "texto"
     if med["fonte"] == "ocr" and med["validado"]:
         postos = [p for p, c in (("p", cons_p), ("fp", cons_fp)) if c is not None]  # fp lido como 0 conta (troca)
         # com um posto só não há troca possível e a física (3 números que fecham) basta; com ponta E fora ponta,
@@ -1024,7 +1026,16 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     if med.get("medidor"):
         aplicar["numero_medidor"] = med["medidor"]
         v2_out.setdefault("identificadores_instalacao", {})["medidor"] = med["medidor"]
-    if med["validado"]:
+    # Grava o que está impresso. Com texto exato, leituras e consumo da tabela entram mesmo quando a física não fecha —
+    # é a regra F01 (motor) quem aponta "consumo ≠ (atual − anterior) × K", não o extrator que esconde. O molde
+    # genérico só devolve linhas que fecham, então aqui são os moldes estruturais (enel, cemig, elektro). No OCR a
+    # dúvida é de leitura: continua exigindo a conferência.
+    impresso = (med["fonte"] != "ocr" and not med["validado"] and med.get("molde") not in (None, "generico")
+                and any(r.get("grandeza") == "energia_ativa" and r.get("leit_ant") is not None for r in med["registros"]))
+    if impresso:
+        med["obs"].append("texto exato: medição gravada como impressa, física não fecha (regra F01)")
+    med["gravado_sem_conferencia"] = impresso
+    if med["validado"] or impresso:
         if med.get("constante") is not None:
             aplicar["constante_k"] = med["constante"]
         le = med["leituras"]
@@ -1045,6 +1056,14 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             aplicar["kwh_total"] = _r3((cons_p or 0) + cons_fp + (cons_res or 0))
         dc = med["demanda_contratada"]
         df = med.get("demanda_faturada") or {}
+        if not df:  # a tabela de medição imprime a linha "Demanda Faturada-kW" (Enel ML, Energisa): é impresso, vale
+            for r in med["registros"]:
+                if r.get("grandeza") == "demanda" and "faturad" in normalizar(r.get("grandeza_txt") or "") and r.get("consumo") is not None:
+                    df[r.get("posto") or "fp"] = max(df.get(r.get("posto") or "fp", 0.0), float(r["consumo"]))
+        # perda de transformação IMPRESSA (linha da tabela ou texto "Perdas 2,5 %"): vai para a coluna; a inferida
+        # pelos itens é cálculo e fica só na observação
+        if med.get("perda_pct") is not None and med.get("perda_origem") in ("linha", "texto"):
+            aplicar["perda_transformacao_percentual"] = med["perda_pct"]
         azul = "azul" in modalidade
         if df:  # o molde leu a demanda faturada explícita (CEMIG A: coluna "Faturado")
             if df.get("fp") is not None:
@@ -1057,17 +1076,12 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             aplicar["demanda_faturada_fponta_kw"] = dem_itens[0]
         elif dem_itens and not azul and dm.get("fp"):
             # vários itens de demanda (CPFL: TUSD 13,53 e outro 16,47): o mais perto da medida, se ficar a ≤ 5 %;
-            # senão a maior entre medida e contratada
+            # senão a maior entre medida e contratada (no modo OCR a contratada não é confiável: fica vazio)
             perto = min(dem_itens, key=lambda v: abs(v - dm["fp"]))
-            aplicar["demanda_faturada_fponta_kw"] = perto if abs(perto - dm["fp"]) <= 0.05 * dm["fp"] \
-                else _r3(max(dm["fp"], dc.get("fp") or 0))
-        elif dm.get("fp") is not None:
-            # sem item: cativo fatura a maior entre a medida e a contratada (REN 1000); no mercado livre a TUSD
-            # de demanda vem como a medida impressa. Sem medida não se chuta a contratada.
-            livre = bool(((v2_out.get("_identificacao") or {}).get("classificacao") or {}).get("mercado_livre"))
-            aplicar["demanda_faturada_fponta_kw"] = dm["fp"] if livre else _r3(max(dm["fp"], dc.get("fp") or 0))
-            if dm.get("p") is not None and azul:
-                aplicar["demanda_faturada_ponta_kw"] = dm["p"] if livre else _r3(max(dm["p"], dc.get("p") or 0))
+            if abs(perto - dm["fp"]) <= 0.05 * dm["fp"]:
+                aplicar["demanda_faturada_fponta_kw"] = perto
+        # sem item de demanda impresso, fica vazio: calcular "a maior entre medida e contratada" seria o extrator
+        # dizendo o que a concessionária devia cobrar — e escondendo quando ela cobrou diferente (17/11/2026)
         if dc.get("fp") is not None and med["fonte"] != "ocr":  # OCR: a contratada não tem conferência → fica vazia
             aplicar["demanda_contratada_fponta_kw"] = dc["fp"]
             lt.setdefault("demanda_contratada_fponta_kw", dc["fp"])

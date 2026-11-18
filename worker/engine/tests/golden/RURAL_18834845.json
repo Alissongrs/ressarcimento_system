@@ -16,9 +16,10 @@
   "classe_consumidor": "RURAL",
   "cnpj_distribuidora_filial": "03.467.321/0001-99",
   "codigo_uc": "00001681834",
-  "cofins_aliquota": 5.0,
+  "cofins_aliquota": 4.9955,
   "cofins_valor": 4.74,
   "composicao_base_icms": null,
+  "confianca_json": "{\"n\": {\"codigo_uc\": 1, \"numero_instalacao\": 1, \"numero_fatura\": 1, \"numero_medidor\": 1, \"cpf_cnpj\": 1, \"classe_consumidor\": 1, \"subgrupo_tarifario\": 1, \"modalidade_tarifaria\": 1, \"grupo_tarifario\": 1, \"tensao_fornecimento\": 1, \"data_leitura_anterior\": 1, \"data_leitura_atual\": 1, \"dias_faturados\": 1, \"mes_referencia\": 1, \"valor_total_fatura\": 1, \"flag_fatura_revisao\": 1, \"flag_acumulo_art113\": 1, \"valor_total_origem\": 1, \"qtd_itens_origem\": 1, \"icms_base_calculo\": 2, \"icms_aliquota\": 2, \"icms_valor\": 2, \"pis_aliquota\": 2, \"pis_valor\": 2, \"cofins_aliquota\": 2, \"cofins_valor\": 2, \"tipo_bandeira_tarifaria\": 1, \"tipo_bandeira\": 1, \"valor_bandeira\": 1, \"valor_bandeira_rs\": 1, \"consumo_ativo_fponta_kwh\": 3, \"kwh_total\": 2, \"indicador_geracao_distribuida\": 1, \"energia_injetada_kwh\": 1, \"energia_compensada_kwh\": 1, \"saldo_credito_energia\": 1, \"itens_cobrados\": 1, \"distribuidora\": 1, \"cnpj_distribuidora_filial\": 2, \"uf_distribuidora\": 1, \"subtotal_faturamento_rs\": 1, \"dec_anual_horas\": 1, \"fec_anual_vezes\": 1, \"validador_gate\": 1, \"extracao_score_confianca\": 1, \"extracao_versao\": 1, \"data_vencimento\": 1, \"endereco_uc\": 1, \"cep_uc\": 1, \"conjunto_uc\": 1, \"dicri_horas\": 1, \"dmic_horas\": 1, \"fator_potencia_status\": 1, \"flag_legado_pre_2023\": 1, \"flag_faturamento_media\": 1, \"flag_acumulo_pos_media\": 1, \"chave_nfe\": 2, \"protocolo_autorizacao\": 1, \"data_emissao_nf\": 1, \"data_apresentacao\": 1, \"serie_nf\": 1, \"roteiro_leitura\": 1, \"matricula_cliente\": 1, \"ie_cliente\": 1, \"tensao_contratada_v\": 1, \"tensao_minima_v\": 1, \"tensao_maxima_v\": 1, \"limite_adequado_min_v\": 1, \"limite_adequado_max_v\": 1, \"ie_distribuidora\": 1, \"cep_distribuidora\": 1, \"endereco_distribuidora\": 1, \"cidade_uf_distribuidora\": 1, \"icms_base_te\": 1, \"leit_ant_ativa_fponta\": 2, \"leit_atu_ativa_fponta\": 2, \"validacao_deterministica\": 1, \"constante_k\": 2}, \"div\": {}}",
   "conjunto_uc": "BOA ESPERANCA",
   "constante_k": 40.0,
   "consumo_ativo_fponta_kwh": 3560.0,
@@ -67,7 +68,7 @@
   "flag_telemetria_perda": null,
   "grupo_tarifario": "B",
   "historico_consumo_json": "[{\"mes\": \"JUN\", \"ano\": 2025, \"consumo_ponta_kwh\": 3560.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"MAI\", \"ano\": 2025, \"consumo_ponta_kwh\": 9867.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"ABR\", \"ano\": 2025, \"consumo_ponta_kwh\": 7800.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"MAR\", \"ano\": 2025, \"consumo_ponta_kwh\": 9839.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"FEV\", \"ano\": 2025, \"consumo_ponta_kwh\": 9750.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"JAN\", \"ano\": 2025, \"consumo_ponta_kwh\": 5080.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"DEZ\", \"ano\": 2024, \"consumo_ponta_kwh\": 9878.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"NOV\", \"ano\": 2024, \"consumo_ponta_kwh\": 9792.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"OUT\", \"ano\": 2024, \"consumo_ponta_kwh\": 7160.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"SET\", \"ano\": 2024, \"consumo_ponta_kwh\": 10208.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"AGO\", \"ano\": 2024, \"consumo_ponta_kwh\": 10044.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"JUL\", \"ano\": 2024, \"consumo_ponta_kwh\": 20360.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}, {\"mes\": \"JUN\", \"ano\": 2024, \"consumo_ponta_kwh\": 9348.0, \"consumo_fponta_kwh\": null, \"demanda_ponta_kw\": null, \"demanda_fponta_kw\": null, \"_campos_nao_impressos\": [\"demanda_ponta_kw\", \"consumo_fponta_kwh\", \"demanda_fponta_kw\"]}]",
-  "icms_aliquota": null,
+  "icms_aliquota": 17.0,
   "icms_base_calculo": 114.57,
   "icms_base_te": 3891.52,
   "icms_base_tusd": null,
@@ -97,7 +98,7 @@
   "perda_ramal_kwh": null,
   "perda_transformacao_percentual": null,
   "periodo_bandeira": null,
-  "pis_aliquota": 1.08,
+  "pis_aliquota": 1.0845,
   "pis_valor": 1.04,
   "protocolo_autorizacao": "1512500072610338 26/06/2025 12:35:21",
   "qtd_itens_origem": "extrator",
@@ -133,6 +134,569 @@
   "valor_total_fatura": 114.57,
   "valor_total_origem": "extrator",
   "vrc_indicador_continuidade": null
+ },
+ "confianca": {
+  "cep_distribuidora": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "cep_uc": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "chave_nfe": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "dv"
+   ],
+   "n": 2
+  },
+  "cidade_uf_distribuidora": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "classe_consumidor": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "cnpj_distribuidora_filial": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "dv"
+   ],
+   "n": 2
+  },
+  "codigo_uc": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "cofins_aliquota": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "cofins_valor": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "conjunto_uc": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "constante_k": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "consumo_ativo_fponta_kwh": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica",
+    "itens"
+   ],
+   "n": 3
+  },
+  "cpf_cnpj": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "data_apresentacao": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "data_emissao_nf": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "data_leitura_anterior": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "data_leitura_atual": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "data_vencimento": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "dec_anual_horas": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "dias_faturados": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "dicri_horas": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "distribuidora": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "dmic_horas": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "endereco_distribuidora": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "endereco_uc": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "energia_compensada_kwh": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "energia_injetada_kwh": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "extracao_score_confianca": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "extracao_versao": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "fator_potencia_status": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "fec_anual_vezes": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_acumulo_art113": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_acumulo_pos_media": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_fatura_revisao": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_faturamento_media": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_legado_pre_2023": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "grupo_tarifario": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "icms_aliquota": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "icms_base_calculo": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "icms_base_te": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "icms_valor": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "ie_cliente": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "ie_distribuidora": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "indicador_geracao_distribuida": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "itens_cobrados": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "kwh_total": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "leit_ant_ativa_fponta": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "leit_atu_ativa_fponta": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "limite_adequado_max_v": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "limite_adequado_min_v": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "matricula_cliente": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "mes_referencia": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "modalidade_tarifaria": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "numero_fatura": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "numero_instalacao": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "numero_medidor": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "pis_aliquota": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "pis_valor": {
+   "divergente": {},
+   "fontes": [
+    "extrator",
+    "fisica"
+   ],
+   "n": 2
+  },
+  "protocolo_autorizacao": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "qtd_itens_origem": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "roteiro_leitura": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "saldo_credito_energia": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "serie_nf": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "subgrupo_tarifario": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "subtotal_faturamento_rs": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "tensao_contratada_v": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "tensao_fornecimento": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "tensao_maxima_v": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "tensao_minima_v": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "tipo_bandeira": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "tipo_bandeira_tarifaria": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "uf_distribuidora": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "validacao_deterministica": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "validador_gate": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "valor_bandeira": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "valor_bandeira_rs": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "valor_total_fatura": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "valor_total_origem": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  }
  },
  "gate": "aprovado",
  "layout": "energisa_mt_danf3e",

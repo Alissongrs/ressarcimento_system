@@ -189,7 +189,8 @@ func carregarFaturasEnergiaOnde(db *sql.DB, cn *cnpjAneel, comItens bool, onde s
 		COALESCE(dias_faturados,0), COALESCE(indicacao_troca_medidor,0) = 1,
 		(COALESCE(indicador_leitura_estimativa,0) = 1 OR COALESCE(flag_faturamento_media,0) = 1 OR COALESCE(indicacao_impedimento_leitura,0) = 1),
 		COALESCE(fio_b_sefaz_rs,0), COALESCE(custo_disponib_sefaz_rs,0),
-		COALESCE(demanda_contratada_ponta_kw,0), COALESCE(demanda_contratada_fponta_kw,0), COALESCE(indicador_leitura_real,0) = 1
+		COALESCE(demanda_contratada_ponta_kw,0), COALESCE(demanda_contratada_fponta_kw,0), COALESCE(indicador_leitura_real,0) = 1,
+		COALESCE(confianca_json,'')
 		FROM FATURA_DADOS_EXTRAIDOS WHERE `+energiaFiltroEmpresa+` AND (`+energiaMesSQL+`) IS NOT NULL`+onde, args...)
 	if err != nil {
 		return nil, err
@@ -199,14 +200,22 @@ func carregarFaturasEnergiaOnde(db *sql.DB, cn *cnpjAneel, comItens bool, onde s
 	for rows.Next() {
 		f := &uFat{}
 		var pis, cof float64
-		var cep, raw, medidor string
+		var cep, raw, medidor, confJ string
 		var k, laFP, luFP, laP, luP, laR, luR, dP, dFP, fp, inj, comp, saldo sql.NullFloat64
 		var cP, cFP float64
 		if rows.Scan(&f.id, &f.chave, &f.mes, &f.grupo, &f.subgrupo, &f.modalidade, &f.cnpj, &f.lant, &f.latu,
 			&pis, &cof, &cep, &f.classe, &f.cip, &f.total, &f.kwhRef, &raw,
 			&f.fornecimento, &medidor, &k, &laFP, &luFP, &laP, &luP, &laR, &luR, &dP, &dFP, &fp, &inj, &comp, &saldo, &f.totalSefaz,
-			&f.diasImpr, &f.trocaMed, &f.justLeitura, &f.fioBSefaz, &f.dispSefaz, &cP, &cFP, &f.leituraReal) != nil {
+			&f.diasImpr, &f.trocaMed, &f.justLeitura, &f.fioBSefaz, &f.dispSefaz, &cP, &cFP, &f.leituraReal, &confJ) != nil {
 			continue
+		}
+		if confJ != "" { // confiança por fontes (worker/engine/confirmacao.py): {"n":{coluna: nº de fontes}, "div":{…}}
+			var cj struct {
+				N map[string]int `json:"n"`
+			}
+			if json.Unmarshal([]byte(confJ), &cj) == nil && len(cj.N) > 0 {
+				f.conf = cj.N
+			}
 		}
 		if cP > 0 || cFP > 0 { // demanda contratada (regras_extra.go: F23, F24, F26, F29)
 			f.contr = map[string]float64{}

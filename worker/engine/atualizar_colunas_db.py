@@ -20,6 +20,20 @@ TBL_FDE = os.environ.get("FDE_TABLE", "FATURA_DADOS_EXTRAIDOS")  # env FDE_TABLE
 # Usar como retorno do _coleta_campos quando blacklist limpou o valor.
 _FORCE_NULL = "__SET_NULL__"
 
+# Colunas que, numa fatura lida por OCR, só gravam vindas de um molde com conferência (medição pela física,
+# tributos por base × alíquota); o extrator antigo não as grava nesse modo (ver fim de _coleta_campos).
+OCR_SO_COM_CONFERENCIA = (
+    "consumo_ativo_ponta_kwh", "consumo_ativo_fponta_kwh", "kwh_total", "constante_k",
+    "leit_ant_ativa_ponta", "leit_atu_ativa_ponta", "leit_ant_ativa_fponta", "leit_atu_ativa_fponta",
+    "leit_ant_reativa", "leit_atu_reativa", "leit_demanda_ponta", "leit_demanda_fponta",
+    "demanda_contratada_ponta_kw", "demanda_contratada_fponta_kw", "demanda_faturada_ponta_kw", "demanda_faturada_fponta_kw",
+    "demanda_reativa_excedente_kvar", "consumo_reativo_excedente_kvarh", "valor_demanda_reativa_excedente",
+    "icms_valor", "icms_base_calculo", "icms_aliquota", "icms_base_te", "icms_base_tusd",
+    "pis_valor", "pis_aliquota", "cofins_valor", "cofins_aliquota",
+    "energia_injetada_kwh", "energia_compensada_kwh", "energia_compensada_muc_kwh", "energia_compensada_ouc_kwh",
+    "saldo_gd_ponta_kwh", "saldo_gd_fponta_kwh", "perda_ramal_kwh", "kwh_acumulado_art113", "acumulo_media_12m_kwh",
+)
+
 
 def _get(d: dict, path: str, default=None):
     """Acessa d['a']['b']['c'] via 'a.b.c'."""
@@ -771,9 +785,28 @@ def _coleta_campos(out_v2: dict) -> dict:
     # medidor, constante, leituras, consumo por posto, kWh total, demanda faturada/contratada,
     # medicao_grandezas_json — por cima do agregado dos itens e do regex v1 (ver medicao.py).
     _med = out_v2.get("_medicao") or {}
-    for k, v in (_med.get("aplicar") or {}).items():
+    _aplicar = dict(_med.get("aplicar") or {})
+    # 17/11/2026 (etapa 2b): tributos lidos pelo molde e conferidos por base × alíquota = valor (tributos.py)
+    _aplicar.update((out_v2.get("_tributos") or {}).get("aplicar") or {})
+    for k, v in _aplicar.items():
         if v is not None:
             cols[k] = v
+
+    # 17/11/2026: PDF-imagem lido por OCR (medicao.aplicar_medicao marca _fonte_itens="ocr"). O texto do OCR
+    # troca dígito e cola número, e o extrator antigo (regex/itens) gravava kWh, tributo e demanda errados
+    # (Energisa: fora ponta 33.131 por 32.947; Enel CE: ICMS no COFINS). Nesse modo só o que passou por uma
+    # conferência grava: a medição validada pela física (aplicar) e, quando existir, o molde de tributos.
+    # O resto dessas colunas fica vazio — vazio vai para a fila humana; errado vira apontamento falso.
+    if out_v2.get("_fonte_itens") == "ocr":
+        for k in OCR_SO_COM_CONFERENCIA:
+            if k not in _aplicar and k in cols:
+                cols[k] = _FORCE_NULL
+
+    # 17/11/2026: confiança por fontes (confirmacao.py) — {n: {campo: nº de fontes}, div: {campo: {fonte: valor}}}
+    _conf = out_v2.get("_confianca")
+    if isinstance(_conf, dict) and _conf and "erro" not in _conf:
+        from confirmacao import compactar
+        cols["confianca_json"] = compactar(_conf)
 
     return cols
 
@@ -819,7 +852,20 @@ def atualizar_colunas_individuais(conn, fatura_id: int, out_v2: dict,
 
     sets = ", ".join(f"`{c}`=%s" for c in cols_to_set)
     valores = list(cols_to_set.values()) + [fatura_id]
-    cur.execute(f"UPDATE {TBL_FDE} SET {sets}, atualizado_em=NOW() WHERE id=%s", valores)
+    try:
+        cur.execute(f"UPDATE {TBL_FDE} SET {sets}, atualizado_em=NOW() WHERE id=%s", valores)
+    except Exception as e:
+        # coluna nova que a migração aditiva do backend ainda não criou (ex.: confianca_json antes do deploy):
+        # tira só ela e grava o resto, em vez de perder a fatura inteira
+        m = re.search(r"Unknown column '([^']+)'", str(e))
+        if not m or m.group(1) not in cols_to_set:
+            raise
+        cols_to_set.pop(m.group(1))
+        if not cols_to_set:
+            raise
+        sets = ", ".join(f"`{c}`=%s" for c in cols_to_set)
+        valores = list(cols_to_set.values()) + [fatura_id]
+        cur.execute(f"UPDATE {TBL_FDE} SET {sets}, atualizado_em=NOW() WHERE id=%s", valores)
     if commit:
         conn.commit()
     cur.close()

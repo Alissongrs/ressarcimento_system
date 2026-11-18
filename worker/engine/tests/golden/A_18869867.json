@@ -19,6 +19,7 @@
   "cofins_aliquota": null,
   "cofins_valor": null,
   "composicao_base_icms": null,
+  "confianca_json": "{\"n\": {\"codigo_uc\": 1, \"numero_instalacao\": 1, \"valor_total_fatura\": 1, \"flag_fatura_revisao\": 1, \"flag_acumulo_art113\": 1, \"valor_total_origem\": 1, \"qtd_itens_origem\": 1, \"itens_cobrados\": 1, \"validador_gate\": 1, \"extracao_score_confianca\": 1, \"extracao_versao\": 1, \"data_vencimento\": 1, \"fator_potencia_status\": 1, \"flag_legado_pre_2023\": 1, \"flag_faturamento_media\": 1, \"flag_acumulo_pos_media\": 1, \"validacao_deterministica\": 1}, \"div\": {}}",
   "conjunto_uc": null,
   "consumo_ativo_fponta_kwh": null,
   "consumo_ativo_ponta_kwh": null,
@@ -128,6 +129,127 @@
   "valor_total_fatura": 7154.33,
   "valor_total_origem": "extrator",
   "vrc_indicador_continuidade": null
+ },
+ "confianca": {
+  "codigo_uc": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "data_vencimento": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "extracao_score_confianca": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "extracao_versao": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "fator_potencia_status": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_acumulo_art113": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_acumulo_pos_media": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_fatura_revisao": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_faturamento_media": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "flag_legado_pre_2023": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "itens_cobrados": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "numero_instalacao": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "qtd_itens_origem": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "validacao_deterministica": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "validador_gate": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "valor_total_fatura": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  },
+  "valor_total_origem": {
+   "divergente": {},
+   "fontes": [
+    "extrator"
+   ],
+   "n": 1
+  }
  },
  "gate": "reprovado",
  "layout": "layout_desconhecido",

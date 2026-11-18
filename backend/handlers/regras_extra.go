@@ -52,6 +52,29 @@ func nivelBase(f *uFat, valor float64, extra string) (string, float64, string) {
 	return "ERRO", rnd2(valor), extra
 }
 
+// confirmado — todos os campos têm o valor confirmado por pelo menos duas fontes independentes (uFat.conf).
+// Sem a informação (base antiga) devolve false.
+func confirmado(f *uFat, campos ...string) bool {
+	if f == nil || f.conf == nil || len(campos) == 0 {
+		return false
+	}
+	for _, c := range campos {
+		if f.conf[c] < 2 {
+			return false
+		}
+	}
+	return true
+}
+
+// nivelConf — como nivelBase, mas numa base extraída o achado volta a ser ERRO quando os campos que o sustentam
+// estão confirmados por duas ou mais fontes (o número não é dúvida de leitura: é o que a fatura e a origem dizem).
+func nivelConf(f *uFat, valor float64, extra string, campos ...string) (string, float64, string) {
+	if f.extraida && confirmado(f, campos...) {
+		return "ERRO", rnd2(valor), extra + " — confirmado por mais de uma fonte"
+	}
+	return nivelBase(f, valor, extra)
+}
+
 var (
 	reReatMed   = regexp.MustCompile(`REAT|KVAR|\bER\b|ENRG\s*REA`)
 	reNaoReat   = regexp.MustCompile(`EXCE|UFER|UFDR|DMCR|DEMANDA|\bDEM\b|\bKW\b`)
@@ -373,23 +396,31 @@ func regrasExtraFatura(f *uFat, sel map[string]bool) []Achado {
 
 	// F39 — valor do tributo ≠ base × alíquota (> R$ 0,10); PIS/COFINS acima do teto do regime
 	if sel["F39"] {
-		pior, det, soPisCofins := 0.0, "", true
+		pior, det, soPisCofins, piorCampos := 0.0, "", true, []string{}
 		for _, t := range f.tribs {
 			if t.retido || t.base <= 0 || t.aliq <= 0 || t.valor <= 0 || t.aliq >= 40 {
 				continue
 			}
 			calc := t.base * t.aliq / 100
-			if f.extraida && (t.valor > 1.5*calc || t.valor < calc/1.5) {
-				continue // base de outro tributo / colunas trocadas na extração
+			pref := strings.ToLower(t.nome)
+			campos := []string{pref + "_valor", pref + "_aliquota"}
+			if pref == "icms" {
+				campos = append(campos, "icms_base_calculo")
+			}
+			// base de outro tributo / colunas trocadas na extração — só quando o trio NÃO está confirmado por outra
+			// fonte; confirmado (molde de tributos + origem), diferença grande é erro grande, não leitura errada
+			if f.extraida && !confirmado(f, campos...) && (t.valor > 1.5*calc || t.valor < calc/1.5) {
+				continue
 			}
 			if d := t.valor - calc; d > 0.10 && d > 0.002*t.valor && !potencia10(t.valor, calc) && d > pior {
 				pior = d
 				soPisCofins = strings.HasPrefix(t.nome, "PIS") || strings.HasPrefix(t.nome, "COFINS")
 				det = fmt.Sprintf("%s: valor R$ %.2f × base R$ %.2f × %.4f%% = R$ %.2f", t.nome, t.valor, t.base, t.aliq, calc)
+				piorCampos = campos
 			}
 		}
 		if pior > 0 {
-			nivel, val, ex := nivelBase(f, pior, "")
+			nivel, val, ex := nivelConf(f, pior, "", piorCampos...)
 			// PIS/COFINS: a alíquota impressa no quadro-resumo é a efetiva do mês, arredondada — base × alíquota não
 			// fecha e os tributos item a item conferem (CPFL baf52c938df1911d, 06/11/2026): não aponta
 			if !soPisCofins {

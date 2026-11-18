@@ -77,6 +77,49 @@ def texto_rapidocr(pdf_bytes: bytes, max_paginas: int = 3) -> list[str]:
     return linhas
 
 
+def itens_recorte(pdf_bytes: bytes, pagina: int, caixa: tuple[float, float, float, float], zoom: float = 6.0) -> list[dict]:
+    """Segunda leitura de um quadro: recorta (x0, y0, x1, y1) em pontos do PDF, renderiza só ali em zoom alto e
+    reconhece de novo. Devolve itens no mesmo formato, já em coordenadas da página. Usado por ocr_reforco.py
+    nos quadros (medição, tributos) que a leitura da página inteira não fechou."""
+    import fitz
+    import numpy as np
+    d = fitz.open(stream=pdf_bytes, filetype="pdf")
+    if d.is_encrypted and not d.authenticate(""):
+        return []
+    if pagina >= len(d):
+        return []
+    pg = d[pagina]
+    x0, y0, x1, y1 = caixa
+    clip = fitz.Rect(max(0, x0), max(0, y0), min(pg.rect.width, x1), min(pg.rect.height, y1))
+    if clip.is_empty or clip.width < 20 or clip.height < 8:
+        return []
+    pix = pg.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=clip)
+    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    if pix.n == 4:
+        img = img[:, :, :3]
+    res, _ = _motor()(img)
+    caixas = []
+    for box, texto, score in (res or []):
+        xs = [p[0] for p in box]
+        ys = [p[1] for p in box]
+        t = (texto or "").strip()
+        if t:
+            caixas.append({"text": t, "x": clip.x0 + min(xs) / zoom, "y": clip.y0 + min(ys) / zoom,
+                           "w": (max(xs) - min(xs)) / zoom, "h": (max(ys) - min(ys)) / zoom, "score": float(score), "page": pagina})
+    caixas.sort(key=lambda c: (round(c["y"] / 3), c["x"]))
+    itens: list[dict] = []
+    for c in caixas:
+        u = itens[-1] if itens else None
+        if u and abs(u["y"] - c["y"]) <= max(u["h"], c["h"]) * 0.6 and 0 <= c["x"] - (u["x"] + u["w"]) < 1.5 * max(u["h"], c["h"]):
+            u["text"] = u["text"] + " " + c["text"]
+            u["w"] = (c["x"] + c["w"]) - u["x"]
+            u["h"] = max(u["h"], c["h"])
+            u["y"] = min(u["y"], c["y"])
+        else:
+            itens.append(dict(c))
+    return itens
+
+
 def _itens_rapidocr(pdf_bytes: bytes, max_paginas: int, zoom: float) -> tuple[list[dict], float, float]:
     import fitz
     import numpy as np

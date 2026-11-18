@@ -291,6 +291,10 @@ type uFat struct {
 	// F63 (regras_enquadramento.go): usina (pasta), titular, potência de geração e a modalidade GD impressa
 	usina, titCNPJ, modGD string
 	potGer               float64
+	// conf (17/11/2026, worker/engine/confirmacao.py → FDE.confianca_json): por coluna, quantas fontes independentes
+	// confirmam o valor (extrator, física da fatura, itens, histórico, dígito verificador, origem sgeeasy, fatura
+	// anterior da UC). nil = base sem essa informação (vale o comportamento antigo: `extraida` rebaixa para ALERTA).
+	conf map[string]int
 }
 
 // Achado de uma regra numa fatura

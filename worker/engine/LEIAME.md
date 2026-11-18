@@ -62,3 +62,26 @@ Para atualizar de novo: copiar de `ia/Copia/essencial` os .py listados aqui e as
 - `ocr_fila.py ids | marcar | resumo` + `worker/job_ocr_sem_texto.sh` (cron 20:00, 200/rodada): fila `FT_OCR_SEM_TEXTO`,
   ids da origem via uid, `pdf_pipeline --prod --force --id-file` com OCR ligado, backup antes.
 - Cron da leitura visual (04:30) desligado; `leitura_visual.py rodar --teto N` continua como reserva manual.
+
+## 17/11/2026 — tributos por molde (etapa 2b) e trava do modo OCR
+
+- `tributos.py`: ICMS/PIS/COFINS pelas linhas posicionadas, conferidos por base × alíquota = valor; ligado em
+  `_rodar_pipeline_v3` (passo 2.67); colunas por `_tributos['aplicar']`; `PDF_PIPELINE_TRIBUTOS=0` desliga.
+  `python tributos.py fatura.pdf` mostra o que fechou.
+- `atualizar_colunas_db.OCR_SO_COM_CONFERENCIA`: numa fatura lida por OCR, consumo/leituras/demandas/tributos só
+  gravam vindos da medição ou do molde de tributos; `medicao.aplicar_medicao` marca `_fonte_itens`.
+- `medicao.aplicar_medicao`: no modo OCR a demanda faturada só sai de item da fatura.
+
+## 17/11/2026 — grava o impresso, confiança por fontes, segunda leitura do OCR
+
+- `medicao.py`/`tributos.py`: a conta só escolhe a leitura; o impresso que não fecha é gravado (texto exato) para a
+  regra apontar. Sem valores calculados (demanda max(), consumo × perda do texto); perda impressa →
+  `perda_transformacao_percentual`.
+- `confirmacao.py`: por campo, nº de fontes (extrator, física, itens, histórico, dv, origem sgeeasy, fatura anterior
+  da UC) → `_confianca` e coluna `confianca_json`; passo 2.68; `extrair_fatura.py --uid` usa o banco (só leitura).
+  Backend: `uFat.conf`, `confirmado`, `nivelConf`; F39 usa.
+- `ocr_reforco.py` + `ocr_itens.itens_recorte`: releitura por recorte em zoom 6 dos quadros que não fecharam
+  (passo 2.675, só OCR).
+- `leitura_visual.py`: motor `openai` (`--motor openai --modelo gpt-5.4-mini`; nano inventa números, não usar) e fila
+  `--fila confianca` (campo-chave com confiança baixa no confianca_json); o modelo é fonte "llm", só preenche vazio com a
+  origem concordando ou física + item. `worker/job_llm_confianca.sh` de hora em hora, `SURE_LLM_POR_HORA`=10.

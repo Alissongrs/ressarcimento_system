@@ -30,7 +30,7 @@ os.environ.setdefault("PDF_PIPELINE_NO_OCR", "1")
 os.environ.setdefault("PDF_PIPELINE_DIR", str(AQUI / "_work"))
 
 
-def extrair_campos(pdf_bytes: bytes, nome: str = "") -> dict:
+def extrair_campos(pdf_bytes: bytes, nome: str = "", uid: str | None = None) -> dict:
     """Retorna {arquivo, mapa, layout, gate, score, n_itens, colunas{...}, texto{...}}.
 
     `colunas` são as mesmas colunas SQL que o pipeline grava em FATURA_DADOS_EXTRAIDOS
@@ -56,10 +56,26 @@ def extrair_campos(pdf_bytes: bytes, nome: str = "") -> dict:
     except Exception:
         texto_bbox = ""
 
+    # --uid: com o uid da fatura, a confiança por fontes (passo 2.68) consulta a origem sgeeasy e a fatura anterior
+    # da UC — só leitura; sem uid (goldens/CI) ficam só as fontes internas
+    cur = con = None
+    if uid:
+        try:
+            import mysql.connector
+            from db_env import conexao
+            con = mysql.connector.connect(**conexao("DB_APP_URL"))
+            cur = con.cursor()
+        except Exception:
+            cur = con = None
     payload = pp._rodar_pipeline_v3(
-        None, None, 0, pdf_bytes, texto_plumber, texto_md, texto_ocr,
-        uid=None, force=False, texto_bbox=texto_bbox or None, dryrun=True,
+        cur, con, 0, pdf_bytes, texto_plumber, texto_md, texto_ocr,
+        uid=uid, force=False, texto_bbox=texto_bbox or None, dryrun=True,
     ) or {}
+    if con is not None:
+        try:
+            con.close()
+        except Exception:
+            pass
     v2 = payload.get("v2") if isinstance(payload, dict) else None
     if not isinstance(v2, dict):
         v2 = {}
@@ -100,6 +116,7 @@ def extrair_campos(pdf_bytes: bytes, nome: str = "") -> dict:
         "score": qualidade.get("score"),
         "n_itens": len(v2.get("itens_fatura") or []),
         "colunas": colunas,
+        "confianca": v2.get("_confianca") or {},
         "texto": {
             "plumber": len(texto_plumber or ""),
             "markdown": len(texto_md or ""),
@@ -118,10 +135,11 @@ def _principal(argv: list[str]) -> int:
         print(__doc__)
         return 0
     como_json = "--json" in argv
+    uid = argv[argv.index("--uid") + 1] if "--uid" in argv and argv.index("--uid") + 1 < len(argv) else None
     for a in argv:
-        if a.startswith("--"):
+        if a.startswith("--") or a == uid:
             continue
-        r = extrair_arquivo(a)
+        r = extrair_campos(Path(a).read_bytes(), Path(a).name, uid=uid)
         if como_json:
             print(json.dumps(r, ensure_ascii=False, indent=1, default=str))
             continue
