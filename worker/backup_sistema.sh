@@ -42,11 +42,16 @@ EXARGS=()
 for t in $EXCLUDE_TABLES; do EXARGS+=("--ignore-table=${DB_NAME}.${t}"); done
 
 SQLGZ="$DIR/db_${DB_NAME}_${STAMP}.sql.gz"
+# mysqldump 8.0.32+ com --single-transaction num servidor com GTID (RDS) faz FLUSH TABLES WITH READ LOCK, que pede o
+# privilégio RELOAD/FLUSH_TABLES que o usuário do RDS não tem ("Access denied ... FLUSH TABLES", 18/11). Sem gravar o
+# GTID no dump ele não precisa do lock; a consistência continua vindo do --single-transaction (InnoDB).
+GTID=()
+mysqldump --help 2>/dev/null | grep -q -- '--set-gtid-purged' && GTID=(--set-gtid-purged=OFF)
 log "iniciando dump de $DB_NAME (dados excluídos: ${EXCLUDE_TABLES:-nenhuma}) ..."
 # 1) dump principal — dados de tudo, menos as tabelas de faturas. Senha via MYSQL_PWD
 #    (não aparece na linha de comando / ps).
 MYSQL_PWD="$DB_PASS" mysqldump -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" \
-    --single-transaction --quick --routines --events --no-tablespaces \
+    --single-transaction --quick --routines --events --no-tablespaces ${GTID[@]+"${GTID[@]}"} \
     "${EXARGS[@]}" "$DB_NAME" 2>>"$LOG" | gzip -c > "$SQLGZ"
 if [ "${PIPESTATUS[0]}" != "0" ]; then log "FALHA no mysqldump"; rm -f "$SQLGZ"; rotina_fim 1 "FALHA no mysqldump"; exit 1; fi
 # 2) só a ESTRUTURA (sem dados) das tabelas de faturas, anexada ao mesmo .gz
@@ -54,7 +59,7 @@ if [ "${PIPESTATUS[0]}" != "0" ]; then log "FALHA no mysqldump"; rm -f "$SQLGZ";
 if [ -n "$EXCLUDE_TABLES" ]; then
   # shellcheck disable=SC2086
   MYSQL_PWD="$DB_PASS" mysqldump -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" \
-      --no-data --no-tablespaces "$DB_NAME" $EXCLUDE_TABLES 2>>"$LOG" | gzip -c >> "$SQLGZ" \
+      --no-data --no-tablespaces ${GTID[@]+"${GTID[@]}"} "$DB_NAME" $EXCLUDE_TABLES 2>>"$LOG" | gzip -c >> "$SQLGZ" \
       && log "estrutura das tabelas de faturas anexada (sem dados)." \
       || log "aviso: não anexei a estrutura das tabelas de faturas."
 fi
