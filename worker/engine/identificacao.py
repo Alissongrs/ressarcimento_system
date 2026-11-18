@@ -471,8 +471,15 @@ def _cabecalho(itens: list[Item], ph: float) -> dict:
     return out
 
 
+RE_DIAS_GRUDADO = re.compile(r"^n\W{0,2}\s*(?:de\s*)?dias\s*:?\s*(\d{2})$")
+
+
 def _dias_por_leituras(itens: list[Item]) -> tuple[int, str] | None:
     """Linha das datas de leitura (anterior, atual, próxima) com um inteiro 15-45 entre elas = nº de dias."""
+    for i in itens:  # OCR junta rótulo e número numa caixa só: "N°DEDIAS30" (Coelba escaneada)
+        g = RE_DIAS_GRUDADO.match(normalizar(i.text)) if i.page == 0 else None
+        if g and 15 <= int(g.group(1)) <= 45:
+            return int(g.group(1)), "rótulo grudado no número"
     linhas = collections.defaultdict(list)
     for i in itens:
         if i.page == 0:
@@ -503,6 +510,8 @@ def _dias_por_periodo(itens: list[Item]) -> tuple[int, str] | None:
         texto = " ".join(g.text for g in sorted(grupo, key=lambda g: g.x))
         if not re.search(r"leitura|periodo", normalizar(texto)):
             continue
+        # a data da PRÓXIMA leitura não é do período faturado (Coelba OCR: 'atual 30/04 + próxima 31/05' dava 31)
+        texto = re.sub(r"(?i)pr[oó]xima\s*leitura\W*\d{2}[/.]\d{2}[/.]\d{4}", " ", texto)
         ds = [parse_data(m.group(0)) for m in RE_DATA.finditer(texto)]
         ds = [d for d in ds if d]
         if len(ds) >= 2:

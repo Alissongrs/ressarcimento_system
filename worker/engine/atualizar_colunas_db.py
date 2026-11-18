@@ -417,7 +417,9 @@ def _coleta_campos(out_v2: dict) -> dict:
                 dias_calc = None
         except Exception:
             pass
-    dias_final = dias_calc or _to_int(pl.get("dias_consumo"))
+    # grava o IMPRESSO ("Nº de dias"); a diferença das datas só entra quando a fatura não traz o número
+    # (regra do extrator: conta não substitui o que está na fatura — divergência é assunto das regras)
+    dias_final = _to_int(pl.get("dias_consumo")) or dias_calc
 
     # ── Subtotais ──
     subtot_fat = _to_float((out_v2.get("subtotais") or {}).get("subtotal_faturamento")
