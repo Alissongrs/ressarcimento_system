@@ -285,6 +285,8 @@ def parse_dinheiro(s: str) -> float | None:
 
 
 def parse_int(s: str) -> int | None:
+    if re.search(r"\d{1,2}[/.]\d{1,2}[/.]\d{2}", s or ""):  # data inteira ("31/05/2026") não é contagem de dias
+        return None
     m = RE_INT.search(s)
     return int(m.group(1)) if m else None
 
@@ -363,17 +365,19 @@ def _por_rotulo(itens: list[Item], tipo: str, modos=("mesma linha", "abaixo", "d
                     if o.x > it.x + it.w + 24 or o.x + o.w < it.x - 24:
                         continue
                     cand.append((dy, o))
-                for dy, o in sorted(cand, key=lambda c: c[0]):
-                    melhor = None
+                # a linha logo abaixo inteira (itens com dy até ~0,8 altura do mais próximo), e nela o token mais perto
+                # da coluna do rótulo. Antes valia o 1º item da lista: no OCR as caixas da mesma linha variam 1-2 px e
+                # "Leitura atual | anterior | Nº de dias" pegava a data anterior para os três (CPFL Paulista 553359).
+                validos = []
+                for dy, o in cand:
                     for tok, tx in _tokens_com_x(o):
                         v = PARSER[tipo](tok)
-                        if v is None:
-                            continue
-                        d = abs(tx - x_rot)
-                        if melhor is None or d < melhor[0]:
-                            melhor = (d, v)
-                    if melhor is not None:
-                        return melhor[1], f"rotulo:{it.text[:40]}|abaixo"
+                        if v is not None:
+                            validos.append((dy, abs(tx - x_rot), v))
+                if validos:
+                    dy0 = min(c[0] for c in validos)
+                    faixa = [c for c in validos if c[0] <= dy0 + max(it.h * 0.8, 4)]
+                    return min(faixa, key=lambda c: c[1])[2], f"rotulo:{it.text[:40]}|abaixo"
               elif modo == "direita":
                 for o in universo:
                     if o.page != it.page or o is it or abs(o.y - it.y) > it.h * 0.7:

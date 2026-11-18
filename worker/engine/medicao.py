@@ -775,6 +775,31 @@ def _medidor_rotulado(itens: list[Item]) -> str | None:
     return None
 
 
+def _medidor_repetido(itens: list[Item]) -> str | None:
+    """Sem rótulo legível (OCR gruda 'NºMedidor' a outros cabeçalhos): o número que ABRE 3+ linhas da tabela de
+    medição (linhas com 2+ números depois dele) é o medidor — a tabela repete o medidor em cada grandeza/posto.
+    CPFL Paulista escaneada (553359): '40177826' em 6 linhas; o extrator pegava o nº da nota fiscal."""
+    import collections
+    cont: collections.Counter = collections.Counter()
+    for ln in agrupar_linhas(itens):
+        if ln[0].page > 2:
+            continue
+        toks = " ".join(i.text for i in sorted(ln, key=lambda i: i.x)).split()
+        if len(toks) < 3:
+            continue
+        v = toks[0].strip(".:;")
+        if not (RE_MEDIDOR.match(v) and 6 <= sum(c.isdigit() for c in v) <= 13) or RE_MES.search(v):
+            continue
+        if re.fullmatch(r"\d{1,3}([.,]\d{3})*([.,]\d+)?", v) and ("." in v or "," in v):
+            continue  # valor monetário/quantidade, não identificador
+        if sum(1 for t in toks[1:] if re.search(r"\d", t)) >= 2:
+            cont[v] += 1
+    if not cont:
+        return None
+    v, n = cont.most_common(1)[0]
+    return v if n >= 3 and (len(cont) == 1 or cont.most_common(2)[1][1] < n) else None
+
+
 # ─── leitura completa ─────────────────────────────────────────────────────────
 MOLDES = [("enel", _ler_enel), ("cemig_a", _ler_cemig_a), ("cemig_b", _ler_cemig_b), ("elektro", _ler_elektro),
           ("generico", _ler_generico)]
@@ -796,10 +821,10 @@ def ler_medicao(pdf_bytes: bytes, itens: list[Item] | None = None) -> dict | Non
         if extras.get("demanda_faturada"):
             med["demanda_faturada"] = extras["demanda_faturada"]
         if not med.get("medidor"):
-            med["medidor"] = extras.get("medidor") or _medidor_rotulado(itens)
+            med["medidor"] = extras.get("medidor") or _medidor_rotulado(itens) or _medidor_repetido(itens)
         return med
     # nenhuma tabela: ao menos o medidor rotulado
-    m = _medidor_rotulado(itens)
+    m = _medidor_rotulado(itens) or _medidor_repetido(itens)
     return {"molde": None, "medidor": m, "constante": None, "perda_pct": None, "perda_origem": None, "registros": [],
             "consumo_medido": {}, "consumo_faturado": {}, "demanda_medida": {}, "leituras": {},
             "demanda_contratada": demanda_contratada(itens), "validado": False, "n_registros": 0, "n_ok": 0,

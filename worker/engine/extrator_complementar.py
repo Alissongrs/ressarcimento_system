@@ -5892,13 +5892,19 @@ def extrair_identificadores_scoring(texto: str) -> dict:
     for pat in (
         r"\d\.\d{3}\.\d{3}\.\d{3}-\d{2}",      # UC ANEEL novo
         r"(?<!\d)0?\d{12,13}(?!\d)",             # UC dígitos puros (com fronteira: não casa fragmento de chave)
-        r"[A-Z]\d{8,12}",                        # medidor com prefixo
+        r"[A-Z]\d{8,12}(?!\d)",                  # medidor com prefixo (W9012463502, N5242008749)
         r"(?<!\d)\d{10,12}(?!\d)",               # dígitos puros 10-12
         r"\d{7}-\d{4}-\d-\d",                    # matrícula
         r"\d+/\d+-\d",                           # código pagador
     ):
         for m in re.finditer(pat, texto_sem_chave):
-            candidatos_set.add((m.group(0), m.start()))
+            ini = m.start()
+            # letra do medidor grudada numa palavra ("NOTAFISCALN048310142" no OCR) não é medidor — salvo quando a
+            # palavra é o próprio rótulo ("MedidorW9012463502"). Medidor com letra solta continua valendo.
+            if (pat.startswith("[A-Z]") and ini > 0 and texto_sem_chave[ini - 1].isalpha()
+                    and not re.search(r"medidor\W*$", texto_sem_chave[max(0, ini - 12):ini], re.I)):
+                continue
+            candidatos_set.add((m.group(0), ini))
 
     # Pontua cada candidato com contexto local (±100 chars)
     scored = []

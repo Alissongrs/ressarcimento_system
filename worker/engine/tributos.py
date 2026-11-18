@@ -73,9 +73,11 @@ def _trio_impresso(nums: list[tuple[str, float]], tributo: str) -> Trio | None:
     cand = nums[:3]
     if len(cand) < 3:
         return None
-    (_, b), (_, a), (_, v) = cand
+    (tb, b), (ta, a), (tv, v) = cand
     if b <= 0 or not (0 < a <= MAX_ALIQ[tributo]) or v < 0 or v > b:
         return None
+    if any(_malformado_ocr(t) for t in (tb, ta, tv)):
+        return None  # trio que não fecha com número malformado do OCR: leitura, não erro da concessionária
     return round(b, 2), round(a, 4), round(v, 2)
 
 
@@ -97,6 +99,9 @@ def _trio(nums: list[tuple[str, float]], tributo: str) -> Trio | None:
                     if bb == 0 or (bb < 0) != (vv < 0) or not (0 < aa <= MAX_ALIQ[tributo]):
                         continue
                     if _fecha(bb, aa, vv):
+                        if (any(_malformado_ocr(t) for t in (tb, ta, tv))
+                                and abs(bb * aa / 100 - vv) > 0.02):
+                            continue  # número malformado do OCR só vale fechando no centavo
                         return round(bb, 2), round(aa, 4), round(vv, 2)
     return None
 
@@ -107,6 +112,8 @@ def _par(nums: list[tuple[str, float]], tributo: str) -> tuple[float, float] | N
     cand = nums[:4]
     for i in range(len(cand) - 1):
         (ta, a), (tv, v) = cand[i], cand[i + 1]
+        if _malformado_ocr(ta) or _malformado_ocr(tv):
+            continue
         if 0 < a <= MAX_ALIQ[tributo] and v > 0 and v / a * 100 > a:
             return a, v
     return None
@@ -126,6 +133,17 @@ def _descricao_antes(tok: str) -> bool:
     """Palavra imediatamente antes do rótulo que o torna parte da descrição de um item."""
     palavras = [w for w in re.split(r"[^a-z/]+", normalizar(tok)) if w]  # "Tanfana-TUSD-Com" (OCR) → "com"
     return bool(palavras) and bool(RE_DESCRICAO_ANTES.match(palavras[-1]))
+
+
+def _malformado_ocr(tok: str) -> bool:
+    """No OCR, número com separador de milhar E ponto decimal ("4.063.00", "5.311.84") não é formato de fatura
+    brasileira — o OCR trocou a vírgula, e às vezes também os dígitos depois dela. Esse número só vale num trio que
+    fecha NO CENTAVO; com a folga normal (0,5 %) a CPFL Paulista 553359 gravava ICMS 4.063,00 onde a fatura diz
+    4.063,88 (18/11). Coelba/Equatorial com o mesmo formato fecham exato e seguem valendo. Texto exato não passa."""
+    import identificacao as _idn
+    if getattr(_idn, "ULTIMA_FONTE", "texto") != "ocr":
+        return False
+    return bool(re.fullmatch(r"-?\d{1,3}(\.\d{3})+\.\d{1,2}", (tok or "").strip().rstrip("%")))
 
 
 def _numeros(toks: list[tuple[str, float]], de: int, x_min: float | None = None) -> list[tuple[str, float]]:
