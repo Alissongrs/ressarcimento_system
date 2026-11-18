@@ -87,6 +87,10 @@ def _trio(nums: list[tuple[str, float]], tributo: str) -> Trio | None:
         return 0.0, 0.0, 0.0  # isento: "0,00 0,00 0,00" ou "0,00 0,00"
     for i in range(len(cand) - 2):
         (tb, b), (ta, a), (tv, v) = cand[i], cand[i + 1], cand[i + 2]
+        if re.fullmatch(r"\d+", tb) and re.fullmatch(r"\d+", tv):
+            # base e valor sem separador (OCR perdeu as vírgulas dos dois): "12828 0,99 127" fecha em qualquer escala
+            # — 128,28/1,27 ou 12.828/127. Ambíguo: não aceita (CPFL Piratininga 555573 gravava PIS 127)
+            continue
         for bb in _variantes(tb, b):
             for aa in _variantes(ta, a):
                 for vv in _variantes(tv, v):
@@ -205,7 +209,9 @@ def ler_tributos(pdf_bytes: bytes | None, itens: list[Item] | None = None) -> di
     # base compartilhada: PIS e COFINS incidem sobre a mesma base — um par (alíquota, valor) fecha se a base que ele
     # implica bate com a base do outro (impressa ou implicada)
     for trib, outro in (("pis", "cofins"), ("cofins", "pis")):
-        if out.get(trib) or not pares[trib]:
+        # só com texto exato: no OCR um dígito/vírgula perdido nos dois tributos ainda "fecha" entre si
+        # (CPFL Piratininga 555573: PIS 1,27 lido como 127 com a base implícita do COFINS também errada)
+        if out.get(trib) or not pares[trib] or not fonte_texto:
             continue
         a, v = pares[trib][0]
         base_est = v / a * 100
@@ -219,7 +225,9 @@ def ler_tributos(pdf_bytes: bytes | None, itens: list[Item] | None = None) -> di
     for trib in ("icms", "pis", "cofins"):
         out.setdefault(trib, None)
         if out[trib]:
-            out[trib]["fecha"] = True
+            # "fecha" = trio impresso que fecha base × alíquota; base implícita (par) é confirmação mais fraca
+            # base implícita (par alíquota + valor, base do outro tributo): None = nem fecha nem diverge
+            out[trib]["fecha"] = None if "base não impressa" in " ".join(o for o in out["obs"] if o.startswith(trib + ":")) else True
         elif impressos[trib] and len(impressos[trib]) == 1:
             # texto exato e nenhuma leitura fecha: grava o impresso e deixa a regra apontar (F39)
             b, a, v = impressos[trib][0]
