@@ -40,6 +40,23 @@ DB_HOST="${BASH_REMATCH[3]}"; DB_PORT="${BASH_REMATCH[4]}"; DB_NAME="${BASH_REMA
 
 EXARGS=()
 for t in $EXCLUDE_TABLES; do EXARGS+=("--ignore-table=${DB_NAME}.${t}"); done
+# Views quebradas (referenciam tabela/coluna que não existe mais — ex.: VW_POWERBI_PROCESSOS, esquema anterior ao V2)
+# derrubam o mysqldump inteiro com erro 1356 depois de ~20 min. Testa cada view antes e deixa as quebradas de fora,
+# registrando no log; o resto do banco vai inteiro.
+VIEWS_QUEBRADAS=""
+if command -v mysql >/dev/null 2>&1; then
+  for v in $(MYSQL_PWD="$DB_PASS" mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -B -e \
+      "SELECT TABLE_NAME FROM information_schema.VIEWS WHERE TABLE_SCHEMA='${DB_NAME}'" 2>>"$LOG"); do
+    if ! MYSQL_PWD="$DB_PASS" mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -B -e \
+        "SELECT 1 FROM \`${v}\` LIMIT 0" "$DB_NAME" >/dev/null 2>&1; then
+      EXARGS+=("--ignore-table=${DB_NAME}.${v}")
+      VIEWS_QUEBRADAS="$VIEWS_QUEBRADAS $v"
+    fi
+  done
+  [ -n "$VIEWS_QUEBRADAS" ] && log "aviso: views quebradas fora do dump:$VIEWS_QUEBRADAS"
+else
+  log "aviso: cliente mysql ausente — não testei as views antes do dump"
+fi
 
 SQLGZ="$DIR/db_${DB_NAME}_${STAMP}.sql.gz"
 # mysqldump 8.0.32+ com --single-transaction num servidor com GTID (RDS) faz FLUSH TABLES WITH READ LOCK, que pede o
@@ -83,4 +100,4 @@ rotaciona() {
 rotaciona 'db_*.sql.gz'
 rotaciona 'files_*.tar.gz'
 log "concluído."
-rotina_fim 0 "dump $(basename "$SQLGZ") ($(du -h "$SQLGZ" | cut -f1))"
+rotina_fim 0 "dump $(basename "$SQLGZ") ($(du -h "$SQLGZ" | cut -f1))${VIEWS_QUEBRADAS:+; views quebradas fora:$VIEWS_QUEBRADAS}"
