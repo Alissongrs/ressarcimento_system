@@ -1,0 +1,10 @@
+# Ambiente PRÓPRIO do job de OCR (worker/.venv_ocr, criado pelo job_ocr_sem_texto.sh), isolado do python do sistema:
+# o pip --user misturava numpy 2 com pacotes do sistema compilados para numpy 1 (ABI mismatch) e o RapidOCR não
+# carregava. Base = o mesmo ambiente dos goldens (CI, versões fixas) + dependências do RapidOCR.
+-r requirements-golden.txt
+onnxruntime
+pyclipper
+shapely
+PyYAML
+six
+# rapidocr_onnxruntime==1.4.4 vai à parte com --no-deps (ele pede o opencv-python cheio, que precisa de libGL)

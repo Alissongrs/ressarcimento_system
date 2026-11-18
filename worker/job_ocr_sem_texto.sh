@@ -28,18 +28,25 @@ flock -n 8 || { log "pdf_pipeline em execução — pulando."; exit 0; }
 
 cd "$ENGINE" || { log "pasta não encontrada: $ENGINE"; exit 0; }
 
-# RapidOCR instalado uma vez para o usuário do cron (como o mysql-connector no job_pdf_pipeline.sh). O pacote pede o
-# opencv-python inteiro (precisa de libGL); instalamos o headless antes e o rapidocr sem dependências.
-if ! "$PYTHON" -c 'import rapidocr_onnxruntime' >/dev/null 2>&1; then
-  log "rapidocr_onnxruntime não instalado — instalando (pip --user)…"
-  "$PYTHON" -m pip install --user --quiet "opencv-python-headless" "onnxruntime" "pyclipper" "shapely" "pyyaml" "six" "pillow" "numpy" >> "$LOG" 2>&1
-  "$PYTHON" -m pip install --user --quiet --no-deps "rapidocr_onnxruntime==1.4.4" >> "$LOG" 2>&1
-  if "$PYTHON" -c 'import rapidocr_onnxruntime' >/dev/null 2>&1; then
-    log "rapidocr_onnxruntime instalado"
-  else
-    log "aviso: rapidocr_onnxruntime não importa (veja acima; se faltar libGL: apt install libgl1 libglib2.0-0) — o pipeline usa o Tesseract"
-  fi
+# Ambiente próprio do OCR (worker/.venv_ocr): o pip --user misturava numpy 2 com pacotes do sistema compilados para
+# numpy 1 (ABI mismatch, 18/11) e o RapidOCR não carregava — o pipeline caía no Tesseract, que não está no host.
+# Versões = requirements-ocr.txt (base dos goldens do CI). Sem RapidOCR NÃO roda o pipeline (nada a ganhar e marcaria
+# faturas à toa).
+VENV="${SURE_OCR_VENV:-$BUNDLE/.venv_ocr}"
+if ! "$VENV/bin/python" -c 'import rapidocr_onnxruntime, fitz, mysql.connector' >/dev/null 2>&1; then
+  log "preparando $VENV (requirements-ocr.txt + rapidocr_onnxruntime)…"
+  { [ -x "$VENV/bin/python" ] || "$PYTHON" -m venv "$VENV"; } >> "$LOG" 2>&1
+  "$VENV/bin/python" -m pip install --quiet --upgrade pip >> "$LOG" 2>&1
+  "$VENV/bin/python" -m pip install --quiet -r "$ENGINE/requirements-ocr.txt" >> "$LOG" 2>&1
+  "$VENV/bin/python" -m pip install --quiet --no-deps "rapidocr_onnxruntime==1.4.4" >> "$LOG" 2>&1
 fi
+if ! "$VENV/bin/python" -c 'import rapidocr_onnxruntime, fitz, mysql.connector' >> "$LOG" 2>&1; then
+  log "ERRO: RapidOCR não carrega em $VENV (veja acima; sem venv: apt install python3-venv; sem libGL: apt install libgl1 libglib2.0-0) — pipeline NÃO executado"
+  rotina_registrar ocr_sem_texto 1 "RapidOCR indisponível no ambiente $VENV — nada processado"
+  exit 0
+fi
+PYTHON="$VENV/bin/python"
+log "RapidOCR ok ($("$PYTHON" -c 'import numpy, onnxruntime; print("numpy", numpy.__version__, "onnxruntime", onnxruntime.__version__)' 2>/dev/null))"
 
 PYTHONUTF8=1 "$PYTHON" ocr_fila.py ids --saida "$IDS" --limite "$LIMITE" >> "$LOG" 2>&1
 N="$(grep -c '[0-9]' "$IDS" 2>/dev/null || echo 0)"
@@ -51,7 +58,12 @@ fi
 rotina_inicio ocr_sem_texto "$N fatura(s) sem texto → pdf_pipeline --force com OCR (RapidOCR)"
 
 log "backup pré-OCR…"
-bash "$BUNDLE/backup_sistema.sh" rotativo >> "$LOG" 2>&1 || log "aviso: backup falhou"
+if ! bash "$BUNDLE/backup_sistema.sh" rotativo >> "$LOG" 2>&1; then
+  log "ERRO: backup falhou — pipeline NÃO executado (nada no banco sem backup); faturas voltam para a fila"
+  PYTHONUTF8=1 "$PYTHON" ocr_fila.py desfazer >> "$LOG" 2>&1
+  rotina_fim 1 "backup falhou — OCR não executado"
+  exit 0
+fi
 
 log "pdf_pipeline --prod --force (OCR ligado) em $N id(s) da origem"
 PYTHONUTF8=1 SURE_OCR_PAGINAS="${SURE_OCR_PAGINAS:-3}" "$PYTHON" pdf_pipeline.py --prod --force --id-file "$IDS" >> "$LOG" 2>&1

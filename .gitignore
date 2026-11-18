@@ -155,3 +155,6 @@ worker/jobs/backup_*.json
 
 # cache sqlite da consulta SEFAZ criado pelo motor ao rodar (worker/engine)
 worker/engine/_cache_sefaz.db
+
+# ambiente próprio do job de OCR (criado na VPS pelo job_ocr_sem_texto.sh)
+worker/.venv_ocr/

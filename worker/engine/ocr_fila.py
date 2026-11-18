@@ -8,7 +8,9 @@ fila tem registro próprio em vez de olhar ocr_gerado_em.
 
 O job (worker/job_ocr_sem_texto.sh) chama:
   ids    --saida ids.txt [--limite 200]   → grava a fila (status 'fila') e os ids da ORIGEM (Faturas_Registradas_Cache.id)
-  marcar                                  → depois do pdf_pipeline --force: 'fila' → 'feito' com o gate/medidor/kWh de depois
+  marcar                                  → depois do pdf_pipeline --force: 'fila' → 'feito' (fatura regravada) ou
+                                            'erro' (não mudou: volta à fila em 7 dias), com gate/medidor/kWh de depois
+  desfazer                                → rodada abortada (backup falhou): apaga as linhas 'fila' desta rodada
   resumo                                  → contagem por status e por resultado
 
 FT_OCR_SEM_TEXTO é a tabela de log desta rotina (criada aqui, se não existir). Nenhuma outra escrita.
@@ -49,7 +51,7 @@ SELECT f.id, f.uid, COALESCE(f.validador_gate, '') AS gate
    AND (f.texto_plumber IS NULL OR LENGTH(f.texto_plumber) < 200)
    AND COALESCE(f.validador_gate, '') NOT IN ('aprovado', 'revisao')
    AND f.uid IS NOT NULL AND f.uid <> ''
-   AND o.id_fatura IS NULL
+   AND (o.id_fatura IS NULL OR (o.status = 'erro' AND o.atualizado_em < NOW() - INTERVAL 7 DAY))
    AND (v.id_fatura IS NULL OR v.status NOT IN ('tem_texto', 'reprocessada'))
  ORDER BY f.mes_referencia DESC, f.id DESC
  LIMIT %s"""
@@ -110,11 +112,16 @@ def cmd_ids(argv: list[str]) -> int:
 def cmd_marcar(argv: list[str]) -> int:
     con = _con()
     cur = con.cursor()
+    # 'feito' só se a fatura foi de fato regravada nesta rodada (atualizado_em depois de entrar na fila); senão 'erro'
+    # (OCR indisponível, PDF protegido, pipeline caiu) — volta à fila em 7 dias. Antes marcava tudo 'feito' (18/11).
     cur.execute("""UPDATE FT_OCR_SEM_TEXTO o JOIN FATURA_DADOS_EXTRAIDOS f ON f.id = o.id_fatura
-                      SET o.status = 'feito', o.gate_depois = f.validador_gate, o.medidor_depois = f.numero_medidor,
+                      SET o.status = IF(f.atualizado_em >= o.atualizado_em, 'feito', 'erro'),
+                          o.gate_depois = f.validador_gate, o.medidor_depois = f.numero_medidor,
                           o.kwh_depois = f.kwh_total, o.ocr_chars = LENGTH(COALESCE(f.texto_ocr, ''))
                     WHERE o.status = 'fila'""")
     n = cur.rowcount
+    cur.execute("SELECT COUNT(*) FROM FT_OCR_SEM_TEXTO WHERE status = 'erro' AND atualizado_em >= NOW() - INTERVAL 1 MINUTE")
+    _log(f"{cur.fetchone()[0]} fatura(s) sem atualização no banco → 'erro' (voltam à fila em 7 dias)")
     con.commit()
     cur.execute("""SELECT COALESCE(gate_depois, ''), SUM(medidor_depois IS NOT NULL AND medidor_depois <> ''),
                           SUM(kwh_depois IS NOT NULL AND kwh_depois > 0), COUNT(*)
@@ -122,6 +129,17 @@ def cmd_marcar(argv: list[str]) -> int:
     _log(f"{n} fatura(s) marcada(s) como feito")
     for gate, med, kwh, tot in cur.fetchall():
         _log(f"  gate '{gate}': {tot} fatura(s), medidor em {int(med or 0)}, kWh em {int(kwh or 0)}")
+    con.close()
+    return 0
+
+
+def cmd_desfazer(argv: list[str]) -> int:
+    """Rodada abortada antes do pipeline (backup falhou): tira da fila o que esta rodada colocou, para voltar na próxima."""
+    con = _con()
+    cur = con.cursor()
+    cur.execute("DELETE FROM FT_OCR_SEM_TEXTO WHERE status = 'fila'")
+    _log(f"{cur.rowcount} fatura(s) devolvida(s) à fila (rodada abortada)")
+    con.commit()
     con.close()
     return 0
 
@@ -154,6 +172,8 @@ def main(argv: list[str]) -> int:
         return cmd_ids(argv[1:])
     if argv[0] == "marcar":
         return cmd_marcar(argv[1:])
+    if argv[0] == "desfazer":
+        return cmd_desfazer(argv[1:])
     if argv[0] == "resumo":
         return cmd_resumo()
     print(__doc__)
