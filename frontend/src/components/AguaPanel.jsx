@@ -91,10 +91,17 @@ export default function AguaPanel({ admin = false }) {
   useEffect(() => { carregar();   }, [empresa, todos]);
 
   async function rejeitar(id) {
-    const motivo = window.prompt('Motivo da rejeição deste apontamento de água:');
-    if (motivo == null) return;
+    // A explicação é obrigatória: fica registrada em FATURA_AGUA_REJEICOES e impede o motor de recriar o apontamento.
+    let motivo = '';
+    while (motivo.trim().length < 10) {
+      const r = window.prompt(motivo === ''
+        ? 'Por que este apontamento de água está sendo rejeitado? (obrigatório)'
+        : 'Explique melhor o motivo da rejeição (mínimo de 10 letras):', motivo);
+      if (r == null) return;
+      motivo = r;
+    }
     try {
-      await apiClient.post(`/api/v1/faturas/agua/${id}/rejeitar`, { motivo });
+      await apiClient.post(`/api/v1/faturas/agua/${id}/rejeitar`, { motivo: motivo.trim() });
       setRows((rs) => rs.filter((r) => r.id !== id));
     } catch (e) { alert(e?.response?.data?.error || 'Falha ao rejeitar.'); }
   }
@@ -252,7 +259,7 @@ export default function AguaPanel({ admin = false }) {
                         <button onClick={() => setDetalhe(r)} className="cpv2-btn cpv2-btn--ghost" title="Analisar UC: gráfico + todas as faturas do banco">📊 Analisar</button>
                         <button onClick={() => rejeitar(r.id)} className="cpv2-btn"
                           style={{ background: 'var(--danger, #dc2626)', color: '#fff', borderColor: 'var(--danger, #dc2626)' }}
-                          title="Rejeitar apontamento (falso positivo) — some da lista">✕</button>
+                          title="Rejeitar apontamento (falso positivo): pede a explicação do motivo e tira da lista">✕ Rejeitar</button>
                       </div>
                     </td>
                   </tr>

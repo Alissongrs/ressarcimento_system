@@ -219,6 +219,12 @@ func RejeitarAguaApontamento(c *gin.Context) {
 		Motivo string `json:"motivo"`
 	}
 	_ = c.ShouldBindJSON(&body)
+	// A explicação é obrigatória (a tela também pede): sem ela ninguém sabe depois por que o apontamento sumiu.
+	body.Motivo = strings.TrimSpace(body.Motivo)
+	if len([]rune(body.Motivo)) < 10 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Explique o motivo da rejeição (mínimo de 10 letras)."})
+		return
+	}
 	sqlDB, err := database.GormDB_App.DB()
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "banco indisponível"})
