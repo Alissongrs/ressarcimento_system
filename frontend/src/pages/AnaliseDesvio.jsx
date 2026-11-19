@@ -2963,7 +2963,7 @@ export default function AnaliseDesvio() {
           ))}
         </div>
       )}
-      {tab === 'agua' ? <AguaPanel /> : tab === 'acer' ? (energiaVisao === 'nova' ? <EnergiaPanel key="acer" base="acer" admin={podeApontamentos} /> : <AcerPanel />)
+      {tab === 'agua' ? <AguaPanel admin={podeApontamentos} /> : tab === 'acer' ? (energiaVisao === 'nova' ? <EnergiaPanel key="acer" base="acer" admin={podeApontamentos} /> : <AcerPanel />)
         : tab === 'usinas' ? <UsinasPanel />
         : tab === 'auditados' && energiaVisao === 'nova' ? <EnergiaPanel key="energia" base="energia" admin={podeApontamentos} /> : (<>
       {/* Filtros do topo: Empresa (select, substitui as pills) + Ordenação (maiores apontamentos).

@@ -242,6 +242,42 @@ func mesBR(m string) string { // "2023-07" → "07/2023"
 	return m
 }
 
+// o que fazer, em uma frase, por causa da conferência — abre o dossiê em linguagem direta.
+var aguaAcaoCurta = map[string]string{
+	"ERRO_CONCESSIONARIA": "A conferência aponta erro de faturamento da concessionária: peça o refaturamento pelo valor correto e a devolução do que foi pago a mais (em dobro, se já houve pagamento indevido).",
+	"CONSUMO_ALTO_MEDIDO": "O volume foi medido, mas está muito acima do normal: peça a revisão da leitura e a aferição do hidrômetro e confirme com o cliente se não houve vazamento interno antes de cobrar da concessionária.",
+	"TROCA_HIDROMETRO":    "Houve troca de hidrômetro no período: confira se o volume cobrado bate com as leituras de retirada do antigo e instalação do novo e peça o refaturamento da diferença.",
+	"VAZAMENTO":           "O pico é compatível com vazamento: peça a revisão por vazamento prevista no regulamento da concessionária, juntando o comprovante do conserto.",
+	"MINIMO_ECONOMIAS":    "A cobrança parece usar mais economias (unidades) do que existem no imóvel: confirme o número real e peça a correção do cadastro e o refaturamento dos meses cobrados a mais.",
+}
+
+// aguaResumoExplicativo monta 2–3 frases em linguagem clara: o que aconteceu nesta fatura e o que o
+// analista deve fazer. É o "abre-alas" do dossiê, antes dos números.
+func aguaResumoExplicativo(d *aguaDossieDados) string {
+	exced := d.exced
+	if exced < 0 {
+		exced = 0
+	}
+	var b strings.Builder
+	if d.ficha == "FA05" {
+		fmt.Fprintf(&b, "Na UC %s (%s), a concessionária cobrou praticamente o mesmo volume por vários meses seguidos — %s m³ em %s —, acima do consumo normal da unidade (cerca de %s m³). ",
+			d.uc, d.conc, brNum(d.consumo, 0), mesBR(d.mes), brNum(d.esperado, 0))
+		b.WriteString("Esse padrão é típico de cobrança pela média, estimativa ou mínimo, sem o hidrômetro medir de fato. ")
+	} else {
+		fmt.Fprintf(&b, "Na fatura de %s da UC %s (%s), o consumo registrado foi de %s m³, %s%% acima do esperado para o período (cerca de %s m³). ",
+			mesBR(d.mes), d.uc, d.conc, brNum(d.consumo, 0), brNum(d.desvio, 0), brNum(d.esperado, 0))
+	}
+	if exced > 0 {
+		fmt.Fprintf(&b, "O excedente de %s m³ representa aproximadamente R$ %s cobrados a mais. ", brNum(exced, 0), brNum(d.ress, 2))
+	}
+	if ac := aguaAcaoCurta[d.causa]; ac != "" {
+		b.WriteString(ac)
+	} else {
+		b.WriteString(aguaAcaoCurta["ERRO_CONCESSIONARIA"])
+	}
+	return b.String()
+}
+
 func gerarDossieAguaPDF(d *aguaDossieDados) []byte {
 	pdf := gofpdf.New("P", "mm", "A4", "")
 	pdf.SetMargins(14, 14, 14)
@@ -296,6 +332,16 @@ func gerarDossieAguaPDF(d *aguaDossieDados) []byte {
 		rot += " — " + c
 	}
 	pdf.CellFormat(W, 8, tr("  Veredito da conferência visual: "+rot), "", 1, "L", true, 0, "")
+	pdf.SetTextColor(0, 0, 0)
+
+	// resumo em linguagem clara — o que aconteceu e o que fazer (antes dos números)
+	titulo("Em resumo")
+	pdf.SetFillColor(239, 246, 255)
+	pdf.SetDrawColor(191, 219, 254)
+	pdf.SetLineWidth(0.2)
+	pdf.SetFont("Arial", "", 9)
+	pdf.SetTextColor(23, 42, 71)
+	pdf.MultiCell(W, 5, tr(aguaResumoExplicativo(d)), "1", "L", true)
 	pdf.SetTextColor(0, 0, 0)
 
 	// a conta

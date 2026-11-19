@@ -35,6 +35,11 @@ func ListAguaAnalise(c *gin.Context) {
 	}
 	// exclui rejeitados (tabela própria da água)
 	where = append(where, "NOT EXISTS (SELECT 1 FROM FATURA_AGUA_REJEICOES r WHERE r.id = a.id)")
+	// por padrão só mostra os conferidos como VERDADEIRO (o analista trabalha só o que é real).
+	// ?todos=1 traz também os não-conferidos/falsos/inconclusivos (uso de admin).
+	if c.Query("todos") != "1" {
+		where = append(where, "EXISTS (SELECT 1 FROM FATURA_AGUA_CONFERENCIA v WHERE v.id = a.id AND v.veredito = 'VERDADEIRO')")
+	}
 	limit := 200
 	if l, e := strconv.Atoi(c.Query("limit")); e == nil && l > 0 && l <= 2000 {
 		limit = l
@@ -95,6 +100,12 @@ func GetAguaResumo(c *gin.Context) {
 		return
 	}
 	cond := "NOT EXISTS (SELECT 1 FROM FATURA_AGUA_REJEICOES r WHERE r.id = a.id)"
+	// mesmo filtro padrão da lista: só VERDADEIRO (a menos de ?todos=1), para os KPIs baterem com a tabela.
+	verd := ""
+	if c.Query("todos") != "1" {
+		verd = " AND EXISTS (SELECT 1 FROM FATURA_AGUA_CONFERENCIA v WHERE v.id = a.id AND v.veredito = 'VERDADEIRO')"
+	}
+	cond += verd
 	args := []interface{}{}
 	if e := strings.TrimSpace(c.Query("empresa")); e != "" {
 		cond += " AND a.cod_empresa = ?"
@@ -111,8 +122,8 @@ func GetAguaResumo(c *gin.Context) {
 		"COUNT(*) n, COALESCE(SUM(a.ressarcimento_estimado),0) rs " +
 		"FROM FATURA_APONTAMENTOS_AGUA_AUDITADOS a " +
 		"LEFT JOIN Tab_Empresa te ON te.Cod_Empresa = a.cod_empresa WHERE " +
-		"NOT EXISTS (SELECT 1 FROM FATURA_AGUA_REJEICOES r WHERE r.id=a.id) " +
-		"GROUP BY a.cod_empresa, te.Rz_Social ORDER BY rs DESC")
+		"NOT EXISTS (SELECT 1 FROM FATURA_AGUA_REJEICOES r WHERE r.id=a.id)" + verd +
+		" GROUP BY a.cod_empresa, te.Rz_Social ORDER BY rs DESC")
 	if e == nil {
 		defer er.Close()
 		for er.Next() {

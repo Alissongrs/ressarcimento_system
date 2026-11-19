@@ -30,6 +30,14 @@ const CAUSA_ROTULO = {
   CONSUMO_ALTO_MEDIDO: 'consumo alto medido',
   MINIMO_ECONOMIAS: 'mínimo por economias — verificar cadastro',
 };
+// cor do chip da causa (nos apontamentos verdadeiros)
+const CAUSA_COR = {
+  ERRO_CONCESSIONARIA: '#b45309',
+  VAZAMENTO: '#2563eb',
+  TROCA_HIDROMETRO: '#7c3aed',
+  CONSUMO_ALTO_MEDIDO: '#0891b2',
+  MINIMO_ECONOMIAS: '#be185d',
+};
 // o que a fatura diz sobre vazamento (só "constatado" prova vazamento)
 const EVID_ROTULO = {
   ALERTA_DO_MES: 'concessionária alertou alta de consumo',
@@ -47,11 +55,11 @@ const COLS = [
   { label: 'Excedente m³', key: 'excedente', num: true },
   { label: 'Desvio', key: 'desvio_pct', num: true },
   { label: 'Ressarc. estimado', key: 'ressarcimento_estimado', num: true },
-  { label: 'Conferência da fatura', key: 'conferencia', num: false },
+  { label: 'Causa / conferência', key: 'conferencia', num: false },
   { label: 'Ações', key: null, num: false },
 ];
 
-export default function AguaPanel() {
+export default function AguaPanel({ admin = false }) {
   const [resumo, setResumo] = useState(null);
   const [rows, setRows] = useState([]);
   const [empresa, setEmpresa] = useState('todos');
@@ -62,11 +70,14 @@ export default function AguaPanel() {
   const [okMsg, setOkMsg] = useState('');
   const [sort, setSort] = useState({ key: 'mes_referencia', dir: 'desc' }); // padrão: mês mais recente no topo
   const [abertoConf, setAbertoConf] = useState(null); // id com a explicação da conferência aberta
+  const [verFaturaId, setVerFaturaId] = useState(null); // id com a fatura aberta EMBUTIDA na linha (1 clique)
+  const [todos, setTodos] = useState(false); // admin: mostrar também não-conferidos/falsos (?todos=1)
 
   async function carregar() {
     setLoading(true); setErro('');
     try {
       const params = empresa !== 'todos' ? { empresa } : {};
+      if (admin && todos) params.todos = 1;
       const [r1, r2] = await Promise.all([
         apiClient.get('/api/v1/faturas/agua-analise/resumo', { params }),
         apiClient.get('/api/v1/faturas/agua-analise', { params: { ...params, limit: 500 } }),
@@ -77,7 +88,7 @@ export default function AguaPanel() {
       setErro(e?.response?.data?.error || 'Falha ao carregar faturas de água.');
     } finally { setLoading(false); }
   }
-  useEffect(() => { carregar();   }, [empresa]);
+  useEffect(() => { carregar();   }, [empresa, todos]);
 
   async function rejeitar(id) {
     const motivo = window.prompt('Motivo da rejeição deste apontamento de água:');
@@ -142,6 +153,19 @@ export default function AguaPanel() {
             ))}
           </select>
         </label>
+        {!todos && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold"
+            style={{ background: 'rgba(31,157,107,0.12)', color: '#1f9d6b' }}
+            title="A lista mostra só os apontamentos conferidos como VERDADEIRO (pico real). Falsos e não conferidos ficam ocultos.">
+            ✓ só apontamentos confirmados
+          </span>
+        )}
+        {admin && (
+          <label className="inline-flex items-center gap-1.5 cursor-pointer select-none" title="Admin: trazer também não-conferidos, falsos e inconclusivos">
+            <input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} />
+            <span className="opacity-70">mostrar não-conferidos</span>
+          </label>
+        )}
         <span className="opacity-50">Regras: pico — consumo por dia ≥ 1,8× o normal (80% acima) da UC (12 meses, mín. 4); cobrança sem medição — o mesmo m³ cobrado ≥ 3 meses seguidos, ≥ 1,5× o normal · ressarcimento = valor cobrado acima do normal.</span>
       </div>
 
@@ -190,37 +214,59 @@ export default function AguaPanel() {
                     </td>
                     <td className="px-3 py-2 text-center tabular-nums font-semibold" style={{ color: '#1f9d6b' }}>{brl(r.ressarcimento_estimado)}</td>
                     <td className="px-3 py-2 text-center whitespace-nowrap">
-                      {r.conferencia ? (
+                      {r.conferencia === 'VERDADEIRO' ? (
+                        <>
+                          <button type="button" onClick={() => setAbertoConf(abertoConf === r.id ? null : r.id)}
+                            className="px-2 py-0.5 rounded-full text-[11px] font-semibold"
+                            style={{ background: CAUSA_COR[r.conferencia_causa] || '#1f9d6b', color: '#fff' }}
+                            title="Causa do pico — clique para ver a explicação da conferência">
+                            {CAUSA_ROTULO[r.conferencia_causa] || 'pico confirmado'}{r.conferencia_obs ? (abertoConf === r.id ? ' ▴' : ' ▾') : ''}
+                          </button>
+                          {((r.conferencia_causa === 'CONSUMO_ALTO_MEDIDO' && EVID_ROTULO[r.conferencia_evidencia]) || r.conferencia_recalcular) && (
+                            <div className="text-[11px] opacity-70 mt-0.5">
+                              {r.conferencia_causa === 'CONSUMO_ALTO_MEDIDO' && EVID_ROTULO[r.conferencia_evidencia] &&
+                                <span title={r.conferencia_aviso || ''}>{EVID_ROTULO[r.conferencia_evidencia]}</span>}
+                              {r.conferencia_recalcular && <span style={{ color: 'var(--warning)' }}>{(r.conferencia_causa === 'CONSUMO_ALTO_MEDIDO' && EVID_ROTULO[r.conferencia_evidencia]) ? ' · ' : ''}refazer valor</span>}
+                            </div>
+                          )}
+                        </>
+                      ) : r.conferencia ? (
                         <button type="button" onClick={() => setAbertoConf(abertoConf === r.id ? null : r.id)}
                           className="px-2 py-0.5 rounded-full text-[11px] font-semibold"
                           style={{ background: CONF_COR[r.conferencia] || '#6b7280', color: '#fff' }}
                           title="Ver a explicação da conferência">
-                          {r.conferencia === 'VERDADEIRO' ? 'Verdadeiro' : r.conferencia === 'FALSO' ? 'Falso' : 'Inconclusivo'} {abertoConf === r.id ? '▴' : '▾'}
+                          {r.conferencia === 'FALSO' ? 'Falso' : 'Inconclusivo'} {abertoConf === r.id ? '▴' : '▾'}
                         </button>
                       ) : <span className="opacity-40">não conferida</span>}
-                      {r.conferencia === 'VERDADEIRO' && (r.conferencia_causa || r.conferencia_recalcular) && (
-                        <div className="text-[11px] opacity-70 mt-0.5">
-                          {CAUSA_ROTULO[r.conferencia_causa] || ''}
-                          {r.conferencia_causa === 'CONSUMO_ALTO_MEDIDO' && EVID_ROTULO[r.conferencia_evidencia] &&
-                            <span title={r.conferencia_aviso || ''}> ({EVID_ROTULO[r.conferencia_evidencia]})</span>}
-                          {r.conferencia_recalcular && <span style={{ color: 'var(--warning)' }}>{r.conferencia_causa ? ' · ' : ''}refazer valor</span>}
-                        </div>
-                      )}
                     </td>
-                    <td className="px-3 py-2 text-center whitespace-nowrap">
-                      <button onClick={() => setReqRow({ ...r, empresa_nome: (empresasResumo.find((e) => e.cod_empresa === r.cod_empresa) || {}).nome })} className="cpv2-btn cpv2-btn--primary mr-1" title="Gerar requisição">📝</button>
-                      <button onClick={() => setDetalhe(r)} className="cpv2-btn cpv2-btn--ghost mr-1" title="Analisar UC: gráfico + todas as faturas do banco">📊 Analisar UC</button>
-                      <button onClick={() => abrirDossie(r.id)} disabled={r.conferencia !== 'VERDADEIRO'} className="cpv2-btn cpv2-btn--ghost mr-1"
-                        title={r.conferencia === 'VERDADEIRO' ? 'Dossiê do apontamento (PDF): conta, gráfico, conferência e o que pedir à concessionária' : 'Dossiê só para apontamento conferido como VERDADEIRO'}>📑 Dossiê</button>
-                      {r.link_fatura && <a href={r.link_fatura} target="_blank" rel="noreferrer" className="cpv2-btn cpv2-btn--ghost mr-1" title="Abrir PDF">📄</a>}
-                      <button onClick={() => rejeitar(r.id)} className="cpv2-btn"
-                        style={{ background: 'var(--danger, #dc2626)', color: '#fff', borderColor: 'var(--danger, #dc2626)' }}
-                        title="Rejeitar apontamento (falso positivo) — some da lista">✕ Rejeitar</button>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-center gap-1 flex-wrap">
+                        <button onClick={() => setVerFaturaId(verFaturaId === r.id ? null : r.id)}
+                          className={`cpv2-btn ${verFaturaId === r.id ? 'cpv2-btn--primary' : 'cpv2-btn--ghost'}`}
+                          title="Ver a fatura aqui mesmo, sem sair da lista">
+                          📄 {verFaturaId === r.id ? 'Fechar fatura' : 'Ver fatura'}
+                        </button>
+                        <button onClick={() => abrirDossie(r.id)} disabled={r.conferencia !== 'VERDADEIRO'} className="cpv2-btn cpv2-btn--ghost"
+                          title={r.conferencia === 'VERDADEIRO' ? 'Dossiê do apontamento (PDF): resumo, conta, gráfico, conferência e o que pedir à concessionária' : 'Dossiê só para apontamento conferido como VERDADEIRO'}>📑 Dossiê</button>
+                        <button onClick={() => setReqRow({ ...r, empresa_nome: (empresasResumo.find((e) => e.cod_empresa === r.cod_empresa) || {}).nome })} className="cpv2-btn cpv2-btn--ghost" title="Gerar requisição">📝 Requisição</button>
+                        <button onClick={() => setDetalhe(r)} className="cpv2-btn cpv2-btn--ghost" title="Analisar UC: gráfico + todas as faturas do banco">📊 Analisar</button>
+                        <button onClick={() => rejeitar(r.id)} className="cpv2-btn"
+                          style={{ background: 'var(--danger, #dc2626)', color: '#fff', borderColor: 'var(--danger, #dc2626)' }}
+                          title="Rejeitar apontamento (falso positivo) — some da lista">✕</button>
+                      </div>
                     </td>
                   </tr>
                   {abertoConf === r.id && r.conferencia_obs && (
                     <tr className="bg-[var(--cpv2-surface-2)]">
                       <td colSpan={COLS.length} className="px-4 py-2 text-xs whitespace-pre-wrap">{r.conferencia_obs}</td>
+                    </tr>
+                  )}
+                  {verFaturaId === r.id && (
+                    <tr className="bg-[var(--cpv2-surface-2)]">
+                      <td colSpan={COLS.length} className="px-3 py-3">
+                        <FaturaInline id={r.id} mes={r.mes_referencia} link={r.link_fatura}
+                          onAnalisar={() => setDetalhe(r)} onFechar={() => setVerFaturaId(null)} />
+                      </td>
                     </tr>
                   )}
                 </React.Fragment>
@@ -244,6 +290,56 @@ export default function AguaPanel() {
       )}
 
       {detalhe && <DetalheUCAguaModal row={detalhe} onClose={() => setDetalhe(null)} />}
+    </div>
+  );
+}
+
+// Visualizador de fatura EMBUTIDO na linha (abre em 1 clique, sem modal). Peça isolada e
+// reaproveitável: se depois trocarmos "expansão na linha" por "painel lateral", é só montar
+// este mesmo componente do outro lado. Reusa o endpoint /agua/:id/pdf?n= (mesmo do modal).
+function FaturaInline({ id, mes, link, onAnalisar, onFechar }) {
+  const [pdf, setPdf] = useState({ url: '', carregando: true, erro: '', n: 1, total: 1 });
+  const carregar = useCallback(async (n = 1) => {
+    setPdf((p) => ({ ...p, carregando: true, erro: '' }));
+    try {
+      const { data, headers } = await apiClient.get(`/api/v1/faturas/agua/${id}/pdf`, { params: { n }, responseType: 'blob' });
+      setPdf((prev) => {
+        if (prev.url) URL.revokeObjectURL(prev.url);
+        return { url: URL.createObjectURL(data), carregando: false, erro: '', n, total: Number(headers?.['x-faturas'] || 1) };
+      });
+    } catch {
+      setPdf((p) => ({ ...p, url: '', carregando: false, erro: 'Não foi possível trazer a fatura do portal.' }));
+    }
+  }, [id]);
+  useEffect(() => { carregar(1); }, [carregar]);
+  useEffect(() => () => { setPdf((p) => { if (p.url) URL.revokeObjectURL(p.url); return p; }); }, []);
+
+  return (
+    <div className="rounded-lg border border-[var(--cpv2-border)] overflow-hidden">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs bg-[var(--cpv2-surface)]">
+        <span className="font-semibold">🧾 Fatura {mes} — confira o pico no histórico de consumo impresso</span>
+        <span className="flex items-center gap-1 flex-wrap justify-end">
+          {pdf.total > 1 && Array.from({ length: pdf.total }, (_, i) => i + 1).map((k) => (
+            <button key={k} onClick={() => carregar(k)} disabled={pdf.carregando || k === pdf.n}
+              className={`cpv2-btn ${k === pdf.n ? 'cpv2-btn--primary' : 'cpv2-btn--ghost'}`} title={`${k}ª fatura do link`}>{k}ª</button>
+          ))}
+          {onAnalisar && <button onClick={onAnalisar} className="cpv2-btn cpv2-btn--ghost" title="Gráfico do histórico + todas as faturas da UC">📊 Analisar UC</button>}
+          {link && <a href={link} target="_blank" rel="noreferrer" className="cpv2-btn cpv2-btn--ghost" title="Abrir a fatura em nova aba">↗ Nova aba</a>}
+          {onFechar && <button onClick={onFechar} className="cpv2-btn cpv2-btn--ghost">✕ Fechar</button>}
+        </span>
+      </div>
+      {pdf.total > 1 && (
+        <div className="px-3 py-1 text-[11px]" style={{ color: 'var(--warning)' }}>
+          O portal trouxe {pdf.total} faturas neste link — confira qual é a de {mes} (a outra pode ser refaturamento ou de outro mês).
+        </div>
+      )}
+      {pdf.erro && (
+        <div className="px-3 py-2 text-xs text-[var(--danger)]">
+          {pdf.erro}{link && <> Você ainda pode <a href={link} target="_blank" rel="noreferrer" className="underline">abrir no portal</a>.</>}
+        </div>
+      )}
+      {pdf.carregando && <div className="px-3 py-6 text-center text-xs opacity-60">Carregando a fatura…</div>}
+      {pdf.url && <iframe title={`Fatura ${mes}`} src={pdf.url} className="w-full bg-white" style={{ height: 620 }} />}
     </div>
   );
 }
