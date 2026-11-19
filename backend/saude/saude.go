@@ -79,6 +79,7 @@ var Catalogo = []Rotina{
 	{Nome: "rotinas_chat", Titulo: "Rotinas do chat e lembretes", Onde: "backend", Cadencia: "a cada minuto", Tipo: TipoPing, Tolerancia: 5 * time.Minute, MaxDuracao: time.Hour},
 	{Nome: "prazos", Titulo: "Prazos dos processos", Onde: "backend", Cadencia: "a cada hora", Tipo: TipoPing, Tolerancia: 3 * time.Hour, MaxDuracao: time.Hour},
 	{Nome: "divergencias_status", Titulo: "Status × histórico", Onde: "backend", Cadencia: "todo dia 06:30", Tipo: TipoExecucao, Tolerancia: 26 * time.Hour, MaxDuracao: time.Hour},
+	{Nome: "disco", Titulo: "Espaço em disco da VPS (aviso acima de 85%)", Onde: "VPS", Cadencia: "de hora em hora", Tipo: TipoExecucao, Tolerancia: 3 * time.Hour, MaxDuracao: 10 * time.Minute},
 	{Nome: "emails", Titulo: "Leitura de e-mails (IMAP)", Onde: "backend", Cadencia: "a cada minuto", Tipo: TipoPing, Opcional: true, Tolerancia: 5 * time.Minute, MaxDuracao: time.Hour},
 }
 

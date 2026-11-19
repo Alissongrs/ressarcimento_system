@@ -86,7 +86,7 @@ if [ "$INCLUDE_FILES" = "1" ]; then
   FILESGZ="$DIR/files_${STAMP}.tar.gz"
   tar -czf "$FILESGZ" -C "$REPO" \
     --exclude='**/node_modules' --exclude='.git' --exclude='**/__pycache__' \
-    --exclude='**/*.log' --exclude='backups' \
+    --exclude='**/*.log' --exclude='backups' --exclude='**/.venv*' --exclude='**/*.pdf' \
     backend/.env docker-compose.prod.yml worker 2>>"$LOG" || log "aviso: tar de arquivos parcial"
   [ -f "$FILESGZ" ] && log "arquivos ok: $(basename "$FILESGZ") ($(du -h "$FILESGZ" | cut -f1))"
 fi

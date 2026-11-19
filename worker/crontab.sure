@@ -67,4 +67,5 @@ W=/opt/ressarcimento/ressarcimento_system/worker
 # 11) Modelo da OpenAI (gpt-5.4-mini) só nas faturas de CONFIANÇA BAIXA (confianca_json: campo-chave com 1 fonte, vazio
 #     ou divergente) — mais uma fonte, nunca grava sozinho. De hora em hora, SURE_LLM_POR_HORA=10 chamadas (≈ US$ 0,013 cada).
 #     SURE_VISUAL_GRAVAR=0 só registra em FT_LEITURA_VISUAL; 1 preenche vazios confirmados pela origem/física+item.
+45 * * * *   $W/job_disco.sh >/dev/null 2>&1
 15 * * * *   SURE_LLM_POR_HORA=10 SURE_VISUAL_GRAVAR=0 $W/job_llm_confianca.sh >/dev/null 2>&1

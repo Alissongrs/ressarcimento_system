@@ -406,6 +406,11 @@ jobs:
             exit 1
           fi
           echo "✅ Deploy saudável em $(git rev-parse HEAD)"
+          # Cada build deixa cache e imagem antiga para trás: em 19/11/2026 isso lotou o disco (260 GB, 100%).
+          # Limpa só o que tem mais de 7 dias e não está em uso; volumes (dados) nunca são tocados.
+          docker builder prune -af --filter "until=168h" >/dev/null 2>&1 || echo "aviso: limpeza do cache de build falhou"
+          docker image prune -af --filter "until=168h" >/dev/null 2>&1 || echo "aviso: limpeza de imagens antigas falhou"
+          echo "Disco depois do deploy: $(df -h / | awk 'NR==2{print $3" usados, "$4" livres ("$5")"}')"
           DEPLOY
 
       - name: Apagar a chave do runner
