@@ -330,6 +330,23 @@ def _parse_html_nf3e(html_raw: str, chave: str, fonte: str) -> dict:
         out["protocolo_autorizacao"] = m_prot.group(1)
         out["data_autorizacao"] = m_prot.group(2).strip()
 
+    # Eventos ("Eventos e Serviços"): além da Autorização de Uso, a nota pode ter Cancelamento (110111),
+    # Substituição (240140) etc. Formato: "<descrição> (Cód.: NNNNNN) <protocolo> <data>".
+    out["eventos"] = []
+    i_ev = texto.find("Eventos e Servi")
+    if i_ev >= 0:
+        bloco_ev = texto[i_ev:]
+        f_ev = bloco_ev.find("Digest Value")
+        if f_ev > 0:
+            bloco_ev = bloco_ev[:f_ev]
+        for m_ev in re.finditer(r"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ ]*?)\s*\(C\S{1,3}d\.?:\s*(\d{6})\)\s+(\d{15,20})\s+"
+                                r"(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2}(?:\s*[-+]\d{2}:\d{2})?)", bloco_ev):
+            out["eventos"].append({"descricao": m_ev.group(1).strip(), "codigo": m_ev.group(2),
+                                   "protocolo": m_ev.group(3), "data": m_ev.group(4).strip()})
+    txt_ev = " ".join(e["descricao"].lower() for e in out["eventos"])
+    out["situacao"] = ("cancelada" if "cancel" in txt_ev else
+                       "substituida" if "substitu" in txt_ev else "autorizada")
+
     # Digest
     m_dig = re.search(r"Digest Value\s+([A-Za-z0-9+/=]+)", texto)
     if m_dig:
