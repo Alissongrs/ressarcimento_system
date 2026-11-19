@@ -1928,42 +1928,50 @@ def extrair_chave_nf3e_do_qrcode(pdf_path: str) -> str:
     return ""
 
 
-def extrair_chave_nf3e_do_texto(texto: str) -> str:
-    """Detecta chave NF3e de 44 dígitos no texto.
+def chave_nf3e_dv_ok(chave: str) -> bool:
+    """Dígito verificador da chave (módulo 11, pesos 2..9 da direita) + modelo 66 (NF3e). Chave lida por OCR com
+    um dígito trocado falha aqui — a 2ª leitura da mesma chave (página 2, QR code) costuma passar."""
+    if not chave or len(chave) != 44 or not chave.isdigit() or chave[20:22] != "66":
+        return False
+    soma, peso = 0, 2
+    for c in reversed(chave[:43]):
+        soma += int(c) * peso
+        peso = 2 if peso == 9 else peso + 1
+    dv = 11 - soma % 11
+    return (0 if dv >= 10 else dv) == int(chave[43])
 
-    Tenta 3 formatos:
-      1. URL: 'chNF3e=NNNNNNNNNN...'
-      2. Formato impresso: '3326 0433 0500 ... 0115' (4-em-4, 11 grupos)
-      3. 44 dígitos puros adjacentes
-    Retorna string vazia se não achar.
-    """
-    if not texto: return ""
-    # 1. URL SEFAZ
-    m = re.search(r"chNF3e=(\d{44})", texto, re.I)
-    if m: return m.group(1)
-    # 2. Formato impresso 4-em-4 (11 grupos de 4 dígitos)
-    # Usa lookahead pra capturar overlapping (lidar com lixo concatenado antes da chave).
-    # Valida UF (11-53) + ano+mês (YYMM 2001-9912) pra rejeitar matches inválidos.
+
+def _candidatas_chave_nf3e(texto: str) -> list:
+    """Todas as chaves de 44 dígitos do texto, na ordem: URL, impresso 4-em-4, 'chave de acesso:', 44 puros."""
+    if not texto:
+        return []
+    out = [m.group(1) for m in re.finditer(r"chNF3e=(\d{44})", texto, re.I)]
     for raw in re.findall(r"(?=(\d{4}\s+\d{4}\s+\d{4}\s+\d{4}\s+\d{4}\s+\d{4}\s+\d{4}\s+\d{4}\s+\d{4}\s+\d{4}\s+\d{4}))", texto):
         chave = re.sub(r"\s+", "", raw)
         if len(chave) == 44 and chave.isdigit():
             try:
-                uf = int(chave[:2])
-                ano_mes = int(chave[2:6])
-                if 11 <= uf <= 53 and 2001 <= ano_mes <= 9912:
-                    return chave
+                if 11 <= int(chave[:2]) <= 53 and 2001 <= int(chave[2:6]) <= 9912:
+                    out.append(chave)
             except ValueError:
                 continue
-    # 3. Pattern Energisa: 'chave acesso: NNNNN...NNNN' (em qualquer formato)
-    m = re.search(r"chave\s+de\s+acesso\s*:?\s*\n?\s*((?:\d{4}\s*){10}\d{4})", texto, re.I)
-    if m:
+    for m in re.finditer(r"chave\s+de\s+acesso\s*:?\s*\n?\s*((?:\d{4}\s*){10}\d{4})", texto, re.I):
         chave = re.sub(r"\s+", "", m.group(1))
         if len(chave) == 44:
-            return chave
-    # 4. 44 dígitos puros (com lookbehind/lookahead pra não pegar mais que 44)
-    m = re.search(r"(?<!\d)(\d{44})(?!\d)", texto)
-    if m: return m.group(1)
-    return ""
+            out.append(chave)
+    out += [m.group(1) for m in re.finditer(r"(?<!\d)(\d{44})(?!\d)", texto)]
+    return list(dict.fromkeys(out))
+
+
+def extrair_chave_nf3e_do_texto(texto: str) -> str:
+    """Chave NF3e de 44 dígitos no texto. Entre as candidatas, a 1ª que passa no dígito verificador; sem nenhuma
+    válida, a 1ª encontrada (comportamento antigo). No OCR a chave aparece 2-3 vezes (páginas, boleto) e uma leitura
+    com dígito trocado vinha primeiro — a consulta à SEFAZ era pulada (CPFL Paulista 553359, 19/11).
+    Retorna string vazia se não achar."""
+    cands = _candidatas_chave_nf3e(texto)
+    for c in cands:
+        if chave_nf3e_dv_ok(c):
+            return c
+    return cands[0] if cands else ""
 
 
 def extrair_itens_encargos_sem_qtd(texto: str) -> list:
@@ -9732,9 +9740,10 @@ def aplicar_complementos(out_v2: dict, texto: str, cascata: dict = None, pdf_pat
     try:
         chave_nf3e = extrair_chave_nf3e_do_texto(texto_combo)
         # Fallback: PDF com fonte corrompida (cid:xxx) — ler QR Code do PDF
-        if not chave_nf3e and pdf_path:
-            chave_nf3e = extrair_chave_nf3e_do_qrcode(pdf_path)
-            if chave_nf3e:
+        if not chave_nf3e_dv_ok(chave_nf3e) and pdf_path:
+            _qr = extrair_chave_nf3e_do_qrcode(pdf_path)  # QR code da imagem: chave exata, sem OCR
+            if _qr and (chave_nf3e_dv_ok(_qr) or not chave_nf3e):
+                chave_nf3e = _qr
                 out_v2["_chave_nf3e_fonte"] = "qr_code"
         if chave_nf3e:
             out_v2["_chave_nf3e_detectada"] = chave_nf3e
