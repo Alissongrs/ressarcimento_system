@@ -809,6 +809,32 @@ def _coleta_campos(out_v2: dict) -> dict:
             if k not in _aplicar and k in cols:
                 cols[k] = _FORCE_NULL
 
+    # 20/11/2026 (usuário): consumo gravado = FATURADO. Grupo B faturado pelo mínimo (custo de disponibilidade) ou
+    # pela média: a medição imprime 0/8/24 kWh e os itens TE/TUSD imprimem 30/50/100 kWh. Vale a quantidade única
+    # de energia dos itens quando é maior que o medido. Sem GD (compensação muda o sentido do "faturado") e só com
+    # texto exato (no OCR a quantidade do item não tem conferência).
+    if out_v2.get("_fonte_itens") != "ocr" and str(cols.get("subgrupo_tarifario") or "").upper().startswith("B"):
+        _its = [i for i in (out_v2.get("itens_fatura") or []) if isinstance(i, dict)]
+        _descs = " ".join(str(i.get("descricao") or "").lower() for i in _its)
+        _gd = cols.get("indicador_geracao_distribuida") == 1 or re.search(r"injet|compens|gd\d|scee|geração|geracao", _descs)
+        _qs = set()
+        for i in _its:
+            d = str(i.get("descricao") or "").lower()
+            u = str(i.get("unidade") or "").lower().replace(" ", "")
+            q = i.get("quantidade_numerica")
+            if not u.startswith("kwh") or not isinstance(q, (int, float)) or q <= 0:
+                continue
+            if re.search(r"band|cip|ilum|cosip|reativ|exced|hist|ajuste|devol|retro|diferen", d):
+                continue
+            if re.search(r"consumo|energia|\bte\b|tusd|disponib", d):
+                _qs.add(round(float(q), 3))
+        try:
+            _med = float(cols.get("consumo_ativo_fponta_kwh")) if cols.get("consumo_ativo_fponta_kwh") not in (None, "", _FORCE_NULL) else 0.0
+        except (TypeError, ValueError):
+            _med = None
+        if not _gd and len(_qs) == 1 and _med is not None and next(iter(_qs)) > _med + 0.5:
+            cols["consumo_ativo_fponta_kwh"] = cols["kwh_total"] = next(iter(_qs))
+
     # 20/11/2026: a SEFAZ é o valor de confiança (usuário, opção 2) — sobrescreve o que a NF3e traz sem dúvida
     # (confirmacao.sefaz_valores: número e emissão da nota, consumo por posto pelo CCI, demanda faturada). O total a
     # pagar NÃO: continua o impresso (a NF3e pode trazer o bruto, antes de benefício/compensação).

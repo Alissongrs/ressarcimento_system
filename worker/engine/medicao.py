@@ -939,6 +939,24 @@ def _perda_texto(itens: list[Item]) -> float | None:
     return None
 
 
+def _consumo_impresso(itens_pdf: list[Item], posto: str, alvo: float) -> float | None:
+    """Número impresso numa linha de consumo do posto (não injetada/compensada/reativa/bandeira) que bate com `alvo`
+    (até 1 kWh ou 0,2 % — a fatura trunca/arredonda). Um só candidato; dois diferentes = dúvida, nada."""
+    achados = set()
+    for ln in agrupar_linhas(itens_pdf):
+        toks = pedacos(ln)
+        n = re.sub(r"\bf\W{0,2}ponta\b", "fora ponta", normalizar(" ".join(t for t, _ in toks)))  # Amazonas "F/Ponta"
+        if "consumo" not in n or re.search(r"injet|compens|reativ|exced|band|histor|media|medio", n):
+            continue
+        if classificar_posto(n)[0] != posto:
+            continue
+        for tok, _ in toks:
+            v = parse_num(tok.strip())
+            if v is not None and v > 0 and abs(v - alvo) <= max(1.0, 0.002 * alvo):
+                achados.add(round(v, 4))
+    return achados.pop() if len(achados) == 1 else None
+
+
 def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     """Lê a medição pelo molde e deixa em v2_out['_medicao'] (com 'aplicar' = colunas a gravar).
     Nunca levanta exceção."""
@@ -1029,6 +1047,25 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
                     cons_p = q
                 else:
                     cons_fp = q
+    # 20/11/2026 (usuário): a coluna de consumo grava o FATURADO. Perda impressa (texto "Perdas: 2.5" ou linha da
+    # tabela) e itens que o leitor não quantificou (Equatorial PI, Amazonas): procura na linha "Consumo <posto>" o
+    # número IMPRESSO igual a medido × (1 + perda) — é o faturado, conferido pela física + perda. Sem achar, fica o
+    # que já estava (medido, ou medido × perda da linha).
+    if med["validado"] and med.get("perda_pct") and med.get("perda_origem") in ("texto", "linha")             and not any(confirma.values()):
+        fator_p = 1 + float(med["perda_pct"]) / 100
+        medido = med.get("consumo_medido") or {}
+        for posto in ("p", "fp"):
+            base = medido.get(posto) if posto == "p" else (medido.get("fp") or medido.get("unico"))
+            if not base:
+                continue
+            q = _consumo_impresso(itens_pdf, posto, base * fator_p)
+            if q is not None:
+                if posto == "p":
+                    cons_p = q
+                else:
+                    cons_fp = q
+                confirma[posto] = True
+                med["obs"].append(f"{posto}: faturado impresso {q} = medido {base} × {fator_p:.4f}")
     med["consumo_faturado"] = {**fat, **({"p": cons_p} if cons_p is not None else {}),
                                **({"fp": cons_fp} if cons_fp is not None else {}),
                                **({"reservado": cons_res} if cons_res is not None else {})}
