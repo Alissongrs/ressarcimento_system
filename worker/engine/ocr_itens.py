@@ -150,6 +150,54 @@ def itens_recorte(pdf_bytes: bytes, pagina: int, caixa: tuple[float, float, floa
     return itens
 
 
+def endireitar(pdf_bytes: bytes, max_paginas: int = 3) -> bytes:
+    """PDF escaneado com página deitada (EDP SP 359348: o OCR lia a fatura de lado e gravava um total 166,68 onde a
+    fatura diz 10.920,94). Um OCR rápido por página; se a maioria das caixas de texto é vertical, testa a página
+    girada 90° nos dois sentidos e fica com a de maior confiança. Devolve o PDF com a rotação corrigida (/Rotate),
+    para o OCR, os recortes do reforço e as imagens verem a página em pé. Sem RapidOCR ou sem página deitada,
+    devolve os mesmos bytes."""
+    try:
+        import fitz
+        import numpy as np
+        motor = _motor()
+    except Exception:  # noqa: BLE001
+        return pdf_bytes
+
+    def caixas(img) -> list[tuple[float, float, float]]:
+        res, _ = motor(img)
+        out = []
+        for box, texto, score in (res or []):
+            if len((texto or "").strip()) < 4:
+                continue
+            xs = [p[0] for p in box]
+            ys = [p[1] for p in box]
+            out.append((max(xs) - min(xs), max(ys) - min(ys), float(score)))
+        return out
+
+    try:
+        d = fitz.open(stream=pdf_bytes, filetype="pdf")
+        mudou = False
+        for pi, pg in enumerate(d):
+            if pi >= max_paginas:
+                break
+            pix = pg.get_pixmap(matrix=fitz.Matrix(1.0, 1.0))
+            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)[:, :, :3]
+            bx = caixas(img)
+            if len(bx) < 10 or sum(1 for w, h, _ in bx if h > 1.5 * w) < 0.6 * len(bx):
+                continue
+            melhor = None
+            for k, rot in ((1, 270), (3, 90)):  # np.rot90 k=1 = anti-horário = /Rotate 270
+                b2 = caixas(np.ascontiguousarray(np.rot90(img, k)))
+                pont = sum(s for w, h, s in b2 if w >= h)
+                if melhor is None or pont > melhor[0]:
+                    melhor = (pont, rot)
+            pg.set_rotation((pg.rotation + melhor[1]) % 360)
+            mudou = True
+        return d.tobytes() if mudou else pdf_bytes
+    except Exception:  # noqa: BLE001
+        return pdf_bytes
+
+
 def _itens_rapidocr(pdf_bytes: bytes, max_paginas: int, zoom: float) -> tuple[list[dict], float, float]:
     import fitz
     import numpy as np

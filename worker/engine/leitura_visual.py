@@ -503,9 +503,12 @@ def confianca_baixa(conf_json: str | None) -> list[str]:
     except ValueError:
         return []
     n, div = c.get("n") or {}, c.get("div") or {}
+    sefaz = set(c.get("sefaz") or [])  # valor da NF3e (fonte oficial): vale sempre, sem leitura do modelo
+    n = {k: v for k, v in n.items() if k not in sefaz}
+    div = {k: v for k, v in div.items() if k not in sefaz}
     baixos = [k for k in CAMPOS_CHAVE if k in n and int(n[k]) < 2]
     baixos += [k for k in CAMPOS_CHAVE if k in div and k not in baixos]
-    baixos += [k for k in CAMPOS_OBRIGATORIOS if k not in n and k not in baixos]
+    baixos += [k for k in CAMPOS_OBRIGATORIOS if k not in n and k not in sefaz and k not in baixos]
     return baixos
 
 

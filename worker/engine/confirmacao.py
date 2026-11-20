@@ -420,6 +420,12 @@ def compactar(conf: dict) -> str:
     """Para a coluna confianca_json: {campo: n} + divergências (só onde há)."""
     out = {"n": {c: e["n"] for c, e in conf.items()},
            "div": {c: e["divergente"] for c, e in conf.items() if e["divergente"]}}
+    sef = sorted(c for c, e in conf.items() if "sefaz" in (e.get("fontes") or []))
+    if sef:
+        out["sefaz"] = sef  # campos com o valor da NF3e (fonte oficial): não entram na fila do modelo
+    corr = {c: e["corrigido"] for c, e in conf.items() if e.get("corrigido")}
+    if corr:
+        out["corr"] = corr
     return json.dumps(out, ensure_ascii=False, default=str)
 
 
@@ -449,10 +455,11 @@ def aplicar(v2_out: dict, cur=None, uid: str | None = None, origem: dict | None 
                     e["fontes"].append("sefaz")
                 if antes in vazio or iguais(k, TIPO_COL.get(k, "num"), antes, val):
                     e["n"] = len(e["fontes"])
-                else:  # o extrator leu outro valor: vale a SEFAZ, a leitura do PDF fica como divergência
+                else:  # o extrator leu outro valor: vale a SEFAZ (usuário 20/11: "o correto é sefaz, sempre");
+                    # a leitura do PDF fica registrada como corrigida, não como divergência (não vai para o modelo)
                     e["fontes"] = ["sefaz"]
                     e["n"] = 1
-                    e["divergente"]["extrator"] = antes
+                    e["corrigido"] = {"extrator": antes}
         # total a pagar impresso × total da NF3e (líquido ou bruto): diferente → divergência (vai para o modelo)
         if sefaz and cols.get("valor_total_fatura") not in vazio and "valor_total_fatura" in conf:
             vt = _num(cols.get("valor_total_fatura"))

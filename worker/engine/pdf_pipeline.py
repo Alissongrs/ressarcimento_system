@@ -4195,6 +4195,14 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
                 motivo = "forçado" if ocr_explicito else f"fallback: melhor fonte {melhor_texto_layer} < {OCR_GATE_MIN_CHARS} chars"
                 log.info(f"  [ocr] extraindo... ({motivo})")
                 t0 = time.time()
+                try:  # página escaneada deitada: endireita antes de qualquer leitura (OCR, recortes, imagens)
+                    import ocr_itens as _oi
+                    _pdf_em_pe = _oi.endireitar(pdf_bytes)
+                    if _pdf_em_pe is not pdf_bytes:
+                        log.info("  [ocr] página deitada: PDF endireitado antes do OCR")
+                        pdf_bytes = _pdf_em_pe
+                except Exception as _e_rot:  # noqa: BLE001
+                    log.warning(f"  [ocr] endireitar falhou: {_e_rot}")
                 texto_ocr, campos_ocr = extrair_ocr(pdf_bytes, fid)
                 dt = time.time() - t0
                 if texto_ocr:

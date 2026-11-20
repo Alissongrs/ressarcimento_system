@@ -47,6 +47,11 @@ def extrair_campos(pdf_bytes: bytes, nome: str = "", uid: str | None = None) -> 
     # pipeline, identificacao.itens_do_pdf cai no mesmo OCR posicionado — caminho gratuito das escaneadas
     texto_ocr = ""
     if os.environ.get("PDF_PIPELINE_NO_OCR", "") != "1" and len(texto_plumber or "") < 200:
+        try:  # página escaneada deitada: endireita antes de qualquer leitura (mesmo passo do pdf_pipeline)
+            import ocr_itens as _oi
+            pdf_bytes = _oi.endireitar(pdf_bytes)
+        except Exception:  # noqa: BLE001
+            pass
         try:
             texto_ocr, _ = pp.extrair_ocr(pdf_bytes, 0)
         except Exception:

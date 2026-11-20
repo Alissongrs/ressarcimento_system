@@ -262,7 +262,14 @@ def _coleta_campos(out_v2: dict) -> dict:
                                        "MULTA", "JUROS", "PARCELA", "CIP", "ILUM", "COSIP",
                                        "ENCARGO", "SUBSIDIO", "DESCONTO", "CONTRIB", "AJUSTE",
                                        "COFINS", "PIS", "PASEP", "ICMS", "REPERCUSSAO",
-                                       "REPERCUSS")):
+                                       "REPERCUSS", "EXCED", "KVARH")) or re.search(r"\bREAT\b", desc_up):
+            continue  # "ENERGIA REAT EXCED TE PONTA" (Copel): reativa excedente, não consumo ativo
+        # Copel: "ENERGIA ELET CONSUMO PTA" / "... F PTA" (posto abreviado)
+        if re.search(r"\bCONSUMO\b.*\bF\.? ?PTA\b", desc_up):
+            _add_consumo("fp", qtd)
+            continue
+        if re.search(r"\bCONSUMO\b.*\bPTA\b", desc_up):
+            _add_consumo("p", qtd)
             continue
         # Identifica posto: ponta vs fora ponta
         if " - PONTA" in desc_up or " PONTA" in desc_up.split(" - ", 1)[-1] or "CONSUMO P " in desc_up + " " or desc_up.endswith(" P") or " PONTA TE" in desc_up or " PONTA TUSD" in desc_up:

@@ -169,6 +169,8 @@ def classificar_grandeza(s: str) -> str:
         return "energia_reativa"
     if "kvarh" in n or "kvar" in n:
         return "energia_reativa"
+    if re.search(r"\bkqh\b|\bqh\b", n):  # Copel "KQH kWh TP": grandeza Q (reativa auxiliar), não consumo ativo
+        return "energia_reativa"
     if re.search(r"\brsv\b", n):  # Energisa MT: "RSV" = energia ativa no reservado
         return "energia_ativa"
     if "consumo" in n or "ativ" in n or "atv" in n or "kwh" in n or "energia" in n or "enrg" in n or n.startswith("en "):
@@ -946,7 +948,9 @@ def _consumo_impresso(itens_pdf: list[Item], posto: str, alvo: float) -> float |
     for ln in agrupar_linhas(itens_pdf):
         toks = pedacos(ln)
         n = re.sub(r"\bf\W{0,2}ponta\b", "fora ponta", normalizar(" ".join(t for t, _ in toks)))  # Amazonas "F/Ponta"
-        if "consumo" not in n or re.search(r"injet|compens|reativ|exced|band|histor|media|medio", n):
+        # "Consumo Ponta" ou "TUSD Energia Ponta (kWh)" (Equatorial PA)
+        if not ("consumo" in n or ("energia" in n and "kwh" in n)) \
+                or re.search(r"injet|compens|reativ|exced|band|histor|media|medio|escassez|demanda", n):
             continue
         if classificar_posto(n)[0] != posto:
             continue
@@ -1051,12 +1055,18 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     # tabela) e itens que o leitor não quantificou (Equatorial PI, Amazonas): procura na linha "Consumo <posto>" o
     # número IMPRESSO igual a medido × (1 + perda) — é o faturado, conferido pela física + perda. Sem achar, fica o
     # que já estava (medido, ou medido × perda da linha).
-    if med["validado"] and med.get("perda_pct") and med.get("perda_origem") in ("texto", "linha")             and not any(confirma.values()):
+    # Posto que já é EXATAMENTE a quantidade de um item impresso não muda; "confirmado" pela folga dos itens
+    # (607,974 calculado ≈ 605,431 impresso) não basta — vale o impresso.
+    _qtd_itens = {round(float(i["quantidade_numerica"]), 3) for i in itens if isinstance(i, dict)
+                  and isinstance(i.get("quantidade_numerica"), (int, float))}
+    def _exato(v) -> bool:
+        return v is not None and round(float(v), 3) in _qtd_itens
+    if med["validado"] and med.get("perda_pct") and med.get("perda_origem") in ("texto", "linha"):
         fator_p = 1 + float(med["perda_pct"]) / 100
         medido = med.get("consumo_medido") or {}
         for posto in ("p", "fp"):
             base = medido.get(posto) if posto == "p" else (medido.get("fp") or medido.get("unico"))
-            if not base:
+            if not base or _exato(cons_p if posto == "p" else cons_fp):
                 continue
             q = _consumo_impresso(itens_pdf, posto, base * fator_p)
             if q is not None:
@@ -1066,6 +1076,47 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
                     cons_fp = q
                 confirma[posto] = True
                 med["obs"].append(f"{posto}: faturado impresso {q} = medido {base} × {fator_p:.4f}")
+    # o item impresso pode usar um fator um pouco diferente do % da linha (Enel SP 594936: perda 2,5 % impressa,
+    # itens 60,254 / 605,431 = medido × 1,0207 nos dois postos), ou a perda nem estar legível e a física não fechar
+    # (590986: "Uso Sistema Encar.NP/FP" 289,05 / 7.125,53 = medido × 1,025). Vale o IMPRESSO no item quando CADA
+    # posto medido tem um só item kWh com fator 1,005–1,10 sobre o medido e o fator é o mesmo em todos. Só texto exato.
+    medido = med.get("consumo_medido") or {}
+    if v2_out.get("_fonte_itens") != "ocr" and medido:
+        cand: dict = {}
+        precisa = 0
+        for posto in ("p", "fp"):
+            base = medido.get(posto) if posto == "p" else (medido.get("fp") or medido.get("unico"))
+            if not base or base <= 0 or _exato(cons_p if posto == "p" else cons_fp):
+                continue
+            precisa += 1
+            qs, qs_consumo = set(), set()
+            for it in itens:
+                if not isinstance(it, dict):
+                    continue
+                q, u = it.get("quantidade_numerica"), (it.get("unidade") or "").upper().replace(" ", "")
+                d = normalizar(it.get("descricao") or "")
+                if not isinstance(q, (int, float)) or q <= 0 or not u.startswith("KWH"):
+                    continue
+                if re.search(r"injet|compens|band|exced|reativ|dispon|deduc|escassez|ajuste|retroat|diferen", d):
+                    continue
+                p_it, _ = classificar_posto(re.sub(r"[.]", " ", d))
+                if (p_it if p_it in ("p", "fp") else "fp") == posto and 1.005 <= float(q) / base <= 1.10:
+                    qs.add(round(float(q), 4))
+                    if "consumo" in d:
+                        qs_consumo.add(round(float(q), 4))
+            if qs_consumo:  # item "Consumo <posto>" manda; os outros kWh (TE, ACL) só quando não há nenhum
+                qs = qs_consumo
+            if len(qs) == 1:
+                cand[posto] = (qs.pop(), base)
+        zs = [q / b for q, b in cand.values()]
+        if cand and len(cand) == precisa and max(zs) - min(zs) < 0.004:
+            for posto, (q, base) in cand.items():
+                if posto == "p":
+                    cons_p = q
+                else:
+                    cons_fp = q
+                confirma[posto] = True
+                med["obs"].append(f"{posto}: faturado impresso no item {q} (medido {base} × {q / base:.4f})")
     med["consumo_faturado"] = {**fat, **({"p": cons_p} if cons_p is not None else {}),
                                **({"fp": cons_fp} if cons_fp is not None else {}),
                                **({"reservado": cons_res} if cons_res is not None else {})}
