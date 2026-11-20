@@ -524,11 +524,14 @@ def _coleta_campos(out_v2: dict) -> dict:
         # Valor A PAGAR primeiro (= SEFAZ líquido, já com crédito de compensação
         # Art.323 subtraído em referencia_vencimento_valor; quando não há crédito,
         # é idêntico ao valor_total_sefaz). Fallbacks: SEFAZ bruto → total do PDF.
-        "valor_total_fatura":    _to_float(
-            (out_v2.get("referencia_vencimento_valor") or {}).get("valor_total_a_pagar")
-            or (out_v2.get("_extras_sefaz") or {}).get("valor_total_sefaz")
-            or vv.get("valor_total")
-        ),
+        # 20/11/2026: o TOTAL A PAGAR IMPRESSO vale; a SEFAZ só entra se a fatura não trouxe total nenhum. Com a SEFAZ
+        # ligada o vNF (bruto, antes de benefício/subvenção) passava na frente: Equatorial PI 594903 gravaria
+        # 9.619,93 no lugar de 5.617,83 impresso. A SEFAZ confere o total na confiança (confirmacao.py).
+        "valor_total_fatura":    _to_float(next(
+            (v for v in ((out_v2.get("referencia_vencimento_valor") or {}).get("valor_total_a_pagar"),
+                         vv.get("valor_total"),
+                         (out_v2.get("_extras_sefaz") or {}).get("valor_total_sefaz"))
+             if v not in (None, "")), None)),  # total 0,00 impresso também vale (fatura zerada por crédito)
         "flag_fatura_revisao":   1 if out_v2.get("_flag_fatura_revisao") else 0,
         # valor de energia ativa (R$) = TE energia ativa do SEFAZ (fiscal) — base do
         # R$/kWh usado no ressarcimento. Antes ficava NULL (nunca era populado).
@@ -537,7 +540,9 @@ def _coleta_campos(out_v2: dict) -> dict:
         ),
         "flag_acumulo_art113":   1 if _tem_art113 else 0,
         "kwh_acumulado_art113":  round(_kwh_art113, 2) if _kwh_art113 > 0 else None,
-        "valor_total_origem":    ("sefaz" if (out_v2.get("_extras_sefaz") or {}).get("valor_total_sefaz") is not None else "extrator"),
+        "valor_total_origem":    ("extrator" if any(v not in (None, "") for v in (
+                                      (out_v2.get("referencia_vencimento_valor") or {}).get("valor_total_a_pagar"), vv.get("valor_total")))
+                                  else "sefaz" if (out_v2.get("_extras_sefaz") or {}).get("valor_total_sefaz") is not None else "extrator"),
         "qtd_itens_origem":      ("sefaz" if (out_v2.get("_extras_sefaz") or {}).get("qtd_itens_sefaz") is not None else "extrator"),
         # Tributos — prioriza tributos_agregados_itens (Fix A)
         "icms_base_calculo":     icms_base,
@@ -804,10 +809,11 @@ def _coleta_campos(out_v2: dict) -> dict:
             if k not in _aplicar and k in cols:
                 cols[k] = _FORCE_NULL
 
-    # 20/11/2026: campo que ficou VAZIO e a NF3e da SEFAZ traz sem dúvida (confirmacao.sefaz_preenche: emissão,
-    # consumo por posto pelo CCI, demanda) — preenche; nunca sobrescreve o que o extrator leu.
-    for k, v in (out_v2.get("_preencher_sefaz") or {}).items():
-        if cols.get(k) in (None, "", _FORCE_NULL):
+    # 20/11/2026: a SEFAZ é o valor de confiança (usuário, opção 2) — sobrescreve o que a NF3e traz sem dúvida
+    # (confirmacao.sefaz_valores: número e emissão da nota, consumo por posto pelo CCI, demanda faturada). O total a
+    # pagar NÃO: continua o impresso (a NF3e pode trazer o bruto, antes de benefício/compensação).
+    for k, v in (out_v2.get("_sefaz_sobrescreve") or {}).items():
+        if k in cols or v not in (None, ""):
             cols[k] = v
 
     # 17/11/2026: confiança por fontes (confirmacao.py) — {n: {campo: nº de fontes}, div: {campo: {fonte: valor}}}

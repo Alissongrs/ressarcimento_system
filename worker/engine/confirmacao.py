@@ -57,7 +57,8 @@ CAMPOS_ANTERIOR = {
     "demanda_contratada_fponta_kw": "demanda_contratada_fponta_kw", "demanda_contratada_ponta_kw": "demanda_contratada_ponta_kw",
     "modalidade_tarifaria": "modalidade_tarifaria", "codigo_uc": "codigo_uc", "subgrupo_tarifario": "subgrupo_tarifario",
 }
-TIPO_COL = {"numero_medidor": "ident", "codigo_uc": "ident", "modalidade_tarifaria": "modalidade", "subgrupo_tarifario": "ident"}
+TIPO_COL = {"numero_medidor": "ident", "codigo_uc": "ident", "modalidade_tarifaria": "modalidade", "subgrupo_tarifario": "ident",
+            "numero_nf": "ident", "data_emissao_nf": "data"}
 
 
 # ─── comparação ───────────────────────────────────────────────────────────────
@@ -194,6 +195,9 @@ _ORIGEM_CON = None
 def sefaz_por_chave(chave) -> dict | None:
     """Consulta pública da NF3e (QR code) pela chave com DV válido. Com SKIP_SEFAZ só usa o cache local.
     Devolve None sem chave válida ou se a SEFAZ não respondeu."""
+    import os
+    if os.environ.get("SURE_SEFAZ_CONFIRMA") == "0":  # testes/gabarito: resultado não pode depender do cache local
+        return None
     ch = re.sub(r"\D", "", str(chave or ""))
     if len(ch) != 44 or dv_chave_nfe(ch) is not True:
         return None
@@ -203,6 +207,18 @@ def sefaz_por_chave(chave) -> dict | None:
     except Exception:
         return None
     return None if (not d or d.get("_erro")) else d
+
+
+def _liquido_deducoes(s: dict) -> float | None:
+    """Total da NF3e tratando TODO item do grupo 5 do cClass como dedução (5904 desconto/devolução, 5905 crédito de
+    subvenção…). O líquido do consultar_nf3e só subtrai a compensação GD (5603/5604): na CPFL 553359 ele dá 53.997,40 e
+    este, 21.561,10 = total a pagar impresso. Não serve para todas as distribuidoras (em 22 de 368 notas o líquido
+    antigo é que bate) — por isso é só mais um candidato na conferência, nunca o total gravado."""
+    itens = s.get("itens") or []
+    if not itens:
+        return None
+    return round(sum((it.get("valor_total_numerico") or 0) * (-1 if str(it.get("codigo_cci") or "").startswith("5") else 1)
+                     for it in itens), 2)
 
 
 def _confirmar_sefaz(add, conf: dict, cols: dict, s: dict) -> None:
@@ -216,7 +232,7 @@ def _confirmar_sefaz(add, conf: dict, cols: dict, s: dict) -> None:
     if s.get("data_emissao") and "data_emissao_nf" in conf and _data(cols.get("data_emissao_nf")) == _data(s["data_emissao"]):
         add("data_emissao_nf", "sefaz", True)  # diferente não vira divergência: a impressa pode ser a do dia seguinte
     vt = _num(cols.get("valor_total_fatura"))
-    for ref in (s.get("valor_total_liquido_numerico"), s.get("valor_total_bruto_numerico")):
+    for ref in (s.get("valor_total_liquido_numerico"), s.get("valor_total_bruto_numerico"), _liquido_deducoes(s)):
         if vt is not None and ref is not None and abs(vt - ref) <= 0.011 and "valor_total_fatura" in conf:
             add("valor_total_fatura", "sefaz", True)
             break
@@ -232,17 +248,22 @@ def _confirmar_sefaz(add, conf: dict, cols: dict, s: dict) -> None:
         conf["situacao_nota"] = {"n": 1, "fontes": ["sefaz"], "divergente": {} if sit == "autorizada" else {"sefaz": sit}}
 
 
-def sefaz_preenche(s: dict | None) -> dict:
-    """Valores da NF3e que podem PREENCHER coluna vazia (aprovado pelo usuário em 20/11/2026). Só o que não deixa
-    dúvida: consumo por posto pelo CCI (0601 TE / 0621 TUSD em kWh; 5º dígito 1 = ponta,
+def sefaz_valores(s: dict | None) -> dict:
+    """Valores da NF3e que SOBRESCREVEM a coluna (usuário, 20/11/2026: a SEFAZ é o valor de confiança — opção 2:
+    dados fiscais e medição faturada sim, total a pagar não). Só o que não deixa dúvida: data de emissão e número
+    da nota; consumo por posto pelo CCI (0601 TE / 0621 TUSD em kWh; 5º dígito 1 = ponta,
     3 = fora ponta, 0 = único) quando TODAS as quantidades daquele posto são iguais e não há outro posto não-ponta
     (sem somar nada); demanda faturada fora ponta (0621 em kW, posto 3 ou 0) com uma quantidade só. Nunca
-    sobrescreve: atualizar_colunas_db só usa onde a coluna ficou vazia."""
+    o total a pagar: continua o impresso; diferença vira divergência e manda a fatura para o modelo (fila de confiança)."""
     out: dict = {}
     if not s:
         return out
-    # data de emissão NÃO preenche: na conferência de 39 escaneadas a NF3e diferiu da data impressa em 1 dia em
-    # 3 de 24 (para os dois lados) — só confirma quando é igual
+    # dados fiscais da própria nota: valem os da NF3e (20/11/2026; a impressa diferiu 1 dia em 3 de 24 escaneadas)
+    d = _data(s.get("data_emissao"))
+    if re.match(r"\d{4}-\d{2}-\d{2}$", d or ""):
+        out["data_emissao_nf"] = d
+    if s.get("numero"):
+        out["numero_nf"] = str(s["numero"]).lstrip("0") or "0"
     energia: dict[str, set] = {}
     demanda: dict[str, set] = {}
     itens = s.get("itens") or []
@@ -415,13 +436,30 @@ def aplicar(v2_out: dict, cur=None, uid: str | None = None, origem: dict | None 
             anterior = anterior_por_uc(cur, emp, cols.get("codigo_uc") or (origem or {}).get("UC"), cols.get("mes_referencia"))
         sefaz = sefaz_por_chave(cols.get("chave_nfe"))
         conf = confirmar(v2_out, cols, origem, anterior, sefaz)
-        # campo VAZIO que a NF3e traz sem dúvida: preenche (atualizar_colunas_db) e registra a fonte
+        # SEFAZ sobrescreve o que traz sem dúvida (atualizar_colunas_db); se o extrator leu OUTRO valor, fica a
+        # divergência — campo-chave divergente manda a fatura para o modelo (leitura_visual --fila confianca)
         vazio = (None, "", "__SET_NULL__")
-        prencher = {k: v for k, v in sefaz_preenche(sefaz).items() if cols.get(k) in vazio}
-        if prencher:
-            v2_out["_preencher_sefaz"] = prencher
-            for k in prencher:
-                conf[k] = {"n": 1, "fontes": ["sefaz"], "divergente": {}}
+        sv = sefaz_valores(sefaz)
+        if sv:
+            v2_out["_sefaz_sobrescreve"] = sv
+            for k, val in sv.items():
+                antes = cols.get(k)
+                e = conf.setdefault(k, {"n": 0, "fontes": [], "divergente": {}})
+                if "sefaz" not in e["fontes"]:
+                    e["fontes"].append("sefaz")
+                if antes in vazio or iguais(k, TIPO_COL.get(k, "num"), antes, val):
+                    e["n"] = len(e["fontes"])
+                else:  # o extrator leu outro valor: vale a SEFAZ, a leitura do PDF fica como divergência
+                    e["fontes"] = ["sefaz"]
+                    e["n"] = 1
+                    e["divergente"]["extrator"] = antes
+        # total a pagar impresso × total da NF3e (líquido ou bruto): diferente → divergência (vai para o modelo)
+        if sefaz and cols.get("valor_total_fatura") not in vazio and "valor_total_fatura" in conf:
+            vt = _num(cols.get("valor_total_fatura"))
+            refs = [r for r in (sefaz.get("valor_total_liquido_numerico"), sefaz.get("valor_total_bruto_numerico"),
+                                _liquido_deducoes(sefaz)) if r is not None]
+            if vt is not None and refs and not any(abs(vt - r) <= 0.011 for r in refs):
+                conf["valor_total_fatura"]["divergente"]["sefaz"] = refs[0]
         v2_out["_confianca"] = conf
         v2_out["_confianca_fontes"] = {"origem": bool(origem), "anterior": (anterior or {}).get("uid"),
                                        "sefaz": (sefaz or {}).get("situacao") or bool(sefaz)}

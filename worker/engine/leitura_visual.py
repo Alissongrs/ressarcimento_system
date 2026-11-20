@@ -906,8 +906,8 @@ def cmd_rodar(argv: list[str]) -> int:
     rotina = "llm_confianca" if fila == "confianca" else "leitura_visual"
     reg.ping(rotina)
     con = _con()
-    if motor == "openai":  # limite por hora da API paga (SURE_LLM_POR_HORA, padrão 10): desconta o que já rodou na última hora
-        por_hora = int(os.environ.get("SURE_LLM_POR_HORA", "10"))
+    if motor == "openai":  # limite por hora da API paga (SURE_LLM_POR_HORA, padrão 20): desconta o que já rodou na última hora
+        por_hora = int(os.environ.get("SURE_LLM_POR_HORA", "20"))
         ja = llm_na_ultima_hora(con)
         if ja >= por_hora and not ids:
             _log(f"limite de {por_hora} leituras por hora já usado ({ja} na última hora)")

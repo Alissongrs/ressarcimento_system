@@ -289,7 +289,7 @@ GD consistente, leitura, SEFAZ). Grava a coluna `validador_gate`.
   completions com imagens em base64, resposta JSON) e vira a fonte "llm" em `integrar_confianca`: valor igual ao da
   base → n + 1; vazio na base → preenche só se a origem sgeeasy diz o mesmo ou, para leituras/constante/consumo, se a
   leitura fechou na física E bate com item kWh; diferente → divergência "llm". Nunca grava sozinho.
-- `worker/job_llm_confianca.sh` (cron 11, de hora em hora às :15): `SURE_LLM_POR_HORA`=10 chamadas, descontando as da
+- `worker/job_llm_confianca.sh` (cron 11, de hora em hora às :15): `SURE_LLM_POR_HORA`=20 chamadas (era 10 até 20/11/2026), descontando as da
   última hora (FT_LEITURA_VISUAL, modelo `openai:gpt-5.4-mini`); tokens em `validacao_json.tokens`;
   `SURE_VISUAL_GRAVAR=0` só registra. Rotina `llm_confianca` no painel. Chave `OPENAI_API_KEY` do backend/.env.
 - Custo: 1.000 faturas ≈ US$ 13–17 (1.000–1.300 chamadas com 2ª leitura); as 8.720 que não fecharam na base ≈ US$ 115
