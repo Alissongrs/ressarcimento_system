@@ -804,6 +804,12 @@ def _coleta_campos(out_v2: dict) -> dict:
             if k not in _aplicar and k in cols:
                 cols[k] = _FORCE_NULL
 
+    # 20/11/2026: campo que ficou VAZIO e a NF3e da SEFAZ traz sem dúvida (confirmacao.sefaz_preenche: emissão,
+    # consumo por posto pelo CCI, demanda) — preenche; nunca sobrescreve o que o extrator leu.
+    for k, v in (out_v2.get("_preencher_sefaz") or {}).items():
+        if cols.get(k) in (None, "", _FORCE_NULL):
+            cols[k] = v
+
     # 17/11/2026: confiança por fontes (confirmacao.py) — {n: {campo: nº de fontes}, div: {campo: {fonte: valor}}}
     _conf = out_v2.get("_confianca")
     if isinstance(_conf, dict) and _conf and "erro" not in _conf:

@@ -213,9 +213,8 @@ def _confirmar_sefaz(add, conf: dict, cols: dict, s: dict) -> None:
     num = re.sub(r"\D", "", str(cols.get("numero_nf") or "")).lstrip("0")
     if num and s.get("numero") and "numero_nf" in conf:
         add("numero_nf", "sefaz", num == str(s["numero"]).lstrip("0"), s["numero"])
-    if s.get("data_emissao") and "data_emissao_nf" in conf:
-        d = _data(s["data_emissao"])
-        add("data_emissao_nf", "sefaz", _data(cols.get("data_emissao_nf")) == d, d)
+    if s.get("data_emissao") and "data_emissao_nf" in conf and _data(cols.get("data_emissao_nf")) == _data(s["data_emissao"]):
+        add("data_emissao_nf", "sefaz", True)  # diferente não vira divergência: a impressa pode ser a do dia seguinte
     vt = _num(cols.get("valor_total_fatura"))
     for ref in (s.get("valor_total_liquido_numerico"), s.get("valor_total_bruto_numerico")):
         if vt is not None and ref is not None and abs(vt - ref) <= 0.011 and "valor_total_fatura" in conf:
@@ -231,6 +230,57 @@ def _confirmar_sefaz(add, conf: dict, cols: dict, s: dict) -> None:
     sit = s.get("situacao")
     if sit:
         conf["situacao_nota"] = {"n": 1, "fontes": ["sefaz"], "divergente": {} if sit == "autorizada" else {"sefaz": sit}}
+
+
+def sefaz_preenche(s: dict | None) -> dict:
+    """Valores da NF3e que podem PREENCHER coluna vazia (aprovado pelo usuário em 20/11/2026). Só o que não deixa
+    dúvida: consumo por posto pelo CCI (0601 TE / 0621 TUSD em kWh; 5º dígito 1 = ponta,
+    3 = fora ponta, 0 = único) quando TODAS as quantidades daquele posto são iguais e não há outro posto não-ponta
+    (sem somar nada); demanda faturada fora ponta (0621 em kW, posto 3 ou 0) com uma quantidade só. Nunca
+    sobrescreve: atualizar_colunas_db só usa onde a coluna ficou vazia."""
+    out: dict = {}
+    if not s:
+        return out
+    # data de emissão NÃO preenche: na conferência de 39 escaneadas a NF3e diferiu da data impressa em 1 dia em
+    # 3 de 24 (para os dois lados) — só confirma quando é igual
+    energia: dict[str, set] = {}
+    demanda: dict[str, set] = {}
+    itens = s.get("itens") or []
+    # fatura com geração distribuída (CCI 56xx: injetada/compensada): o consumo impresso é a soma de linhas que a
+    # NF3e separa (Enel CE: 30 faturado + 234 compensado = 264) — não preenche consumo
+    gd = any(str(it.get("codigo_cci") or "")[:2] == "56" for it in itens)
+    for it in itens:
+        cci = str(it.get("codigo_cci") or "")
+        q = it.get("quantidade_numerica")
+        if len(cci) < 5 or not q or q <= 0:
+            continue
+        un0 = (it.get("unidade_nome") or "").strip().lower()
+        if cci[:4] in ("0601", "0621") and not (un0.startswith("kwh") or un0 == "kw"
+                                                 or str(it.get("unidade_codigo") or "").strip() == "1"):
+            # unidade não reconhecida num item de energia/demanda: não dá para saber de que posto/grandeza é
+            energia.setdefault(cci[4], set()).add(-1.0)
+            continue
+        un = (it.get("unidade_nome") or "").strip().lower()
+        eh_kw = str(it.get("unidade_codigo") or "").strip() == "1" or un == "kw"
+        if cci[:4] in ("0601", "0621") and not eh_kw and un.startswith("kwh"):
+            energia.setdefault(cci[4], set()).add(round(float(q), 2))
+        elif cci[:4] == "0621" and eh_kw:
+            demanda.setdefault(cci[4], set()).add(round(float(q), 2))
+    um = {k: next(iter(v)) for k, v in energia.items() if len(v) == 1 and next(iter(v)) > 0}
+    if gd:
+        um = {}
+    nao_ponta = [k for k in energia if k != "1"]
+    if "1" in um:
+        out["consumo_ativo_ponta_kwh"] = um["1"]
+    if nao_ponta == ["3"] and "3" in um:
+        out["consumo_ativo_fponta_kwh"] = um["3"]
+    elif nao_ponta == ["0"] and "0" in um and "1" not in energia:  # posto único (grupo B): é o consumo e o total
+        out["consumo_ativo_fponta_kwh"] = um["0"]
+        out["kwh_total"] = um["0"]
+    dem = [k for k in demanda if k in ("3", "0")]
+    if len(dem) == 1 and len(demanda[dem[0]]) == 1:
+        out["demanda_faturada_fponta_kw"] = next(iter(demanda[dem[0]]))
+    return out
 
 
 def origem_por_uid(uid: str) -> dict | None:
@@ -365,6 +415,13 @@ def aplicar(v2_out: dict, cur=None, uid: str | None = None, origem: dict | None 
             anterior = anterior_por_uc(cur, emp, cols.get("codigo_uc") or (origem or {}).get("UC"), cols.get("mes_referencia"))
         sefaz = sefaz_por_chave(cols.get("chave_nfe"))
         conf = confirmar(v2_out, cols, origem, anterior, sefaz)
+        # campo VAZIO que a NF3e traz sem dúvida: preenche (atualizar_colunas_db) e registra a fonte
+        vazio = (None, "", "__SET_NULL__")
+        prencher = {k: v for k, v in sefaz_preenche(sefaz).items() if cols.get(k) in vazio}
+        if prencher:
+            v2_out["_preencher_sefaz"] = prencher
+            for k in prencher:
+                conf[k] = {"n": 1, "fontes": ["sefaz"], "divergente": {}}
         v2_out["_confianca"] = conf
         v2_out["_confianca_fontes"] = {"origem": bool(origem), "anterior": (anterior or {}).get("uid"),
                                        "sefaz": (sefaz or {}).get("situacao") or bool(sefaz)}
