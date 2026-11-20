@@ -126,6 +126,8 @@ except Exception as _e:
 # Útil pra lotes 100% text-layer (evita travar/poluir com paralelismo). NÃO use em
 # lotes com faturas escaneadas — elas dependem do OCR pra ter qualquer texto.
 NO_OCR = os.getenv("PDF_PIPELINE_NO_OCR", "") == "1"
+# --seletivo (20/11/2026): reprocessamento que só muda o que está confirmado e nunca apaga valor real (seletivo.py).
+SELETIVO = os.getenv("PDF_PIPELINE_SELETIVO", "") == "1"
 
 # Parâmetros do Tesseract (motor de OCR — CPU-only).
 #   TESS_ZOOM   : fator de render do PyMuPDF (3x ≈ 216 DPI; Tesseract gosta de DPI alto).
@@ -4237,6 +4239,16 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
             _garantir_conexao_local()
 
             campos_final = _merge_campos(campos_plumber, campos_ocr, campos_markdown)
+            # --seletivo: foto dos campos ANTES de qualquer gravação desta fatura (seletivo.aplicar no fim)
+            _sel_uid = str(row.get("UID") or "").strip() or None
+            _sel_antes = None
+            if SELETIVO:
+                try:
+                    import seletivo as _sel
+                    _sel_antes = _sel.snapshot(worker_cur, _sel_uid)
+                except Exception as _e_sel:
+                    log.warning(f"  [seletivo] foto falhou — fatura NÃO gravada: {_e_sel}")
+                    return {"ok": False, "fid": fid, "erro": "seletivo_sem_foto"}
             gravar_campos(worker_cur, worker_conn, fid, campos_final, row)
 
             if not dryrun:
@@ -4353,9 +4365,19 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
                 except Exception as _e_itens:
                     log.warning(f"  [itens v45] excecao: {_e_itens}")
 
+            if SELETIVO and _sel_antes is not None:
+                import seletivo as _sel
+                _sel.aplicar(worker_cur, worker_conn, _sel_uid, _sel_antes, log)
+
             return {"ok": True, "fid": fid, "erro": None}
         except Exception as e:
             log.warning(f"  [worker] excecao na fatura {row.get('id')}: {e}")
+            if SELETIVO and locals().get("_sel_antes") is not None:  # gravou parte antes do erro: protege igual
+                try:
+                    import seletivo as _sel
+                    _sel.aplicar(worker_cur, worker_conn, locals().get("_sel_uid"), locals().get("_sel_antes"), log)
+                except Exception:  # noqa: BLE001
+                    pass
             return {"ok": False, "fid": row.get("id"), "erro": str(e)[:100]}
         finally:
             try: worker_cur.close()
@@ -4580,6 +4602,9 @@ if __name__ == "__main__":
                    help="Lê as faturas da ORIGEM alternativa VTAL (quivere_vtal @179.127.26.89) "
                         "em vez do sgeeasy. Mesma tabela Faturas_Registradas_Cache. Se --empresa "
                         "não for passado, assume Cod_Empresa=2025. Destino (PROD/COPIA) inalterado.")
+    p.add_argument("--seletivo", dest="seletivo", action="store_true",
+                   help="Reprocessamento seguro: só muda campo confirmado (2 fontes ou SEFAZ), nunca apaga valor "
+                        "real (exceto zero de ponta); backup em _backups/seletivo_AAAAMMDD.jsonl (seletivo.py).")
     p.add_argument("--no-ocr", dest="no_ocr", action="store_true",
                    help="Desliga TODO OCR Tesseract: estágio [ocr] próprio + fallback markitdown "
                         "(que dispara OCR interno e polui/trava com múltiplos workers). Use em "
@@ -4623,6 +4648,11 @@ if __name__ == "__main__":
     # --no-ocr: desliga Tesseract (estágio [ocr] + fallback markitdown). Env pros
     # workers do ProcessPool (re-importam o módulo e leem NO_OCR no import) + global
     # do parent. Mesmo padrão à prova de env-não-propagado do --prod.
+    if getattr(args, "seletivo", False):
+        os.environ["PDF_PIPELINE_SELETIVO"] = "1"
+        globals()["SELETIVO"] = True
+        log.info("[--seletivo] só muda o confirmado; não apaga valor real; backup em _backups/seletivo_*.jsonl")
+
     if getattr(args, "no_ocr", False):
         os.environ["PDF_PIPELINE_NO_OCR"] = "1"
         globals()["NO_OCR"] = True
