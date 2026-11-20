@@ -173,3 +173,8 @@ CREATE TABLE IF NOT EXISTS FATURA_USINA_HISTORICO (
   PRIMARY KEY (id),
   KEY idx_fuh_fatura (id_fatura, ordem)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 19/11/2026: situação da nota na SEFAZ (consulta pública NF3e; só conferência, preenchida por sefaz_conferir.py)
+ALTER TABLE FATURA_USINA ADD COLUMN sefaz_situacao VARCHAR(20) NULL;      -- autorizada | cancelada | substituida
+ALTER TABLE FATURA_USINA ADD COLUMN sefaz_eventos JSON NULL;              -- [{descricao, codigo, protocolo, data}]
+ALTER TABLE FATURA_USINA ADD COLUMN sefaz_consultado_em DATETIME NULL;

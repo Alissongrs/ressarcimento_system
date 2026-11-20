@@ -77,10 +77,36 @@ def texto_rapidocr(pdf_bytes: bytes, max_paginas: int = 3) -> list[str]:
     return linhas
 
 
-def itens_recorte(pdf_bytes: bytes, pagina: int, caixa: tuple[float, float, float, float], zoom: float = 6.0) -> list[dict]:
+# Leituras extras de um quadro (ocr_reforco.py): mesma região com zoom e tratamento de imagem diferentes. Cada uma
+# erra em lugares diferentes (dígito colado, ruído do scanner, traço fino); a conta da fatura escolhe a que fecha.
+VARIANTES = [(6.0, None), (8.0, None), (5.0, "contraste"), (6.0, "binaria"), (7.0, "nitida")]
+
+
+def _tratar(img, modo: str | None):
+    """Tratamento da imagem antes do reconhecimento. Nunca altera a geometria (as coordenadas continuam valendo)."""
+    if not modo:
+        return img
+    import cv2
+    import numpy as np
+    cinza = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    if modo == "contraste":  # equalização local: scanner claro/escuro, fundo colorido
+        out = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(cinza)
+    elif modo == "binaria":  # preto e branco adaptativo: fundo com cor/sombra do scanner
+        out = cv2.adaptiveThreshold(cinza, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15)
+    elif modo == "nitida":  # realce de borda: dígitos borrados/colados
+        borrada = cv2.GaussianBlur(cinza, (0, 0), 1.2)
+        out = cv2.addWeighted(cinza, 1.7, borrada, -0.7, 0)
+    else:
+        return img
+    return np.ascontiguousarray(cv2.cvtColor(out, cv2.COLOR_GRAY2RGB))
+
+
+def itens_recorte(pdf_bytes: bytes, pagina: int, caixa: tuple[float, float, float, float], zoom: float = 6.0,
+                  modo: str | None = None) -> list[dict]:
     """Segunda leitura de um quadro: recorta (x0, y0, x1, y1) em pontos do PDF, renderiza só ali em zoom alto e
     reconhece de novo. Devolve itens no mesmo formato, já em coordenadas da página. Usado por ocr_reforco.py
-    nos quadros (medição, tributos) que a leitura da página inteira não fechou."""
+    nos quadros (medição, tributos) que a leitura da página inteira não fechou. `modo` = tratamento da imagem
+    (None, "contraste", "binaria", "nitida") — ver VARIANTES."""
     import fitz
     import numpy as np
     d = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -97,6 +123,10 @@ def itens_recorte(pdf_bytes: bytes, pagina: int, caixa: tuple[float, float, floa
     img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
     if pix.n == 4:
         img = img[:, :, :3]
+    try:
+        img = _tratar(img, modo)
+    except Exception:  # sem cv2: segue com a imagem original
+        pass
     res, _ = _motor()(img)
     caixas = []
     for box, texto, score in (res or []):

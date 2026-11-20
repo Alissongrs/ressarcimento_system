@@ -8,8 +8,10 @@ e mais rápido que ler a página inteira de novo. A posição do quadro vem das 
 achou — os rótulos do cabeçalho da tabela de medição ("Leitura", "Anterior", "Atual", "Const") e os rótulos dos
 tributos (ICMS, PIS, COFINS) — então funciona em qualquer layout sem molde de posição.
 
-Voto: o campo entra quando (a) a releitura fecha a conta da fatura (física ou base × alíquota), ou (b) as duas
-leituras dizem o mesmo número. Nunca grava o que só uma passagem leu sem fechar.
+Voto (medido 19/11/2026 em 39 escaneadas com gabarito visual): medição e ICMS — uma releitura em zoom 6 que fecha a
+conta (física + item kWh; base × alíquota, nunca a soma calculada das linhas); PIS/COFINS — várias releituras com
+tratamento de imagem (ocr_itens.VARIANTES) e entra o valor que duas acharam igual e que fecha. Nunca grava o que
+não fechou.
 
 Uso no pipeline: ocr_reforco.aplicar(v2_out, pdf_bytes) depois da medição e dos tributos, só no modo OCR.
 Avulso: python ocr_reforco.py fatura.pdf
@@ -42,7 +44,9 @@ def _caixa_medicao(itens: list[Item]) -> tuple[int, tuple[float, float, float, f
         anc = sorted(por_pagina[pg], key=lambda i: i.y)
         for i, a in enumerate(anc):
             juntas = [b for b in anc if abs(b.y - a.y) <= 10]
-            if len(juntas) >= 2:
+            # o cabeçalho de DATAS ("Leitura anterior | Leitura atual | Nº de dias", Copel/Enel) também tem 2 âncoras;
+            # o da tabela de medição tem medidor/constante/grandeza/posto — sem um desses não é a tabela
+            if len(juntas) >= 2 and any(re.search(r"\b(const|medidor|grandeza|posto)", b.norm) for b in juntas):
                 y0 = min(b.y for b in juntas) - MARGEM
                 xs = [b.x for b in itens if b.page == pg]
                 return pg, (max(0.0, min(xs) - MARGEM) if xs else 0.0, y0, 10_000.0, y0 + 150.0)
@@ -76,77 +80,120 @@ def _iguais(a, b) -> bool:
         return a == b
 
 
+def _caixa_tributos_unica(itens: list[Item]) -> list[tuple[int, tuple[float, float, float, float]]]:
+    """Um recorte só cobrindo todos os rótulos de tributo da página (menos leituras que um por rótulo)."""
+    por_pg: dict[int, list[tuple[float, float, float, float]]] = {}
+    for pg, (x0, y0, x1, y1) in _caixas_tributos(itens):
+        por_pg.setdefault(pg, []).append((x0, y0, x1, y1))
+    return [(pg, (min(c[0] for c in cs), min(c[1] for c in cs), 10_000.0, max(c[3] for c in cs))) for pg, cs in por_pg.items()]
+
+
+def _variantes():
+    import ocr_itens
+    return list(getattr(ocr_itens, "VARIANTES", [(6.0, None)]))
+
+
+def _soma_calculada(tr2: dict, t: str) -> bool:
+    """tributos.py devolve a SOMA das linhas por item quando não acha o total ("trios por item sem total; soma"):
+    valor calculado, com alíquota implícita que fecha sozinha. Na releitura não vale (Enel CE 398057: 35,24 × 34,97)."""
+    obs = " | ".join(tr2.get("obs") or [])
+    return f"{t}:" in obs and "soma" in obs.split(f"{t}:", 1)[1].split("|", 1)[0]
+
+
 def aplicar(v2_out: dict, pdf_bytes: bytes, zoom: float = 6.0) -> dict:
-    """Só no modo OCR. Relê os quadros que não fecharam e vota. Nunca levanta exceção."""
+    """Só no modo OCR. Relê os quadros que não fecharam e a conta da fatura escolhe. Nunca levanta exceção.
+
+    Medido em 39 escaneadas com gabarito visual (19/11/2026):
+    - medição: uma releitura (zoom 6). Várias variantes e o molde por distribuidora não recuperaram nenhuma leitura
+      (o gargalo é o leitor de cada layout, não o OCR) e triplicavam o tempo.
+    - ICMS: uma releitura (zoom 6) que fecha base × alíquota, sem soma calculada. Variantes geravam ICMS de UMA linha
+      (Light 493430: 1.329,87 no lugar de 8.850,45) que fecha e duas leituras confirmam.
+    - PIS/COFINS: até 5 variantes (ocr_itens.VARIANTES); entra o valor que DUAS leituras acharam igual e que fecha.
+      PIS 75 % → 81 %, COFINS 75 % → 78 %, nenhum erro novo."""
     if v2_out.get("_fonte_itens") != "ocr":
         return v2_out
     try:
         import ocr_itens
         from medicao import aplicar_medicao, ler_medicao
-        from tributos import aplicar_tributos, ler_tributos
+        from tributos import ler_tributos
         itens, _, _ = _idn.itens_do_pdf(pdf_bytes, 3)
         med1 = v2_out.get("_medicao") or {}
         tr1 = v2_out.get("_tributos") or {}
         relidos: list[str] = []
-        itens2 = list(itens)
+        aceitos: list[str] = []
 
-        # medição não fechou → relê o quadro
+        # medição: uma releitura do quadro (âncora da tabela); vale se fecha a física E bate com item kWh
         if not med1.get("validado"):
             cx = _caixa_medicao(itens)
             if cx:
                 pg, caixa = cx
                 novos = ocr_itens.itens_recorte(pdf_bytes, pg, caixa, zoom)
                 if novos:
-                    itens2 = _juntar(itens2, novos, pg, caixa)
                     relidos.append("medicao")
-        # tributo sem trio fechado → relê cada rótulo
-        faltam = [t for t in ("icms", "pis", "cofins") if not (tr1.get(t) or {}).get("fecha")]
-        if faltam:
-            for pg, caixa in _caixas_tributos(itens):
-                novos = ocr_itens.itens_recorte(pdf_bytes, pg, caixa, zoom)
-                if novos:
-                    itens2 = _juntar(itens2, novos, pg, caixa)
-                    relidos.append("tributos")
-        if not relidos:
-            v2_out["_ocr_reforco"] = {"relidos": [], "aceitos": []}
-            return v2_out
+                    itens2 = _juntar(list(itens), novos, pg, caixa)
+                    antes = dict(v2_out.get("_medicao") or {})
+                    med2 = ler_medicao(pdf_bytes, itens2)
+                    if med2 and med2.get("validado"):
+                        _idn.ULTIMA_FONTE = "ocr"
+                        v2_out = _aplicar_com_itens(v2_out, pdf_bytes, itens2, aplicar_medicao)
+                        m2 = v2_out.get("_medicao") or {}
+                        # um recorte pode ler só UM dos registros do posto (Enel SP: fora ponta capacitivo + indutivo)
+                        # e a física fecha nesse registro sozinho — só vale se algum consumo bate com item kWh
+                        if m2.get("validado") and any((m2.get("itens_confirmam") or {}).values()):
+                            aceitos.append("medicao")
+                            m2["obs"] = (m2.get("obs") or []) + ["segunda leitura (recorte zoom alto) fechou a física e bate com item"]
+                        else:
+                            v2_out["_medicao"] = antes
 
-        aceitos: list[str] = []
-        # voto da medição: a releitura fecha a física → vale; senão, só se as duas leituras coincidem (nada novo)
-        if "medicao" in relidos:
-            antes = dict(v2_out.get("_medicao") or {})
-            med2 = ler_medicao(pdf_bytes, itens2)
-            if med2 and med2.get("validado"):
-                _idn.ULTIMA_FONTE = "ocr"
-                # aplica a releitura: aplicar_medicao relê itens_do_pdf (cache da página inteira) — passa os itens
-                # relidos pela porta dos fundos, trocando o cache de leitura por esta chamada
-                v2_out = _aplicar_com_itens(v2_out, pdf_bytes, itens2, aplicar_medicao)
-                m2 = v2_out.get("_medicao") or {}
-                # um recorte pode ler só UM dos registros do posto (Enel SP: fora ponta capacitivo + indutivo) e a
-                # física fecha nesse registro sozinho — valor errado. A releitura só vale se algum consumo bate com um
-                # item kWh da fatura; sem itens, fica como estava (vazio é melhor que parcial)
-                if m2.get("validado") and any((m2.get("itens_confirmam") or {}).values()):
-                    aceitos.append("medicao")
-                    m2["obs"] = (m2.get("obs") or []) + ["segunda leitura (recorte zoom alto) fechou a física e bate com item"]
-                else:
-                    v2_out["_medicao"] = antes
-                    if m2.get("validado"):
-                        v2_out["_medicao"]["obs"] = (antes.get("obs") or []) + ["releitura fechou a física mas nenhum item confirma: não gravada"]
-        if "tributos" in relidos:
-            antes_t = dict(v2_out.get("_tributos") or {})
-            tr2 = ler_tributos(None, itens2) or {}
-            novo = dict(antes_t) if antes_t else {"obs": []}
-            for t in faltam:
-                e2 = tr2.get(t)
-                if e2 and e2.get("fecha"):
-                    novo[t] = e2
-                    aceitos.append(t)
-                    novo.setdefault("obs", []).append(f"{t}: segunda leitura (recorte) fechou base × alíquota")
-            if aceitos and any(a in ("icms", "pis", "cofins") for a in aceitos):
-                # junta: o que fechou na 1ª leitura fica; o que só a releitura fechou entra; colunas refeitas
-                from tributos import montar_aplicar
-                novo["aplicar"] = montar_aplicar(novo)
-                v2_out["_tributos"] = novo
+        faltam = [t for t in ("icms", "pis", "cofins") if not (tr1.get(t) or {}).get("fecha")]
+        caixas = _caixa_tributos_unica(itens) if faltam else []
+        novo = dict(tr1) if tr1 else {"obs": []}
+        if caixas:
+            # ICMS: uma leitura em zoom 6, fecha base × alíquota, sem soma calculada
+            if "icms" in faltam:
+                for pg, caixa in caixas:
+                    novos = ocr_itens.itens_recorte(pdf_bytes, pg, caixa, zoom)
+                    if not novos:
+                        continue
+                    relidos.append("tributos")
+                    tr2 = ler_tributos(None, _juntar(list(itens), novos, pg, caixa)) or {}
+                    e2 = tr2.get("icms")
+                    if e2 and e2.get("fecha") and not _soma_calculada(tr2, "icms"):
+                        novo["icms"] = e2
+                        aceitos.append("icms")
+                        novo.setdefault("obs", []).append("icms: segunda leitura (recorte) fechou base × alíquota")
+                        break
+            # PIS/COFINS: variantes de imagem; entra o valor que duas leituras acharam igual e que fecha
+            pendentes = [t for t in faltam if t in ("pis", "cofins")]
+            votos: dict[str, dict[tuple, list]] = {t: {} for t in pendentes}
+            for pg, caixa in caixas:
+                for z, modo in _variantes():
+                    if not pendentes:
+                        break
+                    novos = ocr_itens.itens_recorte(pdf_bytes, pg, caixa, z, modo)
+                    if not novos:
+                        continue
+                    relidos.append("tributos")
+                    tr2 = ler_tributos(None, _juntar(list(itens), novos, pg, caixa)) or {}
+                    for t in list(pendentes):
+                        e2 = tr2.get(t)
+                        if not (e2 and e2.get("fecha") and e2.get("valor") is not None) or _soma_calculada(tr2, t):
+                            continue
+                        chave = (round(float(e2["valor"]), 2), round(float(e2.get("base") or 0), 2))
+                        lst = votos[t].setdefault(chave, [])
+                        lst.append("z%g %s" % (z, modo or "normal"))
+                        if len(lst) >= 2:
+                            novo[t] = e2
+                            pendentes.remove(t)
+                            aceitos.append(t)
+                            novo.setdefault("obs", []).append(
+                                f"{t}: {len(lst)} releituras ({', '.join(lst)}) acharam o mesmo valor e fecham base × alíquota")
+                if not pendentes:
+                    break
+        if any(a in ("icms", "pis", "cofins") for a in aceitos):
+            from tributos import montar_aplicar
+            novo["aplicar"] = montar_aplicar(novo)
+            v2_out["_tributos"] = novo
         v2_out["_ocr_reforco"] = {"relidos": sorted(set(relidos)), "aceitos": aceitos}
     except Exception as e:  # pragma: no cover
         v2_out["_ocr_reforco"] = {"erro": str(e)[:200]}

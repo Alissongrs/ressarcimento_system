@@ -10,6 +10,8 @@ O extrator grava o que está impresso; este módulo só anota, campo a campo, qu
   origem      — o sistema de origem (sgeeasy, Faturas_Registradas_Cache) tem o mesmo valor para a mesma fatura
   anterior    — a fatura anterior da mesma UC na base: leitura anterior de hoje = leitura atual de lá; medidor,
                 constante, demanda contratada, modalidade e UC iguais
+  sefaz       — consulta pública da NF3e pela chave (19/11/2026): número e emissão da nota, total, kWh dos itens.
+                Só confirma (nunca sobrescreve); nota cancelada/substituída vira "situacao_nota" divergente
 Fonte que diz OUTRO valor fica registrada em "divergente" — não sobrescreve nada: é matéria da regra do motor.
 
 Resultado em v2_out["_confianca"] = {campo: {"n": nº de fontes, "fontes": [...], "divergente": {fonte: valor}}}
@@ -189,6 +191,48 @@ def anterior_por_uc(cur, cod_empresa, codigo_uc, mes_ref) -> dict | None:
 _ORIGEM_CON = None
 
 
+def sefaz_por_chave(chave) -> dict | None:
+    """Consulta pública da NF3e (QR code) pela chave com DV válido. Com SKIP_SEFAZ só usa o cache local.
+    Devolve None sem chave válida ou se a SEFAZ não respondeu."""
+    ch = re.sub(r"\D", "", str(chave or ""))
+    if len(ch) != 44 or dv_chave_nfe(ch) is not True:
+        return None
+    try:
+        from consultar_nf3e_sefaz import consultar_nf3e
+        d = consultar_nf3e(ch)
+    except Exception:
+        return None
+    return None if (not d or d.get("_erro")) else d
+
+
+def _confirmar_sefaz(add, conf: dict, cols: dict, s: dict) -> None:
+    """SEFAZ só CONFIRMA: valor igual soma uma fonte; diferente não vira divergência (o total da NF3e é o da operação
+    e os itens podem vir agrupados de outro jeito), exceto número da nota e data de emissão, que são da própria NF."""
+    if "chave_nfe" in conf:
+        add("chave_nfe", "sefaz", True)
+    num = re.sub(r"\D", "", str(cols.get("numero_nf") or "")).lstrip("0")
+    if num and s.get("numero") and "numero_nf" in conf:
+        add("numero_nf", "sefaz", num == str(s["numero"]).lstrip("0"), s["numero"])
+    if s.get("data_emissao") and "data_emissao_nf" in conf:
+        d = _data(s["data_emissao"])
+        add("data_emissao_nf", "sefaz", _data(cols.get("data_emissao_nf")) == d, d)
+    vt = _num(cols.get("valor_total_fatura"))
+    for ref in (s.get("valor_total_liquido_numerico"), s.get("valor_total_bruto_numerico")):
+        if vt is not None and ref is not None and abs(vt - ref) <= 0.011 and "valor_total_fatura" in conf:
+            add("valor_total_fatura", "sefaz", True)
+            break
+    qtds = [it.get("quantidade_numerica") for it in s.get("itens") or []
+            if (it.get("unidade_nome") or "").lower().startswith("kwh") and it.get("quantidade_numerica")]
+    for c in ("consumo_ativo_fponta_kwh", "consumo_ativo_ponta_kwh", "kwh_total"):
+        v = _num(cols.get(c))
+        if v and c in conf and any(abs(abs(q) - v) <= max(0.6, 0.002 * v) for q in qtds):
+            add(c, "sefaz", True)
+    # situação da nota: cancelada/substituída vira divergência visível (a fatura pode não valer)
+    sit = s.get("situacao")
+    if sit:
+        conf["situacao_nota"] = {"n": 1, "fontes": ["sefaz"], "divergente": {} if sit == "autorizada" else {"sefaz": sit}}
+
+
 def origem_por_uid(uid: str) -> dict | None:
     """Linha da origem (Faturas_Registradas_Cache) pelo UID, só as colunas usadas. Conexão própria, reaproveitada."""
     global _ORIGEM_CON
@@ -227,7 +271,8 @@ def _hist_mes(v2: dict, mes: str) -> float | None:
     return None
 
 
-def confirmar(v2: dict, cols: dict, origem: dict | None = None, anterior: dict | None = None) -> dict:
+def confirmar(v2: dict, cols: dict, origem: dict | None = None, anterior: dict | None = None,
+              sefaz: dict | None = None) -> dict:
     conf: dict[str, dict] = {}
 
     def add(campo: str, fonte: str, ok: bool | None, valor_outro=None):
@@ -295,6 +340,8 @@ def confirmar(v2: dict, cols: dict, origem: dict | None = None, anterior: dict |
                 tipo = TIPO_COL.get(campo, "num")
                 r = iguais(campo, tipo, cols.get(campo), anterior.get(col_a))
                 add(campo, "anterior", r, anterior.get(col_a))
+    if sefaz:
+        _confirmar_sefaz(add, conf, cols, sefaz)
     return conf
 
 
@@ -316,9 +363,11 @@ def aplicar(v2_out: dict, cur=None, uid: str | None = None, origem: dict | None 
         if anterior is None and cur is not None:
             emp = cols.get("cod_empresa") or (origem or {}).get("Cod_Empresa") or (uid[:3] if uid and len(uid) >= 14 else None)
             anterior = anterior_por_uc(cur, emp, cols.get("codigo_uc") or (origem or {}).get("UC"), cols.get("mes_referencia"))
-        conf = confirmar(v2_out, cols, origem, anterior)
+        sefaz = sefaz_por_chave(cols.get("chave_nfe"))
+        conf = confirmar(v2_out, cols, origem, anterior, sefaz)
         v2_out["_confianca"] = conf
-        v2_out["_confianca_fontes"] = {"origem": bool(origem), "anterior": (anterior or {}).get("uid")}
+        v2_out["_confianca_fontes"] = {"origem": bool(origem), "anterior": (anterior or {}).get("uid"),
+                                       "sefaz": (sefaz or {}).get("situacao") or bool(sefaz)}
     except Exception as e:  # pragma: no cover
         v2_out["_confianca"] = {"erro": str(e)[:200]}
     return v2_out

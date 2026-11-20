@@ -9569,8 +9569,10 @@ def aplicar_complementos(out_v2: dict, texto: str, cascata: dict = None, pdf_pat
                         rvv["_credito_compensacao_sefaz"] = _cred_comp
                         # fatura de revisão/devolução → não deve gerar apontamento F02
                         out_v2["_flag_fatura_revisao"] = True
-                    rvv["valor_total_a_pagar"] = _vt_liquido
-                    rvv["_valor_total_origem"] = "sefaz"
+                    # 19/11/2026: SEFAZ CONFIRMA, não sobrescreve (extrator grava o impresso). O total da NF3e é o da
+                    # operação e pode ser outro (CPFL 553359: NF3e 53.997,40 × a pagar 21.561,10). Fica guardado
+                    # e entra como fonte "sefaz" na confiança (confirmacao.py).
+                    rvv["_valor_total_sefaz_liquido"] = _vt_liquido
                 qi_sefaz = sefaz.get("qtd_itens_sefaz")
                 if qi_sefaz is not None:
                     out_v2["_qtd_itens_sefaz"] = int(qi_sefaz)
