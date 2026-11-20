@@ -161,18 +161,33 @@ def _numeros(toks: list[tuple[str, float]], de: int, x_min: float | None = None)
     return nums
 
 
+def _junta_rotulo(toks: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """Enel CE/RJ (novo modelo NF3e) imprime o rótulo do quadro como "I CMS": o texto vem em dois pedaços."""
+    out: list[tuple[str, float]] = []
+    for tok, x in toks:
+        if out and out[-1][0].strip() == "I" and tok.strip().upper() == "CMS":
+            out[-1] = ("ICMS", out[-1][1])
+            continue
+        out.append((tok, x))
+    return out
+
+
 def ler_tributos(pdf_bytes: bytes | None, itens: list[Item] | None = None) -> dict | None:
     if itens is None:
         itens, _, _ = itens_do_pdf(pdf_bytes, 3)
     linhas = [ln for ln in agrupar_linhas(itens) if ln[0].page <= 2]
-    toks_por_linha = [pedacos(ln) for ln in linhas]
+    toks_por_linha = [_junta_rotulo(pedacos(ln)) for ln in linhas]
     achados: dict[str, list[Trio]] = {"icms": [], "pis": [], "cofins": []}
     pares: dict[str, list[tuple[float, float]]] = {"icms": [], "pis": [], "cofins": []}
     impressos: dict[str, list[Trio]] = {"icms": [], "pis": [], "cofins": []}  # trio na posição do rótulo que NÃO fecha
     import identificacao as _idn
     fonte_texto = getattr(_idn, "ULTIMA_FONTE", "texto") != "ocr"
+    icms_st = False
     for li, toks in enumerate(toks_por_linha):
         cabecalho = any(_eh_cabecalho(t) for t, _ in toks)
+        for k, (tok, _x) in enumerate(toks[:-1]):
+            if _tributo(tok) == "icms" and toks[k + 1][0].strip() == "(*)":
+                icms_st = True  # "ICMS (*) (*) (*)": recolhido por substituição tributária, sem valor na fatura
         for k, (tok, x) in enumerate(toks):
             trib = _tributo(tok)
             if not trib:
@@ -204,7 +219,7 @@ def ler_tributos(pdf_bytes: bytes | None, itens: list[Item] | None = None) -> di
                 pr = _par(nums, trib)
                 if pr and pr not in pares[trib]:
                     pares[trib].append(pr)
-    if not any(achados.values()) and not any(pares.values()) and not any(impressos.values()):
+    if not any(achados.values()) and not any(pares.values()) and not any(impressos.values()) and not icms_st:
         return None
     out: dict = {"obs": []}
     for trib, lst in achados.items():
@@ -251,7 +266,12 @@ def ler_tributos(pdf_bytes: bytes | None, itens: list[Item] | None = None) -> di
             b, a, v = impressos[trib][0]
             out[trib] = {"base": b, "aliquota": a, "valor": v, "fecha": False}
             out["obs"].append(f"{trib}: impresso {b} × {a}% ≠ {v} — gravado como está (regra F39)")
-    if not any(out[t] for t in ("icms", "pis", "cofins")):
+    ic = out.get("icms")
+    if icms_st and (not ic or (not ic.get("valor") and not ic.get("base"))):
+        out["icms"] = None  # zeros do quadro não são o ICMS: foi recolhido por substituição tributária
+        out["icms_st"] = True
+        out["obs"].append("icms: (*) recolhido por substituição tributária — sem valor impresso")
+    if not any(out[t] for t in ("icms", "pis", "cofins")) and not out.get("icms_st"):
         return None
     return out
 
@@ -278,6 +298,9 @@ def montar_aplicar(tr: dict) -> dict:
         aplicar["icms_valor"] = tr["icms"]["valor"]
         aplicar["icms_base_calculo"] = tr["icms"]["base"]
         aplicar["icms_aliquota"] = tr["icms"]["aliquota"]
+    elif tr.get("icms_st"):
+        # ICMS por substituição tributária: a fatura não imprime valor; vazio, não 0 (0 é valor lido)
+        aplicar["icms_valor"] = aplicar["icms_base_calculo"] = aplicar["icms_aliquota"] = "__SET_NULL__"
     if tr.get("pis"):
         aplicar["pis_valor"] = tr["pis"]["valor"]
         aplicar["pis_aliquota"] = tr["pis"]["aliquota"]

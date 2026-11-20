@@ -816,6 +816,22 @@ def _coleta_campos(out_v2: dict) -> dict:
         if k in cols or v not in (None, ""):
             cols[k] = v
 
+    # 20/11/2026: kWh total coerente com os postos finais (Grupo A, regra de 31/07: total = ponta + fora ponta).
+    # Conferência visual do lote de 500: o total vinha do agregado dos itens (TE + TUSD contados duas vezes,
+    # CPFL Santa Cruz 564221: 59.404 com postos 3.931 + 27.736) ou só da ponta quando o fora ponta não foi lido
+    # (Copel 591542: total 67 = ponta). Total impresso/validado pela medição (_aplicar) não é tocado.
+    def _f(v):
+        try:
+            return float(v) if v not in (None, "", _FORCE_NULL) else None
+        except (TypeError, ValueError):
+            return None
+    _p, _fp, _tot = _f(cols.get("consumo_ativo_ponta_kwh")), _f(cols.get("consumo_ativo_fponta_kwh")), _f(cols.get("kwh_total"))
+    if "kwh_total" not in _aplicar and _p and _p > 0 and _tot is not None:
+        if _fp is None:
+            cols["kwh_total"] = _FORCE_NULL
+        elif abs(_tot - (_p + _fp)) > max(1.0, 0.005 * (_p + _fp)):
+            cols["kwh_total"] = round(_p + _fp, 3)
+
     # 17/11/2026: confiança por fontes (confirmacao.py) — {n: {campo: nº de fontes}, div: {campo: {fonte: valor}}}
     _conf = out_v2.get("_confianca")
     if isinstance(_conf, dict) and _conf and "erro" not in _conf:
