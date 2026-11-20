@@ -146,44 +146,45 @@ def aplicar(v2_out: dict, pdf_bytes: bytes, zoom: float = 6.0) -> dict:
                             v2_out["_medicao"] = antes
 
         faltam = [t for t in ("icms", "pis", "cofins") if not (tr1.get(t) or {}).get("fecha")]
-        caixas = _caixa_tributos_unica(itens) if faltam else []
         novo = dict(tr1) if tr1 else {"obs": []}
-        if caixas:
-            # ICMS: uma leitura em zoom 6, fecha base × alíquota, sem soma calculada
-            if "icms" in faltam:
-                for pg, caixa in caixas:
-                    novos = ocr_itens.itens_recorte(pdf_bytes, pg, caixa, zoom)
-                    if not novos:
-                        continue
+        if faltam:
+            # 1ª passada = a de produção: um recorte por rótulo de tributo (zoom 6), todos juntos numa leitura; vale o
+            # tributo que fecha base × alíquota — agora sem a soma calculada das linhas por item
+            itens2 = list(itens)
+            for pg, caixa in _caixas_tributos(itens):
+                novos = ocr_itens.itens_recorte(pdf_bytes, pg, caixa, zoom)
+                if novos:
+                    itens2 = _juntar(itens2, novos, pg, caixa)
                     relidos.append("tributos")
-                    tr2 = ler_tributos(None, _juntar(list(itens), novos, pg, caixa)) or {}
-                    e2 = tr2.get("icms")
-                    if e2 and e2.get("fecha") and not _soma_calculada(tr2, "icms"):
-                        novo["icms"] = e2
-                        aceitos.append("icms")
-                        novo.setdefault("obs", []).append("icms: segunda leitura (recorte) fechou base × alíquota")
-                        break
-            # PIS/COFINS: variantes de imagem; entra o valor que duas leituras acharam igual e que fecha
-            pendentes = [t for t in faltam if t in ("pis", "cofins")]
+            if "tributos" in relidos:
+                tr2 = ler_tributos(None, itens2) or {}
+                for t in faltam:
+                    e2 = tr2.get(t)
+                    if e2 and e2.get("fecha") and not _soma_calculada(tr2, t):
+                        novo[t] = e2
+                        aceitos.append(t)
+                        novo.setdefault("obs", []).append(f"{t}: segunda leitura (recorte) fechou base × alíquota")
+            # 2ª passada só para PIS/COFINS que ainda faltam: variantes de imagem no quadro inteiro; entra o valor
+            # que DUAS leituras acharam igual e que fecha (ICMS não: as variantes pegavam o ICMS de uma linha)
+            pendentes = [t for t in faltam if t in ("pis", "cofins") and t not in aceitos]
             votos: dict[str, dict[tuple, list]] = {t: {} for t in pendentes}
-            for pg, caixa in caixas:
+            for pg, caixa in (_caixa_tributos_unica(itens) if pendentes else []):
                 for z, modo in _variantes():
                     if not pendentes:
                         break
                     novos = ocr_itens.itens_recorte(pdf_bytes, pg, caixa, z, modo)
                     if not novos:
                         continue
-                    relidos.append("tributos")
-                    tr2 = ler_tributos(None, _juntar(list(itens), novos, pg, caixa)) or {}
+                    tr3 = ler_tributos(None, _juntar(list(itens), novos, pg, caixa)) or {}
                     for t in list(pendentes):
-                        e2 = tr2.get(t)
-                        if not (e2 and e2.get("fecha") and e2.get("valor") is not None) or _soma_calculada(tr2, t):
+                        e3 = tr3.get(t)
+                        if not (e3 and e3.get("fecha") and e3.get("valor") is not None) or _soma_calculada(tr3, t):
                             continue
-                        chave = (round(float(e2["valor"]), 2), round(float(e2.get("base") or 0), 2))
+                        chave = (round(float(e3["valor"]), 2), round(float(e3.get("base") or 0), 2))
                         lst = votos[t].setdefault(chave, [])
                         lst.append("z%g %s" % (z, modo or "normal"))
                         if len(lst) >= 2:
-                            novo[t] = e2
+                            novo[t] = e3
                             pendentes.remove(t)
                             aceitos.append(t)
                             novo.setdefault("obs", []).append(
