@@ -948,20 +948,26 @@ def _perda_texto(itens: list[Item]) -> float | None:
     return None
 
 
-def _demanda_linhas(itens_pdf: list) -> tuple[list[float], bool]:
+def _demanda_linhas(itens_pdf: list, posto: str = "fp") -> tuple[list[float], bool]:
     """Parcelas de demanda cobrada lidas direto do TEXTO impresso do quadro de itens ("Demanda Distribuição (kW)
     147,98", "Demanda Distrib. Isenta ICMS (kW) 2,02", "DEMANDA DE DISTRIBUICAO TUSD ISENTA kW ICMS 198,48"): a
     quantidade é o número logo depois da unidade kW. Lê por TRECHO "demanda … kW número" — a linha agrupada junta o
     quadro de medição ao lado (Enel CE). Para quando o extrator de itens não trouxe a demanda (Equatorial, Enel CE,
-    Copel). Devolve (parcelas, partição_icms): partição = uma parcela isenta/sem ICMS e outra tributada."""
+    Copel). Devolve (parcelas, partição_icms): partição = uma parcela isenta/sem ICMS e outra tributada.
+    posto="fp": trechos sem posto ou de fora ponta; "p": só os de ponta (Copel A4 azul: "DEMANDA DISTR USD PONTA kW
+    231,84" + "... PONTA ISENTA ICMS kW 88,16"). 21/11/2026: rótulo "DEMANDA LIVRE - kW 90" (quadro da contratada,
+    Equatorial GO) não é parcela — o hífen antes do kW marca rótulo; "ICMSkW" colado (Copel) é separado."""
     vistos, vals, isenta = set(), [], False
     rx = re.compile(r"demanda(?:(?!demanda).){0,60}?\bkw\)?(?:\s+icms)?\s+(\d{1,3}(?:\.\d{3})*,\d+|\d+(?:[.,]\d+)?)\b")
     for ln in agrupar_linhas(itens_pdf or []):
-        n = normalizar(" ".join(t for t, _ in pedacos(ln)))
+        n = re.sub(r"icmskw\b", "icms kw", normalizar(" ".join(t for t, _ in pedacos(ln))))
         for m in rx.finditer(n):
             seg = m.group(0)
             if seg in vistos or re.search(r"reativ|ultrapass|exced|diferen|retroativ|geracao|complement|dmcr|contratad"
-                                          r"|medid|registrad|maxim|histor|faturad|ponta\s*-\s*kw|ponta:", seg):
+                                          r"|medid|registrad|maxim|histor|faturad|-\s*kw|ponta:", seg):
+                continue
+            fora = bool(re.search(r"fora\s*(?:de\s*)?ponta|\bf\W{0,2}ponta|\bfp\b", seg))
+            if (posto == "p") != (bool(re.search(r"ponta", seg)) and not fora):
                 continue
             v = parse_num(m.group(1))
             if v is not None and v > 0:
@@ -1221,6 +1227,13 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             if _s and (_prova or any(abs(_s - r) <= max(0.05, 0.005 * r) for r in _refs)):
                 _soma = _s
                 break
+        _azul_parc = {}
+        if azul and med["fonte"] != "ocr":
+            # azul (Copel A4): parcelas por posto — só vale a partição explícita do ICMS (isenta + tributada)
+            for _posto, _col in (("fp", "demanda_faturada_fponta_kw"), ("p", "demanda_faturada_ponta_kw")):
+                _pp, _pi = _demanda_linhas(itens_pdf, _posto)
+                if len(_pp) == 2 and _pi:
+                    _azul_parc[_col] = _r3(sum(_pp))
         if _soma:
             aplicar["demanda_faturada_fponta_kw"] = _soma
         elif df:  # o molde leu a demanda faturada explícita (CEMIG A: coluna "Faturado")
@@ -1238,6 +1251,7 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             perto = min(dem_itens, key=lambda v: abs(v - dm["fp"]))
             if abs(perto - dm["fp"]) <= 0.05 * dm["fp"]:
                 aplicar["demanda_faturada_fponta_kw"] = perto
+        aplicar.update(_azul_parc)  # a partição impressa vale por cima da tabela de medição e dos itens
         # sem item de demanda impresso, fica vazio: calcular "a maior entre medida e contratada" seria o extrator
         # dizendo o que a concessionária devia cobrar — e escondendo quando ela cobrou diferente (17/11/2026)
         if dc.get("fp") is not None and med["fonte"] != "ocr":  # OCR: a contratada não tem conferência → fica vazia
@@ -1246,6 +1260,14 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
         if dc.get("p") is not None and med["fonte"] != "ocr":
             aplicar["demanda_contratada_ponta_kw"] = dc["p"]
             lt.setdefault("demanda_contratada_ponta_kw", dc["p"])
+    elif med["fonte"] != "ocr":
+        # 21/11/2026: medição não fechou (Copel A4: o molde não lê o quadro), mas a demanda COBRADA não depende dela —
+        # vale a partição explícita do ICMS impressa nos itens (tributada + isenta), por posto: item de demanda com
+        # "PONTA" (sem "fora") só existe na azul — a modalidade ainda não está lida aqui (568081 Azul)
+        for _posto, _col in (("fp", "demanda_faturada_fponta_kw"), ("p", "demanda_faturada_ponta_kw")):
+            _pp, _pi = _demanda_linhas(itens_pdf, _posto)
+            if len(_pp) == 2 and _pi:
+                aplicar[_col] = _r3(sum(_pp))
     if med["registros"]:
         aplicar["medicao_grandezas_json"] = json.dumps(med["registros"], ensure_ascii=False)
     med["aplicar"] = aplicar

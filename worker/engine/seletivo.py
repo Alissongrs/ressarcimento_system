@@ -14,7 +14,10 @@ Regras (decisão do usuário: banco o mais fiel possível; SEFAZ é o valor de c
   total, cujo parser da SEFAZ ainda erra). Divergência com origem sgeeasy, fatura anterior e histórico fica só
   registrada no confianca_json: na cópia (21/11) foram 14 casos e o motor estava certo nos 14 (origem com leitura
   ×100, kWh em R$/kWh, total 67,72 onde o impresso é 0,00). Valor da SEFAZ fica sempre;
-- valor → vazio: volta o valor antigo — exceto zero de ponta em fatura sem ponta (0 → vazio é a correção).
+- valor → 0: volta o valor antigo (é apagar), salvo SEFAZ; vazio → 0 é preencher (leitura impressa 0,00) e segue a
+  regra geral;
+- valor → vazio: volta o valor antigo — exceto zero de ponta em fatura sem ponta e zero de demanda contratada
+  (0 → vazio é a correção).
 20/11/2026: a 1ª versão exigia 2 fontes concordando para qualquer mudança. Na cópia (68 faturas, conferência visual
 dos 29 campos segurados) ela segurou 22 valores certos do motor e salvou 5 errados — os 5 eram erros do motor que
 foram corrigidos (demanda em parcelas, leitura de ponta copiada no fora ponta, "4,27 %" lido como total).
@@ -38,6 +41,9 @@ CAMPOS = ["mes_referencia", "valor_total_fatura", "numero_medidor", "dias_fatura
           "demanda_contratada_fponta_kw", "demanda_contratada_ponta_kw", "data_vencimento", "data_emissao_nf",
           "numero_nf", "chave_nfe"]  # codigo_uc/numero_instalacao: quem manda é o espelho da origem
 PONTA = {"consumo_ativo_ponta_kwh", "leit_ant_ativa_ponta", "leit_atu_ativa_ponta", "demanda_faturada_ponta_kw"}
+# 0 de contratada veio da origem (sgeeasy grava 0 quando não tem): na cópia (21/11) 8 faturas sem contratada impressa
+# tinham 0 e o motor limpava — 0 → vazio é a correção
+ZERO_NAO_E_DADO = PONTA | {"demanda_contratada_fponta_kw", "demanda_contratada_ponta_kw"}
 DIR = Path(__file__).resolve().parent / "_backups"
 
 
@@ -115,8 +121,8 @@ def decidir(antes: dict, depois: dict, conf: dict) -> tuple[dict, dict]:
             continue
         confirmado = c in sefaz or not _diverge(c, div.get(c))
         if _vazio(d):
-            ok = c in PONTA and _zero(a)  # 0 de ponta em fatura sem ponta → vazio
-        elif _zero(d) and not _zero(a) and c not in ("valor_total_fatura",):
+            ok = c in ZERO_NAO_E_DADO and _zero(a)  # 0 de ponta em fatura sem ponta / contratada 0 → vazio
+        elif _zero(d) and not _vazio(a) and not _zero(a) and c not in ("valor_total_fatura",):
             ok = c in sefaz  # valor real → 0 é apagar (Copel A4: 4.898 → 0, 21/11/2026); total 0,00 impresso vale
         else:
             ok = confirmado

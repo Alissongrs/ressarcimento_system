@@ -212,6 +212,20 @@ def _num(s) -> float | None:
     except ValueError:
         return None
 
+def _num_k(s) -> float | None:
+    """Constante do medidor: "0.09600" / "1.44000" usam ponto DECIMAL (Copel) — _num leria 9600 / 144000.
+    Ponto único seguido de nº de casas ≠ 3, ou "0." no começo, é decimal; o resto segue _num."""
+    if not s:
+        return None
+    t = str(s).strip().rstrip(".,")
+    if "," not in t and t.count(".") == 1 and (len(t.split(".")[1]) != 3 or t.startswith("0.")):
+        try:
+            return float(t)
+        except ValueError:
+            return None
+    return _num(t)
+
+
 def _data_br(s: str):
     from datetime import date
     try:
@@ -1235,12 +1249,18 @@ def parse_regex(linhas: list[str]) -> dict:
     if not dados["constante_k"]:
         for pat in [
             r"\bK\s*=\s*([\d,\.]+)",
-            r"Constante[:\s]+([\d,\.]+)",
+            r"Constante[:\s]+([\d,\.]+)(?:[ \t]+([\d,\.]+))?",
             r"K\s*:\s*([\d,\.]+)",
         ]:
             m = re.search(pat, texto, re.IGNORECASE)
             if m:
-                dados["constante_k"] = _num(m.group(1))
+                k = _num_k(m.group(1))
+                # Copel: "Constante 0.09600 0.02400" = kW e kWh; a de demanda é 4× a de energia (integração de
+                # 15 min) → a constante da energia é a 2ª (21/11/2026: gravava 9600 onde o impresso é 0,024)
+                k2 = _num_k(m.group(2)) if m.lastindex and m.lastindex >= 2 and m.group(2) else None
+                if k and k2 and abs(k - 4 * k2) <= 1e-6 + 0.001 * k:
+                    k = k2
+                dados["constante_k"] = k
                 break
 
     if not dados["rtp"]:
