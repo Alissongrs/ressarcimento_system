@@ -34,6 +34,7 @@ import io
 import logging
 import os
 TBL_FDE = os.environ.get("FDE_TABLE", "FATURA_DADOS_EXTRAIDOS_COPIA")  # CÓPIA: grava na tabela COPIA por padrão
+os.environ["FDE_TABLE"] = TBL_FDE  # atualizar_colunas_db/seletivo leem o env com default PRODUÇÃO: alinha à mesma tabela
 
 import re
 import sys
@@ -2198,8 +2199,10 @@ def _gravar_mirror_origem(cur, conn, uid, row):
         A resolução real (qual está certo) é por PROVA — fórmula leitura×K / SEFAZ —
         ou revisão humana; nunca por 'a origem disse'."""
         ext = _n(ext)
-        if ext is None or ext == 0:
-            if orig is None:
+        # 20/11/2026: só preenche o que o extrator deixou VAZIO, e nunca com zero. Zero impresso é dado (total 0,00
+        # de fatura compensada) e o vazio de ponta em fatura sem ponta é proposital — a origem devolvia 0/67,72 ali.
+        if ext is None:
+            if orig is None or orig == 0:
                 return ("keep", None)
             flags.append({"campo": campo, "origem": orig, "extrator": ext, "status": "ORIGEM_NAO_VALIDADO"})
             return ("set", orig)                       # preenche gap (candidato, não confirmado)
@@ -2218,9 +2221,9 @@ def _gravar_mirror_origem(cur, conn, uid, row):
         ("ucs_anteriores", _s(row.get("UCs_Anteriores"))), ("razao_social", _s(row.get("RAZAO_SOCIAL"))),
         ("empresa_nome", _s(row.get("Empresa"))), ("data_proxima_leitura", row.get("DATA_PROXIMA_LEITURA")),
         ("rs_kwh_ponta", _n(row.get("RS_KWH_Ponta"))), ("rs_kwh_fponta", _n(row.get("RS_KWH_FPonta"))),
-        ("rs_kwh_reservado", _n(row.get("RS_KWH_Reservado"))), ("kwh_total", _n(row.get("KWH_Total"))),
+        ("rs_kwh_reservado", _n(row.get("RS_KWH_Reservado"))),
         ("rs_kwh_total", _n(row.get("RS_KWH_Total"))),
-    ]
+    ]  # kwh_total saiu daqui (20/11/2026): a origem passava por cima do kWh do motor; agora só preenche vazio
     for col, val in cad:
         if val is not None:
             sets.append(f"`{col}` = %s"); vals.append(val)
@@ -2238,7 +2241,8 @@ def _gravar_mirror_origem(cur, conn, uid, row):
                      # demanda_faturada NÃO vem mais da origem (KW_Registrada vem errado/arredondado);
                      # agora é a demanda MEDIDA do PDF (itens_fatura), populada no atualizar_colunas.
                      ("consumo_reativo_excedente_kvarh", ufer),
-                     ("energia_injetada_kwh", _n(row.get("KWH_Total_Injet")))]:
+                     ("energia_injetada_kwh", _n(row.get("KWH_Total_Injet"))),
+                     ("kwh_total", _n(row.get("KWH_Total")) or None)]:
         if val is not None:
             sets.append(f"`{col}` = COALESCE(`{col}`, %s)"); vals.append(val)
     # MEDIÇÃO VALIDADA (extrator × origem)
@@ -4281,9 +4285,12 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
                     _txt = (texto_plumber or "") + "\n" + (texto_markitdown or "") + "\n" + (texto_bbox or "")
                     _pl = aplicar_parsers(_txt)
                     if _pl.get("_medicao_validada"):
-                        _cols = {k: v for k, v in _pl.items() if not k.startswith("_")}
+                        # 20/11/2026: o parser antigo só PREENCHE vazio. Ele devolvia leitura None e o consumo dele
+                        # ("Energia Elétrica" = líquido/mínimo) e passava por cima da medição validada do motor
+                        # (medicao.py) — no teste da cópia apagou leituras impressas de 12 faturas.
+                        _cols = {k: v for k, v in _pl.items() if not k.startswith("_") and v is not None}
                         if _cols:
-                            _sets = ", ".join(f"{k}=%s" for k in _cols)
+                            _sets = ", ".join(f"{k}=COALESCE({k}, %s)" for k in _cols)
                             worker_cur.execute(
                                 f"UPDATE {TBL_FDE} SET {_sets} WHERE uid=%s",
                                 (*_cols.values(), uid_neg))
