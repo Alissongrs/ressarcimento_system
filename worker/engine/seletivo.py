@@ -116,6 +116,8 @@ def decidir(antes: dict, depois: dict, conf: dict) -> tuple[dict, dict]:
         confirmado = c in sefaz or not _diverge(c, div.get(c))
         if _vazio(d):
             ok = c in PONTA and _zero(a)  # 0 de ponta em fatura sem ponta → vazio
+        elif _zero(d) and not _zero(a) and c not in ("valor_total_fatura",):
+            ok = c in sefaz  # valor real → 0 é apagar (Copel A4: 4.898 → 0, 21/11/2026); total 0,00 impresso vale
         else:
             ok = confirmado
         (ficou if ok else voltou)[c] = d if ok else a

@@ -668,6 +668,10 @@ def _ler_generico(itens: list[Item]) -> tuple[list[Registro], float | None, dict
                     for a, u, k, c, nome in _ordenacoes(run):
                         r = Registro(medidor, grandeza, txt, posto, sub, "", a, u, k, c)
                         cands = _calc_candidatos(r)
+                        # consumo 0 com leituras diferentes não existe: era a constante colada na leitura
+                        # (Copel A4 "2155 2155.024 … 0", 21/11/2026 — gravava consumo 0 por cima do 4.898 impresso)
+                        if c == 0 and a != u:
+                            continue
                         if any(_bate(c, calc) for _, calc in cands) and not (c == 0 and a == u and medidor is None):
                             r.regra = nome
                             escolhido = r

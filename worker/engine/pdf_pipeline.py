@@ -2243,7 +2243,8 @@ def _gravar_mirror_origem(cur, conn, uid, row):
                      ("consumo_reativo_excedente_kvarh", ufer),
                      ("energia_injetada_kwh", _n(row.get("KWH_Total_Injet"))),
                      ("kwh_total", _n(row.get("KWH_Total")) or None)]:
-        if val is not None:
+        # zero da origem não é dado (21/11/2026): KW_Contratada = 0 entrava em fatura Grupo B e em A que imprime 80 kW
+        if val is not None and not (isinstance(val, (int, float)) and val == 0):
             sets.append(f"`{col}` = COALESCE(`{col}`, %s)"); vals.append(val)
     # MEDIÇÃO VALIDADA (extrator × origem)
     for col, ext, orig in [
