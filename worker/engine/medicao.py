@@ -447,6 +447,32 @@ def demanda_contratada(itens: list[Item]) -> dict:
     return out
 
 
+# 21/11/2026: rótulos do quadro "Grandezas Contratadas" que o leitor por item não pega (o rótulo e o valor saem no
+# fim de uma linha da tabela de itens). Só o posto fora ponta/único; o valor tem de ser o único lido.
+RE_CONTR_TXT = [
+    re.compile(r"montante de uso contratado\s*:?\s*(?P<val>\d[\d.,]*)"),                      # Coelba
+    re.compile(r"(?<!ultrapassagem )(?<!excedente )demanda\s*contratada\s*:?\s*(?P<val>\d[\d.,]*)\s*$"),  # Neoenergia DF
+    re.compile(r"demanda livre\s*-\s*kw\s*(?P<val>\d[\d.,]*)\s*$"),                           # Equatorial GO
+    re.compile(r"montante em todos os periodos\s*:?\s*(?P<val>\d[\d.,]*)\s*kw"),              # Copel
+    re.compile(r"\bcomponente fio\s+(?P<val>\d[\d.,]*)\s*$"),                                 # Light
+]
+
+
+def contratada_texto(itens: list[Item]) -> float | None:
+    vals = set()
+    for ln in agrupar_linhas(itens):
+        if ln[0].page > 1:
+            continue
+        n = normalizar(" ".join(t for t, _ in pedacos(ln)))
+        n = re.sub(r"demandacontratada", "demanda contratada", n)
+        for rx in RE_CONTR_TXT:
+            for m in rx.finditer(n):
+                v = parse_num(m.group("val").rstrip(".,"))
+                if v and v > 0:
+                    vals.add(round(float(v), 3))
+    return vals.pop() if len(vals) == 1 else None
+
+
 # ─── molde CEMIG grupo B: "Tipo de Medição | Medição | Leitura Anterior | Leitura Atual |
 #     Constante de Multiplicação | Consumo kWh"  →  "Energia kWh  ARK191000338  65.967  65.967  1  0"
 def _ler_cemig_b(itens: list[Item]) -> tuple[list[Registro], float | None] | None:
@@ -1011,6 +1037,11 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
         v2_out["_medicao"] = {"erro": str(e)[:200]}
         return v2_out
     if not med:
+        # sem molde de medição (Copel refaturamento 596803): a contratada impressa no quadro ainda vale
+        _ct = contratada_texto(itens_pdf) if v2_out.get("_fonte_itens") != "ocr" else None
+        if _ct is not None:
+            v2_out["_medicao"] = {"aplicar": {"demanda_contratada_fponta_kw": _ct}, "demanda_contratada": {"fp": _ct},
+                                  "validado": False, "obs": ["sem molde de medição: só a contratada do quadro"]}
         return v2_out
     itens = v2_out.get("itens_fatura") or []
     lt = v2_out.get("ligacao_tecnica") or {}
@@ -1254,12 +1285,6 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
         aplicar.update(_azul_parc)  # a partição impressa vale por cima da tabela de medição e dos itens
         # sem item de demanda impresso, fica vazio: calcular "a maior entre medida e contratada" seria o extrator
         # dizendo o que a concessionária devia cobrar — e escondendo quando ela cobrou diferente (17/11/2026)
-        if dc.get("fp") is not None and med["fonte"] != "ocr":  # OCR: a contratada não tem conferência → fica vazia
-            aplicar["demanda_contratada_fponta_kw"] = dc["fp"]
-            lt.setdefault("demanda_contratada_fponta_kw", dc["fp"])
-        if dc.get("p") is not None and med["fonte"] != "ocr":
-            aplicar["demanda_contratada_ponta_kw"] = dc["p"]
-            lt.setdefault("demanda_contratada_ponta_kw", dc["p"])
     elif med["fonte"] != "ocr":
         # 21/11/2026: medição não fechou (Copel A4: o molde não lê o quadro), mas a demanda COBRADA não depende dela —
         # vale a partição explícita do ICMS impressa nos itens (tributada + isenta), por posto: item de demanda com
@@ -1268,6 +1293,20 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             _pp, _pi = _demanda_linhas(itens_pdf, _posto)
             if len(_pp) == 2 and _pi:
                 aplicar[_col] = _r3(sum(_pp))
+    # contratada: não depende da medição fechar (21/11/2026: só gravava com a medição validada). O rótulo do quadro
+    # "Grandezas Contratadas" lido no texto vale por cima do leitor por item. OCR: sem conferência → fica vazia.
+    if med["fonte"] != "ocr":
+        dc = dict(med.get("demanda_contratada") or {})
+        _ct = contratada_texto(itens_pdf)
+        if _ct is not None:
+            if dc.get("fp") not in (None, _ct):
+                med["obs"].append(f"contratada: quadro impresso {_ct} no lugar de {dc.get('fp')}")
+            dc["fp"] = _ct
+            med["demanda_contratada"] = dc
+        for _posto, _col in (("fp", "demanda_contratada_fponta_kw"), ("p", "demanda_contratada_ponta_kw")):
+            if dc.get(_posto) is not None:
+                aplicar[_col] = dc[_posto]
+                lt.setdefault(_col, dc[_posto])
     if med["registros"]:
         aplicar["medicao_grandezas_json"] = json.dumps(med["registros"], ensure_ascii=False)
     med["aplicar"] = aplicar

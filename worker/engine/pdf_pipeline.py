@@ -4393,6 +4393,18 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
                 except Exception as _e_itens:
                     log.warning(f"  [itens v45] excecao: {_e_itens}")
 
+            # 21/11/2026: demanda contratada 0 não é dado (a origem sgeeasy grava 0 quando não tem; Grupo B e faturas
+            # sem o quadro "Grandezas Contratadas"): vira vazio. Contratada impressa o motor já gravou acima.
+            if not dryrun and _sel_uid:
+                try:
+                    worker_cur.execute(
+                        f"UPDATE {TBL_FDE} SET demanda_contratada_fponta_kw = NULLIF(demanda_contratada_fponta_kw, 0), "
+                        f"demanda_contratada_ponta_kw = NULLIF(demanda_contratada_ponta_kw, 0) WHERE uid=%s "
+                        f"AND (demanda_contratada_fponta_kw = 0 OR demanda_contratada_ponta_kw = 0)", (_sel_uid,))
+                    worker_conn.commit()
+                except Exception as _e_dc:  # noqa: BLE001
+                    log.warning(f"  [contratada 0] {_e_dc}")
+
             if SELETIVO and _sel_antes is not None:
                 import seletivo as _sel
                 _sel.aplicar(worker_cur, worker_conn, _sel_uid, _sel_antes, log)
