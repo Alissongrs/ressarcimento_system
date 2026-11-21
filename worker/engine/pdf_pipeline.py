@@ -637,9 +637,9 @@ def parse_regex(linhas: list[str]) -> dict:
         """Copia leitura_p para leitura_fp APENAS se a fatura tem segmentos
         separados (THS). Em Convencional, deixa NULL para o motor F05 não
         somar a leitura única duas vezes."""
-        if not eh_convencional:
-            dados["leit_ant_fp"] = dados["leit_ant_p"]
-            dados["leit_atu_fp"] = dados["leit_atu_p"]
+        # 20/11/2026: desligado. A cópia inventava a leitura de fora ponta (Copel A4: ponta 760304→771082 gravada
+        # também no FP, cujo impresso é 18982037→19161254). Fora ponta só com leitura lida; senão fica vazio.
+        return None
 
     # ── Leituras do medidor ───────────────────────────────────────────────────
     # "Energia ativa em kWh  Ponta  6508  6606  40  4018"

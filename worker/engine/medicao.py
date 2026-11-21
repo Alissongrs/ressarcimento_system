@@ -905,8 +905,10 @@ def _itens_confirmam(itens_fatura: list, valor: float | None, unidade: str = "KW
     return False
 
 
-def _demanda_item(itens_fatura: list) -> list[float]:
-    """Quantidades (kW) dos itens de demanda faturada — exclui diferença/retroativa/ultrapassagem/reativa/lei estadual."""
+def _demanda_item(itens_fatura: list, partes: bool = False) -> list[float]:
+    """Quantidades (kW) dos itens de demanda faturada — exclui diferença/retroativa/ultrapassagem/reativa/lei estadual.
+    partes=True: lista SEM deduplicar e COM as parcelas isenta/sem ICMS — a mesma demanda partida por tributo
+    (Enel CE "Demanda Distribuição sem ICMS" 34,65 + "Demanda Distribuição" 65,35; CPFL dois "Demanda [kW] - TUSD")."""
     vals = []
     for it in itens_fatura or []:
         if not isinstance(it, dict):
@@ -916,10 +918,11 @@ def _demanda_item(itens_fatura: list) -> list[float]:
         q = it.get("quantidade_numerica")
         if "demanda" not in d or not u.startswith("KW") or u.startswith("KWH") or not isinstance(q, (int, float)) or q <= 0:
             continue
-        if re.search(r"diferen|retroativ|ultrapass|reativ|lei estadual|geracao|complement|isent|exced|sem icms", d):
+        if re.search(r"diferen|retroativ|ultrapass|reativ|lei estadual|geracao|complement|exced"
+                     + ("" if partes else r"|isent|sem icms"), d):
             continue
         vals.append(round(float(q), 3))
-    return sorted(set(vals))
+    return vals if partes else sorted(set(vals))
 
 
 RE_PERDA_TXT = re.compile(r"perdas?\b[^0-9%\n]{0,45}?(\d{1,2}(?:[.,]\d{1,2})?)\s*%?(?![\d.,])")
@@ -939,6 +942,29 @@ def _perda_texto(itens: list[Item]) -> float | None:
             if 0.5 <= v <= 10:
                 return v
     return None
+
+
+def _demanda_linhas(itens_pdf: list) -> tuple[list[float], bool]:
+    """Parcelas de demanda cobrada lidas direto do TEXTO impresso do quadro de itens ("Demanda Distribuição (kW)
+    147,98", "Demanda Distrib. Isenta ICMS (kW) 2,02", "DEMANDA DE DISTRIBUICAO TUSD ISENTA kW ICMS 198,48"): a
+    quantidade é o número logo depois da unidade kW. Lê por TRECHO "demanda … kW número" — a linha agrupada junta o
+    quadro de medição ao lado (Enel CE). Para quando o extrator de itens não trouxe a demanda (Equatorial, Enel CE,
+    Copel). Devolve (parcelas, partição_icms): partição = uma parcela isenta/sem ICMS e outra tributada."""
+    vistos, vals, isenta = set(), [], False
+    rx = re.compile(r"demanda(?:(?!demanda).){0,60}?\bkw\)?(?:\s+icms)?\s+(\d{1,3}(?:\.\d{3})*,\d+|\d+(?:[.,]\d+)?)\b")
+    for ln in agrupar_linhas(itens_pdf or []):
+        n = normalizar(" ".join(t for t, _ in pedacos(ln)))
+        for m in rx.finditer(n):
+            seg = m.group(0)
+            if seg in vistos or re.search(r"reativ|ultrapass|exced|diferen|retroativ|geracao|complement|dmcr|contratad"
+                                          r"|medid|registrad|maxim|histor|faturad|ponta\s*-\s*kw|ponta:", seg):
+                continue
+            v = parse_num(m.group(1))
+            if v is not None and v > 0:
+                vistos.add(seg)
+                vals.append(round(float(v), 3))
+                isenta = isenta or bool(re.search(r"isent|sem icms", seg))
+    return vals, (isenta and len(vals) == 2)
 
 
 def _consumo_impresso(itens_pdf: list[Item], posto: str, alvo: float) -> float | None:
@@ -1178,7 +1204,22 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
         if med.get("perda_pct") is not None and med.get("perda_origem") in ("linha", "texto"):
             aplicar["perda_transformacao_percentual"] = med["perda_pct"]
         azul = "azul" in modalidade
-        if df:  # o molde leu a demanda faturada explícita (CEMIG A: coluna "Faturado")
+        # 20/11/2026: demanda cobrada em parcelas (isenta/sem ICMS + tributada, ou duas linhas TUSD): a soma das
+        # parcelas é a demanda faturada quando fecha com a contratada ou a medida — prova de que é partição do mesmo
+        # kW, não ponta/fora ponta. Vale por cima da "Demanda Faturada" da tabela de medição (Enel CE imprime ali a
+        # medida 65,35 e cobra 34,65 + 65,35 = 100 = contratada).
+        _refs = [v for v in (dc.get("fp"), dm.get("fp"), df.get("fp")) if v]
+        _soma = None
+        _lin, _part_icms = _demanda_linhas(itens_pdf) if not azul and med["fonte"] != "ocr" else ([], False)
+        for _partes, _prova in ((_demanda_item(itens, partes=True), False), (_lin, _part_icms)):
+            _s = _r3(sum(_partes)) if len(_partes) >= 2 else None
+            # prova: fecha com contratada/medida, ou é a partição explícita do ICMS (uma parcela isenta + uma tributada)
+            if _s and (_prova or any(abs(_s - r) <= max(0.05, 0.005 * r) for r in _refs)):
+                _soma = _s
+                break
+        if _soma:
+            aplicar["demanda_faturada_fponta_kw"] = _soma
+        elif df:  # o molde leu a demanda faturada explícita (CEMIG A: coluna "Faturado")
             if df.get("fp") is not None:
                 aplicar["demanda_faturada_fponta_kw"] = df["fp"]
             if df.get("p") is not None and azul:

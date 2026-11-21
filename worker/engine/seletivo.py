@@ -9,11 +9,15 @@ e o --force regrava tudo — inclusive vazio por cima de valor real que o motor 
     ... todas as gravações do pipeline ...
     aplicar(cur, conn, uid, antes)      # compara com a foto e desfaz o que não pode mudar
 
-Regras (decisão do usuário: banco o mais fiel possível; SEFAZ é o valor de confiança; só grava o confirmado):
-- vazio → preenchido:  fica se confirmado (n ≥ 2 fontes no confianca_json, ou valor da SEFAZ); senão volta a vazio;
-- valor → outro valor: fica se confirmado sem divergência, ou SEFAZ; senão volta o valor antigo;
-- valor → vazio:       volta o valor antigo — exceto zero de ponta em fatura sem ponta (0 → vazio é a correção).
-Campo sem medição de confiança (fora do confianca_json) conta como não confirmado.
+Regras (decisão do usuário: banco o mais fiel possível; SEFAZ é o valor de confiança):
+- vazio → preenchido e valor → outro valor: fica, a menos que o motor DIVIRJA de fonte CONFIÁVEL — a SEFAZ (fora o
+  total, cujo parser da SEFAZ ainda erra). Divergência com origem sgeeasy, fatura anterior e histórico fica só
+  registrada no confianca_json: na cópia (21/11) foram 14 casos e o motor estava certo nos 14 (origem com leitura
+  ×100, kWh em R$/kWh, total 67,72 onde o impresso é 0,00). Valor da SEFAZ fica sempre;
+- valor → vazio: volta o valor antigo — exceto zero de ponta em fatura sem ponta (0 → vazio é a correção).
+20/11/2026: a 1ª versão exigia 2 fontes concordando para qualquer mudança. Na cópia (68 faturas, conferência visual
+dos 29 campos segurados) ela segurou 22 valores certos do motor e salvou 5 errados — os 5 eram erros do motor que
+foram corrigidos (demanda em parcelas, leitura de ponta copiada no fora ponta, "4,27 %" lido como total).
 
 Cada fatura com campo restaurado ou mudado vira uma linha em _backups/seletivo_AAAAMMDD.jsonl
 ({uid, id, antes, depois, ficou, voltou}) — é o backup para desfazer (desfazer(): grava de volta o "antes").
@@ -85,6 +89,20 @@ def snapshot(cur, uid: str | None) -> dict | None:
     return dict(r)
 
 
+FONTES_CONFIAVEIS = {"sefaz"}  # origem/anterior/historico: só registro (ver docstring)
+SEM_SEFAZ = {"valor_total_fatura"}  # o parser do total da SEFAZ ainda erra (553359, 563246, 609872)
+
+
+def _diverge(campo: str, d) -> bool:
+    """Diverge de fonte confiável? d = {fonte: valor} do confianca_json (formato antigo: qualquer verdade = diverge)."""
+    if not d:
+        return False
+    if not isinstance(d, dict):
+        return True
+    fontes = {f for f in d if f in FONTES_CONFIAVEIS and not (campo in SEM_SEFAZ and f == "sefaz")}
+    return bool(fontes)
+
+
 def decidir(antes: dict, depois: dict, conf: dict) -> tuple[dict, dict]:
     """(ficou, voltou): campos cuja mudança vale e campos que voltam ao valor antigo {campo: valor_antigo}."""
     n, div, sefaz = conf.get("n") or {}, conf.get("div") or {}, set(conf.get("sefaz") or [])
@@ -95,7 +113,7 @@ def decidir(antes: dict, depois: dict, conf: dict) -> tuple[dict, dict]:
         a, d = antes[c], depois[c]
         if _igual(a, d):
             continue
-        confirmado = c in sefaz or (int(n.get(c) or 0) >= 2 and not div.get(c))
+        confirmado = c in sefaz or not _diverge(c, div.get(c))
         if _vazio(d):
             ok = c in PONTA and _zero(a)  # 0 de ponta em fatura sem ponta → vazio
         else:

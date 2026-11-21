@@ -49,7 +49,7 @@
   "pis_valor": 30.64,
   "cofins_valor": 143.79,
   "demanda_contratada_fponta_kw": 30.0,
-  "demanda_faturada_fponta_kw": 13.53,
+  "demanda_faturada_fponta_kw": 30.0,
   "data_vencimento": "2026-03-10",
   "data_emissao_nf": "2026-03-02"
  },
@@ -943,7 +943,7 @@
   "pis_valor": 52.02,
   "cofins_valor": 241.8,
   "demanda_contratada_fponta_kw": 140.0,
-  "demanda_faturada_fponta_kw": 60.98,
+  "demanda_faturada_fponta_kw": 140.0,
   "data_vencimento": "2025-07-20",
   "data_emissao_nf": "2025-07-04"
  },

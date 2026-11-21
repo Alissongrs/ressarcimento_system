@@ -387,6 +387,14 @@ def _por_rotulo(itens: list[Item], tipo: str, modos=("mesma linha", "abaixo", "d
                     v = PARSER[tipo](o.text)
                     if v is not None:
                         return v, f"rotulo:{it.text[:40]}|direita"
+                # linha de tabela ("Total a Pagar ........ 0,00", CPFL): o valor fica na coluna Valor, longe do rótulo.
+                # Vale só quando é o ÚNICO número da linha à direita — sem vizinho para confundir.
+                if tipo == "total":
+                    longe = [PARSER[tipo](o.text) for o in universo if o.page == it.page and o is not it
+                             and abs(o.y - it.y) <= it.h * 0.7 and o.x >= it.x + it.w]
+                    longe = [v for v in longe if v is not None]
+                    if len(longe) == 1:
+                        return longe[0], f"rotulo:{it.text[:40]}|linha"
     return None
 
 
@@ -428,7 +436,9 @@ def _cabecalho(itens: list[Item], ph: float) -> dict:
         if re.search(r"pagina|p[aá]g\.|\bvia\b|cep", ntexto):
             continue
         pedacos = [p.strip() for p in texto.split("|") if p.strip()]
-        dinheiro = [(i, parse_dinheiro(p)) for i, p in enumerate(pedacos) if parse_dinheiro(p) is not None and ("r$" in normalizar(p) or parse_dinheiro(p) >= 1.0)]
+        # "%" não é dinheiro: CPFL imprime "COFINS 4,27 %" em fonte grande e o total vem mascarado (R$ *****) — 597328
+        dinheiro = [(i, parse_dinheiro(p)) for i, p in enumerate(pedacos) if parse_dinheiro(p) is not None and "%" not in p
+                    and ("r$" in normalizar(p) or parse_dinheiro(p) >= 1.0)]
         datas = [(i, parse_data(p)) for i, p in enumerate(pedacos) if parse_data(p) and "emiss" not in normalizar(p)]
         datas_puras = [(i, v) for i, v in datas if RE_DATA.fullmatch(pedacos[i].strip())]
         mes = next((parse_mesano(p) for p in pedacos if parse_mesano(p) and not RE_DATA.search(p)), None)
