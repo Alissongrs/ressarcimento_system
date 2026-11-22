@@ -129,7 +129,37 @@ def _itens_fitz(pdf_bytes: bytes, max_paginas: int):
 
 
 OCR_ZOOM = float(os.getenv("TESS_ZOOM", "3"))
-ULTIMA_FONTE = "texto"  # "ocr" quando itens_do_pdf caiu no OCR (medicao.py afrouxa a tolerância de linha)  # 3x ≈ 216 dpi, igual ao OCR do pdf_pipeline
+# Fonte das linhas da ÚLTIMA chamada de itens_do_pdf NESTA thread: "ocr" quando caiu no OCR (medicao.py afrouxa a
+# tolerância de linha e só grava o conferido). 21/11/2026: era global do módulo — com o pdf_pipeline --workers N
+# (threads) uma fatura lia a fonte da outra; e ocr_reforco trocava itens_do_pdf no módulo inteiro, entregando os itens
+# relidos de uma escaneada a outra fatura. Agora é por thread (fonte_atual / itens_forcados).
+import threading as _threading  # noqa: E402
+
+_TL = _threading.local()
+
+
+def fonte_atual() -> str:
+    return getattr(_TL, "fonte", "texto")
+
+
+def definir_fonte(valor: str) -> None:
+    _TL.fonte = valor
+
+
+class itens_forcados:
+    """with itens_forcados(itens): itens_do_pdf devolve estes itens (fonte OCR) só nesta thread."""
+
+    def __init__(self, itens):
+        self.itens = itens
+
+    def __enter__(self):
+        self.antes = getattr(_TL, "forcados", None)
+        _TL.forcados = self.itens
+        return self
+
+    def __exit__(self, *exc):
+        _TL.forcados = self.antes
+        return False
 
 
 def _itens_ocr(pdf_bytes: bytes, max_paginas: int) -> tuple[list[Item], float, float]:
@@ -205,8 +235,11 @@ def itens_do_pdf(pdf_bytes: bytes, max_paginas: int = 2) -> tuple[list[Item], fl
     """Linhas posicionadas: liteparse; se vier pouco (PDF estranho), PyMuPDF; se continuar sem texto (PDF só imagem)
     e o OCR não estiver desligado (PDF_PIPELINE_NO_OCR=1), RapidOCR (ou Tesseract, se o pacote não estiver instalado;
     SURE_OCR_MOTOR=tesseract força o Tesseract)."""
-    global ULTIMA_FONTE
-    ULTIMA_FONTE = "texto"
+    forcados = getattr(_TL, "forcados", None)
+    if forcados is not None:
+        definir_fonte("ocr")
+        return [i for i in forcados if i.page < max_paginas], 0.0, 0.0
+    definir_fonte("texto")
     try:
         itens, pw, ph = _itens_liteparse(pdf_bytes, max_paginas)
     except Exception:
@@ -232,7 +265,7 @@ def itens_do_pdf(pdf_bytes: bytes, max_paginas: int = 2) -> tuple[list[Item], fl
                 itens3 = []
         if len(itens3) > len(itens):
             itens, pw, ph = itens3, pw3, ph3
-            ULTIMA_FONTE = "ocr"
+            definir_fonte("ocr")
     itens.sort(key=lambda i: (i.page, round(i.y / 2), i.x))
     return itens, pw, ph
 

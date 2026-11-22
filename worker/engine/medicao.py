@@ -82,7 +82,7 @@ def agrupar_linhas(itens: list[Item], tol: float | None = None) -> list[list[Ite
     """Agrupa itens em linhas por proximidade de y (mesma página). Itens de OCR oscilam mais em y: tolerância maior."""
     if tol is None:
         import identificacao as _idn
-        tol = 3.5 if getattr(_idn, "ULTIMA_FONTE", "") == "ocr" else 2.2
+        tol = 3.5 if _idn.fonte_atual() == "ocr" else 2.2
     linhas: list[list[Item]] = []
     for it in sorted(itens, key=lambda i: (i.page, i.y, i.x)):
         if linhas and linhas[-1][0].page == it.page and abs(linhas[-1][0].y - it.y) <= tol:
@@ -666,7 +666,7 @@ def _ordenacoes(nums: list[float]) -> list[tuple[float, float, float | None, flo
 def _idn_fonte() -> str:
     try:
         import identificacao as _i
-        return getattr(_i, "ULTIMA_FONTE", "")
+        return _i.fonte_atual()
     except Exception:  # noqa: BLE001
         return ""
 
@@ -1185,7 +1185,7 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
         import identificacao as _idn
         # fonte das linhas (camada de texto ou OCR): atualizar_colunas_db só deixa o extrator antigo gravar
         # consumo/tributo/demanda quando é texto
-        v2_out["_fonte_itens"] = "ocr" if getattr(_idn, "ULTIMA_FONTE", "") == "ocr" else "texto"
+        v2_out["_fonte_itens"] = "ocr" if _idn.fonte_atual() == "ocr" else "texto"
         med = ler_medicao(pdf_bytes, itens_pdf)
     except Exception as e:  # pragma: no cover
         v2_out["_medicao"] = {"erro": str(e)[:200]}

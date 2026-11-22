@@ -134,7 +134,7 @@ def aplicar(v2_out: dict, pdf_bytes: bytes, zoom: float = 6.0) -> dict:
                     antes = dict(v2_out.get("_medicao") or {})
                     med2 = ler_medicao(pdf_bytes, itens2)
                     if med2 and med2.get("validado"):
-                        _idn.ULTIMA_FONTE = "ocr"
+                        _idn.definir_fonte("ocr")
                         v2_out = _aplicar_com_itens(v2_out, pdf_bytes, itens2, aplicar_medicao)
                         m2 = v2_out.get("_medicao") or {}
                         # um recorte pode ler só UM dos registros do posto (Enel SP: fora ponta capacitivo + indutivo)
@@ -202,24 +202,10 @@ def aplicar(v2_out: dict, pdf_bytes: bytes, zoom: float = 6.0) -> dict:
 
 
 def _aplicar_com_itens(v2_out: dict, pdf_bytes: bytes, itens2: list[Item], fn):
-    """Roda aplicar_medicao/aplicar_tributos com a lista de itens relida: troca temporariamente itens_do_pdf."""
-    original = _idn.itens_do_pdf
-
-    def _falso(pdf, max_paginas=2):
-        _idn.ULTIMA_FONTE = "ocr"
-        return [i for i in itens2 if i.page < max_paginas], 0.0, 0.0
-
-    _idn.itens_do_pdf = _falso
-    try:
-        import medicao as _m
-        import tributos as _t
-        _m.itens_do_pdf = _falso
-        _t.itens_do_pdf = _falso
+    """Roda aplicar_medicao/aplicar_tributos com a lista de itens relida — só nesta thread (itens_forcados);
+    trocar itens_do_pdf no módulo entregava os itens desta fatura às outras threads do pdf_pipeline."""
+    with _idn.itens_forcados(itens2):
         return fn(v2_out, pdf_bytes)
-    finally:
-        _idn.itens_do_pdf = original
-        _m.itens_do_pdf = original
-        _t.itens_do_pdf = original
 
 
 if __name__ == "__main__":

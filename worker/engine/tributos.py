@@ -141,7 +141,7 @@ def _malformado_ocr(tok: str) -> bool:
     fecha NO CENTAVO; com a folga normal (0,5 %) a CPFL Paulista 553359 gravava ICMS 4.063,00 onde a fatura diz
     4.063,88 (18/11). Coelba/Equatorial com o mesmo formato fecham exato e seguem valendo. Texto exato não passa."""
     import identificacao as _idn
-    if getattr(_idn, "ULTIMA_FONTE", "texto") != "ocr":
+    if _idn.fonte_atual() != "ocr":
         return False
     return bool(re.fullmatch(r"-?\d{1,3}(\.\d{3})+\.\d{1,2}", (tok or "").strip().rstrip("%")))
 
@@ -181,7 +181,7 @@ def ler_tributos(pdf_bytes: bytes | None, itens: list[Item] | None = None) -> di
     pares: dict[str, list[tuple[float, float]]] = {"icms": [], "pis": [], "cofins": []}
     impressos: dict[str, list[Trio]] = {"icms": [], "pis": [], "cofins": []}  # trio na posição do rótulo que NÃO fecha
     import identificacao as _idn
-    fonte_texto = getattr(_idn, "ULTIMA_FONTE", "texto") != "ocr"
+    fonte_texto = _idn.fonte_atual() != "ocr"
     icms_st = False
     for li, toks in enumerate(toks_por_linha):
         cabecalho = any(_eh_cabecalho(t) for t, _ in toks)
