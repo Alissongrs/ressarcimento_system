@@ -652,10 +652,40 @@ def _ordenacoes(nums: list[float]) -> list[tuple[float, float, float | None, flo
             out.append((u, a, k, c, "atu ant K cons"))
     if n >= 5:
         out.append((nums[0], nums[1], nums[2], nums[-1], "ant atu K … cons"))
+        for i in range(0, n - 4):  # coluna a mais entre K e consumo (Amazonas "61880 61483 1,00000 5 397": NPL)
+            a, u, k, _x, c = nums[i:i + 5]
+            out.append((a, u, k, c, "ant atu K x cons"))
+            out.append((u, a, k, c, "atu ant K x cons"))
     for i in range(0, max(n - 2, 0) + 1):
         if i + 3 <= n:
             a, u, c = nums[i:i + 3]
             out.append((a, u, None, c, "ant atu cons"))
+    return out
+
+
+def _idn_fonte() -> str:
+    try:
+        import identificacao as _i
+        return getattr(_i, "ULTIMA_FONTE", "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _descolar_k_consumo(toks: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """OCR cola a constante no consumo: "85875.00 97045.00 1.0011170.00" (Enel CE 609870). Um token com dois
+    separadores decimais logo depois de duas leituras vira K + consumo no ponto em que (atual − anterior) × K fecha."""
+    out = list(toks)
+    for i, (t, x) in enumerate(toks):
+        if i < 2 or parse_num(t) is not None or not re.fullmatch(r"\d+[.,]\d+[.,]\d+", t):
+            continue
+        a, u = parse_num(toks[i - 2][0]), parse_num(toks[i - 1][0])
+        if a is None or u is None or u <= a:
+            continue
+        sep = re.search(r"[.,]", t).start()
+        for j in range(sep + 2, len(t) - 3):
+            k, c = parse_num(t[:j]), parse_num(t[j:])
+            if k and c and 0 < k < 1000 and _bate(c, (u - a) * k):
+                return out[:i] + [(t[:j], x), (t[j:], x + 1)] + out[i + 1:]
     return out
 
 
@@ -665,7 +695,7 @@ def _ler_generico(itens: list[Item]) -> tuple[list[Registro], float | None, dict
     for ln in agrupar_linhas(itens):
         if ln[0].page > 1:
             break
-        toks = pedacos(ln)
+        toks = _descolar_k_consumo(pedacos(ln))
         # corrida de números
         flags = [parse_num(t) is not None for t, _ in toks]
         tem_medidor = any(RE_MEDIDOR.match(t) and sum(ch.isdigit() for ch in t) >= 4 for t, _ in toks)
@@ -716,6 +746,15 @@ def _ler_generico(itens: list[Item]) -> tuple[list[Registro], float | None, dict
                                 r.regra = nome
                                 quase = r
                     escolhido = escolhido or quase
+                    # OCR: linha de energia ativa com medidor que não fecha (dígito lido errado no consumo, 550695
+                    # "3014" por 3614) entra PENDENTE — _ocr_confirma_por_itens só a aceita se leituras × K × perda
+                    # baterem com o item kWh impresso
+                    if not escolhido and medidor and grandeza == "energia_ativa" and _idn_fonte() == "ocr":
+                        for a, u, k, c, nome in _ordenacoes(run):
+                            if nome == "ant atu K cons" and a < u and k is not None and 0 < k < 1000:
+                                escolhido = Registro(medidor, grandeza, txt, posto, sub, "", a, u, k, c)
+                                escolhido.regra = "ocr_pendente"
+                                break
                     if escolhido:
                         chave = (escolhido.medidor, escolhido.grandeza, escolhido.posto, escolhido.leit_ant,
                                  escolhido.leit_atu, escolhido.constante, escolhido.consumo)
@@ -1076,6 +1115,68 @@ def _consumo_impresso(itens_pdf: list[Item], posto: str, alvo: float) -> float |
     return achados.pop() if len(achados) == 1 else None
 
 
+def _ocr_confirma_por_itens(med: dict, itens_pdf: list) -> bool:
+    """21/11/2026, só OCR: o OCR troca dígito no consumo da tabela (550695: "3014" por 3614) mas as leituras e a
+    constante saem iguais. Confere cada posto de energia ativa por (atual − anterior) × K × f = quantidade impressa num
+    item kWh, com o MESMO f (perda de transformação, 1,000–1,060) em todos os postos; com um posto só, f = 1 e o
+    número em duas linhas kWh (TE e TUSD). Confirmado: consumo = a quantidade impressa (o faturado)."""
+    regs = [r for r in med.get("registros") or [] if r.get("grandeza") == "energia_ativa"
+            and r.get("leit_ant") is not None and r.get("leit_atu") is not None]
+    por_posto: dict = {}
+    for r in regs:
+        p = "p" if r.get("posto") == "p" else "fp"
+        k = r.get("constante") or 1.0
+        calc = (r["leit_atu"] - r["leit_ant"]) * k
+        if calc <= 0 or p in por_posto:
+            return False
+        por_posto[p] = (r, calc)
+    if not por_posto:
+        return False
+    qs: dict = {}
+    for ln in agrupar_linhas(itens_pdf):
+        if ln[0].page > 1:
+            continue
+        n = normalizar(" ".join(t for t, _ in pedacos(ln)))
+        if not re.search(r"kw\s*h|kwn|kvh", n) or re.search(r"injet|compens|reativ|kvar", n):
+            continue
+        for t, _ in pedacos(ln):
+            v = parse_num(t.strip())
+            if v is not None and v > 0:
+                qs[round(v, 4)] = qs.get(round(v, 4), 0) + 1
+    cand = {p: [(q / calc, q) for q in qs if 0.9995 <= q / calc <= 1.06] for p, (_, calc) in por_posto.items()}
+    if len(por_posto) == 1:
+        p = next(iter(cand))
+        ok = [(z, q) for z, q in cand[p] if abs(z - 1) <= 0.001 and qs[q] >= 2]
+        if len({q for _, q in ok}) != 1:
+            return False
+        escolha = {p: ok[0]}
+    else:
+        pares = [(zp, qp, zf, qf) for zp, qp in cand.get("p", []) for zf, qf in cand.get("fp", [])
+                 if abs(zp - zf) <= 0.0015]
+        if len({(qp, qf) for _, qp, _, qf in pares}) != 1:
+            return False
+        zp, qp, zf, qf = pares[0]
+        escolha = {"p": (zp, qp), "fp": (zf, qf)}
+    fat = dict(med.get("consumo_faturado") or {})
+    medido = dict(med.get("consumo_medido") or {})
+    leit = dict(med.get("leituras") or {})
+    for p, (z, q) in escolha.items():
+        r, calc = por_posto[p]
+        r["ok"], r["calc"], r["regra"] = True, round(q, 4), f"(atual−anterior)×K × {z:.4f} = item kWh (OCR)"
+        chave = p if (p == "p" or "unico" not in fat) else "unico"
+        fat[chave] = round(q, 4)
+        medido[chave] = round(calc, 3)
+        leit[chave] = {"ant": r["leit_ant"], "atu": r["leit_atu"], "constante": r.get("constante"), "registros": 1}
+    med["consumo_faturado"], med["consumo_medido"], med["leituras"] = fat, medido, leit
+    z = max(z for z, _ in escolha.values())
+    if z > 1.0005:
+        med["perda_pct"], med["perda_origem"] = round((z - 1) * 100, 2), "itens"
+    med["validado"], med["validado_por"], med["confirmado_ocr_itens"] = True, "itens_ocr", True
+    med["n_ok"] = sum(1 for r in med["registros"] if r.get("ok"))
+    med.setdefault("obs", []).append("OCR: postos confirmados por leituras × K × perda = item kWh impresso")
+    return True
+
+
 def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     """Lê a medição pelo molde e deixa em v2_out['_medicao'] (com 'aplicar' = colunas a gravar).
     Nunca levanta exceção."""
@@ -1089,6 +1190,11 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     except Exception as e:  # pragma: no cover
         v2_out["_medicao"] = {"erro": str(e)[:200]}
         return v2_out
+    if med and v2_out.get("_fonte_itens") == "ocr" and med.get("registros"):
+        _pend = any(r.get("regra") == "ocr_pendente" or r.get("ok") is False for r in med["registros"]
+                    if r.get("grandeza") == "energia_ativa")
+        if _pend or not med.get("validado"):
+            _ocr_confirma_por_itens(med, itens_pdf)
     if not med:
         # sem molde de medição (Copel refaturamento 596803): a contratada impressa no quadro ainda vale
         _ct = contratada_texto(itens_pdf) if v2_out.get("_fonte_itens") != "ocr" else None
@@ -1248,7 +1354,7 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     # lido errado que ainda feche a conta; só se grava a medição quando cada posto com consumo bate com um item
     # kWh da fatura. Sem confirmação fica vazio (fila humana / leitura visual à mão), nunca um valor inventado.
     med["fonte"] = v2_out.get("_fonte_itens") or "texto"
-    if med["fonte"] == "ocr" and med["validado"]:
+    if med["fonte"] == "ocr" and med["validado"] and not med.get("confirmado_ocr_itens"):
         postos = [p for p, c in (("p", cons_p), ("fp", cons_fp)) if c is not None]  # fp lido como 0 conta (troca)
         # com um posto só não há troca possível e a física (3 números que fecham) basta; com ponta E fora ponta,
         # cada um tem de bater com um item kWh
