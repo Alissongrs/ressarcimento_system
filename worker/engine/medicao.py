@@ -455,17 +455,20 @@ RE_CONTR_TXT = [
     re.compile(r"demanda livre\s*-\s*kw\s*(?P<val>\d[\d.,]*)\s*$"),                           # Equatorial GO
     re.compile(r"montante em todos os periodos\s*:?\s*(?P<val>\d[\d.,]*)\s*kw"),              # Copel
     re.compile(r"\bcomponente fio\s+(?P<val>\d[\d.,]*)\s*$"),                                 # Light
+    re.compile(r"montante fora (?:de )?ponta\s*:?\s*(?P<val>\d[\d.,]*)\s*kw"),               # Copel azul
 ]
+RE_CONTR_TXT_P = [re.compile(r"montante na ponta\s*:?\s*(?P<val>\d[\d.,]*)\s*kw")]       # Copel azul
 
 
-def contratada_texto(itens: list[Item]) -> float | None:
+def contratada_texto(itens: list[Item], posto: str = "fp") -> float | None:
     vals = set()
+    rxs = RE_CONTR_TXT_P if posto == "p" else RE_CONTR_TXT
     for ln in agrupar_linhas(itens):
         if ln[0].page > 1:
             continue
         n = normalizar(" ".join(t for t, _ in pedacos(ln)))
         n = re.sub(r"demandacontratada", "demanda contratada", n)
-        for rx in RE_CONTR_TXT:
+        for rx in rxs:
             for m in rx.finditer(n):
                 v = parse_num(m.group("val").rstrip(".,"))
                 if v and v > 0:
@@ -833,7 +836,57 @@ def _medidor_repetido(itens: list[Item]) -> str | None:
 
 
 # ─── leitura completa ─────────────────────────────────────────────────────────
-MOLDES = [("enel", _ler_enel), ("cemig_a", _ler_cemig_a), ("cemig_b", _ler_cemig_b), ("elektro", _ler_elektro),
+# ─── molde Copel A (21/11/2026): "0044629187 CONSUMO kWh FP 4029997 4229109.024 4898" — medidor, grandeza, unidade,
+#     posto (PT/FP/TP), leitura anterior, leitura atual, constante, consumo. A camada de texto cola a leitura atual
+#     com a constante (".024" = 0,024); a constante certa vem do quadro "Constante 0.09600 0.02400" (kW, kWh). TP
+#     (total) não entra. O consumo da coluna já vem com a perda de transformação (2,5 %, inferida pela validação).
+RE_COPEL = re.compile(r"^(?P<med>\d{8,12}) (?P<g>consumo|en\.? ?exce|demanda|kqh|[a-z.]+) (?P<u>kwh|kw|kvarh|kvar) "
+                      r"(?P<posto>pt|fp|tp) (?P<nums>[\d., ]+)$")
+RE_COPEL_K = re.compile(r"constante (?P<kw>\d+[.,]\d+) (?P<kwh>\d+[.,]\d+)")
+
+
+def _num_copel(t: str) -> float | None:
+    if re.fullmatch(r"\d+(\.\d{1,2})?", t):  # Copel imprime "14.76" (ponto decimal) e "25801" (sem milhar)
+        return float(t)
+    return parse_num(t)
+
+
+def _ler_copel(itens: list[Item]) -> tuple[list[Registro], float | None] | None:
+    linhas = [(ln, normalizar(" ".join(t for t, _ in pedacos(ln)))) for ln in agrupar_linhas(itens) if ln[0].page <= 2]
+    k_kw = k_kwh = None
+    for _, n in linhas:
+        m = RE_COPEL_K.search(n)
+        if m:
+            k_kw, k_kwh = float(m.group("kw").replace(",", ".")), float(m.group("kwh").replace(",", "."))
+            break
+    regs: list[Registro] = []
+    for _, n in linhas:
+        m = RE_COPEL.match(n)
+        if not m or m.group("posto") == "tp":
+            continue
+        toks = m.group("nums").split()
+        k = None
+        if len(toks) == 3 and re.fullmatch(r"\d+\.\d+", toks[1]):  # leitura atual colada na constante
+            atu_s, k_s = toks[1].split(".")
+            toks = [toks[0], atu_s, "0." + k_s, toks[2]]
+        if len(toks) != 4:
+            continue
+        ant, atu, cons = parse_num(toks[0]), parse_num(toks[1]), _num_copel(toks[3])
+        k = float(toks[2]) if re.fullmatch(r"\d*\.\d+", toks[2]) else parse_num(toks[2])
+        g = m.group("g")
+        if g == "demanda":
+            grandeza, k = "demanda", (k_kw or k)
+        elif g == "consumo" and m.group("u") == "kwh":
+            grandeza, k = "energia_ativa", (k_kwh or k)
+        else:
+            grandeza, k = "energia_reativa", (k_kwh or k)
+        posto = "p" if m.group("posto") == "pt" else "fp"
+        regs.append(Registro(m.group("med"), grandeza, f"{g} {m.group('u')} {m.group('posto')}", posto, None,
+                             m.group("posto"), ant, atu, k, cons))
+    return (regs, None) if sum(r.grandeza == "energia_ativa" for r in regs) >= 1 else None
+
+
+MOLDES = [("copel", _ler_copel), ("enel", _ler_enel), ("cemig_a", _ler_cemig_a), ("cemig_b", _ler_cemig_b), ("elektro", _ler_elektro),
           ("generico", _ler_generico)]
 
 
@@ -1259,9 +1312,12 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
                 _soma = _s
                 break
         _azul_parc = {}
-        if azul and med["fonte"] != "ocr":
-            # azul (Copel A4): parcelas por posto — só vale a partição explícita do ICMS (isenta + tributada)
+        if med["fonte"] != "ocr":
+            # azul (Copel A4): parcelas por posto — só vale a partição explícita do ICMS (isenta + tributada). Item
+            # de demanda de PONTA só existe na azul: a ponta não espera a modalidade (ainda não lida aqui)
             for _posto, _col in (("fp", "demanda_faturada_fponta_kw"), ("p", "demanda_faturada_ponta_kw")):
+                if _posto == "fp" and not azul:
+                    continue
                 _pp, _pi = _demanda_linhas(itens_pdf, _posto)
                 if len(_pp) == 2 and _pi:
                     _azul_parc[_col] = _r3(sum(_pp))
@@ -1302,6 +1358,10 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             if dc.get("fp") not in (None, _ct):
                 med["obs"].append(f"contratada: quadro impresso {_ct} no lugar de {dc.get('fp')}")
             dc["fp"] = _ct
+            med["demanda_contratada"] = dc
+        _ctp = contratada_texto(itens_pdf, "p")
+        if _ctp is not None:
+            dc["p"] = _ctp
             med["demanda_contratada"] = dc
         for _posto, _col in (("fp", "demanda_contratada_fponta_kw"), ("p", "demanda_contratada_ponta_kw")):
             if dc.get(_posto) is not None:
