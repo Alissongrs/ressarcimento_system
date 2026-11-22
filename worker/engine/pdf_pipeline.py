@@ -4404,13 +4404,13 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
                     worker_conn.commit()
                 except Exception as _e_dc:  # noqa: BLE001
                     log.warning(f"  [contratada 0] {_e_dc}")
-                # Grupo A sem GD: kWh total = ponta + fora ponta (+ reservado) gravados — o total antigo do OCR com
+                # Grupo A: kWh total = ponta + fora ponta (+ reservado) gravados — o total antigo do OCR com
                 # dígito trocado (615514: 34.028,36 onde 4.006,7496 + 30.071,6058 = 34.078,36) não fica
                 try:
                     worker_cur.execute(
                         f"UPDATE {TBL_FDE} SET kwh_total = ROUND(consumo_ativo_ponta_kwh + consumo_ativo_fponta_kwh "
                         f"+ COALESCE(consumo_ativo_reservado_kwh, 0), 4) WHERE uid=%s AND subgrupo_tarifario LIKE 'A%%' "
-                        f"AND COALESCE(indicador_geracao_distribuida, 0) = 0 AND consumo_ativo_ponta_kwh IS NOT NULL "
+                        f"AND consumo_ativo_ponta_kwh IS NOT NULL "
                         f"AND consumo_ativo_fponta_kwh IS NOT NULL AND (kwh_total IS NULL OR ABS(kwh_total - "
                         f"(consumo_ativo_ponta_kwh + consumo_ativo_fponta_kwh + COALESCE(consumo_ativo_reservado_kwh, 0))) > 0.5)",
                         (_sel_uid,))
