@@ -127,7 +127,7 @@ except Exception as _e:
 # Útil pra lotes 100% text-layer (evita travar/poluir com paralelismo). NÃO use em
 # lotes com faturas escaneadas — elas dependem do OCR pra ter qualquer texto.
 NO_OCR = os.getenv("PDF_PIPELINE_NO_OCR", "") == "1"
-# --seletivo (20/11/2026): reprocessamento que só muda o que está confirmado e nunca apaga valor real (seletivo.py).
+# --seletivo (20/11/2026): reprocessamento que só muda o que está confirmado; campo que o motor deixa vazio fica vazio (23/11) (seletivo.py).
 SELETIVO = os.getenv("PDF_PIPELINE_SELETIVO", "") == "1"
 
 # Parâmetros do Tesseract (motor de OCR — CPU-only).
@@ -4434,7 +4434,8 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
             if SELETIVO and locals().get("_sel_antes") is not None:  # gravou parte antes do erro: protege igual
                 try:
                     import seletivo as _sel
-                    _sel.aplicar(worker_cur, worker_conn, locals().get("_sel_uid"), locals().get("_sel_antes"), log)
+                    _sel.aplicar(worker_cur, worker_conn, locals().get("_sel_uid"), locals().get("_sel_antes"), log,
+                                 limpar=False)
                 except Exception:  # noqa: BLE001
                     pass
             return {"ok": False, "fid": row.get("id"), "erro": str(e)[:100]}
@@ -4662,8 +4663,8 @@ if __name__ == "__main__":
                         "em vez do sgeeasy. Mesma tabela Faturas_Registradas_Cache. Se --empresa "
                         "não for passado, assume Cod_Empresa=2025. Destino (PROD/COPIA) inalterado.")
     p.add_argument("--seletivo", dest="seletivo", action="store_true",
-                   help="Reprocessamento seguro: só muda campo confirmado (2 fontes ou SEFAZ), nunca apaga valor "
-                        "real (exceto zero de ponta); backup em _backups/seletivo_AAAAMMDD.jsonl (seletivo.py).")
+                   help="Reprocessamento seguro: só muda campo confirmado (sem divergir da SEFAZ); campo que o motor deixa "
+                        "vazio fica vazio (23/11); backup em _backups/seletivo_AAAAMMDD.jsonl (seletivo.py).")
     p.add_argument("--no-ocr", dest="no_ocr", action="store_true",
                    help="Desliga TODO OCR Tesseract: estágio [ocr] próprio + fallback markitdown "
                         "(que dispara OCR interno e polui/trava com múltiplos workers). Use em "
@@ -4710,7 +4711,7 @@ if __name__ == "__main__":
     if getattr(args, "seletivo", False):
         os.environ["PDF_PIPELINE_SELETIVO"] = "1"
         globals()["SELETIVO"] = True
-        log.info("[--seletivo] só muda o confirmado; não apaga valor real; backup em _backups/seletivo_*.jsonl")
+        log.info("[--seletivo] só muda o confirmado; vazio do motor limpa o antigo; backup em _backups/seletivo_*.jsonl")
 
     if getattr(args, "no_ocr", False):
         os.environ["PDF_PIPELINE_NO_OCR"] = "1"

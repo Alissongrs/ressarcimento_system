@@ -16,8 +16,10 @@ Regras (decisão do usuário: banco o mais fiel possível; SEFAZ é o valor de c
   ×100, kWh em R$/kWh, total 67,72 onde o impresso é 0,00). Valor da SEFAZ fica sempre;
 - valor → 0: volta o valor antigo (é apagar), salvo SEFAZ; vazio → 0 é preencher (leitura impressa 0,00) e segue a
   regra geral;
-- valor → vazio: volta o valor antigo — exceto zero de ponta em fatura sem ponta e zero de demanda contratada
-  (0 → vazio é a correção).
+- valor → vazio: o campo fica vazio (decisão do usuário 23/11/2026: o motor novo não leu = não grava valor antigo,
+  que pode estar errado — Light 1072 × 10.721 impresso). Só quando o motor rodou (confianca_json preenchido), a
+  fatura terminou sem exceção E o PDF tem texto digital (texto_plumber). Fatura escaneada/foto (só OCR): vazio é o
+  OCR que não leu, não ausência — Enel SP foto com PIS 895,14 impresso virava vazio; aí o valor antigo volta.
 20/11/2026: a 1ª versão exigia 2 fontes concordando para qualquer mudança. Na cópia (68 faturas, conferência visual
 dos 29 campos segurados) ela segurou 22 valores certos do motor e salvou 5 errados — os 5 eram erros do motor que
 foram corrigidos (demanda em parcelas, leitura de ponta copiada no fora ponta, "4,27 %" lido como total).
@@ -109,7 +111,7 @@ def _diverge(campo: str, d) -> bool:
     return bool(fontes)
 
 
-def decidir(antes: dict, depois: dict, conf: dict) -> tuple[dict, dict]:
+def decidir(antes: dict, depois: dict, conf: dict, limpar: bool = True) -> tuple[dict, dict]:
     """(ficou, voltou): campos cuja mudança vale e campos que voltam ao valor antigo {campo: valor_antigo}."""
     n, div, sefaz = conf.get("n") or {}, conf.get("div") or {}, set(conf.get("sefaz") or [])
     ficou, voltou = {}, {}
@@ -121,7 +123,8 @@ def decidir(antes: dict, depois: dict, conf: dict) -> tuple[dict, dict]:
             continue
         confirmado = c in sefaz or not _diverge(c, div.get(c))
         if _vazio(d):
-            ok = c in ZERO_NAO_E_DADO and _zero(a)  # 0 de ponta em fatura sem ponta / contratada 0 → vazio
+            # 23/11/2026: vazio vence quando o motor rodou (conf) e a fatura terminou; antes só 0 de ponta/contratada
+            ok = (limpar and bool(conf)) or (c in ZERO_NAO_E_DADO and _zero(a))
         elif _zero(d) and not _vazio(a) and not _zero(a) and c not in ("valor_total_fatura",):
             ok = c in sefaz  # valor real → 0 é apagar (Copel A4: 4.898 → 0, 21/11/2026); total 0,00 impresso vale
         else:
@@ -130,25 +133,25 @@ def decidir(antes: dict, depois: dict, conf: dict) -> tuple[dict, dict]:
     return ficou, voltou
 
 
-def aplicar(cur, conn, uid: str | None, antes: dict | None, log=None) -> dict:
+def aplicar(cur, conn, uid: str | None, antes: dict | None, log=None, limpar: bool = True) -> dict:
     """Compara com a foto e restaura o que não pode mudar. Nunca levanta exceção (a fatura já foi gravada)."""
     if not antes or not uid:
         return {}
     try:
         cols = [c for c in antes if c != "id"]
-        cur.execute(f"SELECT {', '.join('`' + c + '`' for c in cols)}, confianca_json FROM {TBL()} WHERE uid=%s LIMIT 1",
-                    (uid,))
+        cur.execute(f"SELECT {', '.join('`' + c + '`' for c in cols)}, confianca_json, "
+                    f"CHAR_LENGTH(TRIM(COALESCE(texto_plumber, ''))) AS _txt FROM {TBL()} WHERE uid=%s LIMIT 1", (uid,))
         r = cur.fetchone()
         if not r:
             return {}
         if not isinstance(r, dict):
-            r = dict(zip(cols + ["confianca_json"], r))
+            r = dict(zip(cols + ["confianca_json", "_txt"], r))
         try:
             conf = json.loads(r.get("confianca_json") or "{}")
         except ValueError:
             conf = {}
         depois = {c: r.get(c) for c in cols}
-        ficou, voltou = decidir(antes, depois, conf)
+        ficou, voltou = decidir(antes, depois, conf, limpar and int(r.get("_txt") or 0) > 0)
         if voltou:
             sets = ", ".join(f"`{c}`=%s" for c in voltou)
             cur.execute(f"UPDATE {TBL()} SET {sets} WHERE uid=%s", (*voltou.values(), uid))
