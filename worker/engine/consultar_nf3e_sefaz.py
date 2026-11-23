@@ -412,6 +412,71 @@ def _handler_svrs(chave: str) -> tuple[Optional[dict], int, str]:
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Handler: SEFAZ-MG (portal próprio — a SVRS responde "não consta" para MG). 22/11/2026: URL tirada do QR code da
+# fatura CEMIG; a página é PrimeFaces com tabela HTML de itens (unidade "2 - kWh", quantidade com ponto decimal)
+# ────────────────────────────────────────────────────────────────────────────
+def _parse_html_mg(html_raw: str, chave: str) -> dict:
+    out = _parse_html_nf3e(html_raw, chave, "sefaz_mg")
+    limpa = lambda x: re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", x)).strip()  # noqa: E731
+    m = re.search(r"Data/Hora Emiss.{1,12}?</th>.*?<tbody>\s*<tr>(.*?)</tr>", html_raw, re.S)
+    if m:
+        tds = [limpa(t) for t in re.findall(r"<td[^>]*>(.*?)</td>", m.group(1), re.S)]
+        if len(tds) >= 4 and re.match(r"\d{2}/\d{2}/\d{4}", tds[3]):
+            out["data_emissao"] = tds[3]
+            if tds[2].isdigit():
+                out["numero"] = tds[2].lstrip("0") or "0"
+    i0 = html_raw.find("PRODUTOS E SERVI")
+    i1 = html_raw.find("EVENTOS E SERVI")
+    itens = []
+    if 0 <= i0 < i1:
+        for tr in re.findall(r"<tr>(.*?)</tr>", html_raw[i0:i1], re.S):
+            tds = [limpa(t) for t in re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)]
+            if len(tds) < 7 or not re.fullmatch(r"\d{7}", tds[1] or ""):
+                continue
+            mu = re.match(r"(\d+)\s*-\s*(.+)", tds[3])
+            try:
+                qtd = float(tds[4].replace(",", ".")) if tds[4] else None
+                tar = float(tds[5].replace(",", ".")) if tds[5] else None
+            except ValueError:
+                continue
+            val = _br_to_float(tds[6].replace("R$", "").strip())
+            tipo = _classificar_cci(tds[1])
+            sinal = -1 if tipo in ("compensacao_gd_propria", "compensacao_gd_outras") else 1
+            itens.append({"numero": int(tds[0]) if tds[0].isdigit() else len(itens) + 1, "codigo_cci": tds[1],
+                          "tipo_inferido": tipo, "sinal": sinal, "descricao_abrev": tds[2],
+                          "unidade_codigo": mu.group(1) if mu else None,
+                          "unidade_nome": (mu.group(2) if mu else tds[3]).strip(),
+                          "quantidade_string": tds[4], "quantidade_numerica": qtd,
+                          "tarifa_unitaria_string": tds[5], "tarifa_unitaria_numerica": tar,
+                          "valor_total_string": tds[6], "valor_total_numerico": val,
+                          "valor_efetivo_numerico": (val * sinal) if val is not None else None})
+    if itens:
+        out["itens"] = itens
+        out["qtd_itens"] = len(itens)
+        soma_liq = round(sum(it["valor_efetivo_numerico"] or 0 for it in itens), 2)
+        soma_bruta = round(sum(it["valor_total_numerico"] or 0 for it in itens), 2)
+        fmt = lambda v: f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")  # noqa: E731
+        out.update({"valor_total_liquido_numerico": soma_liq, "valor_total_liquido": fmt(soma_liq),
+                    "valor_total_bruto_numerico": soma_bruta, "valor_total_bruto": fmt(soma_bruta),
+                    "valor_total": fmt(soma_liq), "valor_total_numerico": soma_liq})
+    ev = limpa(html_raw[i1:]).lower() if i1 >= 0 else ""
+    out["situacao"] = "cancelada" if "cancelamento" in ev else "substituida" if "substitui" in ev else "autorizada"
+    return out
+
+
+def _handler_sefaz_mg(chave: str) -> tuple[Optional[dict], int, str]:
+    url = f"https://portalsped.fazenda.mg.gov.br/portalnf3e/sistema/qrcode.xhtml?chNF3e={chave}&tpAmb=1"
+    s = _new_session(tls_legacy=True)
+    try:
+        r = s.get(url, timeout=90, verify=False)
+        if r.status_code != 200 or "PRODUTOS E SERVI" not in r.text:
+            return None, r.status_code, f"MG sem nota (status {r.status_code}, {len(r.text)} bytes)"
+        return _parse_html_mg(r.text, chave), 200, ""
+    except requests.RequestException as e:
+        return None, 0, f"{type(e).__name__}: {str(e)[:200]}"
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Roteador por UF
 # ────────────────────────────────────────────────────────────────────────────
 _HANDLERS_POR_UF = {
@@ -422,7 +487,7 @@ _HANDLERS_POR_UF = {
     "PA": _handler_svrs, "AP": _handler_svrs, "TO": _handler_svrs,
     "MA": _handler_svrs, "PI": _handler_svrs, "CE": _handler_svrs, "RN": _handler_svrs,
     "PB": _handler_svrs, "PE": _handler_svrs, "AL": _handler_svrs, "SE": _handler_svrs, "BA": _handler_svrs,
-    "MG": _handler_svrs, "ES": _handler_svrs, "RJ": _handler_svrs, "SP": _handler_svrs,
+    "MG": _handler_sefaz_mg, "ES": _handler_svrs, "RJ": _handler_svrs, "SP": _handler_svrs,
     "PR": _handler_svrs, "SC": _handler_svrs, "RS": _handler_svrs,
     "MS": _handler_svrs, "GO": _handler_svrs, "DF": _handler_svrs,
 }

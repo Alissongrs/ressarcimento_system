@@ -50,6 +50,21 @@ def _caixa_medicao(itens: list[Item]) -> tuple[int, tuple[float, float, float, f
                 y0 = min(b.y for b in juntas) - MARGEM
                 xs = [b.x for b in itens if b.page == pg]
                 return pg, (max(0.0, min(xs) - MARGEM) if xs else 0.0, y0, 10_000.0, y0 + 150.0)
+    # 22/11/2026: cabeçalho ilegível na escaneada (615514 CPFL: "Medidor/Grandezas" saiu "eiai | Asier."). As linhas
+    # da tabela começam pelo nº do medidor (que o OCR também varia): ≥ 2 linhas na página com número + posto horário
+    from medicao import agrupar_linhas, pedacos  # noqa: E402
+    por_pg: dict = {}
+    for ln in agrupar_linhas(itens):
+        toks = [t.strip() for t, _ in pedacos(ln)]
+        if toks and re.fullmatch(r"\d{6,12}", toks[0]) and re.search(r"pon[tl]a|porta|pona|unico",
+                                                                      normalizar(" ".join(toks[1:]))):
+            por_pg.setdefault(ln[0].page, []).append(ln)
+    for pg in sorted(por_pg):
+        lns = por_pg[pg]
+        if len(lns) >= 2:
+            ys = [ln[0].y for ln in lns]
+            xs = [b.x for b in itens if b.page == pg]
+            return pg, (max(0.0, min(xs) - MARGEM) if xs else 0.0, min(ys) - 14.0, 10_000.0, max(ys) + 10.0)
     return None
 
 
@@ -114,7 +129,7 @@ def aplicar(v2_out: dict, pdf_bytes: bytes, zoom: float = 6.0) -> dict:
         return v2_out
     try:
         import ocr_itens
-        from medicao import aplicar_medicao, ler_medicao
+        from medicao import _ocr_linhas_ativa, aplicar_medicao, ler_medicao
         from tributos import ler_tributos
         itens, _, _ = _idn.itens_do_pdf(pdf_bytes, 3)
         med1 = v2_out.get("_medicao") or {}
@@ -133,17 +148,41 @@ def aplicar(v2_out: dict, pdf_bytes: bytes, zoom: float = 6.0) -> dict:
                     itens2 = _juntar(list(itens), novos, pg, caixa)
                     antes = dict(v2_out.get("_medicao") or {})
                     med2 = ler_medicao(pdf_bytes, itens2)
-                    if med2 and med2.get("validado"):
+                    # a releitura vale se o molde fechar OU se as leituras (as duas leituras do quadro juntas)
+                    # fecharem com o item kWh impresso (_ocr_reparar_por_itens, 615514)
+                    if med2 is not None or _ocr_linhas_ativa(itens2):
                         _idn.definir_fonte("ocr")
-                        v2_out = _aplicar_com_itens(v2_out, pdf_bytes, itens2, aplicar_medicao)
+                        import copy as _copy
+                        _snap = {k: _copy.deepcopy(v2_out.get(k)) for k in
+                                 ("identificadores_instalacao", "periodo_leitura", "ligacao_tecnica")}
+                        # mais uma passada binarizada em zoom 5: na 615514 só ela leu "551624" e "254561"
+                        # (as outras liam o 6 como 0). Serve de candidata a _ocr_reparar_por_itens, nunca sozinha
+                        extra = [list(itens)]
+                        try:
+                            nb = ocr_itens.itens_recorte(pdf_bytes, pg, caixa, 5.0, "binaria")
+                            if nb:
+                                extra.append(_juntar(list(itens), nb, pg, caixa))
+                        except Exception:  # noqa: BLE001
+                            pass
+                        v2_out["_ocr_med_extra"] = extra
+                        try:
+                            v2_out = _aplicar_com_itens(v2_out, pdf_bytes, itens2, aplicar_medicao)
+                        finally:
+                            v2_out.pop("_ocr_med_extra", None)
                         m2 = v2_out.get("_medicao") or {}
                         # um recorte pode ler só UM dos registros do posto (Enel SP: fora ponta capacitivo + indutivo)
                         # e a física fecha nesse registro sozinho — só vale se algum consumo bate com item kWh
-                        if m2.get("validado") and any((m2.get("itens_confirmam") or {}).values()):
+                        if m2.get("validado") and (any((m2.get("itens_confirmam") or {}).values())
+                                                   or m2.get("confirmado_ocr_itens")):
                             aceitos.append("medicao")
                             m2["obs"] = (m2.get("obs") or []) + ["segunda leitura (recorte zoom alto) fechou a física e bate com item"]
                         else:
                             v2_out["_medicao"] = antes
+                            for k, v in _snap.items():  # releitura recusada não deixa rastro
+                                if v is None:
+                                    v2_out.pop(k, None)
+                                else:
+                                    v2_out[k] = v
 
         faltam = [t for t in ("icms", "pis", "cofins") if not (tr1.get(t) or {}).get("fecha")]
         novo = dict(tr1) if tr1 else {"obs": []}

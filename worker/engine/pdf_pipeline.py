@@ -2204,7 +2204,8 @@ def _gravar_mirror_origem(cur, conn, uid, row):
     rc = conn.cursor(dictionary=True)
     try:
         rc.execute(f"SELECT consumo_ativo_ponta_kwh ap, consumo_ativo_fponta_kwh afp, "
-                   f"consumo_ativo_reservado_kwh ar, valor_total_fatura vt FROM {TBL_FDE} WHERE uid=%s", (uid,))
+                   f"consumo_ativo_reservado_kwh ar, valor_total_fatura vt, medicao_grandezas_json mj FROM {TBL_FDE} "
+                   f"WHERE uid=%s", (uid,))
         a = rc.fetchone() or {}
     finally:
         rc.close()
@@ -2273,6 +2274,11 @@ def _gravar_mirror_origem(cur, conn, uid, row):
         ("consumo_ativo_reservado_kwh", a.get("ar"), _n(row.get("KWH_Reservado"))),
         ("valor_total_fatura", a.get("vt"), _n(row.get("RS_Total_Fatura"))),
     ]:
+        # 22/11/2026: tabela de medição lida e sem reservado → a origem não preenche (Enel SP: punha ali o fora
+        # ponta indutivo e o kWh total somava duas vezes)
+        if col == "consumo_ativo_reservado_kwh" and ext is None and a.get("mj") \
+                and '"reservado"' not in str(a.get("mj")):
+            continue
         acao, novo = valida(col, ext, orig)
         if acao == "set":
             sets.append(f"`{col}` = %s"); vals.append(novo)

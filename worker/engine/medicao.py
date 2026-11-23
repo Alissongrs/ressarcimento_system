@@ -118,7 +118,7 @@ RE_POSTO = re.compile(
 
 
 _TOK_FP = {"fp", "fpta", "f-pta", "hfp", "fponta", "f.pta", "fora"}
-_TOK_P = {"ponta", "pta", "np", "hp", "p"}
+_TOK_P = {"ponta", "pta", "np", "hp", "p", "pt"}  # "pt": Elektro "CONSUMO kWh PT"
 _TOK_RES = {"reservado", "hr", "res", "reserv", "rsv"}
 _TOK_UNI = {"unico", "total", "tp", "geral"}
 
@@ -168,6 +168,8 @@ def classificar_grandeza(s: str) -> str:
     if "reativ" in n or "rtv" in n or re.search(r"\breat\b", n):  # "Consumo Reativo", "Energia Reativa", "ENRGRTV"
         return "energia_reativa"
     if "kvarh" in n or "kvar" in n:
+        return "energia_reativa"
+    if re.search(r"\bexce\b", n):  # Elektro "EN.EXCE kWh": energia reativa excedente (22/11/2026)
         return "energia_reativa"
     if re.search(r"\bkqh\b|\bqh\b", n):  # Copel "KQH kWh TP": grandeza Q (reativa auxiliar), não consumo ativo
         return "energia_reativa"
@@ -336,7 +338,9 @@ def _calc_candidatos(r: Registro) -> list[tuple[str, float]]:
         return []  # constante zero/negativa: não é medição
     k = r.constante if r.constante is not None else 1.0
     atu = r.leit_atu
-    if atu < r.leit_ant and r.leit_ant > 0:  # virada do medidor
+    # virada do medidor: só com a anterior na metade de cima do mostrador (99.141→516). 22/11/2026: EDP ES com as
+    # leituras trocadas (21.641→21.541) "virava" para 99.900 e fechava com "100.000" (= 100 kWh) lido como 100 mil
+    if atu < r.leit_ant and r.leit_ant >= 0.5 * 10 ** len(str(int(r.leit_ant))):
         atu = atu + 10 ** len(str(int(r.leit_ant)))
     dif = (atu - r.leit_ant) * k
     if r.grandeza in ("demanda", "demanda_reativa"):
@@ -368,12 +372,27 @@ def validar(regs: list[Registro], perda_linha: float | None) -> tuple[float | No
             r.ok, r.calc, r.regra = True, 0.0, "sem consumo"
             continue
         for regra, calc in cands:
+            # 22/11/2026: leitura parada só fecha com consumo ZERO (acima) — EDP ES "Adicional Bandeira ... 0,01885"
+            # lido como registro 0→0 fechava pela tolerância de 0,02 e gravava 0,019 kWh
+            # (zero impresso com leitura parada continua fechando: Enel CE demanda reativa 60,69→60,69 consumo 0,00)
+            if calc <= 0 and r.consumo != 0:
+                continue
             for f in fatores:
                 if _bate(r.consumo, calc, f):
                     r.ok, r.calc, r.regra = True, round(calc * f, 3), regra + (f" × {f:.4f}" if f != 1.0 else "")
                     break
             if r.ok:
                 break
+        if r.ok is None and r.consumo and r.consumo > 0 and abs(r.consumo * 1000 - round(r.consumo * 1000)) < 1e-6:
+            # "26.000" (Light GD 22/11/2026: leituras 10.327→10.457 × 200 = 26.000 kWh) lido como 26: o ponto era de
+            # milhar. Só quando (atual − anterior) × K fecha EXATO com o número × 1000
+            # 22/11/2026: nunca com virada do medidor nem por tolerância — EDP ES "100.000" (= 100 kWh, 3 decimais)
+            # com leituras trocadas virava 21.541+100.000−21.641 = 99.900 ≈ 100.000 e gravava 100.000 kWh
+            for regra, calc in cands:
+                if calc > 0 and r.leit_atu >= r.leit_ant and abs(r.consumo * 1000 - calc) <= 0.6:
+                    r.consumo = round(r.consumo * 1000, 3)
+                    r.ok, r.calc, r.regra = True, round(calc, 3), regra + " (ponto de milhar)"
+                    break
         if r.ok is None:
             r.ok = False
             # candidato mais próximo (razão consumo/cálculo mais perto de 1) — é dele que se infere a perda
@@ -486,7 +505,9 @@ def _ler_cemig_b(itens: list[Item]) -> tuple[list[Registro], float | None] | Non
         faixa = [it for l2 in linhas[i: i + 3] if l2[0].page == ln[0].page for it in l2 if abs(it.y - ln[0].y) <= 14]
         if not any(it.norm.startswith("constante") for it in faixa) or not any(it.norm.startswith("consumo") for it in faixa):
             continue
-        x_ini = min(it.x for it in ln) - 5
+        # x do próprio rótulo, não da linha: "Mês/Ano Valor (R$)" do quadro de débitos fica na mesma altura
+        # (CEMIG B 22/11/2026: leitura anterior 54,40 = valor do débito, K 23.132 = leitura)
+        x_ini = min(it.x for it in ln if it.norm.startswith("tipo de medicao")) - 5
         y_fim = max(it.y for it in faixa) + 2
         regs: list[Registro] = []
         for l2 in linhas[i + 1:]:
@@ -689,6 +710,26 @@ def _descolar_k_consumo(toks: list[tuple[str, float]]) -> list[tuple[str, float]
     return out
 
 
+def _desgrudar(strs: list[str]) -> list[list[float]]:
+    """Corridas alternativas quando o texto do PDF cola duas colunas num número (Equatorial GO "8841000396" = consumo
+    8841 + leitura 000396; Energisa "0143525,199999" = leitura 0 + leitura 143525,199999): cada número de 5+ dígitos
+    inteiros é partido em dois — no lugar, ou com a parte da esquerda indo para o fim (é o consumo da linha)."""
+    base = [parse_num(t) for t in strs]
+    out = []
+    for idx, t in enumerate(strs):
+        mm = re.fullmatch(r"(\d+)([.,]\d+)?", t.strip())
+        if not mm or len(mm.group(1)) < 5:
+            continue
+        ip, dec = mm.group(1), mm.group(2) or ""
+        for cut in range(1, len(ip)):
+            a, b = parse_num(ip[:cut]), parse_num(ip[cut:] + dec)
+            if a is None or b is None:
+                continue
+            out.append(base[:idx] + [a, b] + base[idx + 1:])
+            out.append(base[:idx] + [b] + base[idx + 1:] + [a])
+    return out
+
+
 def _ler_generico(itens: list[Item]) -> tuple[list[Registro], float | None, dict] | None:
     regs: list[Registro] = []
     vistos: set = set()
@@ -715,7 +756,9 @@ def _ler_generico(itens: list[Item]) -> tuple[list[Registro], float | None, dict
             if "r$" in texto_antes.lower() or "%" in texto_antes or RE_MES.search(texto_antes):
                 i = j
                 continue  # item de faturamento / histórico (mês de referência na descrição)
-            if len(run) >= 3 and antes:
+            # 2 números só quando um deles pode ser duas colunas coladas (Energisa "0143525,199999 143525,199999")
+            colado = len(run) == 2 and any(re.fullmatch(r"\d{5,}([.,]\d+)?", t.strip()) for t, _ in toks[i:j])
+            if (len(run) >= 3 or colado) and antes:
                 medidor = next((t for t, _ in antes if RE_MEDIDOR.match(t) and sum(ch.isdigit() for ch in t) >= 4), None)
                 palavras = [t for t, _ in antes if t != medidor and not RE_MEDIDOR.match(t)]
                 txt = " ".join(palavras)
@@ -746,6 +789,26 @@ def _ler_generico(itens: list[Item]) -> tuple[list[Registro], float | None, dict
                                 r.regra = nome
                                 quase = r
                     escolhido = escolhido or quase
+                    # 22/11/2026: duas colunas coladas num número. Vale só a ÚNICA partição em que a física fecha exata
+                    # com consumo > 0 e leitura atual > anterior — escolha entre leituras, conferida pela conta
+                    if not escolhido and grandeza == "energia_ativa":
+                        sols = {}
+                        for alt in _desgrudar([t for t, _ in toks[i:j]]):
+                            for a, u, k, c, nome in _ordenacoes(alt):
+                                if c and c > 0 and a < u and (k is None or 0 < k < 100000):
+                                    r = Registro(medidor, grandeza, txt, posto, sub, "", a, u, k, c)
+                                    if any(_bate(c, calc) for _, calc in _calc_candidatos(r)):
+                                        r.regra = nome + " (colunas coladas)"
+                                        sols.setdefault((a, u, k, c), r)
+                        if len(sols) == 1:
+                            escolhido = next(iter(sols.values()))
+                    # 22/11/2026: Elektro A imprime leituras 0/0 e o consumo ("CONSUMO kWh PT 0 0 1 3182"). Entra como
+                    # registro que não fecha; só vale se os itens da fatura confirmarem (aplicar_medicao) — o genérico
+                    # sem conferência não grava
+                    if not escolhido and grandeza == "energia_ativa" and medidor and len(run) == 4 \
+                            and run[0] == 0 and run[1] == 0 and run[3] and run[3] > 0 and run[2] and 0 < run[2] < 1000:
+                        escolhido = Registro(medidor, grandeza, txt, posto, sub, "", 0.0, 0.0, run[2], run[3])
+                        escolhido.regra = "leituras zeradas"
                     # OCR: linha de energia ativa com medidor que não fecha (dígito lido errado no consumo, 550695
                     # "3014" por 3614) entra PENDENTE — _ocr_confirma_por_itens só a aceita se leituras × K × perda
                     # baterem com o item kWh impresso
@@ -763,6 +826,10 @@ def _ler_generico(itens: list[Item]) -> tuple[list[Registro], float | None, dict
                             regs.append(escolhido)
                         break  # uma só corrida por linha
             i = j
+    # 22/11/2026: linha de item da fatura lida como registro — sem medidor, leituras 0→0 e "consumo" < 1 (EDP ES
+    # "Adicional Bandeira Amarela Energia Inj. kWh 435,0000- 0,01885": a tarifa virava consumo e somava 0,019)
+    regs = [r for r in regs if not (r.medidor is None and r.leit_ant == 0 and r.leit_atu == 0
+                                    and r.consumo is not None and 0 < r.consumo < 1)]
     if not regs:
         return None
     # Energisa MT imprime várias linhas "RSV Fora Ponta" sem dizer a grandeza (a 1ª é a energia ativa no
@@ -964,10 +1031,10 @@ def montar(molde: str, regs: list[Registro], perda: float | None, origem: str | 
     ativa = [r for r in regs if r.grandeza == "energia_ativa"]
     medidores = collections.Counter(r.medidor for r in ativa if r.medidor) or collections.Counter(r.medidor for r in regs if r.medidor)
     # constante das colunas = a do registro fora ponta/único de maior consumo (Enel Rio imprime K diferente por posto)
-    constantes = collections.Counter(r.constante for r in ativa if r.constante is not None)
+    # 22/11/2026: sem registro fora ponta/único lido, o K da ponta NÃO vai para a coluna (Equatorial GO 0,21 por 21)
     pref = [r for r in ativa if r.posto in ("fp", "unico") and r.constante is not None]
-    if pref:
-        constantes = collections.Counter([max(pref, key=lambda z: (z.consumo or 0)).constante])
+    constantes = collections.Counter([max(pref, key=lambda z: (z.consumo or 0)).constante]) if pref \
+        else collections.Counter()
     medido: dict[str, float] = collections.defaultdict(float)
     for r in ativa:
         if r.consumo is not None:
@@ -1115,6 +1182,170 @@ def _consumo_impresso(itens_pdf: list[Item], posto: str, alvo: float) -> float |
     return achados.pop() if len(achados) == 1 else None
 
 
+def _qs_kwh(itens_pdf: list) -> tuple[dict, dict]:
+    """Quantidades das linhas kWh (pág. 1–2): {valor: nº de linhas} e o conjunto dos números sem separador lidos
+    com 4 ou 3 decimais (o OCR come a vírgula: "300716058" = 30.071,6058)."""
+    qs: dict = {}
+    sem_ponto: dict = {}
+    for ln in agrupar_linhas(itens_pdf):
+        if ln[0].page > 1:
+            continue
+        n = normalizar(" ".join(t for t, _ in pedacos(ln)))
+        if not re.search(r"kw\s*h|kwn|kvh|kv/h", n) or re.search(r"injet|compens|reativ|kvar", n):
+            continue
+        for t, _ in pedacos(ln):
+            t = t.strip()
+            v = parse_num(t)
+            if v is not None and v > 0:
+                qs[round(v, 4)] = qs.get(round(v, 4), 0) + 1
+            if re.fullmatch(r"\d{6,10}", t):
+                for q in (round(int(t) / 10_000, 4), round(int(t) / 1_000, 4)):
+                    sem_ponto[q] = sem_ponto.get(q, 0) + 1
+    return qs, sem_ponto
+
+
+# dígitos que o RapidOCR troca em escaneada ruim (615514: "551024" por 551624, "254501" por 254561)
+_CONFUNDE = {"0": "689", "6": "0589", "8": "0369", "9": "068", "1": "7", "7": "1", "5": "6", "3": "8"}
+RE_OCR_ATIVA = re.compile(r"ativ|aliva|aiva|atva|alwa|alva|atwa")
+RE_OCR_NAO_ATIVA = re.compile(r"dem|dma|reat|reai|real|kvar|\bkva\b")
+RE_OCR_FORA = re.compile(r"fora|fo'a|\bfoa|fera|f\.?\s*ponta|fponta|\bfp\b")
+
+
+def _ocr_linhas_ativa(itens: list) -> list[tuple[str, str, int, int, float | None]]:
+    """Linhas da tabela de medição lidas no OCR, com tolerância: (medidor, posto, anterior, atual, K|None)."""
+    out = []
+    for ln in agrupar_linhas(itens):
+        if ln[0].page > 1:
+            continue
+        toks = [t.strip() for t, _ in pedacos(ln)]
+        if not toks or not re.fullmatch(r"\d{6,12}", toks[0]):
+            continue
+        n = normalizar(" ".join(toks[1:]))
+        if not RE_OCR_ATIVA.search(n) or RE_OCR_NAO_ATIVA.search(n) or ("pon" not in n and "por" not in n and "unic" not in n):
+            continue
+        posto = "fp" if (RE_OCR_FORA.search(n) or "unic" in n) else "p"
+        inteiros = [t for t in toks[1:] if re.fullmatch(r"\d{4,8}", t)]
+        if len(inteiros) < 2:
+            continue
+        k = None
+        for t in toks[1:]:
+            if re.fullmatch(r"0\d{5,6}", t):  # "080000" = 0,80000 (vírgula comida)
+                k = float("0." + t[1:])
+                break
+            if re.fullmatch(r"\d{1,3}[.,]\d{2,6}", t):
+                v = parse_num(t)
+                if v and 0 < v < 1000:
+                    k = v
+                    break
+        out.append((toks[0], posto, int(inteiros[0]), int(inteiros[1]), k))
+    return out
+
+
+def _trocas_ocr(v: int) -> set[int]:
+    t = str(v)
+    return {int(t[:i] + d + t[i + 1:]) for i, c in enumerate(t) for d in _CONFUNDE.get(c, "")}
+
+
+def _ocr_reparar_por_itens(med: dict, fontes: list[list], itens_pdf: list) -> bool:
+    """22/11/2026, só OCR, quando nem o molde nem _ocr_confirma_por_itens fecharam (615514 CPFL: o OCR lê "6" como "0"
+    nas leituras em todo zoom). Junta as linhas de energia ativa de todas as leituras do quadro (página inteira e
+    recorte), testa as leituras como lidas e, se nada fechar, com UM dígito confundível trocado por posto. Aceita só
+    se houver UMA combinação em que todos os postos fecham (atual − anterior) × K × f = item kWh impresso com o mesmo f
+    (_ocr_confirma_por_itens). É escolha entre leituras candidatas do OCR confirmada por número impresso — nenhum
+    valor é calculado."""
+    linhas = [l for its in fontes for l in _ocr_linhas_ativa(its)]
+    if not linhas:
+        return False
+    # números inteiros que alguma passada do OCR leu (a binarizada nem sempre começa a linha pelo medidor)
+    lidos: set = set()
+    for its in fontes:
+        for ln in agrupar_linhas(its):
+            if ln[0].page <= 1:
+                lidos |= {int(t.strip()) for t, _ in pedacos(ln) if re.fullmatch(r"\d{4,8}", t.strip())}
+    kmed = collections.Counter(l[4] for l in linhas if l[4]).most_common(1)
+    k_padrao = kmed[0][0] if kmed else None
+    por_posto: dict = {}
+    for mid, posto, a, u, k in linhas:
+        k = k or k_padrao
+        if k:
+            por_posto.setdefault(posto, set()).add((mid, a, u, k))
+    if not por_posto:
+        return False
+    qs, sem_ponto = _qs_kwh(itens_pdf)
+    todos = set(qs) | set(sem_ponto)
+    postos = sorted(por_posto)
+    def _subs(lido: int, novo: int) -> set:
+        x, y = str(lido), str(novo)
+        return {(c, d) for c, d in zip(x, y) if c != d} if len(x) == len(y) else set()
+
+    for com_troca in (False, True):
+        cands: dict = {}
+        origem: dict = {}  # (posto, ant, atu, K) → trocas de dígito (lido, impresso) que levaram até ele
+        for p, rs in por_posto.items():
+            cs = set()
+            for mid, a, u, k in rs:
+                pares = {(a, u)}
+                if com_troca:
+                    pares |= {(a2, u) for a2 in _trocas_ocr(a)} | {(a, u2) for u2 in _trocas_ocr(u)}
+                for a2, u2 in pares:
+                    calc = (u2 - a2) * k
+                    if calc > 0 and any(0.9995 <= q / calc <= 1.06 for q in todos):
+                        cs.add((a2, u2, k, mid))
+                        origem.setdefault((p, a2, u2, k), set()).update(_subs(a, a2) | _subs(u, u2))
+            cands[p] = cs
+        if any(not cands[p] for p in postos):
+            continue
+        sol: dict = {}
+        for combo in __import__("itertools").product(*[sorted(cands[p]) for p in postos]):
+            chave = tuple(x[:3] for x in combo)
+            if chave in sol:
+                continue
+            m2 = {"registros": [{"grandeza": "energia_ativa", "posto": p, "leit_ant": float(a), "leit_atu": float(u),
+                                 "constante": k, "medidor": mid} for p, (a, u, k, mid) in zip(postos, combo)],
+                  "consumo_faturado": {}, "consumo_medido": {}, "leituras": {}}
+            if _ocr_confirma_por_itens(m2, itens_pdf):
+                sol[chave] = (combo, m2)
+        if not sol:
+            continue
+        if len(sol) > 1:
+            # mais de uma combinação fecha (615514 ponta: 546738→551624 e 546138→551024 têm a mesma diferença). Vale
+            # a ÚNICA em que todas as leituras foram lidas literalmente por alguma passada do OCR; senão não grava
+            def _apoio(ch):
+                return sum((a in lidos) + (u in lidos) for a, u, _k in ch)
+            melhor = max(_apoio(ch) for ch in sol)
+            top = [ch for ch in sol if _apoio(ch) == melhor]
+            if len(top) != 1 or melhor < 2 * len(postos):
+                # ainda empatado: vale a ÚNICA cuja troca própria é a MESMA confusão que o OCR já provou nesta fatura
+                # (a troca comum a todas as soluções — 615514: o fora ponta só fecha com "0" lido por "6", e na ponta
+                # 551024→551624 é esse erro, enquanto 546738→546138 pediria "7" lido por "1", nunca visto)
+                def _trocas(ch):
+                    return [origem.get((p, a, u, k), set()) for p, (a, u, k) in zip(postos, ch)]
+                comuns = set.intersection(*[set().union(*_trocas(ch)) for ch in top])
+                coer = [ch for ch in top
+                        if all(t <= comuns or not t for t in _trocas(ch)) and set().union(*_trocas(ch))]
+                if not comuns or len(coer) != 1:
+                    return False
+                top = coer
+                desempate = "mesma confusão de dígito " + ",".join(f"{c}→{d}" for c, d in sorted(comuns))
+                med.setdefault("obs", []).append("OCR: duas leituras fechavam; desempate pela " + desempate)
+            sol = {top[0]: sol[top[0]]}
+        combo, m2 = next(iter(sol.values()))
+        outros = [r for r in med.get("registros") or [] if r.get("grandeza") != "energia_ativa"]
+        med["registros"] = m2["registros"] + outros
+        for c in ("consumo_faturado", "consumo_medido", "leituras", "validado", "validado_por",
+                  "confirmado_ocr_itens", "perda_pct", "perda_origem"):
+            if c in m2:
+                med[c] = m2[c]
+        med["n_ok"] = sum(1 for r in med["registros"] if r.get("ok"))
+        med["constante"] = next((k for p, (a, u, k, mid) in zip(postos, combo) if p == "fp"), combo[0][2])
+        med["medidor"] = med.get("medidor") or combo[0][3]
+        desc = "; ".join(f"{p} {a}→{u} K {k}" for p, (a, u, k, mid) in zip(postos, combo))
+        med.setdefault("obs", []).append(("OCR: dígito confundível trocado; " if com_troca else "OCR: ")
+                                         + "leituras confirmadas por item kWh impresso — " + desc)
+        return True
+    return False
+
+
 def _ocr_confirma_por_itens(med: dict, itens_pdf: list) -> bool:
     """21/11/2026, só OCR: o OCR troca dígito no consumo da tabela (550695: "3014" por 3614) mas as leituras e a
     constante saem iguais. Confere cada posto de energia ativa por (atual − anterior) × K × f = quantidade impressa num
@@ -1132,17 +1363,7 @@ def _ocr_confirma_por_itens(med: dict, itens_pdf: list) -> bool:
         por_posto[p] = (r, calc)
     if not por_posto:
         return False
-    qs: dict = {}
-    for ln in agrupar_linhas(itens_pdf):
-        if ln[0].page > 1:
-            continue
-        n = normalizar(" ".join(t for t, _ in pedacos(ln)))
-        if not re.search(r"kw\s*h|kwn|kvh", n) or re.search(r"injet|compens|reativ|kvar", n):
-            continue
-        for t, _ in pedacos(ln):
-            v = parse_num(t.strip())
-            if v is not None and v > 0:
-                qs[round(v, 4)] = qs.get(round(v, 4), 0) + 1
+    qs, sem_ponto = _qs_kwh(itens_pdf)
     cand = {p: [(q / calc, q) for q in qs if 0.9995 <= q / calc <= 1.06] for p, (_, calc) in por_posto.items()}
     if len(por_posto) == 1:
         p = next(iter(cand))
@@ -1151,11 +1372,18 @@ def _ocr_confirma_por_itens(med: dict, itens_pdf: list) -> bool:
             return False
         escolha = {p: ok[0]}
     else:
+        # mesmo fator nos dois postos: 0,0001 (550695 diferia 0,00008; 615514 0,00004). Com 0,0015 um item lido
+        # errado pelo OCR ("4008,7496" por 4006,7496: 1,02557 × 1,02502) passava. Número sem separador (o OCR comeu
+        # a vírgula) só vale aqui, no par com o mesmo fator — nunca sozinho
+        for p, (_, calc) in por_posto.items():
+            cand[p] = cand[p] + [(q / calc, q) for q in sem_ponto if q not in qs and 0.9995 <= q / calc <= 1.06]
         pares = [(zp, qp, zf, qf) for zp, qp in cand.get("p", []) for zf, qf in cand.get("fp", [])
-                 if abs(zp - zf) <= 0.0015]
-        if len({(qp, qf) for _, qp, _, qf in pares}) != 1:
+                 if abs(zp - zf) <= 0.0001]
+        # quantidades iguais até o centésimo são a mesma (OCR: "300716058" e "300716056"); fica a mais repetida
+        if len({(round(qp, 2), round(qf, 2)) for _, qp, _, qf in pares}) != 1:
             return False
-        zp, qp, zf, qf = pares[0]
+        _n = lambda q: qs.get(q, 0) + sem_ponto.get(q, 0)  # noqa: E731
+        zp, qp, zf, qf = max(pares, key=lambda t: (_n(t[1]) + _n(t[3])))
         escolha = {"p": (zp, qp), "fp": (zf, qf)}
     fat = dict(med.get("consumo_faturado") or {})
     medido = dict(med.get("consumo_medido") or {})
@@ -1177,6 +1405,21 @@ def _ocr_confirma_por_itens(med: dict, itens_pdf: list) -> bool:
     return True
 
 
+def _texto_de_ocr_embutido(pdf_bytes: bytes) -> bool:
+    """PDF-imagem com camada de texto invisível feita por OCR (fonte "GlyphLessFont", Tesseract/ocrmypdf): o texto
+    parece exato mas é leitura de máquina. 23/11/2026 Light 36248049194027620260301: a camada trazia "1072" onde a
+    imagem imprime 10.721 e a leitura foi gravada como impressa."""
+    try:
+        import fitz
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as d:
+            for pg in list(d)[:2]:
+                if any("glyphless" in str(ft[3]).lower() for ft in pg.get_fonts(full=False)):
+                    return True
+    except Exception:  # noqa: BLE001
+        return False
+    return False
+
+
 def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     """Lê a medição pelo molde e deixa em v2_out['_medicao'] (com 'aplicar' = colunas a gravar).
     Nunca levanta exceção."""
@@ -1195,6 +1438,8 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
                     if r.get("grandeza") == "energia_ativa")
         if _pend or not med.get("validado"):
             _ocr_confirma_por_itens(med, itens_pdf)
+    if med and v2_out.get("_fonte_itens") == "ocr" and not med.get("validado"):
+        _ocr_reparar_por_itens(med, [itens_pdf] + list(v2_out.get("_ocr_med_extra") or []), itens_pdf)
     if not med:
         # sem molde de medição (Copel refaturamento 596803): a contratada impressa no quadro ainda vale
         _ct = contratada_texto(itens_pdf) if v2_out.get("_fonte_itens") != "ocr" else None
@@ -1213,6 +1458,8 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
         fat["unico"] = fat.pop("p")
         if "p" in med["leituras"]:
             med["leituras"]["unico"] = med["leituras"].pop("p")
+            if med.get("constante") is None:
+                med["constante"] = med["leituras"]["unico"].get("constante")
         med["obs"].append("grupo B: registro impresso como 'Ponta' tratado como único")
     cons_p = fat.get("p")
     cons_fp = _r3(sum(v for k, v in fat.items() if k in ("fp", "unico", "intermediario") and v is not None)) \
@@ -1369,7 +1616,12 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     # é a regra F01 (motor) quem aponta "consumo ≠ (atual − anterior) × K", não o extrator que esconde. O molde
     # genérico só devolve linhas que fecham, então aqui são os moldes estruturais (enel, cemig, elektro). No OCR a
     # dúvida é de leitura: continua exigindo a conferência.
-    impresso = (med["fonte"] != "ocr" and not med["validado"] and med.get("molde") not in (None, "generico")
+    # camada de texto feita por OCR não é "texto exato": sem a física fechar, não grava como impressa
+    ocr_embutido = _texto_de_ocr_embutido(pdf_bytes)
+    if ocr_embutido and not med["validado"]:
+        med["obs"].append("camada de texto é OCR embutido (GlyphLessFont): medição que não fecha não é gravada")
+    impresso = (med["fonte"] != "ocr" and not ocr_embutido and not med["validado"]
+                and med.get("molde") not in (None, "generico")
                 and any(r.get("grandeza") == "energia_ativa" and r.get("leit_ant") is not None for r in med["registros"]))
     if impresso:
         med["obs"].append("texto exato: medição gravada como impressa, física não fecha (regra F01)")
@@ -1393,6 +1645,9 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             aplicar["consumo_ativo_fponta_kwh"] = cons_fp
         if cons_fp is not None:  # só ponta lida (fora ponta ilegível) não é total
             aplicar["kwh_total"] = _r3((cons_p or 0) + cons_fp + (cons_res or 0))
+            # 22/11/2026: a origem punha o fora ponta indutivo da Enel SP no reservado e o kWh total dobrava
+            # (66.561 por 36.615): com a tabela lida, o reservado é o dela — sem linha de reservado fica vazio
+            aplicar["consumo_ativo_reservado_kwh"] = cons_res if cons_res is not None else "__SET_NULL__"
         dc = med["demanda_contratada"]
         df = med.get("demanda_faturada") or {}
         if not df:  # a tabela de medição imprime a linha "Demanda Faturada-kW" (Enel ML, Energisa): é impresso, vale

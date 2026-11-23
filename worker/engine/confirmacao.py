@@ -299,6 +299,10 @@ def sefaz_valores(s: dict | None) -> dict:
         out["consumo_ativo_fponta_kwh"] = um["0"]
         out["kwh_total"] = um["0"]
     dem = [k for k in demanda if k in ("3", "0")]
+    # 22/11/2026: posto único com OUTRO item 0621 em kW é a demanda faturada partida em linhas (Enel SP Verde:
+    # 0621000 9,94 "c/ desconto" + 0621100 60,06 "Lei Estadual" = 70 contratada) — não dá para escolher, não grava
+    if dem == ["0"] and len(demanda) > 1:
+        dem = []
     if len(dem) == 1 and len(demanda[dem[0]]) == 1:
         out["demanda_faturada_fponta_kw"] = next(iter(demanda[dem[0]]))
     return out

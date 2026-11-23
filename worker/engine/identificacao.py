@@ -480,6 +480,10 @@ def _cabecalho(itens: list[Item], ph: float) -> dict:
             y_mes = y
         if len(pedacos) == 1 and RE_DATA.fullmatch(pedacos[0].strip()):
             datas_soltas.append((y, parse_data(pedacos[0])))
+        # 22/11/2026: linha de tributo não é o total (CPFL escaneada: o OCR perdeu "Total a pagar" e o 1º valor em
+        # destaque virou "500,01 COFINS" — o PIS do quadro de tributos — no lugar de R$ 46.729,35)
+        if re.search(r"\b(pis|pasep|cofins|icms)\b", ntexto):
+            dinheiro = []
         if dinheiro and "total" not in out:
             i_din, v = dinheiro[0]
             out["total"] = (v, f"destaque:{texto[:40]}")
@@ -755,6 +759,17 @@ def aplicar_identificacao(v2_out: dict, pdf_bytes: bytes) -> dict:
         vv["data_vencimento"] = _br(ident["vencimento"])
     if ident.get("total") is not None:
         vv["valor_total"] = ident["total"]
+        # 22/11/2026 (usuário): fatura paga / 2ª via quitada imprime "TOTAL A PAGAR 0,00" — vale o TOTAL da tabela de
+        # itens (Neoenergia Brasília: 0,00 impresso, itens 600,55). Só com total impresso zero e itens positivos
+        if not ident["total"]:
+            try:
+                tt = parse_dinheiro(str((v2_out.get("totais_tabela_itens") or {}).get("valor_total") or ""))
+            except Exception:  # noqa: BLE001
+                tt = None
+            if tt and tt > 0:
+                vv["valor_total"] = tt
+                vv["_valor_total_fonte"] = "total_itens_fatura_paga"
+                ident.setdefault("_origem", {})["total"] = "itens: total a pagar impresso 0,00 (fatura paga)"
     nf = v2_out.setdefault("nota_fiscal", {})
     if ident.get("nf"):
         nf["numero_nf"] = ident["nf"]
