@@ -3906,10 +3906,13 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
          ids: list[int] | None = None,
          com_itens: bool = False,
          skip_processadas: bool = False,
-         workers: int = 1):
+         workers: int = 1,
+         uids: list[str] | None = None):
 
     log.info("=" * 60)
-    if ids:
+    if uids:
+        log.info(f"pdf_pipeline.py  uid(s)={len(uids)}  extrator={extrator}  force={force}  dryrun={dryrun}")
+    elif ids:
         log.info(f"pdf_pipeline.py  id(s)={ids}  extrator={extrator}  force={force}  dryrun={dryrun}  skip_processadas={skip_processadas}")
     else:
         empresas_str = ", ".join(str(e) for e in cod_empresas)
@@ -3957,7 +3960,11 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
         except Exception as e:
             log.warning(f"[link-invalido] não li a tabela ({e}) — nenhuma fatura pulada por link")
 
-    if ids:
+    if uids:
+        # --uid-file (23/11/2026): a origem regrava Faturas_Registradas_Cache com ids novos (o UID se mantém) —
+        # o id atual é resolvido aqui, na hora de rodar. Filtro por UID entra em lotes logo abaixo.
+        filtros = ["frc.UID IN ({uids_ph})", "frc.Link IS NOT NULL", "TRIM(frc.Link) != ''"]
+    elif ids:
         lista_ids = ", ".join(str(i) for i in ids)
         filtros = [f"frc.id IN ({lista_ids})", "frc.Link IS NOT NULL", "TRIM(frc.Link) != ''"]
     else:
@@ -3969,11 +3976,11 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
         filtros = [filtro_empresa, "frc.Link IS NOT NULL", "TRIM(frc.Link) != ''"]
 
     where   = " AND ".join(filtros)
-    lim_sql = f"LIMIT {limite}" if (limite and not ids) else ""
+    lim_sql = f"LIMIT {limite}" if (limite and not ids and not uids) else ""
 
     # Lê direto da origem (sgeeasy_clientes_novo). Não precisa de COLLATE
     # porque é uma conexão única na origem.
-    cur_orig.execute(f"""
+    _sql_origem = f"""
         SELECT frc.id, frc.UID, frc.Cod_Empresa, frc.UC, frc.Mes_Ref, frc.Link,
                frc.CNPJ_Fatura, frc.Concessionaria, frc.CNPJ_Concessionaria, frc.Tp_Tensao,
                frc.Classe_Tarifaria, frc.Mercado, frc.NroMedidor, frc.NroNF,
@@ -3990,8 +3997,22 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
         WHERE {where}
         ORDER BY frc.id {ordem}
         {lim_sql}
-    """)
-    todas_origem = cur_orig.fetchall()
+    """
+    if uids:
+        todas_origem, _vistos = [], set()
+        for _i in range(0, len(uids), 1000):
+            _lote = uids[_i:_i + 1000]
+            cur_orig.execute(_sql_origem.replace("{uids_ph}", ", ".join(["%s"] * len(_lote))), _lote)
+            for _r in cur_orig.fetchall():  # mesmo UID em 2 linhas: fica a de menor id (ORDER BY id ASC/DESC)
+                if _r["UID"] not in _vistos:
+                    _vistos.add(_r["UID"])
+                    todas_origem.append(_r)
+        _faltam = len(set(uids) - _vistos)
+        if _faltam:
+            log.warning(f"[--uid-file] {_faltam} UID(s) sem linha com Link na origem — não processados")
+    else:
+        cur_orig.execute(_sql_origem)
+        todas_origem = cur_orig.fetchall()
     log.info(f"Faturas na origem ({DB_ORIGEM.get('database','?')}): {len(todas_origem)}")
 
     # Se não force, descobrimos quais UIDs já foram processados no destino
@@ -4002,7 +4023,7 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
             placeholders = ", ".join(["%s"] * len(uids))
             cur.execute(f"""
                 SELECT uid, plumber_gerado_em, markdown_gerado_em, ocr_gerado_em, validador_gate
-                FROM FATURA_DADOS_EXTRAIDOS
+                FROM {TBL_FDE}
                 WHERE uid IN ({placeholders})
             """, uids)
             ja_processadas = {r["uid"]: r for r in cur.fetchall()}
@@ -4646,6 +4667,9 @@ if __name__ == "__main__":
     p.add_argument("--id-file", dest="id_file", default=None,
                    help="Arquivo com ids da ORIGEM (frc.id), 1 por linha — evita estourar "
                         "a linha de comando em lotes grandes. Combina com/substitui --id.")
+    p.add_argument("--uid-file", dest="uid_file", default=None,
+                   help="Arquivo com UIDs (1 por linha): o id atual na origem é resolvido na hora de rodar "
+                        "(a origem troca os ids; o UID se mantém). Use no lugar de --id-file em lotes longos.")
     p.add_argument("--revalidar", action="store_true",
                    help="Re-roda SÓ o estágio v3 (extrator+complementos+gate) usando o TEXTO "
                         "JÁ SALVO no banco — SEM baixar PDF. Aplica os fixes do código atual em "
@@ -4767,12 +4791,20 @@ if __name__ == "__main__":
         args.id = sorted(set((args.id or []) + _ids_arq))
         log.info(f"[--id-file] {len(_ids_arq)} ids lidos de {args.id_file}")
 
-    if not args.empresa and not args.id:
-        p.error("Informe --empresa, --id ou --id-file")
+    _uids_arq = None
+    if getattr(args, "uid_file", None):
+        with open(args.uid_file, encoding="utf-8") as _f:
+            _uids_arq = list(dict.fromkeys(_ln.strip() for _ln in _f if _ln.strip()))
+        log.info(f"[--uid-file] {len(_uids_arq)} UIDs lidos de {args.uid_file}")
+        if args.id:
+            p.error("--uid-file não combina com --id/--id-file")
+
+    if not args.empresa and not args.id and not _uids_arq:
+        p.error("Informe --empresa, --id, --id-file ou --uid-file")
 
     if getattr(args, "retentar_links_invalidos", False):
         os.environ["PDF_PIPELINE_RETENTAR_INVALIDOS"] = "1"
     main(cod_empresas=args.empresa or [], force=args.force, limite=args.limite,
          dryrun=args.dryrun, extrator=args.extrator, ordem=args.ordem, ids=args.id,
          com_itens=args.com_itens, skip_processadas=args.skip_processadas,
-         workers=max(1, args.workers))
+         workers=max(1, args.workers), uids=_uids_arq)
