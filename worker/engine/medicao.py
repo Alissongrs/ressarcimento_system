@@ -901,9 +901,18 @@ def _medidor_rotulado(itens: list[Item]) -> str | None:
                 coluna.append(it)  # cabeçalho de coluna: valor abaixo
                 continue
             v = m.group(1).upper() if m.group(1) else None
-            if not v and k + 1 < len(ln):
-                v = ln[k + 1].text.strip().split()[0] if ln[k + 1].text.strip() else None
-            if v and RE_MEDIDOR.match(v) and sum(c.isdigit() for c in v) >= 4 and not RE_MES.search(v):
+            prox = k + 1
+            if not v and prox < len(ln):
+                v = ln[prox].text.strip().split()[0] if ln[prox].text.strip() else None
+                prox += 1
+            # 24/11/2026: matrícula Energisa MT ("3137563-2021-11-8") cortada pelo OCR antigo embutido no scan cai logo
+            # depois de "Nº DO MEDIDOR:" — o medidor impresso (00002934464) é o token seguinte
+            if v and re.fullmatch(r"\d{5,9}-(19|20)\d{2}", v):
+                resto = it.norm[m.end():].split() if m.group(1) else []
+                v = (resto[0].upper() if resto else
+                     ln[prox].text.strip().split()[0] if prox < len(ln) and ln[prox].text.strip() else None)
+            if v and RE_MEDIDOR.match(v) and sum(c.isdigit() for c in v) >= 4 and not RE_MES.search(v) \
+                    and not re.fullmatch(r"\d{5,9}-(19|20)\d{2}", v):
                 return v
     for cab in coluna:
         for ln in linhas:
@@ -1246,7 +1255,20 @@ def _trocas_ocr(v: int) -> set[int]:
     return {int(t[:i] + d + t[i + 1:]) for i, c in enumerate(t) for d in _CONFUNDE.get(c, "")}
 
 
-def _ocr_reparar_por_itens(med: dict, fontes: list[list], itens_pdf: list) -> bool:
+def _elos_vizinhos(vizinhos: dict | None, ch, postos) -> int:
+    """24/11/2026: quantas leituras da combinação ch emendam com o mês vizinho da mesma UC (anterior de hoje = atual
+    do mês anterior; atual de hoje = anterior do mês seguinte). vizinhos = {posto: (atual_mes_anterior,
+    anterior_mes_seguinte)} — continuidade.elos_para_medicao."""
+    if not vizinhos:
+        return 0
+    n = 0
+    for p, (a, u, _k) in zip(postos, ch):
+        va, vp = vizinhos.get(p) or (None, None)
+        n += (va is not None and abs(a - va) <= 0.5) + (vp is not None and abs(u - vp) <= 0.5)
+    return n
+
+
+def _ocr_reparar_por_itens(med: dict, fontes: list[list], itens_pdf: list, vizinhos: dict | None = None) -> bool:
     """22/11/2026, só OCR, quando nem o molde nem _ocr_confirma_por_itens fecharam (615514 CPFL: o OCR lê "6" como "0"
     nas leituras em todo zoom). Junta as linhas de energia ativa de todas as leituras do quadro (página inteira e
     recorte), testa as leituras como lidas e, se nada fechar, com UM dígito confundível trocado por posto. Aceita só
@@ -1307,6 +1329,15 @@ def _ocr_reparar_por_itens(med: dict, fontes: list[list], itens_pdf: list) -> bo
                 sol[chave] = (combo, m2)
         if not sol:
             continue
+        if len(sol) > 1 and vizinhos:
+            # 24/11/2026: desempate pelo mês vizinho — vale a ÚNICA combinação cujas leituras emendam com a fatura do
+            # mês anterior/seguinte da mesma UC (números impressos lá, lidos por outra extração)
+            el = {ch: _elos_vizinhos(vizinhos, ch, postos) for ch in sol}
+            mx = max(el.values())
+            topv = [ch for ch in sol if el[ch] == mx]
+            if mx >= 1 and len(topv) == 1:
+                med.setdefault("obs", []).append(f"OCR: {len(sol)} leituras fechavam; desempate pelo mês vizinho ({mx} elos)")
+                sol = {topv[0]: sol[topv[0]]}
         if len(sol) > 1:
             # mais de uma combinação fecha (615514 ponta: 546738→551624 e 546138→551024 têm a mesma diferença). Vale
             # a ÚNICA em que todas as leituras foram lidas literalmente por alguma passada do OCR; senão não grava
@@ -1439,7 +1470,8 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
         if _pend or not med.get("validado"):
             _ocr_confirma_por_itens(med, itens_pdf)
     if med and v2_out.get("_fonte_itens") == "ocr" and not med.get("validado"):
-        _ocr_reparar_por_itens(med, [itens_pdf] + list(v2_out.get("_ocr_med_extra") or []), itens_pdf)
+        _ocr_reparar_por_itens(med, [itens_pdf] + list(v2_out.get("_ocr_med_extra") or []), itens_pdf,
+                               v2_out.get("_vizinhos"))
     if not med:
         # sem molde de medição (Copel refaturamento 596803): a contratada impressa no quadro ainda vale
         _ct = contratada_texto(itens_pdf) if v2_out.get("_fonte_itens") != "ocr" else None

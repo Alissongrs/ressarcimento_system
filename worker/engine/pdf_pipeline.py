@@ -2176,6 +2176,72 @@ def gravar_dados_extraidos(cur, conn, fatura_id: int, campos: dict,
         return False
 
 
+# ─── Parser por layout × leituras já gravadas (24/11/2026) ───────────────────
+_POSTOS_PARSER = (
+    ("ponta", "leit_ant_ativa_ponta", "leit_atu_ativa_ponta", "consumo_ativo_ponta_kwh"),
+    ("fponta", "leit_ant_ativa_fponta", "leit_atu_ativa_fponta", "consumo_ativo_fponta_kwh"),
+)
+
+
+def _fisica_fecha(ant, atu, k, cons) -> bool:
+    """(atual − anterior) × K = consumo, com a mesma folga do parser (1 % ou perdas de 2,5 %)."""
+    try:
+        ant, atu, k, cons = float(ant), float(atu), float(k), float(cons)
+    except (TypeError, ValueError):
+        return False
+    if atu < ant or cons <= 0 or k <= 0:
+        return False
+    calc, tol = (atu - ant) * k, max(1.0, cons * 0.01)
+    return abs(calc - cons) <= tol or abs(calc * 1.025 - cons) <= tol
+
+
+def _parser_corrige_leituras(cur, uid, cols: dict) -> dict:
+    """O parser por layout só PREENCHE vazio (COALESCE). Duas exceções, ambas pela física da própria fatura:
+      - o posto já gravado tem leituras que NÃO fecham (anterior/atual invertidas pelo regex antigo — Energisa MT
+        2022: 12,197 → 10,488 onde a fatura diz 10,488 → 12,197) e o parser leu o mesmo consumo com leituras que
+        fecham: as leituras do parser substituem (devolvidas aqui, gravadas sem COALESCE);
+      - o registro é ÚNICO e o motor já o gravou no outro posto (Energisa MT 2021: posto impresso "Ponta", motor grava
+        como fora ponta): o parser não cria o segundo posto — senão o kWh total dobra (6.486 → 12.972).
+    Remove de `cols` o que não deve ser preenchido e devolve {coluna: valor} a sobrescrever."""
+    trocas: dict = {}
+    try:
+        cur.execute(f"SELECT leit_ant_ativa_ponta, leit_atu_ativa_ponta, consumo_ativo_ponta_kwh, leit_ant_ativa_fponta, "
+                    f"leit_atu_ativa_fponta, consumo_ativo_fponta_kwh, constante_k FROM {TBL_FDE} WHERE uid=%s", (uid,))
+        r = cur.fetchone()
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"  [parser_layout] leitura atual: {e}")
+        return trocas
+    if not r:
+        return trocas
+    if not isinstance(r, dict):
+        r = dict(zip(("leit_ant_ativa_ponta", "leit_atu_ativa_ponta", "consumo_ativo_ponta_kwh", "leit_ant_ativa_fponta",
+                      "leit_atu_ativa_fponta", "consumo_ativo_fponta_kwh", "constante_k"), r))
+
+    def _f(v):
+        try:
+            return None if v is None else float(v)
+        except (TypeError, ValueError):
+            return None
+
+    for seg, a, u, c in _POSTOS_PARSER:
+        pa, pu, pc = _f(cols.get(a)), _f(cols.get(u)), _f(cols.get(c))
+        if None in (pa, pu, pc):
+            continue  # parser sem leitura: só preenche vazio
+        _, oa, ou, oc = next(p for p in _POSTOS_PARSER if p[0] != seg)
+        if _f(r.get(oa)) == pa and _f(r.get(ou)) == pu and _f(r.get(oc)) is not None and abs(_f(r.get(oc)) - pc) < 0.01:
+            for kk in (a, u, c):
+                cols.pop(kk, None)  # mesmo registro já gravado no outro posto: registro único
+            continue
+        if _fisica_fecha(r.get(a), r.get(u), r.get("constante_k") or cols.get("constante_k"), r.get(c)):
+            continue  # o gravado fecha: fica
+        cons_atual = _f(r.get(c))
+        if (r.get(a) is not None or r.get(u) is not None) and (cons_atual is None or abs(cons_atual - pc) <= max(0.01, pc * 0.001)):
+            trocas[a], trocas[u] = pa, pu
+            cols.pop(a, None)
+            cols.pop(u, None)
+    return trocas
+
+
 # ─── Espelho da ORIGEM (sgeeasy) → FDE ───────────────────────────────────────
 def _gravar_mirror_origem(cur, conn, uid, row):
     """Espelha campos da Faturas_Registradas_Cache (origem) na FDE, por uid.
@@ -3334,7 +3400,7 @@ def normalizar_via_llm(v2_out: dict, texto: str) -> dict:
     return dbg
 
 
-def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown, texto_ocr, uid: str = None, force: bool = False, texto_bbox: str = None, dryrun: bool = False, origem: dict = None):
+def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown, texto_ocr, uid: str = None, force: bool = False, texto_bbox: str = None, dryrun: bool = False, origem: dict = None, _reserva: bool = False):
     """Executa pipeline determinístico unificado (3 extratores + camadas auxiliares).
 
     Args:
@@ -3371,6 +3437,44 @@ def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown,
     except Exception as e:
         log.warning(f"  [v3] imports falharam: {e}")
         return
+
+    # 25/11/2026 SURE_OCR_VERSAO=combo: fatura escaneada (ou com camada de texto descartada) é lida também pelo v6, em
+    # dryrun e sem gravar nada; as colunas dela vão em v2_out["_colunas_reserva_ocr"] e atualizar_colunas_db só usa um
+    # valor do v6 num campo que o v4 deixou vazio e que uma conta confirma (ocr_combinado.py).
+    # _escaneada também desliga o OCR repetido da cascata (item 1, 25/11/2026). PDF_PIPELINE_CASCATA_OCR=1 religa.
+    _reserva_ocr = None
+    _escaneada = False
+    if pdf_bytes and os.getenv("PDF_PIPELINE_NO_OCR", "") != "1":
+        _escaneada = len((texto_plumber or "").strip()) < 200
+        if not _escaneada:
+            try:
+                import camada_texto as _ct_combo
+                _escaneada = bool(_ct_combo.avaliar(pdf_bytes).get("descartar"))
+            except Exception:
+                pass
+    try:
+        import ocr_itens as _oi_combo
+        if _oi_combo.combo() and pdf_bytes and not _reserva:
+            if _escaneada:
+                _t_combo = time.time()
+                with _oi_combo.versao("v6"):
+                    _txt6 = texto_ocr
+                    if texto_ocr:
+                        try:
+                            _txt6, _ = extrair_ocr(pdf_bytes, fid or 0)
+                        except Exception:
+                            _txt6 = texto_ocr
+                    _p6 = _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown, _txt6, uid=uid,
+                                             force=force, texto_bbox=texto_bbox, dryrun=True, origem=origem,
+                                             _reserva=True) or {}
+                _v6 = _p6.get("v2") if isinstance(_p6, dict) else None
+                if isinstance(_v6, dict):
+                    from atualizar_colunas_db import _coleta_campos_base
+                    _v6["_texto_plumber"] = texto_plumber or ""
+                    _reserva_ocr = _coleta_campos_base(_v6)
+                log.info(f"  [ocr combo] leitura v6 de reserva: {len(_reserva_ocr or {})} colunas ({time.time() - _t_combo:.1f}s)")
+    except Exception as e:
+        log.warning(f"  [ocr combo] leitura v6 falhou (segue só v4): {e}")
 
     # Texto unificado (4 extratores): plumber + markdown + ocr + bbox-ordenado
     # bbox-ordenado é crítico pra DANF3E que pdfplumber lê coluna-a-coluna (Via Varejo)
@@ -3415,7 +3519,8 @@ def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown,
     if tmp_pdf:
         t_etapa = time.time()
         try:
-            cascata_out = resumir(cascata_extracao(tmp_pdf))
+            cascata_out = resumir(cascata_extracao(
+                tmp_pdf, sem_ocr=_escaneada and os.getenv("PDF_PIPELINE_CASCATA_OCR", "0") != "1"))
             regs = (cascata_out.get("regioes_detectadas") if isinstance(cascata_out, dict) else None) or {}
             log.info(f"  [v3.2 cascata bbox] {regs} ({time.time()-t_etapa:.1f}s)")
         except Exception as e:
@@ -3502,6 +3607,14 @@ def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown,
         t_etapa = time.time()
         try:
             from medicao import aplicar_medicao
+            # 24/11/2026: leituras do mês anterior/seguinte da mesma UC (PROD, só leitura) — desempate entre leituras
+            # candidatas do OCR (medicao._ocr_reparar_por_itens, ocr_reforco)
+            if cur is not None and uid and os.getenv("PDF_PIPELINE_VIZINHOS", "1") != "0":
+                try:
+                    from continuidade import elos_para_medicao
+                    v2_out["_vizinhos"] = elos_para_medicao(cur, uid)
+                except Exception as _e_viz:  # noqa: BLE001
+                    log.warning(f"  [v3.66 vizinhos] {_e_viz}")
             aplicar_medicao(v2_out, pdf_bytes)
             _md = v2_out.get("_medicao") or {}
             if _md:
@@ -3544,7 +3657,8 @@ def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown,
     # itens, histórico, dígito verificador, origem sgeeasy (linha da Faturas_Registradas_Cache) e fatura anterior da
     # mesma UC. Só anota (v2_out['_confianca'] → coluna confianca_json); nunca sobrescreve o impresso.
     # PDF_PIPELINE_CONFIANCA=0 desliga.
-    if isinstance(v2_out, dict) and os.getenv("PDF_PIPELINE_CONFIANCA", "1") != "0":
+    # leitura de reserva do OCR combo: a confiança só anota (não muda valor) e a leitura principal já a calcula
+    if isinstance(v2_out, dict) and os.getenv("PDF_PIPELINE_CONFIANCA", "1") != "0" and not _reserva:
         t_etapa = time.time()
         try:
             from confirmacao import aplicar as _conf_aplicar, resumo as _conf_resumo
@@ -3633,6 +3747,9 @@ def _rodar_pipeline_v3(cur, conn, fid, pdf_bytes, texto_plumber, texto_markdown,
     if tmp_pdf:
         try: os.remove(tmp_pdf)
         except: pass
+
+    if _reserva_ocr and isinstance(v2_out, dict):
+        v2_out["_colunas_reserva_ocr"] = _reserva_ocr
 
     # 4) Persiste em extracao_raw_json.regex_v3 (compatível retroativamente)
     payload = {
@@ -4231,6 +4348,19 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
                                      len(texto_markitdown or ""),
                                      len(texto_bbox or ""))
             fontes_pobres = melhor_texto_layer < OCR_GATE_MIN_CHARS
+            # 24/11/2026: camada invisível de OCR alheio por cima do scan, com nota baixa no léxico das faturas →
+            # descarta a camada e lê como escaneada (camada_texto.py). Sem isso o motor lia lixo como texto digital.
+            try:
+                import camada_texto as _ct
+                _camada = _ct.avaliar(pdf_bytes)
+            except Exception:  # noqa: BLE001
+                _camada = {"descartar": False}
+            if _camada.get("descartar"):
+                log.info(f"  [camada] OCR embutido com nota {_camada.get('nota')} < {_ct.LIMIAR} — descartada, lida como escaneada")
+                texto_plumber, texto_markitdown, texto_bbox = "", "", ""
+                campos_plumber, campos_markdown = _campos_vazios(), _campos_vazios()
+                plumber_ok = False
+                melhor_texto_layer, fontes_pobres = 0, True
 
             if NO_OCR:
                 # --no-ocr: Tesseract totalmente desligado (estágio [ocr] nunca roda).
@@ -4337,13 +4467,14 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
                         # ("Energia Elétrica" = líquido/mínimo) e passava por cima da medição validada do motor
                         # (medicao.py) — no teste da cópia apagou leituras impressas de 12 faturas.
                         _cols = {k: v for k, v in _pl.items() if not k.startswith("_") and v is not None}
-                        if _cols:
-                            _sets = ", ".join(f"{k}=COALESCE({k}, %s)" for k in _cols)
+                        _troca = _parser_corrige_leituras(worker_cur, uid_neg, _cols)
+                        if _cols or _troca:
+                            _sets = ", ".join([f"{k}=COALESCE({k}, %s)" for k in _cols] + [f"{k}=%s" for k in _troca])
                             worker_cur.execute(
                                 f"UPDATE {TBL_FDE} SET {_sets} WHERE uid=%s",
-                                (*_cols.values(), uid_neg))
+                                (*_cols.values(), *_troca.values(), uid_neg))
                             worker_conn.commit()
-                            log.info(f"  [parser:{_pl['_layout']}] medição OK → {list(_cols)}")
+                            log.info(f"  [parser:{_pl['_layout']}] medição OK → {list(_cols)} | corrigiu {list(_troca)}")
                 except Exception as _e_pl:
                     log.warning(f"  [parser_layout] excecao: {_e_pl}")
 
@@ -4444,10 +4575,96 @@ def main(cod_empresas: list[int], force: bool, limite: int | None,
                     worker_conn.commit()
                 except Exception as _e_kt:  # noqa: BLE001
                     log.warning(f"  [kwh_total] {_e_kt}")
+                # 24/11/2026: leitura anterior/atual INVERTIDAS (anterior > atual) desfeitas quando o mês anterior e/ou o
+                # seguinte da mesma UC (PROD, só leitura) confirmam a ordem trocada e a conta fecha (continuidade.py).
+                # Energisa PB 426535820251201: impresso 688.081,57 → 698.264,65; gravado ao contrário.
+                try:
+                    import continuidade as _cont
+                    _desinv = _cont.aplicar(worker_cur, TBL_FDE, _sel_uid)
+                    if _desinv:
+                        worker_cur.execute(f"UPDATE {TBL_FDE} SET {', '.join(f'{k}=%s' for k in _desinv)} WHERE uid=%s",
+                                           (*_desinv.values(), _sel_uid))
+                        # confiança: a divergência com os vizinhos era a inversão — vira correção registrada
+                        try:
+                            import json as _jct
+                            worker_cur.execute(f"SELECT confianca_json FROM {TBL_FDE} WHERE uid=%s", (_sel_uid,))
+                            _rcj = worker_cur.fetchone()
+                            _cj = (_rcj.get("confianca_json") if isinstance(_rcj, dict) else (_rcj[0] if _rcj else None))
+                            if _cj:
+                                _cj = _jct.loads(_cj)
+                                for _k in _desinv:
+                                    (_cj.get("div") or {}).pop(_k, None)
+                                    _cj.setdefault("corr", {})[_k] = {"continuidade": "anterior/atual invertidas"}
+                                worker_cur.execute(f"UPDATE {TBL_FDE} SET confianca_json=%s WHERE uid=%s",
+                                                   (_jct.dumps(_cj, ensure_ascii=False), _sel_uid))
+                        except Exception as _e_cj:  # noqa: BLE001
+                            log.warning(f"  [continuidade] confianca_json: {_e_cj}")
+                        worker_conn.commit()
+                        log.info(f"  [continuidade] leituras desinvertidas pelos meses vizinhos → {_desinv}")
+                except Exception as _e_ct:  # noqa: BLE001
+                    log.warning(f"  [continuidade] {_e_ct}")
+                # 24/11/2026: total = valor da linha digitável impressa quando ela tem todos os dígitos verificadores
+                # conferidos e diverge do gravado (scan Energisa MT com OCR antigo: 817,81 do 1º item × 882,66 impresso)
+                try:
+                    from boleto import valor_boleto
+                    worker_cur.execute(f"SELECT valor_total_fatura, data_vencimento FROM {TBL_FDE} WHERE uid=%s", (_sel_uid,))
+                    _rv = worker_cur.fetchone()
+                    if _rv is not None and not isinstance(_rv, dict):
+                        _rv = {"valor_total_fatura": _rv[0], "data_vencimento": _rv[1]}
+                    _rv = _rv or {}
+                    _vt, _venc = _rv.get("valor_total_fatura"), _rv.get("data_vencimento")
+                    if isinstance(_venc, str):
+                        try:
+                            import datetime as _dtb
+                            _venc = _dtb.date.fromisoformat(_venc[:10])
+                        except ValueError:
+                            _venc = None
+                    # 24/11/2026: + códigos lidos da IMAGEM (codigos.py): barras ITF (DV + fator = vencimento) e PIX (CRC).
+                    # Linha digitável e barras valem sozinhas; o PIX só confirma (QR de cobrança pode ser de outro doc).
+                    import codigos as _cod
+                    import boleto as _bol
+                    _cods = _cod.ler(pdf_bytes)
+                    _vals = set(_cod.valores([c for c in _cods if c[0] == "ITF"], _venc))
+                    _vtx = valor_boleto((texto_plumber or "") + "\n" + (texto_ocr or ""), _venc)
+                    if _vtx is not None:
+                        _vals.add(_vtx)
+                    # só confirmam (nunca trocam): PIX e barras sem fator/vencimento diferente (Equatorial: fator 0000)
+                    _vpix = _cod.valores([c for c in _cods if c[0] == "QRCode"]) | _cod.valores(
+                        [c for c in _cods if c[0] == "ITF"], _venc, estrito=False)
+                    _vb = _vals.pop() if len(_vals) == 1 else None
+                    _fonte_b = ("linha digitável" if _vtx is not None else "código de barras") + (" + PIX" if _vb in _vpix else "")
+                    if _vb is None and len(_vpix) == 1 and _vt is not None and abs(float(_vt) - next(iter(_vpix))) <= 0.005:
+                        _fonte_b = "PIX/barras confirmam"
+                    if _vb is not None:
+                        if _vt is None or abs(float(_vt) - _vb) > 0.005:
+                            worker_cur.execute(f"UPDATE {TBL_FDE} SET valor_total_fatura=%s WHERE uid=%s", (_vb, _sel_uid))
+                            worker_conn.commit()
+                            log.info(f"  [boleto] total {_vt} → {_vb} ({_fonte_b}, DVs conferidos)")
+                    elif _fonte_b == "PIX/barras confirmam":
+                        log.info(f"  [boleto] total {_vt} confirmado (PIX/barras sem vencimento)")
+                    elif _vpix:
+                        log.info(f"  [boleto] PIX/barras sem vencimento {sorted(_vpix)} ≠ total gravado {_vt} — mantido")
+                    # chave de acesso do QR da SEFAZ (DV conferido): grava se vazia ou se a gravada não fecha o DV
+                    _chq = _cod.chave(_cods)
+                    if _chq:
+                        worker_cur.execute(f"SELECT chave_nfe FROM {TBL_FDE} WHERE uid=%s", (_sel_uid,))
+                        _rc = worker_cur.fetchone()
+                        _cha = (_rc.get("chave_nfe") if isinstance(_rc, dict) else (_rc[0] if _rc else None)) or None
+                        # QR decodificado (com correção de erro) vence a chave lida do texto/OCR: 24/11/2026 havia
+                        # dígitos do BOLETO gravados como chave que fechavam o DV por coincidência
+                        if _cha is None or re.sub(r"\D", "", str(_cha)) != _chq:
+                            worker_cur.execute(f"UPDATE {TBL_FDE} SET chave_nfe=%s WHERE uid=%s", (_chq, _sel_uid))
+                            worker_conn.commit()
+                            log.info(f"  [qr] chave_nfe {_cha} → {_chq} (QR SEFAZ, DV conferido)")
+                except Exception as _e_bol:  # noqa: BLE001
+                    log.warning(f"  [boleto] {_e_bol}")
 
             if SELETIVO and _sel_antes is not None:
                 import seletivo as _sel
-                _sel.aplicar(worker_cur, worker_conn, _sel_uid, _sel_antes, log)
+                # camada de OCR embutida descartada = fatura escaneada: vazio do nosso OCR é "não leu", o antigo volta
+                # (regra do --seletivo para escaneada/foto; 24/11/2026: ICMS 203,67 da 14466762420210101 sumia)
+                _sel.aplicar(worker_cur, worker_conn, _sel_uid, _sel_antes, log,
+                             limpar=not (locals().get("_camada") or {}).get("descartar"))
 
             return {"ok": True, "fid": fid, "erro": None}
         except Exception as e:

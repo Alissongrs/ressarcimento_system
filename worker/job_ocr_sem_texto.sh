@@ -8,7 +8,7 @@
 # --id-file SEM --no-ocr → ocr_fila.py marcar. Usa o MESMO lock do pdf_pipeline (nunca dois pipelines juntos).
 #
 # Variáveis: SURE_OCR_LIMITE (faturas por rodada, default 200), SURE_OCR_PAGINAS (páginas lidas, default 3),
-#            SURE_PYTHON, SURE_OCR_LOG.
+#            SURE_OCR_VERSAO (v4 | v6 | combo; default combo se os dois pacotes carregam), SURE_PYTHON, SURE_OCR_LOG.
 set -uo pipefail
 
 BUNDLE="$(cd "$(dirname "$0")" && pwd)"
@@ -45,7 +45,22 @@ if ! "$VENV/bin/python" -c 'import rapidocr_onnxruntime, fitz, mysql.connector' 
   rotina_registrar ocr_sem_texto 1 "RapidOCR indisponível no ambiente $VENV — nada processado"
   exit 0
 fi
+# 24/11/2026: leitor de código de barras/QR (codigos.py) — venv já existente não reinstala o requirements; opcional
+"$VENV/bin/python" -c 'import zxingcpp' >/dev/null 2>&1 ||   "$VENV/bin/python" -m pip install --quiet "zxing-cpp==3.1.1" >> "$LOG" 2>&1 || log "aviso: zxing-cpp não instalou (códigos de barras/QR desligados)"
+# 25/11/2026: OCR combinado — v4 (rapidocr_onnxruntime) lê; o v6 (rapidocr 3, PP-OCRv6) só completa campo que o v4
+# deixou vazio e que uma conta confirma (ocr_combinado.py). Nas 50 escaneadas do gabarito: 597 → 639 certos, 12 → 12
+# errados. Sem o pacote v6 segue só o v4 (combo exige os dois: sem eles o pipeline cairia no Tesseract).
+"$VENV/bin/python" -c 'import rapidocr' >/dev/null 2>&1 || "$VENV/bin/python" -m pip install --quiet "rapidocr==3.10.0" >> "$LOG" 2>&1 || log "aviso: rapidocr 3 não instalou"
+if [ -z "${SURE_OCR_VERSAO:-}" ]; then
+  if "$VENV/bin/python" -c 'import rapidocr, rapidocr_onnxruntime' >/dev/null 2>&1; then
+    export SURE_OCR_VERSAO=combo
+  else
+    export SURE_OCR_VERSAO=v4
+    log "aviso: rapidocr 3 indisponível — OCR só v4 (sem combo)"
+  fi
+fi
 PYTHON="$VENV/bin/python"
+log "OCR versão=$SURE_OCR_VERSAO"
 log "RapidOCR ok ($("$PYTHON" -c 'import numpy, onnxruntime; print("numpy", numpy.__version__, "onnxruntime", onnxruntime.__version__)' 2>/dev/null))"
 
 PYTHONUTF8=1 "$PYTHON" ocr_fila.py ids --saida "$IDS" --limite "$LIMITE" >> "$LOG" 2>&1

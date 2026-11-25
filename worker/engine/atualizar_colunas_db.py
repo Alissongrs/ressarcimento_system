@@ -19,6 +19,8 @@ TBL_FDE = os.environ.get("FDE_TABLE", "FATURA_DADOS_EXTRAIDOS")  # env FDE_TABLE
 # Sentinel pra forçar UPDATE com NULL real (sobrescreve lixo do regex v1).
 # Usar como retorno do _coleta_campos quando blacklist limpou o valor.
 _FORCE_NULL = "__SET_NULL__"
+import logging as _logging
+log = _logging.getLogger("atualizar_colunas_db")
 
 # Colunas que, numa fatura lida por OCR, só gravam vindas de um molde com conferência (medição pela física,
 # tributos por base × alíquota); o extrator antigo não as grava nesse modo (ver fim de _coleta_campos).
@@ -189,6 +191,23 @@ def _consumo_gd_override(itens):
 
 
 def _coleta_campos(out_v2: dict) -> dict:
+    """Colunas do out_v2; no modo OCR combo (SURE_OCR_VERSAO=combo) completa os campos vazios com a leitura v6
+    de reserva (out_v2["_colunas_reserva_ocr"]) só onde uma conta confirma — ver ocr_combinado.py."""
+    cols = _coleta_campos_base(out_v2)
+    reserva = out_v2.get("_colunas_reserva_ocr") if isinstance(out_v2, dict) else None
+    if reserva and isinstance(cols, dict):
+        try:
+            import ocr_combinado
+            cols, aceitos, _ = ocr_combinado.combinar(cols, reserva)
+            out_v2["_ocr_combinado"] = sorted(aceitos)
+            if aceitos:
+                log.info(f"  [ocr combo] v6 completou {len(aceitos)} campo(s) com prova: {sorted(aceitos)}")
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"  [ocr combo] combinação falhou (fica só v4): {e}")
+    return cols
+
+
+def _coleta_campos_base(out_v2: dict) -> dict:
     """Mapeia out_v2 → dict {coluna: valor} pra UPDATE SQL.
 
     REGRA: prioriza `ligacao_tecnica` (extrator atual) sobre `classificacao` (legado).
@@ -397,12 +416,9 @@ def _coleta_campos(out_v2: dict) -> dict:
     # ── PIS/COFINS: prioriza tributos_agregados (combinado), fallback tributos_por_dist ──
     pis_val = _to_float(pis.get("valor_string"))
     cofins_val = _to_float(cofins.get("valor_string"))
-    # Se PIS e COFINS separados não existem, mas agregado tem combinado, divide ~17.5%/82.5%
-    if (pis_val is None and cofins_val is None) and pis_cofins_agg.get("valor_numerico") is not None:
-        combo = pis_cofins_agg["valor_numerico"]
-        # Razão típica PIS=0.83%, COFINS=3.81% → PIS ≈ 17.9% do combo, COFINS ≈ 82.1%
-        pis_val = round(combo * 0.179, 2)
-        cofins_val = round(combo - pis_val, 2)
+    # 24/11/2026: PIS/COFINS só o impresso. Antes, sem os dois separados, dividia o combinado 17,9%/82,1% — valor
+    # CALCULADO, nunca impresso (Energisa MT 2022: 273,37/1.253,81 onde a fatura diz 272,42/1.254,76; e dividia até a
+    # BASE PIS/COFINS no lugar do valor: 241,94/1.109,66 onde a fatura diz 11,15/51,39). Sem o impresso, fica vazio.
 
     # ── Subvenção ICMS Enel SP (Decreto SP nº 64.255/2019) ──────────────────
     # Quando aplicar_complementos detectou subvenção, ICMS/PIS/COFINS NULL viram 0.00.

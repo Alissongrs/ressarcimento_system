@@ -240,11 +240,17 @@ def itens_do_pdf(pdf_bytes: bytes, max_paginas: int = 2) -> tuple[list[Item], fl
         definir_fonte("ocr")
         return [i for i in forcados if i.page < max_paginas], 0.0, 0.0
     definir_fonte("texto")
+    # 24/11/2026: camada de texto invisível de OCR alheio por cima do scan, com nota baixa → lida como escaneada
     try:
-        itens, pw, ph = _itens_liteparse(pdf_bytes, max_paginas)
+        import camada_texto as _ct
+        _descartar = _ct.avaliar(pdf_bytes)["descartar"]
+    except Exception:
+        _descartar = False
+    try:
+        itens, pw, ph = ([], 0.0, 0.0) if _descartar else _itens_liteparse(pdf_bytes, max_paginas)
     except Exception:
         itens, pw, ph = [], 0.0, 0.0
-    if len([i for i in itens if i.page == 0]) < 40:
+    if len([i for i in itens if i.page == 0]) < 40 and not _descartar:
         try:
             itens2, pw2, ph2 = _itens_fitz(pdf_bytes, max_paginas)
             if len(itens2) > len(itens):

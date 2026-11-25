@@ -9,7 +9,10 @@ O extrator grava o que está impresso; este módulo só anota, campo a campo, qu
   dv          — dígito verificador confere (chave da NF3e, CNPJ)
   origem      — o sistema de origem (sgeeasy, Faturas_Registradas_Cache) tem o mesmo valor para a mesma fatura
   anterior    — a fatura anterior da mesma UC na base: leitura anterior de hoje = leitura atual de lá; medidor,
-                constante, demanda contratada, modalidade e UC iguais
+                constante, demanda contratada, modalidade e UC iguais. Leituras só quando é o MÊS IMEDIATAMENTE
+                anterior (24/11/2026: com mês faltando na base a leitura não tem por que bater)
+  posterior   — a fatura do mês seguinte (24/11/2026): leitura atual de hoje = leitura anterior de lá; medidor igual.
+                Na PROD, ~96% dos pares de meses consecutivos fecham; a quebra concentra o erro de extração
   sefaz       — consulta pública da NF3e pela chave (19/11/2026): número e emissão da nota, total, kWh dos itens.
                 Só confirma (nunca sobrescreve); nota cancelada/substituída vira "situacao_nota" divergente
 Fonte que diz OUTRO valor fica registrada em "divergente" — não sobrescreve nada: é matéria da regra do motor.
@@ -56,6 +59,11 @@ CAMPOS_ANTERIOR = {
     "numero_medidor": "numero_medidor", "constante_k": "constante_k",
     "demanda_contratada_fponta_kw": "demanda_contratada_fponta_kw", "demanda_contratada_ponta_kw": "demanda_contratada_ponta_kw",
     "modalidade_tarifaria": "modalidade_tarifaria", "codigo_uc": "codigo_uc", "subgrupo_tarifario": "subgrupo_tarifario",
+}
+# coluna de hoje → coluna da fatura do mês seguinte
+CAMPOS_POSTERIOR = {
+    "leit_atu_ativa_fponta": "leit_ant_ativa_fponta", "leit_atu_ativa_ponta": "leit_ant_ativa_ponta",
+    "numero_medidor": "numero_medidor",
 }
 TIPO_COL = {"numero_medidor": "ident", "codigo_uc": "ident", "modalidade_tarifaria": "modalidade", "subgrupo_tarifario": "ident",
             "numero_nf": "ident", "data_emissao_nf": "data"}
@@ -166,6 +174,31 @@ def anterior_por_uid(cur, uid: str) -> dict | None:
     if not r:
         return None
     return dict(zip(cols, r)) if not isinstance(r, dict) else r
+
+
+def posterior_por_uid(cur, uid: str) -> dict | None:
+    """Fatura seguinte da mesma UC na FDE (mesmo prefixo do uid, data maior — a mais próxima)."""
+    uid = str(uid or "").strip()
+    if len(uid) < 10 or not uid[-8:].isdigit():
+        return None
+    cols = sorted(set(CAMPOS_POSTERIOR.values()) | {"id", "uid", "mes_referencia"})
+    try:
+        cur.execute(f"SELECT {', '.join(cols)} FROM FATURA_DADOS_EXTRAIDOS WHERE uid LIKE %s AND LENGTH(uid) = %s AND uid > %s "
+                    f"ORDER BY uid ASC LIMIT 1", (uid[:-8] + "________", len(uid), uid))
+        r = cur.fetchone()
+    except Exception:
+        return None
+    if not r:
+        return None
+    return dict(zip(cols, r)) if not isinstance(r, dict) else r
+
+
+def meses_entre(a, b) -> int | None:
+    """Meses de a até b (mes_referencia de cada fatura); None se faltar um dos dois."""
+    x, y = _data(a), _data(b)
+    if len(x) < 7 or len(y) < 7 or not (x[:4] + y[:4]).isdigit():
+        return None
+    return (int(y[:4]) * 12 + int(y[5:7])) - (int(x[:4]) * 12 + int(x[5:7]))
 
 
 def anterior_por_uc(cur, cod_empresa, codigo_uc, mes_ref) -> dict | None:
@@ -347,7 +380,7 @@ def _hist_mes(v2: dict, mes: str) -> float | None:
 
 
 def confirmar(v2: dict, cols: dict, origem: dict | None = None, anterior: dict | None = None,
-              sefaz: dict | None = None) -> dict:
+              sefaz: dict | None = None, posterior: dict | None = None) -> dict:
     conf: dict[str, dict] = {}
 
     def add(campo: str, fonte: str, ok: bool | None, valor_outro=None):
@@ -410,11 +443,18 @@ def confirmar(v2: dict, cols: dict, origem: dict | None = None, anterior: dict |
                 r = iguais(campo, tipo, cols.get(campo), origem.get(col_o))
                 add(campo, "origem", r, origem.get(col_o))
     if anterior:
+        consecutivo = meses_entre(anterior.get("mes_referencia"), cols.get("mes_referencia")) == 1
         for campo, col_a in CAMPOS_ANTERIOR.items():
-            if campo in conf:
+            if campo in conf and (consecutivo or not campo.startswith("leit_")):
                 tipo = TIPO_COL.get(campo, "num")
                 r = iguais(campo, tipo, cols.get(campo), anterior.get(col_a))
                 add(campo, "anterior", r, anterior.get(col_a))
+    if posterior:
+        consecutivo = meses_entre(cols.get("mes_referencia"), posterior.get("mes_referencia")) == 1
+        for campo, col_p in CAMPOS_POSTERIOR.items():
+            if campo in conf and (consecutivo or not campo.startswith("leit_")):
+                r = iguais(campo, TIPO_COL.get(campo, "num"), cols.get(campo), posterior.get(col_p))
+                add(campo, "posterior", r, posterior.get(col_p))
     if sefaz:
         _confirmar_sefaz(add, conf, cols, sefaz)
     return conf
@@ -444,8 +484,20 @@ def aplicar(v2_out: dict, cur=None, uid: str | None = None, origem: dict | None 
         if anterior is None and cur is not None:
             emp = cols.get("cod_empresa") or (origem or {}).get("Cod_Empresa") or (uid[:3] if uid and len(uid) >= 14 else None)
             anterior = anterior_por_uc(cur, emp, cols.get("codigo_uc") or (origem or {}).get("UC"), cols.get("mes_referencia"))
+        posterior = posterior_por_uid(cur, uid) if (cur is not None and uid) else None
+        # 24/11/2026: o prefixo do uid não é fixo por UC (Energisa PB 426535720251001 → 426535820251201): sem o mês
+        # imediatamente anterior/seguinte pelo uid, busca pela empresa + nº de instalação
+        if cur is not None and cols.get("numero_instalacao") and cols.get("mes_referencia"):
+            from continuidade import por_instalacao
+            _emp = cols.get("cod_empresa") or (origem or {}).get("Cod_Empresa")
+            if meses_entre((anterior or {}).get("mes_referencia"), cols.get("mes_referencia")) != 1:
+                anterior = por_instalacao(cur, "FATURA_DADOS_EXTRAIDOS", _emp, cols["numero_instalacao"], cols["mes_referencia"], -1,
+                                          sorted(set(CAMPOS_ANTERIOR.values()) | {"id", "uid", "mes_referencia"})) or anterior
+            if meses_entre(cols.get("mes_referencia"), (posterior or {}).get("mes_referencia")) != 1:
+                posterior = por_instalacao(cur, "FATURA_DADOS_EXTRAIDOS", _emp, cols["numero_instalacao"], cols["mes_referencia"], +1,
+                                           sorted(set(CAMPOS_POSTERIOR.values()) | {"id", "uid", "mes_referencia"})) or posterior
         sefaz = sefaz_por_chave(cols.get("chave_nfe"))
-        conf = confirmar(v2_out, cols, origem, anterior, sefaz)
+        conf = confirmar(v2_out, cols, origem, anterior, sefaz, posterior)
         # SEFAZ sobrescreve o que traz sem dúvida (atualizar_colunas_db); se o extrator leu OUTRO valor, fica a
         # divergência — campo-chave divergente manda a fatura para o modelo (leitura_visual --fila confianca)
         vazio = (None, "", "__SET_NULL__")
@@ -473,6 +525,7 @@ def aplicar(v2_out: dict, cur=None, uid: str | None = None, origem: dict | None 
                 conf["valor_total_fatura"]["divergente"]["sefaz"] = refs[0]
         v2_out["_confianca"] = conf
         v2_out["_confianca_fontes"] = {"origem": bool(origem), "anterior": (anterior or {}).get("uid"),
+                                       "posterior": (posterior or {}).get("uid"),
                                        "sefaz": (sefaz or {}).get("situacao") or bool(sefaz)}
     except Exception as e:  # pragma: no cover
         v2_out["_confianca"] = {"erro": str(e)[:200]}

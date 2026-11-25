@@ -85,7 +85,7 @@ def pdfplumber_extrair_tabelas_pagina(pdf_path: str, pag: int) -> list:
 # CAMADA 1b — PyMuPDF4LLM (markdown estruturado com tabelas)
 # Fallback para faturas onde pdfplumber falha (fonts CID, layouts complexos)
 # ============================================================
-def pymupdf4llm_markdown(pdf_path: str) -> dict:
+def pymupdf4llm_markdown(pdf_path: str, sem_ocr: bool = False) -> dict:
     """Converte PDF para markdown estruturado via pymupdf4llm.
     Mantém tabelas como tabelas markdown — útil quando plumber falha.
     """
@@ -95,7 +95,7 @@ def pymupdf4llm_markdown(pdf_path: str) -> dict:
         # páginas quando acha tessdata (lento, e o texto muda conforme a máquina tem ou não
         # Tesseract). Com a flag, OCR nunca; sem a flag, comportamento padrão do pacote.
         kw = {}
-        if os.getenv("PDF_PIPELINE_NO_OCR", "") == "1":
+        if sem_ocr or os.getenv("PDF_PIPELINE_NO_OCR", "") == "1":
             try:
                 from pymupdf4llm.ocr import OCRMode
                 kw["use_ocr"] = OCRMode.NEVER
@@ -249,8 +249,11 @@ def detectar_regioes(pdf_path: str) -> dict:
 # ============================================================
 # Pipeline em cascata: PyMuPDF clip → pdfplumber crop → img2table
 # ============================================================
-def cascata_extracao(pdf_path: str) -> dict:
-    """Aplica cascata progressiva. Retorna texto/tabelas por região identificada."""
+def cascata_extracao(pdf_path: str, sem_ocr: bool = False) -> dict:
+    """Aplica cascata progressiva. Retorna texto/tabelas por região identificada.
+
+    sem_ocr (25/11/2026): fatura escaneada já lida pelo OCR do pipeline (ocr_itens) — o pymupdf4llm não roda o OCR
+    próprio da página e o img2table (Tesseract) é pulado; eram ~110 s por fatura repetindo a mesma leitura."""
     out = {
         "regioes_detectadas": {},
         "saldo_gd_texto": None,
@@ -315,7 +318,7 @@ def cascata_extracao(pdf_path: str) -> dict:
 
     # CAMADA 1c — PyMuPDF4LLM SEMPRE (extrai CNPJs e markdown estruturado adicional)
     t0 = time.time()
-    md_out = pymupdf4llm_markdown(pdf_path)
+    md_out = pymupdf4llm_markdown(pdf_path, sem_ocr=sem_ocr)
     if "markdown" in md_out:
         out["pymupdf4llm"] = {
             "chars": md_out.get("chars"),
@@ -333,7 +336,7 @@ def cascata_extracao(pdf_path: str) -> dict:
     # que é lento, polui o stdout e trava com múltiplos workers. Com PDF_PIPELINE_NO_OCR=1
     # (flag --no-ocr do pdf_pipeline) essa camada é pulada — a fatura fica sem as tabelas
     # do img2table, mas plumber/bbox já cobrem faturas com text-layer nativo.
-    _no_ocr = os.getenv("PDF_PIPELINE_NO_OCR", "") == "1"
+    _no_ocr = sem_ocr or os.getenv("PDF_PIPELINE_NO_OCR", "") == "1"
     if not out["tabelas_pdfplumber"] and not out["tabelas_drawings"] and not _no_ocr:
         t0 = time.time()
         try:

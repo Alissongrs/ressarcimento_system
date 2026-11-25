@@ -18,43 +18,101 @@ Como módulo:  itens, pw, ph = ocr_itens.itens_rapidocr(pdf_bytes, max_paginas) 
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
 from pathlib import Path
 
-_ENGINE = None
+_ENGINES: dict = {}  # versão → motor carregado (o modo combo usa os dois na mesma fatura)
 _CACHE: dict = {}  # sha1(pdf)[:16]:zoom → (itens, pw, ph, páginas lidas) da última fatura (uma entrada só)
 MAX_PAGINAS = int(os.getenv("SURE_OCR_PAGINAS", "3"))
 
 
-def disponivel() -> bool:
-    """True se o pacote rapidocr_onnxruntime importa (não carrega os modelos)."""
+# 24/11/2026: versão do motor. "v4" = rapidocr_onnxruntime 1.4.4 (PP-OCRv4); "v6" = rapidocr 3.x (PP-OCRv6, padrão
+# do pacote). Medido nas escaneadas do gabarito (números impressos lidos certo, 32 faturas): v4 245/310, v6 255/310,
+# v6 25% mais rápido e separa as palavras (131 coladas × 1.380). "auto" = v6 se o pacote rapidocr 3 existir.
+# 25/11/2026: "combo" = v4 principal + v6 de reserva só nos campos que o v4 deixou vazios e que uma conta confirma
+# (ocr_combinado.py; o pdf_pipeline roda a leitura v6 em dryrun dentro de versao("v6")). Nas 50 escaneadas do
+# gabarito: 597 → 639 certos, 12 → 12 errados.
+VERSAO = os.getenv("SURE_OCR_VERSAO", "v4")
+
+
+def combo() -> bool:
+    return VERSAO == "combo"
+
+
+@contextlib.contextmanager
+def versao(v: str):
+    """Troca a versão do motor dentro do bloco (o modo combo roda a leitura de reserva com v6)."""
+    global VERSAO
+    antes, VERSAO = VERSAO, v
     try:
-        import rapidocr_onnxruntime  # noqa: F401
+        yield
+    finally:
+        VERSAO = antes
+
+
+def _versao() -> str:
+    if VERSAO == "combo":
+        return "v4"
+    if VERSAO != "auto":
+        return VERSAO
+    try:
+        import rapidocr  # noqa: F401
+        return "v6"
+    except Exception:
+        return "v4"
+
+
+def disponivel() -> bool:
+    """True se o pacote do motor escolhido importa (não carrega os modelos)."""
+    try:
+        if _versao() == "v6" or VERSAO == "combo":
+            import rapidocr  # noqa: F401
+        if _versao() == "v4":
+            import rapidocr_onnxruntime  # noqa: F401
         return True
     except Exception:
         return False
 
 
+class _MotorV6:
+    """rapidocr 3.x com a mesma assinatura do 1.4.4: motor(img) → ([(caixa 4×2, texto, score)], tempo)."""
+
+    def __init__(self):
+        from rapidocr import RapidOCR
+        self.eng = RapidOCR(params={"Global.log_level": "warning"})
+
+    def __call__(self, img):
+        r = self.eng(img)
+        if r is None or r.boxes is None or r.txts is None:
+            return [], None
+        return [(b.tolist(), t, float(s)) for b, t, s in zip(r.boxes, r.txts, r.scores)], getattr(r, "elapse", None)
+
+
 def _motor():
-    global _ENGINE
-    if _ENGINE is None:
-        from rapidocr_onnxruntime import RapidOCR
-        _ENGINE = RapidOCR()
-    return _ENGINE
+    v = _versao()
+    if v not in _ENGINES:
+        if v == "v6":
+            _ENGINES[v] = _MotorV6()
+        else:
+            from rapidocr_onnxruntime import RapidOCR
+            _ENGINES[v] = RapidOCR()
+    return _ENGINES[v]
 
 
 def itens_rapidocr(pdf_bytes: bytes, max_paginas: int = 3, zoom: float = 3.0) -> tuple[list[dict], float, float]:
     """OCR de até max(max_paginas, MAX_PAGINAS) páginas, uma vez por PDF: a identificação pede 2 páginas, a medição e o
     texto corrido pedem 3 — o cache guarda o lote maior e devolve só as páginas pedidas."""
     import hashlib
-    chave = hashlib.sha1(pdf_bytes).hexdigest()[:16] + f":{zoom:g}"
+    chave = hashlib.sha1(pdf_bytes).hexdigest()[:16] + f":{zoom:g}:{_versao()}"
     pags = max(int(max_paginas), MAX_PAGINAS)
     ent = _CACHE.get(chave)
     if ent is None or ent[3] < pags:
         itens, pw, ph = _itens_rapidocr(pdf_bytes, pags, zoom)
-        _CACHE.clear()
+        for k in [k for k in _CACHE if k.split(":")[0] != chave.split(":")[0]]:  # só a fatura atual (as 2 versões)
+            del _CACHE[k]
         ent = _CACHE[chave] = ([dict(i) for i in itens], pw, ph, pags)
     return [dict(i) for i in ent[0] if i["page"] < max_paginas], ent[1], ent[2]
 

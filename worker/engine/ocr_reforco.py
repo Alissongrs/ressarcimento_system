@@ -172,8 +172,10 @@ def aplicar(v2_out: dict, pdf_bytes: bytes, zoom: float = 6.0) -> dict:
                         m2 = v2_out.get("_medicao") or {}
                         # um recorte pode ler só UM dos registros do posto (Enel SP: fora ponta capacitivo + indutivo)
                         # e a física fecha nesse registro sozinho — só vale se algum consumo bate com item kWh
+                        # 24/11/2026: ou as leituras emendam com o mês vizinho da mesma UC (as duas pontas, todos os
+                        # postos lidos): a física fecha E a sequência de leituras do medidor continua
                         if m2.get("validado") and (any((m2.get("itens_confirmam") or {}).values())
-                                                   or m2.get("confirmado_ocr_itens")):
+                                                   or m2.get("confirmado_ocr_itens") or _emenda_vizinhos(m2, v2_out.get("_vizinhos"))):
                             aceitos.append("medicao")
                             m2["obs"] = (m2.get("obs") or []) + ["segunda leitura (recorte zoom alto) fechou a física e bate com item"]
                         else:
@@ -238,6 +240,25 @@ def aplicar(v2_out: dict, pdf_bytes: bytes, zoom: float = 6.0) -> dict:
     except Exception as e:  # pragma: no cover
         v2_out["_ocr_reforco"] = {"erro": str(e)[:200]}
     return v2_out
+
+
+def _emenda_vizinhos(med: dict, vizinhos: dict | None) -> bool:
+    """Todos os postos de energia ativa lidos emendam com o mês anterior E com o seguinte (quando existem), e ao
+    menos um elo existe."""
+    if not vizinhos:
+        return False
+    elos = 0
+    for r in med.get("registros") or []:
+        if r.get("grandeza") != "energia_ativa" or r.get("leit_ant") is None or r.get("leit_atu") is None:
+            continue
+        va, vp = vizinhos.get("p" if r.get("posto") == "p" else "fp") or (None, None)
+        for lido, viz in ((r["leit_ant"], va), (r["leit_atu"], vp)):
+            if viz is None:
+                continue
+            if abs(float(lido) - float(viz)) > 0.5:
+                return False
+            elos += 1
+    return elos >= 1
 
 
 def _aplicar_com_itens(v2_out: dict, pdf_bytes: bytes, itens2: list[Item], fn):

@@ -41,7 +41,10 @@ CAMPOS = ["mes_referencia", "valor_total_fatura", "numero_medidor", "dias_fatura
           "consumo_ativo_fponta_kwh", "consumo_ativo_ponta_kwh", "kwh_total", "icms_valor", "icms_base_calculo",
           "icms_aliquota", "pis_valor", "cofins_valor", "demanda_faturada_fponta_kw", "demanda_faturada_ponta_kw",
           "demanda_contratada_fponta_kw", "demanda_contratada_ponta_kw", "data_vencimento", "data_emissao_nf",
-          "numero_nf", "chave_nfe"]  # codigo_uc/numero_instalacao: quem manda é o espelho da origem
+          "numero_nf", "chave_nfe", "numero_instalacao"]  # codigo_uc: quem manda é o espelho da origem
+# 24/11/2026: nº de instalação já preenchido NUNCA muda no reprocessamento — é a chave que agrupa a UC (motor, mês vizinho).
+# Na Energisa MT escaneada o OCR leu o telefone "65 9 9999-7974" e o código do cliente "6/3137563-7" como instalação.
+NUNCA_TROCA = {"numero_instalacao"}
 PONTA = {"consumo_ativo_ponta_kwh", "leit_ant_ativa_ponta", "leit_atu_ativa_ponta", "demanda_faturada_ponta_kw"}
 # 0 de contratada veio da origem (sgeeasy grava 0 quando não tem): na cópia (21/11) 8 faturas sem contratada impressa
 # tinham 0 e o motor limpava — 0 → vazio é a correção
@@ -111,7 +114,7 @@ def _diverge(campo: str, d) -> bool:
     return bool(fontes)
 
 
-def decidir(antes: dict, depois: dict, conf: dict, limpar: bool = True) -> tuple[dict, dict]:
+def decidir(antes: dict, depois: dict, conf: dict, limpar: bool = True, origem_nv: set | None = None) -> tuple[dict, dict]:
     """(ficou, voltou): campos cuja mudança vale e campos que voltam ao valor antigo {campo: valor_antigo}."""
     n, div, sefaz = conf.get("n") or {}, conf.get("div") or {}, set(conf.get("sefaz") or [])
     ficou, voltou = {}, {}
@@ -122,6 +125,15 @@ def decidir(antes: dict, depois: dict, conf: dict, limpar: bool = True) -> tuple
         if _igual(a, d):
             continue
         confirmado = c in sefaz or not _diverge(c, div.get(c))
+        if c in NUNCA_TROCA and not _vazio(a):
+            voltou[c] = a
+            continue
+        # 24/11/2026: escaneada (limpar=False) — campo que o OCR não leu e o espelho da origem preencheu SEM validar
+        # (ORIGEM_NAO_VALIDADO) é "não leu": volta o antigo. Energisa MT 14466811920221201: origem 11.023,44 (medido)
+        # por cima do faturado impresso 11.299,026
+        if not limpar and origem_nv and c in origem_nv and not _vazio(a):
+            voltou[c] = a
+            continue
         if _vazio(d):
             # 23/11/2026: vazio vence quando o motor rodou (conf) e a fatura terminou; antes só 0 de ponta/contratada
             ok = (limpar and bool(conf)) or (c in ZERO_NAO_E_DADO and _zero(a))
@@ -130,7 +142,47 @@ def decidir(antes: dict, depois: dict, conf: dict, limpar: bool = True) -> tuple
         else:
             ok = confirmado
         (ficou if ok else voltou)[c] = d if ok else a
+    # 24/11/2026: leituras que FECHAVAM a conta da fatura ((atual − anterior) × K ≈ consumo) não trocam por um par
+    # que não fecha (Energisa MT A3A 14466623120210201: regex v1 copiou a ponta 33→34 no fora ponta 3.441→3.533,
+    # K 1.750, consumo 161.000). Só desfaz troca de valor por valor; vazio segue a regra acima.
+    final = {c: (ficou.get(c, voltou.get(c, depois.get(c)))) for c in depois}
+    for ca, ct, cc in (("leit_ant_ativa_fponta", "leit_atu_ativa_fponta", "consumo_ativo_fponta_kwh"),
+                       ("leit_ant_ativa_ponta", "leit_atu_ativa_ponta", "consumo_ativo_ponta_kwh")):
+        if not ({ca, ct} & set(ficou)) or c_vazio_algum(antes, ca, ct) or c_vazio_algum(final, ca, ct):
+            continue
+        k, cons = _num(final.get("constante_k")) or 1.0, _num(final.get(cc))
+        if _fecha(antes[ca], antes[ct], k, cons) and not _fecha(final[ca], final[ct], k, cons):
+            for c in (ca, ct):
+                if c in ficou:
+                    voltou[c] = antes[c]
+                    ficou.pop(c)
+    # kWh total é a soma dos postos feita ANTES desta decisão: posto que voltou ao antigo leva o total junto
+    if {"consumo_ativo_ponta_kwh", "consumo_ativo_fponta_kwh"} & set(voltou) and "kwh_total" in ficou:
+        voltou["kwh_total"] = antes["kwh_total"]
+        ficou.pop("kwh_total")
     return ficou, voltou
+
+
+def _num(v):
+    try:
+        return float(v) if not _vazio(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def c_vazio_algum(d: dict, *cs) -> bool:
+    return any(_vazio(d.get(c)) for c in cs)
+
+
+def _fecha(ant, atu, k: float, cons) -> bool:
+    """(atual − anterior) × K fecha o consumo (até 6% de perda de transformação), sem consumo: só atual ≥ anterior."""
+    a, t = _num(ant), _num(atu)
+    if a is None or t is None or t < a:
+        return False
+    if not cons:
+        return False
+    calc = (t - a) * k
+    return calc > 0 and 0.94 <= cons / calc <= 1.07
 
 
 def aplicar(cur, conn, uid: str | None, antes: dict | None, log=None, limpar: bool = True) -> dict:
@@ -139,19 +191,24 @@ def aplicar(cur, conn, uid: str | None, antes: dict | None, log=None, limpar: bo
         return {}
     try:
         cols = [c for c in antes if c != "id"]
-        cur.execute(f"SELECT {', '.join('`' + c + '`' for c in cols)}, confianca_json, "
+        cur.execute(f"SELECT {', '.join('`' + c + '`' for c in cols)}, confianca_json, revisar_campos, "
                     f"CHAR_LENGTH(TRIM(COALESCE(texto_plumber, ''))) AS _txt FROM {TBL()} WHERE uid=%s LIMIT 1", (uid,))
         r = cur.fetchone()
         if not r:
             return {}
         if not isinstance(r, dict):
-            r = dict(zip(cols + ["confianca_json", "_txt"], r))
+            r = dict(zip(cols + ["confianca_json", "revisar_campos", "_txt"], r))
         try:
             conf = json.loads(r.get("confianca_json") or "{}")
         except ValueError:
             conf = {}
         depois = {c: r.get(c) for c in cols}
-        ficou, voltou = decidir(antes, depois, conf, limpar and int(r.get("_txt") or 0) > 0)
+        try:
+            _flags = (json.loads(r.get("revisar_campos") or "{}") or {}).get("flags") or []
+        except (ValueError, AttributeError):
+            _flags = []
+        origem_nv = {f.get("campo") for f in _flags if isinstance(f, dict) and "NAO_VALIDADO" in str(f.get("status"))}
+        ficou, voltou = decidir(antes, depois, conf, limpar and int(r.get("_txt") or 0) > 0, origem_nv)
         if voltou:
             sets = ", ".join(f"`{c}`=%s" for c in voltou)
             cur.execute(f"UPDATE {TBL()} SET {sets} WHERE uid=%s", (*voltou.values(), uid))

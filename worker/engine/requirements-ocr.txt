@@ -8,3 +8,9 @@ shapely
 PyYAML
 six
 # rapidocr_onnxruntime==1.4.4 vai à parte com --no-deps (ele pede o opencv-python cheio, que precisa de libGL)
+# 24/11/2026: código de barras do boleto (ITF) e QR (chave SEFAZ / PIX) lidos da imagem — codigos.py. Opcional: sem ele
+# o pipeline segue como antes.
+zxing-cpp==3.1.1
+# 25/11/2026: segundo leitor do OCR combinado (SURE_OCR_VERSAO=combo, ocr_combinado.py): PP-OCRv6. Usa o
+# opencv-python-headless (sem libGL); baixa os modelos na 1ª execução.
+rapidocr==3.10.0

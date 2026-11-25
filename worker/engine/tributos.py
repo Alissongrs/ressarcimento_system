@@ -172,6 +172,45 @@ def _junta_rotulo(toks: list[tuple[str, float]]) -> list[tuple[str, float]]:
     return out
 
 
+_ALIQ_ICMS = (7.0, 12.0, 17.0, 17.5, 18.0, 19.0, 20.0, 20.5, 21.0, 22.0, 23.0, 25.0, 27.0, 29.0, 30.0)
+
+
+def _linha_total_quadro(toks_por_linha: list[list[tuple[str, float]]]) -> dict[str, Trio]:
+    """24/11/2026 — Energisa MT "SUA FATURA CHEGOU" (2021), lida por OCR: o quadro DESCRITIVO fecha numa linha
+    "TOTAL: 882,66 1.018,38 203,67 1.018,38 7,99 36,80" = valor, base ICMS, ICMS, base PIS/COFINS, PIS, COFINS, e o
+    cabeçalho imprime as alíquotas do PIS e da COFINS "(0,7847%)" "(3,6142%)". Vale cada tributo cujo trio IMPRESSO
+    fecha: PIS/COFINS com a alíquota do cabeçalho; ICMS com uma alíquota de ICMS existente. Nada é calculado."""
+    aliqs: list[float] = []
+    for toks in toks_por_linha:
+        for t, _ in toks:
+            for m in re.finditer(r"\((\d{1,2},\d{2,4})\s*%\)", t):
+                v = float(m.group(1).replace(",", "."))
+                if 0.3 < v < 10 and v not in aliqs:
+                    aliqs.append(v)
+    for toks in toks_por_linha:
+        for k, (tok, _x) in enumerate(toks):
+            if not re.fullmatch(r"total:?", normalizar(tok).strip()):
+                continue
+            nums = [v for _, v in _numeros(toks, k + 1)]
+            if len(nums) < 6:
+                continue
+            _vt, b_icms, icms, b_pc, pis, cofins = nums[:6]
+            out: dict[str, Trio] = {}
+            for a in _ALIQ_ICMS:
+                if b_icms and _fecha(b_icms, a, icms):
+                    out["icms"] = (round(b_icms, 2), a, round(icms, 2))
+                    break
+            if len(aliqs) >= 2 and b_pc:
+                ap, ac = min(aliqs), max(aliqs)
+                if _fecha(b_pc, ap, pis):
+                    out["pis"] = (round(b_pc, 2), ap, round(pis, 2))
+                if _fecha(b_pc, ac, cofins):
+                    out["cofins"] = (round(b_pc, 2), ac, round(cofins, 2))
+            if out:
+                return out
+    return {}
+
+
 def ler_tributos(pdf_bytes: bytes | None, itens: list[Item] | None = None) -> dict | None:
     if itens is None:
         itens, _, _ = itens_do_pdf(pdf_bytes, 3)
@@ -219,9 +258,13 @@ def ler_tributos(pdf_bytes: bytes | None, itens: list[Item] | None = None) -> di
                 pr = _par(nums, trib)
                 if pr and pr not in pares[trib]:
                     pares[trib].append(pr)
+    total_quadro = _linha_total_quadro(toks_por_linha) if not all(achados.values()) else {}
+    for trib, trio in total_quadro.items():
+        if not achados[trib]:
+            achados[trib].append(trio)
     if not any(achados.values()) and not any(pares.values()) and not any(impressos.values()) and not icms_st:
         return None
-    out: dict = {"obs": []}
+    out: dict = {"obs": [f"{t}: linha TOTAL do quadro descritivo, fecha base × alíquota impressa" for t in total_quadro]}
     for trib, lst in achados.items():
         if not lst:
             out[trib] = None
