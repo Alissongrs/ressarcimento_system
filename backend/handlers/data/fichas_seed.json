@@ -766,5 +766,41 @@
   "base_legal": "REN ANEEL 1.000/2021 (SCEE: prazo de 60 meses e ordem de uso dos créditos); Lei 14.300/2022.",
   "faturas_necessarias": "A fatura do mês com o quadro de créditos; para expirados, as faturas das UCs beneficiárias do período.",
   "criterios": "ALERTA quando há créditos que expiram em até 2 meses (oportunidade de redistribuir) ou que já expiraram com consumo cobrado sem compensação na mesma fatura."
+ },
+ {
+  "codigo": "F65",
+  "ordem": 65,
+  "nome": "Reativo Excedente Cobrado (oportunidade de redução de custo)",
+  "grupo": "Redução de Custo (oportunidade)",
+  "no_motor": false,
+  "interpretacao": "A regra 65 não aponta erro da distribuidora: aponta custo evitável. A energia reativa excedente (UFER) e a demanda reativa excedente (DMCR) são cobradas quando o fator de potência fica abaixo de 0,92. Em usinas, isso costuma vir do consumo próprio fora do horário de geração ou do inversor operando fora do fator unitário. A cobrança é devida, mas pode ser eliminada com banco de capacitores ou ajuste do fator de potência do inversor.",
+  "aplicacao": "1. Ler os itens de reativo excedente da fatura (energia e demanda reativa, em qualquer posto).\n2. Somar o valor cobrado no mês.\n3. Acumular por usina ao longo do histórico para comparar com o custo do banco de capacitores ou do ajuste do inversor.",
+  "base_legal": "REN ANEEL 1000/2021, Arts. 302, 303 e 304 (fator de potência de referência 0,92 e cobrança do reativo excedente).",
+  "faturas_necessarias": "As faturas da usina com os itens de reativo excedente.",
+  "criterios": "OPORTUNIDADE sempre que a fatura cobra reativo excedente com valor positivo. Não entra no valor dos erros: a cobrança indevida de reativo (fator de potência ≥ 0,92 ou grupo B) é a F15/F16/F17."
+ },
+ {
+  "codigo": "F66",
+  "ordem": 66,
+  "nome": "Multas e Juros por Atraso (oportunidade de redução de custo)",
+  "grupo": "Redução de Custo (oportunidade)",
+  "no_motor": false,
+  "interpretacao": "A regra 66 aponta multa, juros de mora e atualização monetária cobrados por pagamento após o vencimento. A cobrança é devida quando houve atraso, mas é custo evitável: o ganho vem de ajustar o processo de pagamento para quitar as faturas em dia.",
+  "aplicacao": "1. Ler os itens de multa, juros de mora e atualização monetária da fatura.\n2. Somar o valor cobrado no mês.\n3. Acumular por usina para mostrar o custo dos atrasos.",
+  "base_legal": "REN ANEEL 1000/2021 (acréscimos por atraso no pagamento: multa de até 2%, juros de mora de até 1% ao mês e atualização monetária).",
+  "faturas_necessarias": "A fatura que traz a cobrança (a multa costuma vir na fatura seguinte à paga com atraso).",
+  "criterios": "OPORTUNIDADE sempre que a fatura cobra multa, juros ou atualização monetária com valor positivo. O limite de 2% da multa não é julgado aqui: a multa de uma fatura pode somar mais de uma conta em atraso."
+ },
+ {
+  "codigo": "F67",
+  "ordem": 67,
+  "nome": "Ultrapassagem Real de Demanda (oportunidade de readequar o contrato)",
+  "grupo": "Redução de Custo (oportunidade)",
+  "no_motor": false,
+  "interpretacao": "A regra 67 aponta a ultrapassagem de demanda cobrada quando a demanda medida passou mesmo da contratada mais a tolerância de 5%. A cobrança é devida, mas indica contrato subdimensionado: aumentar a demanda contratada (de consumo ou de injeção/geração) costuma custar menos do que pagar a ultrapassagem, que tem tarifa dobrada.",
+  "aplicacao": "1. Ler os itens de ultrapassagem de demanda (consumo ou geração/injeção) com valor positivo.\n2. Comparar a demanda medida com a contratada do mesmo tipo no quadro de demanda.\n3. Se a medida passou da contratada + 5%, apontar o valor da ultrapassagem como custo evitável.",
+  "base_legal": "REN ANEEL 1000/2021, Art. 295 e Art. 301 (ultrapassagem acima de 5% da demanda contratada); contrato de uso do sistema (CUSD) para readequar a demanda.",
+  "faturas_necessarias": "A fatura com o item de ultrapassagem e o quadro de demanda (contratada e medida).",
+  "criterios": "OPORTUNIDADE quando há item de ultrapassagem e a demanda medida do mesmo tipo ficou acima da contratada + 5%. Se a medida ficou dentro da tolerância, a cobrança é indevida e cai na F23 (erro)."
  }
 ]

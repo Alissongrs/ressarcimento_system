@@ -8,6 +8,8 @@ import { abrirDossie } from './dossieApontamento';
 // Somente leitura: o backend aplica SÓ as regras marcadas no botão Regras (o motor F01–F05 só se marcado)
 // sobre FATURA_USINA* (ao vivo, cache 10 min). Uma linha por fatura: regras com erro, com alerta, o resumo do que
 // foi encontrado e o valor envolvido (achados com erro + a parte não compensada do F02, quando ele aponta).
+// Regras de OPORTUNIDADE (F65–F67, grupo "Redução de Custo"): cobrança devida mas evitável — coluna e card próprios,
+// fora do valor dos erros (não viram pedido de ressarcimento).
 // Botão "Regras": escolhe quais regras do catálogo (página Regras) valem para as faturas das usinas — salva no
 // servidor (DM_REGRAS_CONJUNTO, conjunto "usinas"); regras que dependem de parâmetro externo aparecem bloqueadas.
 
@@ -52,6 +54,12 @@ const SITUACAO = {
   pendente: { rot: 'ainda não implementada', cor: '#6b7280', ok: false },
 };
 const valorOutras = (a) => (a.achados || []).reduce((s, x) => s + (x.nivel === 'ERRO' ? x.valor || 0 : 0), 0);
+// OPORTUNIDADE (F65–F67): cobrança devida mas evitável (reativo, multas/juros, ultrapassagem real) — não soma nos erros
+const VERDE = '#16a34a';
+const valorOport = (a) => (a.achados || []).reduce((s, x) => s + (x.nivel === 'OPORTUNIDADE' ? x.valor || 0 : 0), 0);
+const corNivel = (n) => (n === 'ERRO' ? '#dc2626' : n === 'OPORTUNIDADE' ? VERDE : '#d97706');
+const rotNivel = (n) => (n === 'ERRO' ? 'erro' : n === 'OPORTUNIDADE' ? 'oportunidade' : 'alerta');
+const ordemNivel = (n) => (n === 'ERRO' ? 0 : n === 'OPORTUNIDADE' ? 2 : 1);
 
 // conjunto: 'usinas' | 'acer' — a seleção de cada aba fica separada (DM_REGRAS_CONJUNTO)
 export function RegrasModal({ onClose, onSalvo, conjunto = 'usinas', titulo = 'Regras aplicadas às faturas das usinas' }) {
@@ -195,7 +203,7 @@ function DetalheUC({ ap, onClose }) {
           <button onClick={onClose} className="text-sm opacity-70 hover:opacity-100">✕ fechar</button>
         </div>
         <div className="mt-3 text-sm">
-          <b>{[...(ap.fichas || []), ...(ap.alertas || [])].join(', ')}</b> em {mesBR(ap.mes_referencia)}{(ap.detalhamento || []).length ? ` — ${ap.detalhamento.join(' · ')}` : ''}
+          <b>{[...(ap.fichas || []), ...(ap.alertas || []), ...(ap.oportunidades || [])].join(', ')}</b> em {mesBR(ap.mes_referencia)}{(ap.detalhamento || []).length ? ` — ${ap.detalhamento.join(' · ')}` : ''}
         </div>
         {(ap.fichas || []).includes('F02') && (
           <div className="mt-2 text-xs opacity-80">
@@ -208,7 +216,7 @@ function DetalheUC({ ap, onClose }) {
           <div className="mt-3 text-xs space-y-1">
             {ap.achados.map((x, i) => (
               <div key={i}>
-                <b style={{ color: x.nivel === 'ERRO' ? '#dc2626' : '#d97706' }}>{x.codigo} {x.nivel === 'ERRO' ? 'erro' : 'alerta'}</b>
+                <b style={{ color: corNivel(x.nivel) }}>{x.codigo} {rotNivel(x.nivel)}</b>
                 {' — '}{x.detalhe}{x.valor ? ` · ${brl(x.valor)}` : ''}{x.kwh ? ` · ${num(x.kwh)} kWh` : ''}
               </div>
             ))}
@@ -256,7 +264,7 @@ function DetalheUC({ ap, onClose }) {
 const valorAp = (a) => valorOutras(a) + ((a.fichas || []).includes('F02') ? a.estimativa_nao_compensada || 0 : 0);
 // resumo legível: o primeiro achado (erro antes de alerta) ou o detalhamento do motor
 const resumoAp = (a) => {
-  const ach = [...(a.achados || [])].sort((x, y) => (x.nivel === 'ERRO' ? 0 : 1) - (y.nivel === 'ERRO' ? 0 : 1));
+  const ach = [...(a.achados || [])].sort((x, y) => ordemNivel(x.nivel) - ordemNivel(y.nivel));
   if (ach.length) return `${ach[0].codigo}: ${ach[0].detalhe}`;
   return (a.detalhamento || [])[0] || '';
 };
@@ -267,7 +275,7 @@ export default function UsinasPanel() {
   const [loading, setLoading] = useState(true);
   const [ficha, setFicha] = useState('todas');
   const [dist, setDist] = useState('todas');
-  const [nivel, setNivel] = useState('todos'); // todos | erro | alerta
+  const [nivel, setNivel] = useState('todos'); // todos | erro | alerta | oportunidade
   const [busca, setBusca] = useState('');
   const [detalhe, setDetalhe] = useState(null);
   const [regrasAberto, setRegrasAberto] = useState(false);
@@ -293,20 +301,25 @@ export default function UsinasPanel() {
     return aps.filter((a) => {
       const er = a.fichas || SEM_DADOS;
       const al = a.alertas || SEM_DADOS;
+      const op = a.oportunidades || SEM_DADOS;
       if (nivel === 'erro' && !er.length) return false;
       if (nivel === 'alerta' && !al.length) return false;
-      if (ficha !== 'todas' && !er.includes(ficha) && !al.includes(ficha)) return false;
+      if (nivel === 'oportunidade' && !op.length) return false;
+      if (ficha !== 'todas' && !er.includes(ficha) && !al.includes(ficha) && !op.includes(ficha)) return false;
       if (dist !== 'todas' && a.distribuidora !== dist) return false;
       return !q || `${a.usina} ${a.titular} ${a.uc}`.toLowerCase().includes(q);
-    }).sort((x, y) => valorAp(y) - valorAp(x) || ((y.fichas || []).length - (x.fichas || []).length));
+    }).sort((x, y) => valorAp(y) - valorAp(x) || ((y.fichas || []).length - (x.fichas || []).length) || valorOport(y) - valorOport(x));
   }, [aps, ficha, dist, nivel, busca]);
   const soma = useMemo(() => linhas.reduce((s, a) => s + valorAp(a), 0), [linhas]);
+  const somaOp = useMemo(() => linhas.reduce((s, a) => s + valorOport(a), 0), [linhas]);
 
   const exportar = () => {
     const ws = XLSX.utils.json_to_sheet(linhas.map((a) => ({
       'Regras (erro)': (a.fichas || []).join(','), 'Regras (alerta)': (a.alertas || []).join(','),
+      'Regras (oportunidade)': (a.oportunidades || []).join(','),
       Distribuidora: a.distribuidora, Usina: a.usina, Titular: a.titular, UC: a.uc, 'Mês ref.': mesBR(a.mes_referencia),
-      'Valor envolvido (erros)': valorAp(a) || null, 'Total a pagar': a.total_a_pagar || null,
+      'Valor envolvido (erros)': valorAp(a) || null, 'Redução de custo (oportunidade)': valorOport(a) || null,
+      'Total a pagar': a.total_a_pagar || null,
       'O que foi encontrado': [...(a.achados || []).map((x) => `${x.codigo} ${x.nivel}: ${x.detalhe}`), ...(a.detalhamento || [])].join(' | '),
       Fatura: a.link_drive, id_fatura: a.id_fatura,
     })));
@@ -319,11 +332,13 @@ export default function UsinasPanel() {
   if (erro && !dados) return <div className="p-6 text-sm text-[var(--danger)]">Erro: {erro}</div>;
   const pf = dados?.por_ficha || {};
   const pa = dados?.por_alerta || {};
+  const po = dados?.por_oportunidade || {};
   const sel = dados?.regras_selecionadas || SEM_DADOS;
-  const comAlgo = sel.filter((f) => pf[f] || pa[f]);
+  const comAlgo = sel.filter((f) => pf[f] || pa[f] || po[f]);
   const nErro = aps.filter((a) => (a.fichas || []).length).length;
   const nAlerta = aps.filter((a) => !(a.fichas || []).length && (a.alertas || []).length).length;
   const totalErros = aps.reduce((s, a) => s + valorAp(a), 0);
+  const nOport = aps.filter((a) => (a.oportunidades || []).length).length;
 
   return (
     <div className="w-full space-y-4">
@@ -333,6 +348,8 @@ export default function UsinasPanel() {
         <Card titulo="Faturas com erro" valor={num(nErro)} sub="a regra se confirmou com os números da fatura" cor="#dc2626" />
         <Card titulo="Faturas só com alerta" valor={num(nAlerta)} sub="indício — conferir na fatura" cor="#d97706" />
         <Card titulo="Valor envolvido (erros)" valor={brl(totalErros)} sub="soma do que as regras com erro calcularam" />
+        {nOport > 0 && <Card titulo="Oportunidade de redução de custo" valor={brl(dados.estimativa_oportunidade)}
+          sub={`${num(nOport)} faturas · reativo, multas/juros, ultrapassagem — cobrança devida, mas evitável`} cor={VERDE} />}
       </div>
 
       {erro && <div className="text-xs text-[var(--danger)]">Erro ao recalcular: {erro}</div>}
@@ -345,6 +362,7 @@ export default function UsinasPanel() {
             {f}{FICHA_ROT[f] ? ` · ${FICHA_ROT[f]}` : ''}
             {pf[f] ? <span style={{ color: '#dc2626' }}> · {pf[f]} erro</span> : null}
             {pa[f] ? <span style={{ color: '#d97706' }}> · {pa[f]} alerta</span> : null}
+            {po[f] ? <span style={{ color: VERDE }}> · {po[f]} oportunidade</span> : null}
           </button>
         ))}
       </div>
@@ -353,13 +371,14 @@ export default function UsinasPanel() {
         <label className="inline-flex items-center gap-1.5"><span className="opacity-70">Regra:</span>
           <select value={ficha} onChange={(e) => setFicha(e.target.value)} className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent">
             <option value="todas">todas</option>
-            {sel.map((f) => <option key={f} value={f}>{f}{FICHA_ROT[f] ? ` — ${FICHA_ROT[f]}` : ''} ({pf[f] || 0} erro{pa[f] ? ` + ${pa[f]} alerta` : ''})</option>)}
+            {sel.map((f) => <option key={f} value={f}>{f}{FICHA_ROT[f] ? ` — ${FICHA_ROT[f]}` : ''} ({po[f] ? `${po[f]} oportunidade` : `${pf[f] || 0} erro${pa[f] ? ` + ${pa[f]} alerta` : ''}`})</option>)}
           </select></label>
         <label className="inline-flex items-center gap-1.5"><span className="opacity-70">Nível:</span>
           <select value={nivel} onChange={(e) => setNivel(e.target.value)} className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent">
-            <option value="todos">erro e alerta</option>
+            <option value="todos">todos</option>
             <option value="erro">só erro</option>
             <option value="alerta">só alerta</option>
+            <option value="oportunidade">só oportunidade (redução de custo)</option>
           </select></label>
         <label className="inline-flex items-center gap-1.5"><span className="opacity-70">Distribuidora:</span>
           <select value={dist} onChange={(e) => setDist(e.target.value)} className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent">
@@ -368,7 +387,7 @@ export default function UsinasPanel() {
           </select></label>
         <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar usina, titular ou UC"
           className="px-2 py-1 rounded border border-[var(--cpv2-border)] bg-transparent min-w-[220px]" />
-        <span className="opacity-70">{linhas.length} faturas · {brl(soma)}</span>
+        <span className="opacity-70">{linhas.length} faturas · {brl(soma)} em erros{somaOp > 0 ? <> · <span style={{ color: VERDE }}>{brl(somaOp)} em oportunidade</span></> : null}</span>
         <button onClick={() => setRegrasAberto(true)} className="ml-auto px-3 py-1 rounded-md font-semibold text-white"
           style={{ background: '#d97706' }} title="Escolher as regras do catálogo aplicadas às faturas das usinas">
           ⚙ Regras ({sel.length})</button>
@@ -381,19 +400,21 @@ export default function UsinasPanel() {
         <table className="w-full text-xs">
           <thead className="bg-[var(--cpv2-surface)]">
             <tr className="text-left">
-              <th className="p-2">Erro</th><th className="p-2">Alerta</th><th className="p-2">Distribuidora</th><th className="p-2">Usina</th>
+              <th className="p-2">Erro</th><th className="p-2">Alerta</th><th className="p-2">Oportunidade</th><th className="p-2">Distribuidora</th><th className="p-2">Usina</th>
               <th className="p-2">UC</th><th className="p-2">Mês</th><th className="p-2">O que foi encontrado</th>
-              <th className="p-2 text-right">Valor envolvido</th><th className="p-2">Fatura</th>
+              <th className="p-2 text-right">Valor envolvido</th><th className="p-2 text-right">Redução de custo</th><th className="p-2">Fatura</th>
             </tr>
           </thead>
           <tbody>
             {linhas.map((a) => {
               const v = valorAp(a);
+              const vo = valorOport(a);
               return (
                 <tr key={a.id_fatura} onClick={() => setDetalhe(a)}
                   className="border-t border-[var(--cpv2-border)] cursor-pointer hover:bg-[var(--cpv2-surface)] align-top">
                   <td className="p-2 font-semibold" style={{ color: '#dc2626' }}>{(a.fichas || []).join(', ') || '—'}</td>
                   <td className="p-2" style={{ color: '#d97706' }}>{(a.alertas || []).join(', ') || '—'}</td>
+                  <td className="p-2" style={{ color: VERDE }}>{(a.oportunidades || []).join(', ') || '—'}</td>
                   <td className="p-2">{a.distribuidora}</td>
                   <td className="p-2">{a.usina || a.titular}</td>
                   <td className="p-2">{a.uc}</td>
@@ -401,6 +422,7 @@ export default function UsinasPanel() {
                   <td className="p-2 max-w-[520px]" title={[...(a.achados || []).map((x) => `${x.codigo} (${x.nivel}): ${x.detalhe}`), ...(a.detalhamento || [])].join('\n')}>
                     <div className="line-clamp-2">{resumoAp(a)}</div></td>
                   <td className="p-2 text-right font-semibold">{v ? brl(v) : '—'}</td>
+                  <td className="p-2 text-right" style={{ color: vo ? VERDE : undefined }}>{vo ? brl(vo) : '—'}</td>
                   <td className="p-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     <LinkFatura link={a.link_drive} rotulo="PDF" />
                     <button type="button" className="ml-2 text-[var(--accent)]" title="Dossiê do apontamento (PDF): explica cada regra, a tese, como foi aplicada, a conta e a fatura com os valores marcados"
@@ -408,7 +430,7 @@ export default function UsinasPanel() {
                 </tr>
               );
             })}
-            {!linhas.length && <tr><td colSpan={9} className="p-4 text-center opacity-60">nenhum apontamento com esses filtros</td></tr>}
+            {!linhas.length && <tr><td colSpan={11} className="p-4 text-center opacity-60">nenhum apontamento com esses filtros</td></tr>}
           </tbody>
         </table>
       </div>

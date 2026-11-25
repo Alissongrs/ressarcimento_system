@@ -103,6 +103,8 @@ type UsinaApontamento struct {
 	Link            string   `json:"link_drive"`
 	Achados         []Achado `json:"achados,omitempty"` // regras do catálogo além do motor (F13, F35, F53...)
 	Alertas         []string `json:"alertas,omitempty"` // códigos com nível ALERTA (não entram em "fichas")
+	// códigos com nível OPORTUNIDADE (redução de custo, F65–F67): cobrança devida mas evitável — fora dos erros e dos alertas
+	Oportunidades []string `json:"oportunidades,omitempty"`
 }
 
 type usinasResultado struct {
@@ -117,6 +119,8 @@ type usinasResultado struct {
 	EstFortesL   float64            `json:"estimativa_fortes_nao_compensada"`
 	EstOutras    float64            `json:"estimativa_outras_regras"`
 	PorAlerta    map[string]int     `json:"por_alerta"`
+	PorOport     map[string]int     `json:"por_oportunidade"`
+	EstOport     float64            `json:"estimativa_oportunidade"` // R$ das regras de oportunidade (não soma nos erros)
 	Selecionadas []string           `json:"regras_selecionadas"`
 	Apontamentos []UsinaApontamento `json:"apontamentos"`
 }
@@ -155,7 +159,7 @@ func CalcularUsinas(db *sql.DB, sel map[string]bool) (*usinasResultado, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &usinasResultado{Gerado: time.Now().Format(time.RFC3339), PorFicha: map[string]int{}, PorAlerta: map[string]int{}}
+	out := &usinasResultado{Gerado: time.Now().Format(time.RFC3339), PorFicha: map[string]int{}, PorAlerta: map[string]int{}, PorOport: map[string]int{}}
 	for c := range sel {
 		out.Selecionadas = append(out.Selecionadas, c)
 	}
@@ -289,6 +293,9 @@ func CalcularUsinas(db *sql.DB, sel map[string]bool) (*usinasResultado, error) {
 				x.Fichas = append(x.Fichas, a.Codigo)
 				x.Detalhe = append(x.Detalhe, a.Codigo+" - "+a.Detalhe)
 				out.EstOutras += a.Valor
+			} else if a.Nivel == nivelOportunidade {
+				x.Oportunidades = append(x.Oportunidades, a.Codigo)
+				out.EstOport += a.Valor
 			} else {
 				x.Alertas = append(x.Alertas, a.Codigo)
 			}
@@ -302,10 +309,14 @@ func CalcularUsinas(db *sql.DB, sel map[string]bool) (*usinasResultado, error) {
 		for _, f := range x.Alertas {
 			out.PorAlerta[f]++
 		}
+		for _, f := range x.Oportunidades {
+			out.PorOport[f]++
+		}
 		lst = append(lst, x)
 	}
 	out.Apontamentos = lst
 	out.EstOutras = r2(out.EstOutras)
+	out.EstOport = r2(out.EstOport)
 	out.EstBruta, out.EstLiq, out.EstFortesB, out.EstFortesL = r2(out.EstBruta), r2(out.EstLiq), r2(out.EstFortesB), r2(out.EstFortesL)
 	sort.Slice(out.Apontamentos, func(i, j int) bool {
 		a, b := out.Apontamentos[i], out.Apontamentos[j]

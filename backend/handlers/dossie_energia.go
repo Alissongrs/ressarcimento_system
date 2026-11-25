@@ -44,6 +44,7 @@ import (
 type dossieApont struct {
 	Base, ID, UC, Distribuidora, Empresa, Mes string
 	Fichas, Motor, Alertas                    []string
+	Oportunidades                             []string // usinas: F65–F67 (redução de custo, não é pedido)
 	Achados                                   []Achado
 	Detalhe                                   []string
 	Consumo, Media, Excesso, Preco, Desvio    float64
@@ -99,7 +100,7 @@ func apontamentoDoCache(base, id string) (*dossieApont, string) {
 		for _, x := range usinasCache.Apontamentos {
 			if x.IDFatura == id {
 				a := &dossieApont{Base: base, ID: x.IDFatura, UC: x.UC, Distribuidora: x.Distribuidora,
-					Empresa: strings.TrimSpace(x.Usina + " · " + x.Titular), Mes: x.MesRef, Alertas: x.Alertas, Achados: x.Achados,
+					Empresa: strings.TrimSpace(x.Usina + " · " + x.Titular), Mes: x.MesRef, Alertas: x.Alertas, Oportunidades: x.Oportunidades, Achados: x.Achados,
 					Detalhe: x.Detalhe, Consumo: x.ConsumoKWh, Media: x.MediaKWh, Excesso: x.ExcessoKWh, Preco: x.PrecoKWh,
 					Desvio: x.DesvioPct, EstF02: x.EstimativaBruta, Total: x.TotalAPagar, F02Val: x.F02Validacao,
 					Classif: x.Classificacao, Link: x.Link, Forte: x.Forte}
@@ -523,8 +524,14 @@ func gerarDossieEnergiaPDF(db *sql.DB, a *dossieApont, f *uFat, hist []*uFat, pa
 		if len(alertas) > 0 {
 			faixa += fmt.Sprintf(" + %d alerta(s)", len(alertas))
 		}
-	} else {
+	} else if len(alertas) > 0 {
 		faixa += fmt.Sprintf("%d alerta(s) para conferir (%s)", len(alertas), strings.Join(alertas, ", "))
+	} else if len(a.Oportunidades) > 0 {
+		cor = [3]int{22, 163, 74}
+		faixa += fmt.Sprintf("oportunidade de redução de custo (%s) — não é erro da distribuidora", strings.Join(a.Oportunidades, ", "))
+	}
+	if len(a.Oportunidades) > 0 && (len(erros) > 0 || len(alertas) > 0) {
+		faixa += fmt.Sprintf(" + %d oportunidade(s) de redução de custo", len(a.Oportunidades))
 	}
 	pdf.SetFillColor(cor[0], cor[1], cor[2])
 	pdf.SetTextColor(255, 255, 255)
@@ -586,14 +593,15 @@ func gerarDossieEnergiaPDF(db *sql.DB, a *dossieApont, f *uFat, hist []*uFat, pa
 	}
 	par("Como ler este dossiê: para cada regra que apontou há (1) o problema em poucas palavras, (2) os números encontrados nesta fatura, "+
 		"(3) a conta do valor, (4) como o sistema aplicou a regra, (5) por que está como ERRO ou ALERTA e (6) a tese, os critérios e a base legal. "+
-		"ERRO = a regra se confirmou com os números da fatura; ALERTA = indício que precisa de conferência antes de virar pedido. "+
+		"ERRO = a regra se confirmou com os números da fatura; ALERTA = indício que precisa de conferência antes de virar pedido; "+
+		"OPORTUNIDADE = cobrança devida, mas que dá para evitar (não é pedido à distribuidora). "+
 		fonte+" Os termos técnicos estão no glossário; as páginas da fatura, com os valores marcados em amarelo, vêm no fim.", 7.8)
 
 	// ---- regra a regra
 	for _, grupoCod := range []struct {
 		nivel string
 		cods  []string
-	}{{"ERRO", erros}, {"ALERTA", alertas}} {
+	}{{"ERRO", erros}, {"ALERTA", alertas}, {nivelOportunidade, a.Oportunidades}} {
 		for _, cod := range grupoCod.cods {
 			ficha := fichaCompleta(db, cod)
 			nome := cod
@@ -658,7 +666,11 @@ func gerarDossieEnergiaPDF(db *sql.DB, a *dossieApont, f *uFat, hist []*uFat, pa
 				par("• "+t, 8.6)
 			}
 			sub("A conta do valor")
-			if valor > 0 {
+			if grupoCod.nivel == nivelOportunidade {
+				pdf.SetFont("Arial", "B", 8.8)
+				pdf.CellFormat(W, 5, tr("Valor cobrado nesta fatura: R$ "+brNum(valor, 2)), "", 1, "L", false, 0, "")
+				par("É o que esta fatura cobrou e que pode ser evitado com a ação indicada. A cobrança é devida: não é valor a ressarcir pela distribuidora, e sim custo a reduzir.", 7.8)
+			} else if valor > 0 {
 				pdf.SetFont("Arial", "B", 8.8)
 				pdf.CellFormat(W, 5, tr("Valor envolvido: R$ "+brNum(valor, 2)), "", 1, "L", false, 0, "")
 				par("É o valor que a regra calculou como cobrado a mais (ou não pago ao cliente) nesta fatura, com os números do item anterior, onde a conta está passo a passo. O valor do pedido pode mudar com tributos, juros e a devolução em dobro quando cabível.", 7.8)
@@ -675,7 +687,11 @@ func gerarDossieEnergiaPDF(db *sql.DB, a *dossieApont, f *uFat, hist []*uFat, pa
 			par(porqueNivel(grupoCod.nivel, f.extraida), 8)
 			if ficha != nil {
 				if ficha.Interpretacao != "" {
-					sub("A tese: por que isso é cobrança indevida (catálogo de regras)")
+					if grupoCod.nivel == nivelOportunidade {
+						sub("Por que é uma oportunidade de redução de custo (catálogo de regras)")
+					} else {
+						sub("A tese: por que isso é cobrança indevida (catálogo de regras)")
+					}
 					par(ficha.Interpretacao, 7.8)
 				}
 				if ficha.Criterios != "" {

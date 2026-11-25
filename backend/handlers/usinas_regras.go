@@ -46,6 +46,8 @@ var regrasSituacao = map[string]string{
 	// dependem de parâmetro de fora que o sistema não tem (regrasPrecisa)
 	"F64": "fatura", // regras_componentes.go (usinas: quadro de créditos da fatura)
 	"F30": "parametro", "F40": "parametro", "F47": "parametro", "F59": "parametro", "F62": "parametro", "F60": "parametro", "F61": "parametro",
+	// oportunidade de redução de custo (regras_oportunidade.go, 25/11/2026) — nível OPORTUNIDADE, só nas usinas
+	"F65": "fatura", "F66": "fatura", "F67": "fatura",
 }
 
 // o que falta para as regras que dependem de parâmetro (mostrado na lista)
@@ -295,6 +297,8 @@ type uFat struct {
 	// confirmam o valor (extrator, física da fatura, itens, histórico, dígito verificador, origem sgeeasy, fatura
 	// anterior da UC). nil = base sem essa informação (vale o comportamento antigo: `extraida` rebaixa para ALERTA).
 	conf map[string]int
+	// F67 (regras_oportunidade.go): quadro de demanda da FATURA_USINA_DEMANDA (contratada × medida por tipo)
+	dems []uDem
 }
 
 // Achado de uma regra numa fatura
@@ -1098,6 +1102,16 @@ func AplicarRegrasUsinas(db *sql.DB, sel map[string]bool) (map[string][]Achado, 
 		return nil, err
 	}
 	aplicarRegrasComuns(fats, sel, out)
+	if sel["F67"] {
+		if err := carregarDemandaUsinas(db, fats); err != nil {
+			return nil, err
+		}
+	}
+	for id, f := range fats { // regras_oportunidade.go (F65 F66 F67) — só nas usinas
+		if a := regrasOportunidade(f, sel); len(a) > 0 {
+			out[id] = append(out[id], a...)
+		}
+	}
 	if sel["F51"] {
 		for id, a := range regraCIPPares(fats) {
 			out[id] = append(out[id], a...)
