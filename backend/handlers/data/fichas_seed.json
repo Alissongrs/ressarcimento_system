@@ -802,5 +802,17 @@
   "base_legal": "REN ANEEL 1000/2021, Art. 295 e Art. 301 (ultrapassagem acima de 5% da demanda contratada); contrato de uso do sistema (CUSD) para readequar a demanda.",
   "faturas_necessarias": "A fatura com o item de ultrapassagem e o quadro de demanda (contratada e medida).",
   "criterios": "OPORTUNIDADE quando há item de ultrapassagem e a demanda medida do mesmo tipo ficou acima da contratada + 5%. Se a medida ficou dentro da tolerância, a cobrança é indevida e cai na F23 (erro)."
+ },
+ {
+  "codigo": "F68",
+  "ordem": 68,
+  "nome": "Energia Injetada Não Compensada",
+  "grupo": "Geração Distribuída (usinas)",
+  "no_motor": false,
+  "interpretacao": "A regra 68 aponta a fatura da unidade geradora que registra energia injetada acima de zero e consumo de energia ativa passível de compensação, mas nenhum kWh compensado na própria fatura naquele ciclo. Fatura cobrada só por demanda contratada (de consumo ou de geração/injeção) e/ou custo de disponibilidade, sem consumo ativo compensável, não é apontada.",
+  "aplicacao": "1. Ler a energia injetada impressa na fatura; se estiver vazia, somar as medições de injeção/geração em kWh (sem demanda em kW e sem reativo em kvar).\n2. Ler o consumo de energia ativa faturado em kWh (TE, TUSD ou consumo). Quando a fatura separa TE e TUSD, a mesma energia conta uma vez só (o maior valor de cada posto). Linhas de bandeira e de custo de disponibilidade ficam de fora; no grupo B, consumo igual ao mínimo (30/50/100 kWh) conta como custo de disponibilidade.\n3. Ler os kWh compensados na própria fatura: linhas de energia compensada/injetada dos itens e a linha de energia compensada do quadro de GD (só as linhas do mês da fatura). Transferência e rateio para outras UCs não contam.\n4. Apontar quando a injetada é maior que zero, há consumo compensável e nada foi compensado. A regra não calcula valor em R$.",
+  "base_legal": "Lei 14.300/2022 e REN ANEEL 1000/2021 (Sistema de Compensação de Energia Elétrica): a energia injetada gera crédito que abate o consumo de energia ativa da própria unidade e das beneficiárias do rateio.",
+  "faturas_necessarias": "A fatura da unidade geradora, com os itens de consumo e de compensação e o quadro de GD do mês.",
+  "criterios": "ALERTA quando a injetada é maior que zero, há consumo de energia ativa passível de compensação e nenhum kWh foi compensado na própria fatura. Texto: \"injetada X kWh; nenhum kWh compensado na própria UC\". Não aponta fatura só de demanda contratada e/ou custo de disponibilidade."
  }
 ]

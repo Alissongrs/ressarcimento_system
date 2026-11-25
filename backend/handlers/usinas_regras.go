@@ -48,6 +48,7 @@ var regrasSituacao = map[string]string{
 	"F30": "parametro", "F40": "parametro", "F47": "parametro", "F59": "parametro", "F62": "parametro", "F60": "parametro", "F61": "parametro",
 	// oportunidade de redução de custo (regras_oportunidade.go, 25/11/2026) — nível OPORTUNIDADE, só nas usinas
 	"F65": "fatura", "F66": "fatura", "F67": "fatura",
+	"F68": "fatura", // regras_injetada.go (usinas: injetada sem compensação na própria UC — R05 da 1ª onda)
 }
 
 // o que falta para as regras que dependem de parâmetro (mostrado na lista)
@@ -299,6 +300,8 @@ type uFat struct {
 	conf map[string]int
 	// F67 (regras_oportunidade.go): quadro de demanda da FATURA_USINA_DEMANDA (contratada × medida por tipo)
 	dems []uDem
+	// F68 (regras_injetada.go): kWh injetados impressos (FATURA_USINA.kwh_injetada_total)
+	injImpr sql.NullFloat64
 }
 
 // Achado de uma regra numa fatura
@@ -1107,8 +1110,16 @@ func AplicarRegrasUsinas(db *sql.DB, sel map[string]bool) (map[string][]Achado, 
 			return nil, err
 		}
 	}
-	for id, f := range fats { // regras_oportunidade.go (F65 F66 F67) — só nas usinas
+	if sel["F68"] {
+		if err := carregarInjetadaUsinas(db, fats); err != nil {
+			return nil, err
+		}
+	}
+	for id, f := range fats { // regras_oportunidade.go (F65 F66 F67) e regras_injetada.go (F68) — só nas usinas
 		if a := regrasOportunidade(f, sel); len(a) > 0 {
+			out[id] = append(out[id], a...)
+		}
+		if a := regraInjetadaNaoCompensada(f, sel); len(a) > 0 {
 			out[id] = append(out[id], a...)
 		}
 	}
