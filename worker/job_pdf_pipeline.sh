@@ -55,6 +55,14 @@ case "$MYV" in
     ;;
 esac
 
+# 25/11/2026: leitor de código de barras do boleto (ITF) e QR (chave NF3e / PIX) — codigos.py. Opcional: sem ele o
+# pipeline segue igual, só sem confirmar valor/chave pelos códigos. Instala uma vez para o usuário que roda o job.
+if ! "$PYTHON" -c 'import zxingcpp' >/dev/null 2>&1; then
+  log "zxing-cpp ausente — instalando 3.1.1…"
+  "$PYTHON" -m pip install --user --quiet "zxing-cpp==3.1.1" >> "$LOG" 2>&1 \
+    || log "aviso: zxing-cpp não instalou (códigos de barras/QR desligados; rode na VPS: $PYTHON -m pip install --user zxing-cpp==3.1.1)"
+fi
+
 # pdf_pipeline.py fica FORA do Git (tem as conexões do banco) e a cópia da VPS pode ser a antiga, que
 # grava log e imagens em "C:/paddleocr/..." — no Linux isso é uma pasta relativa a esta; sem ela o script
 # morre na 1ª linha (FileNotFoundError). Criar a pasta resolve sem mexer no script.
