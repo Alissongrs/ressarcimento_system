@@ -206,6 +206,10 @@ def parse(doc, fid, caminho):
     if tit.get('nome') and corr_l and corr_l[0].startswith(tit['nome']) and len(corr_l[0]) > len(tit['nome']):
         d['valores_alternativos'].append({'campo': 'titular.nome', 'valor': tit['nome'], 'pagina': 1})
         tit['nome'] = corr_l[0]
+    # 25/11/2026: layout sem o bloco do titular (x≈41, y 245–300; piloto 5816263f) — o nome vem da correspondência
+    if not tit.get('nome') and corr_l and not re.match(r'\d{5}-\d{3}(?!\d)', corr_l[0]):
+        tit['nome'] = corr_l[0]
+        d['valores_alternativos'].append({'campo': 'titular.nome_origem', 'valor': 'bloco de correspondência', 'pagina': 1})
     if corr_l:
         mm = re.match(r'(\d{5}-\d{3})\s+(.*?)\s+([A-Z]{2})$', corr_l[-1])
         if mm:
