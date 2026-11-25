@@ -18,6 +18,27 @@ JSON_DIR = os.path.join(RAIZ, 'dados', 'json')
 DRIVE = 'gdrive:Faturas Usinas Thopen/'
 
 
+
+def gd_do_mes(gdl, mes_fat):
+    """Quadro de GD com vários meses em colunas (Celesc): fica só a coluna do mês da fatura. Só filtra quando as linhas
+    de INJETADA trazem mais de um mês e um deles é o da fatura."""
+    meses = {str(g.get('mes_ref'))[:7] for g in gdl if g.get('tipo') == 'injetada' and g.get('mes_ref')}
+    if len(meses) <= 1 or not mes_fat or mes_fat[:7] not in meses:
+        return gdl
+    return [g for g in gdl if not g.get('mes_ref') or str(g.get('mes_ref'))[:7] == mes_fat[:7]]
+
+def tributo_impresso(d, nome, padrao=None):
+    """Valor do tributo no quadro de tributos impresso (dados['tributos']): uma única linha não retida; ambíguo → padrao."""
+    vals = set()
+    for t in (d.get('tributos') or []):
+        if not isinstance(t, dict) or t.get('retido') or t.get('valor') is None:
+            continue
+        n = str(t.get('tributo') or '').strip().upper().replace('/PASEP', '').replace('PASEP', 'PIS')
+        if n == nome:
+            vals.add(round(float(num(t['valor'])), 2))
+    return vals.pop() if len(vals) == 1 else padrao
+
+
 def num(v):
     if isinstance(v, bool) or v is None:
         return None
@@ -88,6 +109,24 @@ def gd_lancamentos(gd):
     return out
 
 
+def _soma_contratada(dem, tipos, excluir=False):
+    """Soma contratada_kw das linhas do(s) tipo(s), contando uma vez cada par (posto, valor) — 25/11/2026."""
+    vistos, out = set(), []
+    for x in dem:
+        if (x.get('tipo') in tipos) == excluir:
+            continue
+        v = num(x.get('contratada_kw'))
+        if v is None:
+            continue
+        # geração/injeção: um contrato só por usina — o posto do quadro (FORA_PONTA × GERACAO) não distingue valores
+        k = v if not excluir else (str(x.get('posto') or '').upper(), v)
+        if k in vistos:
+            continue
+        vistos.add(k)
+        out.append(v)
+    return round(sum(out), 2) if out else None
+
+
 def demanda_linhas(dm):
     if isinstance(dm, list):
         return dm
@@ -156,14 +195,26 @@ def montar(d, man):
         'leitura_anterior': dia(ref.get('leitura_anterior')), 'leitura_atual': dia(ref.get('leitura_atual')),
         'dias_faturados': num(ref.get('dias_faturados')),
         'total_a_pagar': num(tot.get('total_a_pagar')), 'total_nota_fiscal': num(tot.get('total_nota_fiscal')),
-        'total_icms': soma([num(i.get('icms')) for i in itens]), 'total_pis': soma([num(i.get('pis')) for i in itens]),
-        'total_cofins': soma([num(i.get('cofins')) for i in itens]), 'total_pis_cofins': pc,
+        'total_icms': tributo_impresso(d, 'ICMS', soma([num(i.get('icms')) for i in itens])),
+        # 24/11/2026: ICMS/PIS/COFINS total = o do QUADRO DE TRIBUTOS impresso (uma linha não retida); sem quadro, soma dos
+        # itens como antes (vazio quando o item só tem a coluna PIS/COFINS junta)
+        'total_pis': tributo_impresso(d, 'PIS', soma([num(i.get('pis')) for i in itens])),
+        'total_cofins': tributo_impresso(d, 'COFINS', soma([num(i.get('cofins')) for i in itens])), 'total_pis_cofins': pc,
         'cosip': num(tot.get('valor_cosip_cip')) if tot.get('valor_cosip_cip') is not None else
                  soma([num(i.get('valor')) for i in itens if i.get('componente') == 'ILUMINACAO_PUBLICA']),
-        'kwh_injetada_total': soma([num(g.get('kwh')) for g in gdl if g.get('tipo') == 'injetada']),
-        'kwh_compensada_total': soma([num(g.get('kwh')) for g in gdl if g.get('tipo') == 'compensada']),
-        'demanda_contratada_kw': soma([num(x.get('contratada_kw')) for x in dem if x.get('tipo') != 'geracao']),
-        'demanda_geracao_kw': soma([num(x.get('contratada_kw')) for x in dem if x.get('tipo') == 'geracao']),
+        # 25/11/2026: a Celesc imprime o quadro de GD com 6 meses lado a lado (mes_ref = coluna) — o total é só a coluna do
+        # mês da fatura (somar as colunas deu 275.817 kWh numa fatura com injeção 0). Elektro: mes_ref da compensada é a
+        # origem do crédito (MUC 05/2024) e a injetada não tem mês → não filtra.
+        'kwh_injetada_total': soma([num(g.get('kwh')) for g in gd_do_mes(gdl, mes(ref.get('mes_referencia'))) if g.get('tipo') == 'injetada']),
+        'kwh_compensada_total': soma([num(g.get('kwh')) for g in gd_do_mes(gdl, mes(ref.get('mes_referencia'))) if g.get('tipo') == 'compensada']),
+        # 25/11/2026: 'injecao' (Demanda de Injeção: Light, Neoenergia, Celesc) é demanda de GERAÇÃO — antes entrava somada
+        # na contratada de consumo. Geração = linhas 'geracao'; sem elas, a de injeção (as duas juntas contariam 2×).
+        # o mesmo contratado aparece em 2 quadros (CEMIG: "Grandezas Contratadas" e "Demanda ativa ... Contratado"):
+        # soma só pares (posto, valor) distintos — 0b6edca0: 30 + 30 não é 60
+        'demanda_contratada_kw': _soma_contratada(dem, ('geracao', 'injecao'), excluir=True),
+        'demanda_geracao_kw': _soma_contratada(dem, ('geracao',))
+                              if any(x.get('tipo') == 'geracao' and x.get('contratada_kw') is not None for x in dem) else
+                              _soma_contratada(dem, ('injecao',)),
         'soma_itens': (ext.get('conferencias') or {}).get('soma_itens'),
         'validacao_ok': None, 'n_divergencias_impressas': len(lista(ext.get('divergencias_impressas'))),
         'n_ilegiveis': len(lista(ext.get('ilegiveis'))), 'versao_formato': ext.get('versao_formato', 1),
