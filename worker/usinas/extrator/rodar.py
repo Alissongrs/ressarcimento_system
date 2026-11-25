@@ -25,6 +25,8 @@ import fit
 import elektro
 import copel_gd
 import copel
+import celesc
+import cemig
 from validar import conferir
 
 B = r'C:\usinas_thopen'
@@ -38,10 +40,11 @@ PARSERS = {'LIGHT': [light], 'EQUATORIAL GO': [equatorial, equatorial_a4], 'EQUA
            'NEOENERGIA BSB': [neoenergia, neoenergia_bsb], 'NEOENERGIA RN': [neoenergia, neoenergia_bsb], 'NEOENERGIA BRASILIA': [neoenergia, neoenergia_bsb],
            'NEOENERGIA COSERN': [neoenergia, neoenergia_bsb], 'Neoenergia Cosern': [neoenergia, neoenergia_bsb],
            'NEOENERGIA BRASÍLIA': [neoenergia, neoenergia_bsb],
-           'FIT': [fit], 'COPEL': [copel, copel_gd], 'NEOENERGIA ELEKTRO': [elektro], 'Neoenergia Elektro': [elektro], 'FIT (DEMONSTRATIVO DE GERAÇÃO)': [fit]}
+           'FIT': [fit], 'COPEL': [copel, copel_gd], 'NEOENERGIA ELEKTRO': [elektro], 'Neoenergia Elektro': [elektro], 'FIT (DEMONSTRATIVO DE GERAÇÃO)': [fit],
+           'CELESC': [celesc], 'CEMIG': [cemig]}
 
 
-TODOS = [light, equatorial, equatorial_a4, cpfl, cpfl_antigo, enel_sp, enel, energisa, edp, neoenergia, neoenergia_bsb, fit, elektro, copel_gd, copel]
+TODOS = [light, equatorial, equatorial_a4, cpfl, cpfl_antigo, enel_sp, enel, energisa, edp, neoenergia, neoenergia_bsb, fit, elektro, copel_gd, copel, celesc, cemig]
 
 
 def main(sigla, alvo):
