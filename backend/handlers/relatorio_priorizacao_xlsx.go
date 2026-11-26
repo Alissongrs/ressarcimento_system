@@ -91,8 +91,10 @@ func (l prioLinha) amee() float64 {
 	}
 	return l.it.TotalAmee
 }
+
+// envio(): data de finalização — envio ao financeiro (VW) ou, sem ele, o dossiê "Procedente - Relatórios e Evidências".
 func (l prioLinha) envio() time.Time {
-	s := l.it.EnvioFinanceiro
+	s := l.it.Finalizado
 	if l.v != nil && l.v.EnvioFin != "" {
 		s = l.v.EnvioFin
 	}
@@ -335,14 +337,14 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 	nVenc, vVenc := soma(prior, previstoEm(sA.ini, sA.fim))
 	nComp := 0
 	for _, l := range prior {
-		if l.it.Comprovante != nil {
+		if l.it.Comprovante != nil || l.it.Finalizado != "" {
 			nComp++
 		}
 	}
 	card("B", "D", 13, "Semana atual", fmt.Sprintf("%s a %s", dm(sA.ini), dm(sA.fim)), "E7E6E6", "")
 	card("E", "G", 13, "Previsão Vencimentos da Semana", nVenc, "E7E6E6", fmtInt)
 	card("H", "J", 13, "Valor Previsão Vencimentos da Semana", vVenc, "E7E6E6", fmtBRL)
-	card("K", "M", 13, "Comprovantes da distribuidora (priorizados)", fmt.Sprintf("%d de %d", nComp, len(prior)), "E7E6E6", "")
+	card("K", "M", 13, "Comprovante recebido (priorizados)", fmt.Sprintf("%d de %d", nComp, len(prior)), "E7E6E6", "")
 
 	// pipeline / SLA / movimentações
 	put("B18", "C18", "Pipeline Atual dos Priorizados", st(azul, "FFFFFF", true, 11, "", false))
@@ -468,7 +470,7 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 	r := 36
 	cab := [][3]string{{"B", "", "Vencimentos"}, {"C", "", "UC"}, {"D", "", "Id_requisicao"}, {"E", "", "Cliente"}, {"F", "G", "Concessionaria"},
 		{"H", "", "Total_cliente"}, {"I", "", "Repasse_simples"}, {"J", "", "Repasse_dobro"}, {"K", "L", "Total_amee"},
-		{"M", "", "Prazo_inicial"}, {"N", "", "Envio_financeiro"}}
+		{"M", "", "Prazo_inicial"}, {"N", "", "Finalizado_em"}}
 	for _, h := range cab {
 		fim := ""
 		if h[1] != "" {
@@ -552,7 +554,7 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 			{"status_processo", 20}, {"status_aprovacao", 14}, {"credito_simples", 14}, {"credito_dobro", 14}, {"total_cliente", 14},
 			{"repasse_simples", 14}, {"repasse_dobro", 14}, {"total_amee", 14}, {"data_envio_financeiro", 14}, {"observação", 45},
 			{"prazo_retorno (data prevista)", 14}, {"comprovante_data", 13}, {"comprovante_fonte", 16}, {"dias_ate_comprovante", 12},
-			{"data_estimada_sistema", 14}, {"base_estimativa", 20}}
+			{"data_estimada_sistema", 14}, {"base_estimativa", 20}, {"finalizado_em", 13}, {"fonte_finalizacao", 26}}
 		hst := st(azul, "FFFFFF", true, 10, "", true)
 		for i, c := range cols {
 			nm, _ := excelize.ColumnNumberToName(i + 1)
@@ -581,7 +583,8 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 			}
 			vals := []interface{}{rotulo(l), v.UC, l.it.IDProcesso, v.Cliente, v.Conc, v.RessEst, data(v.DataMov), data(v.Prazo), v.StatusPrazo,
 				v.Comentario, v.Instancia, v.Etapa, v.StatusProc, v.StatusAprov, v.CredS, v.CredD, v.TotCli, v.RepS, v.RepD, v.TotAmee,
-				data(v.EnvioFin), l.it.Observacao, data(l.it.DataManual), compD, compF, dias, est, base}
+				data(v.EnvioFin), l.it.Observacao, data(l.it.DataManual), compD, compF, dias, est, base,
+				data(l.it.Finalizado), l.it.FonteFinalizacao}
 			fill := ""
 			if amarelo != nil && amarelo(l) {
 				fill = "F9F3A9"
@@ -594,7 +597,7 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 				switch {
 				case j == 5 || (j >= 14 && j <= 19):
 					nf = fmtBRL
-				case j == 6 || j == 7 || j == 20 || j == 22 || j == 23 || j == 26:
+				case j == 6 || j == 7 || j == 20 || j == 22 || j == 23 || j == 26 || j == 28:
 					nf = fmtData
 				}
 				s := &excelize.Style{Font: &excelize.Font{Size: 10, Family: "Calibri"}, Border: borda,

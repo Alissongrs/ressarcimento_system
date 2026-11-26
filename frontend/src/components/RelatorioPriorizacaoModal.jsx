@@ -55,6 +55,22 @@ function ComprovanteCell({ p, onRegistrar, onApagar, podeEditar }) {
     );
   }
   if (!aberto) {
+    if (p.finalizado_em) {
+      return (
+        <div style={{ lineHeight: 1.3 }} title={p.ref_finalizacao || ''}>
+          <div style={{ fontWeight: 600, color: 'var(--cpv2-success)' }}>Recebido</div>
+          <div style={{ fontSize: 11, color: 'var(--cpv2-text-muted)' }}>
+            finalizado {br(p.finalizado_em)} · {p.fonte_finalizacao}
+            {podeEditar && (
+              <button type="button" className="cpv2-btn" style={{ padding: '0 5px', fontSize: 10, marginLeft: 4 }}
+                onClick={() => setAberto(true)} title="Registrar a data do comprovante">
+                <Plus size={10} />
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <div style={{ lineHeight: 1.3 }}>
         <span style={{ color: 'var(--cpv2-text-soft)' }}>Não chegou</span>
@@ -160,7 +176,7 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
       demais: g(procs.filter((p) => !p.estrela)),
       comprovados: g(procs.filter((p) => p.comprovante)),
       compMes: g(procs.filter((p) => p.comprovante && p.comprovante.data.slice(0, 7) === mesAtual)),
-      atrasados: procs.filter((p) => !p.comprovante && p.dias_para_estimada != null && p.dias_para_estimada < 0).length,
+      atrasados: procs.filter((p) => !p.comprovante && !p.finalizado_em && p.dias_para_estimada != null && p.dias_para_estimada < 0).length,
     };
   }, [procs]);
 
@@ -171,7 +187,7 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
       if (filtro === 'p2' && p.estrela !== 2) return false;
       if (filtro === 'marcados' && !p.estrela) return false;
       if (filtro === 'sem' && p.estrela) return false;
-      if (filtro === 'semcomp' && p.comprovante) return false;
+      if (filtro === 'semcomp' && (p.comprovante || p.finalizado_em)) return false;
       if (!q) return true;
       return [p.id_processo, p.cliente, p.concessionaria, p.uc].some((v) => String(v || '').toLowerCase().includes(q));
     }).sort((a, b) => (a.estrela || 9) - (b.estrela || 9) || (b.total_amee || 0) - (a.total_amee || 0));
@@ -275,7 +291,7 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
                       <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>{brl(p.total_amee)}</td>
                       <td style={td}><ComprovanteCell p={p} podeEditar={podeEditar} onRegistrar={onRegistrar} onApagar={onApagar} /></td>
                       <td style={td}>
-                        {p.comprovante ? <span style={{ color: 'var(--cpv2-text-soft)' }}>—</span> : p.data_estimada ? (
+                        {p.comprovante || p.finalizado_em ? <span style={{ color: 'var(--cpv2-text-soft)' }}>—</span> : p.data_estimada ? (
                           <div style={{ lineHeight: 1.3 }}>
                             <div style={{ fontWeight: 600, color: p.dias_para_estimada < 0 ? 'var(--cpv2-danger)' : undefined }}>{br(p.data_estimada)}</div>
                             <div style={{ fontSize: 11, color: 'var(--cpv2-text-muted)' }}>

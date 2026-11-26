@@ -64,7 +64,20 @@ type priorizacaoItem struct {
 	DataEstimada     string                  `json:"data_estimada"`
 	BaseEstimativa   string                  `json:"base_estimativa"`
 	DiasParaEstimada *int                    `json:"dias_para_estimada"`
+	Finalizado       string                  `json:"finalizado_em"`
+	FonteFinalizacao string                  `json:"fonte_finalizacao"`
+	RefFinalizacao   string                  `json:"ref_finalizacao,omitempty"`
 	procedencia      time.Time
+}
+
+var reUCNorm = regexp.MustCompile(`[^0-9A-Za-z]`)
+
+// normUC: "8.535.465.018-89" / "0414828816 (PARTE 1)" → só alfanumérico, sem zeros à esquerda.
+func normUC(s string) string {
+	if i := strings.Index(s, "("); i > 0 {
+		s = s[:i]
+	}
+	return strings.TrimLeft(strings.ToUpper(reUCNorm.ReplaceAllString(s, "")), "0")
 }
 
 func priorizacaoDB() (*sql.DB, bool) {
@@ -190,6 +203,46 @@ func carregarPriorizacao(db *sql.DB, encerrados bool) (*priorizacaoDados, error)
 		return nil, err
 	}
 
+	// Finalização: a equipe só encerra depois que a distribuidora manda o comprovante de depósito. O encerramento é o
+	// dossiê "Procedente - Relatórios e Evidências - Instalação <UC>" mandado ao financeiro; no sistema, a data de envio
+	// ao financeiro (Faturamento), que às vezes é lançada dias depois — por isso vale a data do financeiro quando existe
+	// e, sem ela, a do dossiê.
+	porUC := map[string][]*priorizacaoItem{}
+	for _, it := range itens {
+		if k := normUC(it.UC); k != "" {
+			porUC[k] = append(porUC[k], it)
+		}
+	}
+	if r, err := db.Query(`SELECT TRIM(SUBSTRING_INDEX(subject,'Instalação',-1)), DATE_FORMAT(received_at,'%Y-%m-%d'), subject
+	                          FROM mail_messages
+	                         WHERE subject LIKE 'Procedente - Relat%' AND from_email LIKE '%@amee.com.br'
+	                         ORDER BY received_at`); err == nil {
+		for r.Next() {
+			var uc, d, assunto sql.NullString
+			if r.Scan(&uc, &d, &assunto) != nil {
+				continue
+			}
+			t := parseDataSQL(d)
+			for _, it := range porUC[normUC(uc.String)] {
+				if it.EnvioFinanceiro != "" || it.Finalizado != "" || t.IsZero() {
+					continue
+				}
+				if !it.procedencia.IsZero() && t.Before(it.procedencia) {
+					continue // dossiê de um procedente anterior da mesma UC
+				}
+				it.Finalizado, it.FonteFinalizacao, it.RefFinalizacao = fmtData(t), "dossiê ao financeiro (e-mail)", assunto.String
+			}
+		}
+		r.Close()
+	} else {
+		log.Printf("carregarPriorizacao dossiês: %v", err)
+	}
+	for _, it := range itens {
+		if it.EnvioFinanceiro != "" {
+			it.Finalizado, it.FonteFinalizacao = it.EnvioFinanceiro, "envio ao financeiro"
+		}
+	}
+
 	// comprovantes, da fonte mais forte para a mais fraca; fica o primeiro achado de cada processo
 	definir := func(id int64, t time.Time, fonte, ref string, idc int64) {
 		it := por[id]
@@ -279,7 +332,7 @@ func carregarPriorizacao(db *sql.DB, encerrados bool) (*priorizacaoDados, error)
 	hoje := time.Now()
 	hoje = time.Date(hoje.Year(), hoje.Month(), hoje.Day(), 0, 0, 0, 0, time.Local)
 	for _, it := range itens {
-		if it.Comprovante != nil || it.procedencia.IsZero() {
+		if it.Comprovante != nil || it.Finalizado != "" || it.procedencia.IsZero() {
 			continue
 		}
 		media, base := mediaGeral, "média geral"
