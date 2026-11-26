@@ -212,11 +212,8 @@ func GetRelatorioPriorizacao(c *gin.Context) {
 		}
 		r.Close()
 	}
-	for _, it := range itens { // na falta de registro, a entrada em Faturamento indica que o depósito foi confirmado
-		if it.EnvioFinanceiro != "" {
-			definir(it.IDProcesso, parseDataSQL(sql.NullString{String: it.EnvioFinanceiro, Valid: true}), "faturamento", "data de envio ao financeiro", 0)
-		}
-	}
+	// Envio ao financeiro NÃO é comprovante: é o informativo nosso para o financeiro
+	// cobrar o cliente. Comprovante = documento enviado pela distribuidora a nós.
 
 	// tempo médio procedência → comprovante (procedências desde 01/01/2026)
 	inicio, _ := time.Parse("2006-01-02", priorizacaoInicioMedia)
