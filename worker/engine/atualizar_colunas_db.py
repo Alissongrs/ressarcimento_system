@@ -232,13 +232,16 @@ def _cpf_cnpj_cliente(cli: dict, out_v2: dict):
             dv_ok = dv_cnpj(dig)
         except Exception:  # noqa: BLE001
             dv_ok = len(dig) == 14
-        if "*" not in str(lido) and len(dig) == 14 and dv_ok and not _cnpj_e_distribuidora(dig, out_v2):
+        if "*" not in str(lido) and len(dig) == 14 and dv_ok and dig != "0" * 14 and not _cnpj_e_distribuidora(dig, out_v2):
             return lido
     origem = cli.get("cnpj_cliente") if cli.get("_cnpj_cliente_fonte") == "origem" else None
     if origem:
         return origem
-    if lido and ("*" in str(lido) or _cnpj_e_distribuidora(re.sub(r"\D", "", str(lido)), out_v2)):
-        return None
+    # sem origem: o mascarado impresso (Enel/Light "60.***.***/****-30") é o que a fatura mostra e fica;
+    # CNPJ da distribuidora no lugar do cliente não fica (goldens Amazonas/Equatorial PI/AL tinham o da distribuidora)
+    dig = re.sub(r"\D", "", str(lido or ""))
+    if lido and "*" not in str(lido) and (dig == "0" * 14 or _cnpj_e_distribuidora(dig, out_v2)):
+        return None  # 00.000.000/0000-00 (Enel SP escaneada) ou CNPJ da distribuidora não é o cliente
     return lido or cli.get("cpf")
 
 

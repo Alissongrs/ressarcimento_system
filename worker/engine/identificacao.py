@@ -295,7 +295,7 @@ def parse_uc(s: str) -> str | None:
         if re.fullmatch(r"0[38]00\d{6,8}", dig):
             continue
         # número decimal (constante/tarifa "0.04200" da Enel SP escaneada) não é UC
-        if re.fullmatch(r"0[.,]\d+", tok):
+        if re.fullmatch(r"0[.,]\d+", tok) or re.fullmatch(r"\d{1,6}\.\d{2}", tok):  # "94301.20" (valor) também não
             continue
         return tok
     return None

@@ -19,13 +19,14 @@
   "cofins_aliquota": null,
   "cofins_valor": null,
   "composicao_base_icms": null,
-  "confianca_json": "{\"n\": {\"codigo_uc\": 1, \"numero_instalacao\": 1, \"numero_fatura\": 1, \"numero_medidor\": 1, \"nome_cliente\": 1, \"cpf_cnpj\": 1, \"subgrupo_tarifario\": 1, \"grupo_tarifario\": 1, \"data_leitura_anterior\": 1, \"data_leitura_atual\": 1, \"dias_faturados\": 1, \"mes_referencia\": 1, \"valor_total_fatura\": 1, \"flag_fatura_revisao\": 1, \"flag_acumulo_art113\": 1, \"valor_total_origem\": 1, \"qtd_itens_origem\": 1, \"tipo_bandeira_tarifaria\": 1, \"tipo_bandeira\": 1, \"consumo_ativo_ponta_kwh\": 3, \"consumo_ativo_fponta_kwh\": 3, \"kwh_total\": 2, \"demanda_contratada_ponta_kw\": 1, \"demanda_contratada_fponta_kw\": 1, \"itens_cobrados\": 1, \"distribuidora\": 1, \"cnpj_distribuidora_filial\": 2, \"uf_distribuidora\": 1, \"validador_gate\": 1, \"extracao_score_confianca\": 1, \"extracao_versao\": 1, \"data_vencimento\": 1, \"fator_potencia_status\": 1, \"flag_legado_pre_2023\": 1, \"flag_faturamento_media\": 1, \"flag_acumulo_pos_media\": 1, \"chave_nfe\": 2, \"data_emissao_nf\": 1, \"ie_cliente\": 1, \"endereco_distribuidora\": 1, \"perda_transformacao_percentual\": 1, \"cip_iluminacao_publica_rs\": 1, \"valor_cip_cosip\": 1, \"leit_ant_ativa_fponta\": 2, \"leit_atu_ativa_fponta\": 2, \"validacao_deterministica\": 1, \"constante_k\": 2, \"leit_ant_ativa_ponta\": 2, \"leit_atu_ativa_ponta\": 2}, \"div\": {}}",
+  "confianca_json": "{\"n\": {\"codigo_uc\": 1, \"numero_instalacao\": 1, \"numero_fatura\": 1, \"numero_medidor\": 1, \"nome_cliente\": 1, \"subgrupo_tarifario\": 1, \"grupo_tarifario\": 1, \"data_leitura_anterior\": 1, \"data_leitura_atual\": 1, \"dias_faturados\": 1, \"mes_referencia\": 1, \"valor_total_fatura\": 1, \"flag_fatura_revisao\": 1, \"flag_acumulo_art113\": 1, \"valor_total_origem\": 1, \"qtd_itens_origem\": 1, \"tipo_bandeira_tarifaria\": 1, \"tipo_bandeira\": 1, \"consumo_ativo_ponta_kwh\": 3, \"consumo_ativo_fponta_kwh\": 3, \"kwh_total\": 2, \"demanda_contratada_ponta_kw\": 1, \"demanda_contratada_fponta_kw\": 1, \"itens_cobrados\": 1, \"distribuidora\": 1, \"cnpj_distribuidora_filial\": 2, \"uf_distribuidora\": 1, \"validador_gate\": 1, \"extracao_score_confianca\": 1, \"extracao_versao\": 1, \"data_vencimento\": 1, \"fator_potencia_status\": 1, \"flag_legado_pre_2023\": 1, \"flag_faturamento_media\": 1, \"flag_acumulo_pos_media\": 1, \"chave_nfe\": 2, \"data_emissao_nf\": 1, \"ie_cliente\": 1, \"endereco_distribuidora\": 1, \"perda_transformacao_percentual\": 1, \"cip_iluminacao_publica_rs\": 1, \"valor_cip_cosip\": 1, \"leit_ant_ativa_fponta\": 2, \"leit_atu_ativa_fponta\": 2, \"validacao_deterministica\": 1, \"constante_k\": 2, \"leit_ant_ativa_ponta\": 2, \"leit_atu_ativa_ponta\": 2}, \"div\": {}}",
   "conjunto_uc": null,
   "constante_k": 60.0,
   "consumo_ativo_fponta_kwh": 11229.0,
   "consumo_ativo_ponta_kwh": 1125.0,
+  "consumo_ativo_reservado_kwh": "__SET_NULL__",
   "consumo_reativo_excedente_kvarh": null,
-  "cpf_cnpj": "02.341.467/0001-20",
+  "cpf_cnpj": null,
   "data_apresentacao": null,
   "data_emissao_nf": "2025-09-03",
   "data_leitura_anterior": "2025-07-31",
@@ -189,13 +190,6 @@
     "itens"
    ],
    "n": 3
-  },
-  "cpf_cnpj": {
-   "divergente": {},
-   "fontes": [
-    "extrator"
-   ],
-   "n": 1
   },
   "data_emissao_nf": {
    "divergente": {},
