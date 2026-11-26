@@ -41,6 +41,7 @@ import {
   Landmark,
   MessageCircle,
   Server,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 import FeedbackModal from './components/FeedbackModal.jsx';
@@ -71,6 +72,7 @@ const GestaoRequisicoes = lazy(() => import('./pages/GestaoRequisicoes.jsx'));
 const ControleProcessosV2 = lazy(() => import('./pages/ControleProcessosV2.jsx'));
 const ProcessoDetalhePage = lazy(() => import('./pages/ProcessoDetalhePage.jsx'));
 const Relatorios = lazy(() => import('./pages/Relatorios.jsx'));
+const RelatoriosLista = lazy(() => import('./pages/RelatoriosLista.jsx'));
 const CaixaDeEmail = lazy(() => import('./pages/CaixaDeEmail.jsx'));
 const AnaliseDesvio = lazy(() => import('./pages/AnaliseDesvio.jsx'));
 const Regras = lazy(() => import('./pages/Regras.jsx'));
@@ -153,6 +155,7 @@ function TopNav({ role, unread, mailUnread, onOpenAlertCalendar, onLogout, user 
     { to: '/auditoria', label: 'Processos (gestão)', Icon: ShieldCheck },
     { to: '/analise-desvio', label: 'Auditoria de Faturas', Icon: TrendingUp },
     { to: '/regras', label: 'Regras', Icon: Settings2 },
+    { to: '/relatorios', label: 'Relatórios', Icon: FileSpreadsheet },
     { to: '/dashboard', label: 'Métricas', Icon: BarChart3, adminOnly: true },
     { to: '/historico', label: 'Histórico', Icon: History, adminOnly: true },
     { to: '/tarefas-sistema', label: 'Tarefas do sistema', Icon: Server, adminOnly: true },
@@ -1164,6 +1167,7 @@ function App() {
                         <Route path="/rotinas" element={<AdminRotinas />} />
                         <Route path="/protocolos-aneel" element={<ProtocolosAneel />} />
                         <Route path="/whatsapp" element={<WhatsappEmpresa />} />
+                        <Route path="/relatorios" element={<RelatoriosLista />} />
 
                         {role === 'admin' ? (
                           <>

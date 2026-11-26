@@ -602,6 +602,11 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.POST("/processos/:id/suspender", handlers.SuspenderProcesso)
 			gestorRequired.POST("/processos/:id/retomar", handlers.RetomarProcesso)
 			gestorRequired.GET("/processos/prazos", handlers.GetProcessosComPrazo)
+			// 26/11/2026: relatório de priorização dos deferidos (Luana) — estrelas, datas e comprovantes
+			gestorRequired.GET("/relatorios/priorizacao", handlers.GetRelatorioPriorizacao)
+			gestorRequired.PUT("/relatorios/priorizacao/:id", handlers.PutRelatorioPriorizacao)
+			gestorRequired.POST("/relatorios/priorizacao/:id/comprovante", handlers.PostComprovanteProcesso)
+			gestorRequired.DELETE("/relatorios/priorizacao/comprovante/:idc", handlers.DeleteComprovanteProcesso)
 			gestorRequired.GET("/processos/backlog", handlers.GetBacklogProcessos)
 			gestorRequired.GET("/processos/:id/cobranca-cache", handlers.GetCobrancaCacheHandler)
 			gestorRequired.POST("/agente-recepcao/varredura-emails", handlers.VarrerEmailsRecepcaoHandler)
@@ -925,6 +930,11 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.POST("/processos/:id/suspender", handlers.SuspenderProcesso)
 			gestorRequired.POST("/processos/:id/retomar", handlers.RetomarProcesso)
 			gestorRequired.GET("/processos/prazos", handlers.GetProcessosComPrazo)
+			// 26/11/2026: relatório de priorização dos deferidos (Luana) — estrelas, datas e comprovantes
+			gestorRequired.GET("/relatorios/priorizacao", handlers.GetRelatorioPriorizacao)
+			gestorRequired.PUT("/relatorios/priorizacao/:id", handlers.PutRelatorioPriorizacao)
+			gestorRequired.POST("/relatorios/priorizacao/:id/comprovante", handlers.PostComprovanteProcesso)
+			gestorRequired.DELETE("/relatorios/priorizacao/comprovante/:idc", handlers.DeleteComprovanteProcesso)
 			gestorRequired.GET("/processos/backlog", handlers.GetBacklogProcessos)
 			gestorRequired.GET("/processos/:id/cobranca-cache", handlers.GetCobrancaCacheHandler)
 			gestorRequired.POST("/agente-recepcao/varredura-emails", handlers.VarrerEmailsRecepcaoHandler)

@@ -355,6 +355,31 @@ func runAdditiveMigrations(db *sql.DB) error {
 		  KEY ix_lv_status (status, atualizado_em)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
 
+	// 26/11/2026: Relatório de priorização (Luana) — estrela (1 = prioridade 1, estrela maior; 2 = prioridade 2,
+	// estrela menor; 0 = irrelevante) e data prevista digitada por processo.
+	createTableIfNotExists(db, "FT_RELATORIO_PRIORIZACAO", `
+		CREATE TABLE IF NOT EXISTS FT_RELATORIO_PRIORIZACAO (
+		  id_processo    INT          NOT NULL,
+		  estrela        TINYINT      NOT NULL DEFAULT 0,
+		  data_manual    DATE         NULL,
+		  atualizado_por INT          NULL,
+		  atualizado_em  DATETIME     NOT NULL,
+		  PRIMARY KEY (id_processo)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
+
+	// 26/11/2026: comprovante de depósito da distribuidora ao cliente, com a fonte (email, whatsapp, manual).
+	createTableIfNotExists(db, "FT_PROCESSO_COMPROVANTE", `
+		CREATE TABLE IF NOT EXISTS FT_PROCESSO_COMPROVANTE (
+		  id               INT          AUTO_INCREMENT PRIMARY KEY,
+		  id_processo      INT          NOT NULL,
+		  data_comprovante DATE         NOT NULL,
+		  fonte            VARCHAR(16)  NOT NULL,
+		  referencia       VARCHAR(255) NULL,
+		  id_usuario       INT          NULL,
+		  criado_em        DATETIME     NOT NULL,
+		  KEY idx_comprovante_processo (id_processo)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
+
 	// ↑ Próximas mudanças ADITIVAS entram acima desta linha.
 	log.Println("[migrate-aditivo] concluído")
 	return nil
