@@ -55,6 +55,8 @@ type priorizacaoItem struct {
 	UltimaMov        string                  `json:"ultima_movimentacao"`
 	TotalCliente     float64                 `json:"total_cliente"`
 	TotalAmee        float64                 `json:"total_amee"`
+	RepasseSimples   float64                 `json:"repasse_simples"`
+	RepasseDobro     float64                 `json:"repasse_dobro"`
 	EnvioFinanceiro  string                  `json:"data_envio_financeiro"`
 	Estrela          int                     `json:"estrela"`
 	DataManual       string                  `json:"data_manual"`
@@ -67,6 +69,7 @@ type priorizacaoItem struct {
 	Finalizado       string                  `json:"finalizado_em"`
 	FonteFinalizacao string                  `json:"fonte_finalizacao"`
 	RefFinalizacao   string                  `json:"ref_finalizacao,omitempty"`
+	Historico        []priorizacaoEvento     `json:"historico"`
 	procedencia      time.Time
 }
 
@@ -164,6 +167,7 @@ func carregarPriorizacao(db *sql.DB, encerrados bool) (*priorizacaoDados, error)
 		       DATE_FORMAT(p.data_movimentacao,'%Y-%m-%d'),
 		       COALESCE(d.credito_simples, p.credito_simples, 0) + COALESCE(d.credito_dobro, p.credito_dobro, 0),
 		       COALESCE(d.repasse_simples, p.repasse_simples, 0) + COALESCE(d.repasse_dobro, p.repasse_dobro, 0),
+		       COALESCE(d.repasse_simples, p.repasse_simples, 0), COALESCE(d.repasse_dobro, p.repasse_dobro, 0),
 		       DATE_FORMAT(f.data_envio_financeiro,'%Y-%m-%d'),
 		       COALESCE(r.estrela,0), DATE_FORMAT(r.data_manual,'%Y-%m-%d'), COALESCE(r.observacao,''),
 		       COALESCE(p.id_aprovacao_atual,0) = 1
@@ -187,7 +191,7 @@ func carregarPriorizacao(db *sql.DB, encerrados bool) (*priorizacaoDados, error)
 		it := &priorizacaoItem{}
 		var proc, mov, envio, manual sql.NullString
 		if err := rows.Scan(&it.IDProcesso, &it.UC, &it.Cliente, &it.Concessionaria, &it.Instancia, &it.Etapa, &it.IDEtapa,
-			&it.Status, &proc, &mov, &it.TotalCliente, &it.TotalAmee, &envio, &it.Estrela, &manual, &it.Observacao, &it.Deferido); err != nil {
+			&it.Status, &proc, &mov, &it.TotalCliente, &it.TotalAmee, &it.RepasseSimples, &it.RepasseDobro, &envio, &it.Estrela, &manual, &it.Observacao, &it.Deferido); err != nil {
 			log.Printf("GetRelatorioPriorizacao scan: %v", err)
 			continue
 		}
@@ -348,6 +352,7 @@ func carregarPriorizacao(db *sql.DB, encerrados bool) (*priorizacaoDados, error)
 		faltam := int(math.Round(est.Sub(hoje).Hours() / 24))
 		it.DiasParaEstimada = &faltam
 	}
+	carregarHistoricoPrio(db, itens)
 	return &priorizacaoDados{Itens: itens, MediaGeral: mediaGeral, NaMedia: n, PorDist: porDist}, nil
 }
 

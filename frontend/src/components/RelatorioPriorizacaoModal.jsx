@@ -103,6 +103,29 @@ function ComprovanteCell({ p, onRegistrar, onApagar, podeEditar }) {
   );
 }
 
+function Historico({ eventos }) {
+  const [tudo, setTudo] = useState(false);
+  const lista = eventos || [];
+  if (!lista.length) return <span style={{ color: 'var(--cpv2-text-soft)' }}>—</span>;
+  const vis = tudo ? lista : lista.slice(-3);
+  return (
+    <div style={{ minWidth: 260, maxWidth: 420, lineHeight: 1.3 }}>
+      {vis.map((e, i) => (
+        <div key={`${e.data}-${i}`} style={{ marginBottom: 4 }}>
+          <span style={{ fontWeight: 600 }}>{br(e.data)}</span>
+          <span style={{ color: 'var(--cpv2-text-muted)', fontSize: 11 }}> · {e.tipo}</span>
+          <div style={{ fontSize: 11.5 }}>{e.texto}</div>
+        </div>
+      ))}
+      {lista.length > 3 ? (
+        <button type="button" className="cpv2-btn" style={{ padding: '1px 6px', fontSize: 11 }} onClick={() => setTudo(!tudo)}>
+          {tudo ? 'mostrar só os últimos' : `ver tudo (${lista.length})`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function Card({ titulo, valor, sub }) {
   return (
     <div style={{
@@ -270,12 +293,13 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
                     <th style={th}>Distribuidora</th>
                     <th style={th}>Instância / etapa</th>
                     <th style={th}>Procedência</th>
-                    <th style={{ ...th, textAlign: 'right' }}>Repasse AMEE</th>
                     <th style={th}>Comprovante</th>
                     <th style={th}>Data estimada (sistema)</th>
                     <th style={th}>Data prevista (manual)</th>
                     <th style={th}>Observação</th>
                     <th style={th}>Última mov.</th>
+                    <th style={th}>Histórico (desde a procedência)</th>
+                    <th style={{ ...th, textAlign: 'right' }}>Repasse AMEE</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -288,7 +312,6 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
                       <td style={td}>{p.concessionaria}</td>
                       <td style={td}>{p.instancia}<div style={{ fontSize: 11, color: 'var(--cpv2-text-muted)' }}>{p.etapa}{p.status ? ` · ${p.status}` : ''}</div></td>
                       <td style={td}>{br(p.data_procedencia)}</td>
-                      <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>{brl(p.total_amee)}</td>
                       <td style={td}><ComprovanteCell p={p} podeEditar={podeEditar} onRegistrar={onRegistrar} onApagar={onApagar} /></td>
                       <td style={td}>
                         {p.comprovante || p.finalizado_em ? <span style={{ color: 'var(--cpv2-text-soft)' }}>—</span> : p.data_estimada ? (
@@ -311,6 +334,12 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
                           onBlur={(e) => salvarObs(p.id_processo, e.target.value)} />
                       </td>
                       <td style={td}>{br(p.ultima_movimentacao)}</td>
+                      <td style={td}><Historico eventos={p.historico} /></td>
+                      <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontWeight: 700 }}>{brl(p.total_amee)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--cpv2-text-muted)' }}>simples {brl(p.repasse_simples)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--cpv2-text-muted)' }}>dobro {brl(p.repasse_dobro)}</div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

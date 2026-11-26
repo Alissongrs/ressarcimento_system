@@ -554,7 +554,7 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 			{"status_processo", 20}, {"status_aprovacao", 14}, {"credito_simples", 14}, {"credito_dobro", 14}, {"total_cliente", 14},
 			{"repasse_simples", 14}, {"repasse_dobro", 14}, {"total_amee", 14}, {"data_envio_financeiro", 14}, {"observação", 45},
 			{"prazo_retorno (data prevista)", 14}, {"comprovante_data", 13}, {"comprovante_fonte", 16}, {"dias_ate_comprovante", 12},
-			{"data_estimada_sistema", 14}, {"base_estimativa", 20}, {"finalizado_em", 13}, {"fonte_finalizacao", 26}}
+			{"data_estimada_sistema", 14}, {"base_estimativa", 20}, {"finalizado_em", 13}, {"fonte_finalizacao", 26}, {"historico (desde a procedência)", 80}, {"repasse_amee", 15}}
 		hst := st(azul, "FFFFFF", true, 10, "", true)
 		for i, c := range cols {
 			nm, _ := excelize.ColumnNumberToName(i + 1)
@@ -584,7 +584,7 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 			vals := []interface{}{rotulo(l), v.UC, l.it.IDProcesso, v.Cliente, v.Conc, v.RessEst, data(v.DataMov), data(v.Prazo), v.StatusPrazo,
 				v.Comentario, v.Instancia, v.Etapa, v.StatusProc, v.StatusAprov, v.CredS, v.CredD, v.TotCli, v.RepS, v.RepD, v.TotAmee,
 				data(v.EnvioFin), l.it.Observacao, data(l.it.DataManual), compD, compF, dias, est, base,
-				data(l.it.Finalizado), l.it.FonteFinalizacao}
+				data(l.it.Finalizado), l.it.FonteFinalizacao, textoHistoricoPrio(l.it.Historico), v.TotAmee}
 			fill := ""
 			if amarelo != nil && amarelo(l) {
 				fill = "F9F3A9"
@@ -595,20 +595,20 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 				_ = f.SetCellValue(nome, a, val)
 				nf := ""
 				switch {
-				case j == 5 || (j >= 14 && j <= 19):
+				case j == 5 || (j >= 14 && j <= 19) || j == 31:
 					nf = fmtBRL
 				case j == 6 || j == 7 || j == 20 || j == 22 || j == 23 || j == 26 || j == 28:
 					nf = fmtData
 				}
 				s := &excelize.Style{Font: &excelize.Font{Size: 10, Family: "Calibri"}, Border: borda,
-					Alignment: &excelize.Alignment{Vertical: "top", WrapText: j == 9 || j == 21}}
+					Alignment: &excelize.Alignment{Vertical: "top", WrapText: j == 9 || j == 21 || j == 30}}
 				if fill != "" {
 					s.Fill = excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{fill}}
 				}
 				if nf != "" {
 					s.CustomNumFmt = &nf
 				}
-				k := fmt.Sprint("lista", fill, nf, j == 9 || j == 21)
+				k := fmt.Sprint("lista", fill, nf, j == 9 || j == 21 || j == 30)
 				id, ok := estilos[k]
 				if !ok {
 					id, _ = f.NewStyle(s)
@@ -662,4 +662,17 @@ func (l prioLinha) vUC() string {
 		return ""
 	}
 	return l.v.UC
+}
+
+// textoHistoricoPrio: uma linha por evento, "dd/mm/aaaa · tipo · texto".
+func textoHistoricoPrio(h []priorizacaoEvento) string {
+	linhas := make([]string, 0, len(h))
+	for _, e := range h {
+		d := e.Data
+		if len(d) >= 10 {
+			d = d[8:10] + "/" + d[5:7] + "/" + d[:4]
+		}
+		linhas = append(linhas, d+" · "+e.Tipo+" · "+e.Texto)
+	}
+	return strings.Join(linhas, "\n")
 }
