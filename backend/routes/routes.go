@@ -604,6 +604,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/processos/prazos", handlers.GetProcessosComPrazo)
 			// 26/11/2026: relatório de priorização dos deferidos (Luana) — estrelas, datas e comprovantes
 			gestorRequired.GET("/relatorios/priorizacao", handlers.GetRelatorioPriorizacao)
+			gestorRequired.GET("/relatorios/priorizacao/xlsx", handlers.GetRelatorioPriorizacaoXLSX)
 			gestorRequired.PUT("/relatorios/priorizacao/:id", handlers.PutRelatorioPriorizacao)
 			gestorRequired.POST("/relatorios/priorizacao/:id/comprovante", handlers.PostComprovanteProcesso)
 			gestorRequired.DELETE("/relatorios/priorizacao/comprovante/:idc", handlers.DeleteComprovanteProcesso)
@@ -932,6 +933,7 @@ func SetupRouter(gdb *gorm.DB) *gin.Engine {
 			gestorRequired.GET("/processos/prazos", handlers.GetProcessosComPrazo)
 			// 26/11/2026: relatório de priorização dos deferidos (Luana) — estrelas, datas e comprovantes
 			gestorRequired.GET("/relatorios/priorizacao", handlers.GetRelatorioPriorizacao)
+			gestorRequired.GET("/relatorios/priorizacao/xlsx", handlers.GetRelatorioPriorizacaoXLSX)
 			gestorRequired.PUT("/relatorios/priorizacao/:id", handlers.PutRelatorioPriorizacao)
 			gestorRequired.POST("/relatorios/priorizacao/:id/comprovante", handlers.PostComprovanteProcesso)
 			gestorRequired.DELETE("/relatorios/priorizacao/comprovante/:idc", handlers.DeleteComprovanteProcesso)

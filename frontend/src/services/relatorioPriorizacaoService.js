@@ -20,3 +20,15 @@ export async function apagarComprovante(idComprovante) {
   const { data } = await api.delete(`/relatorios/priorizacao/comprovante/${idComprovante}`);
   return data;
 }
+
+// Excel no formato do dashboard da Luana (gerado no backend). mes = 'AAAA-MM'
+export async function baixarRelatorioPriorizacaoXlsx(mes) {
+  const resp = await api.get('/relatorios/priorizacao/xlsx', { params: mes ? { mes } : {}, responseType: 'blob' });
+  const cd = resp.headers?.['content-disposition'] || '';
+  const m = cd.match(/filename="?([^"]+)"?/);
+  const nome = m ? m[1] : `Relatorio_Priorizacao_${mes || ''}.xlsx`;
+  const url = URL.createObjectURL(resp.data);
+  const a = document.createElement('a');
+  a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}

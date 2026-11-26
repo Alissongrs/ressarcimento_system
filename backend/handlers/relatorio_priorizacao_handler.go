@@ -49,6 +49,7 @@ type priorizacaoItem struct {
 	Instancia        string                  `json:"instancia"`
 	Etapa            string                  `json:"etapa"`
 	IDEtapa          int                     `json:"id_etapa"`
+	Deferido         bool                    `json:"deferido"`
 	Status           string                  `json:"status"`
 	DataProcedencia  string                  `json:"data_procedencia"`
 	UltimaMov        string                  `json:"ultima_movimentacao"`
@@ -95,6 +96,14 @@ func parseDataSQL(v sql.NullString) time.Time {
 	return t
 }
 
+// priorizacaoDados é o resultado comum da tela e do Excel.
+type priorizacaoDados struct {
+	Itens      []*priorizacaoItem
+	MediaGeral float64 // -1 = sem casos
+	NaMedia    int
+	PorDist    map[string][2]int
+}
+
 // GetRelatorioPriorizacao lista todos os processos deferidos com estrela, comprovante e datas.
 // GET /api/v1/relatorios/priorizacao[?encerrados=1]
 func GetRelatorioPriorizacao(c *gin.Context) {
@@ -103,8 +112,36 @@ func GetRelatorioPriorizacao(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "banco indisponível"})
 		return
 	}
+	d, err := carregarPriorizacao(db, c.Query("encerrados") == "1")
+	if err != nil {
+		log.Printf("GetRelatorioPriorizacao: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro na consulta"})
+		return
+	}
+	medias := []gin.H{}
+	for k, v := range d.PorDist {
+		medias = append(medias, gin.H{"concessionaria": k, "media_dias": math.Round(float64(v[0])/float64(v[1])*10) / 10, "casos": v[1]})
+	}
+	sort.Slice(medias, func(a, b int) bool { return medias[a]["casos"].(int) > medias[b]["casos"].(int) })
+	var mg interface{}
+	if d.MediaGeral >= 0 {
+		mg = math.Round(d.MediaGeral*10) / 10
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"processos":        d.Itens,
+		"media_geral_dias": mg,
+		"casos_na_media":   d.NaMedia,
+		"medias_por_dist":  medias,
+		"inicio_media":     priorizacaoInicioMedia,
+		"gerado_em":        time.Now().Format("2006-01-02 15:04"),
+	})
+}
+
+// carregarPriorizacao: deferidos (sem os encerrados, salvo encerrados=true) + todo processo marcado com estrela,
+// mesmo que não esteja deferido no sistema (a Luana prioriza casos ainda em contestação).
+func carregarPriorizacao(db *sql.DB, encerrados bool) (*priorizacaoDados, error) {
 	filtroEtapa := "AND COALESCE(p.id_etapa_atual,0) <> 6"
-	if c.Query("encerrados") == "1" {
+	if encerrados {
 		filtroEtapa = ""
 	}
 	rows, err := db.Query(`
@@ -115,7 +152,8 @@ func GetRelatorioPriorizacao(c *gin.Context) {
 		       COALESCE(d.credito_simples, p.credito_simples, 0) + COALESCE(d.credito_dobro, p.credito_dobro, 0),
 		       COALESCE(d.repasse_simples, p.repasse_simples, 0) + COALESCE(d.repasse_dobro, p.repasse_dobro, 0),
 		       DATE_FORMAT(f.data_envio_financeiro,'%Y-%m-%d'),
-		       COALESCE(r.estrela,0), DATE_FORMAT(r.data_manual,'%Y-%m-%d'), COALESCE(r.observacao,'')
+		       COALESCE(r.estrela,0), DATE_FORMAT(r.data_manual,'%Y-%m-%d'), COALESCE(r.observacao,''),
+		       COALESCE(p.id_aprovacao_atual,0) = 1
 		  FROM FT_PROCESSOS p
 		  LEFT JOIN DM_INSTANCIAS i ON i.id_instancia = p.id_instancia_atual
 		  LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
@@ -124,12 +162,10 @@ func GetRelatorioPriorizacao(c *gin.Context) {
 		  LEFT JOIN FT_DEFERIMENTOS d ON d.id_deferimento = dm.mx
 		  LEFT JOIN (SELECT id_processo, MIN(data_envio_financeiro) data_envio_financeiro FROM FT_FATURAMENTO GROUP BY id_processo) f ON f.id_processo = p.id_processo
 		  LEFT JOIN FT_RELATORIO_PRIORIZACAO r ON r.id_processo = p.id_processo
-		 WHERE p.id_aprovacao_atual = 1 ` + filtroEtapa + `
+		 WHERE (p.id_aprovacao_atual = 1 ` + filtroEtapa + `) OR COALESCE(r.estrela,0) > 0
 		 ORDER BY p.id_processo`)
 	if err != nil {
-		log.Printf("GetRelatorioPriorizacao: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro na consulta"})
-		return
+		return nil, err
 	}
 	defer rows.Close()
 	itens := []*priorizacaoItem{}
@@ -138,7 +174,7 @@ func GetRelatorioPriorizacao(c *gin.Context) {
 		it := &priorizacaoItem{}
 		var proc, mov, envio, manual sql.NullString
 		if err := rows.Scan(&it.IDProcesso, &it.UC, &it.Cliente, &it.Concessionaria, &it.Instancia, &it.Etapa, &it.IDEtapa,
-			&it.Status, &proc, &mov, &it.TotalCliente, &it.TotalAmee, &envio, &it.Estrela, &manual, &it.Observacao); err != nil {
+			&it.Status, &proc, &mov, &it.TotalCliente, &it.TotalAmee, &envio, &it.Estrela, &manual, &it.Observacao, &it.Deferido); err != nil {
 			log.Printf("GetRelatorioPriorizacao scan: %v", err)
 			continue
 		}
@@ -151,9 +187,7 @@ func GetRelatorioPriorizacao(c *gin.Context) {
 		por[it.IDProcesso] = it
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("GetRelatorioPriorizacao rows: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "erro na consulta"})
-		return
+		return nil, err
 	}
 
 	// comprovantes, da fonte mais forte para a mais fraca; fica o primeiro achado de cada processo
@@ -182,8 +216,8 @@ func GetRelatorioPriorizacao(c *gin.Context) {
 		log.Printf("GetRelatorioPriorizacao comprovantes: %v", err)
 	}
 	if r, err := db.Query(`SELECT h.id_processo, DATE_FORMAT(h.data_movimentacao,'%Y-%m-%d'), h.comentario
-	                          FROM FT_HISTORICO_MOVIMENTACOES h JOIN FT_PROCESSOS p ON p.id_processo = h.id_processo
-	                         WHERE p.id_aprovacao_atual = 1 AND h.comentario LIKE '%comprovante%'
+	                          FROM FT_HISTORICO_MOVIMENTACOES h
+	                         WHERE h.comentario LIKE '%comprovante%'
 	                         ORDER BY h.data_movimentacao`); err == nil {
 		for r.Next() {
 			var idp int64
@@ -261,24 +295,7 @@ func GetRelatorioPriorizacao(c *gin.Context) {
 		faltam := int(math.Round(est.Sub(hoje).Hours() / 24))
 		it.DiasParaEstimada = &faltam
 	}
-
-	medias := []gin.H{}
-	for k, v := range porDist {
-		medias = append(medias, gin.H{"concessionaria": k, "media_dias": math.Round(float64(v[0])/float64(v[1])*10) / 10, "casos": v[1]})
-	}
-	sort.Slice(medias, func(a, b int) bool { return medias[a]["casos"].(int) > medias[b]["casos"].(int) })
-	var mg interface{}
-	if mediaGeral >= 0 {
-		mg = math.Round(mediaGeral*10) / 10
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"processos":        itens,
-		"media_geral_dias": mg,
-		"casos_na_media":   n,
-		"medias_por_dist":  medias,
-		"inicio_media":     priorizacaoInicioMedia,
-		"gerado_em":        time.Now().Format("2006-01-02 15:04"),
-	})
+	return &priorizacaoDados{Itens: itens, MediaGeral: mediaGeral, NaMedia: n, PorDist: porDist}, nil
 }
 
 // PutRelatorioPriorizacao grava estrela e/ou data manual de um processo.

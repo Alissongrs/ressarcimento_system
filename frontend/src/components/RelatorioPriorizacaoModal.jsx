@@ -1,13 +1,12 @@
 // Relatório de priorização dos deferidos (pedido da Luana, 26/11/2026) — modal de tela inteira.
 // Todos os processos deferidos; estrela grande = prioridade 1, estrela pequena = prioridade 2, sem estrela = irrelevante.
 // Comprovante de depósito com a fonte; data estimada pelo sistema (média desde 01/01/2026) e data digitada.
-// "Gerar relatório" monta um .xlsx com os marcados + o resumo de TODOS os deferidos.
+// "Gerar relatório" baixa do backend o Excel no formato do dashboard da Luana (Dashboard + DEFERIDOS + Demais deferidos).
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import * as XLSX from 'xlsx';
 import { X, Star, Download, RefreshCw, Plus, Trash2 } from 'lucide-react';
 import {
-  getRelatorioPriorizacao, salvarPriorizacao, registrarComprovante, apagarComprovante,
+  getRelatorioPriorizacao, salvarPriorizacao, registrarComprovante, apagarComprovante, baixarRelatorioPriorizacaoXlsx,
 } from '../services/relatorioPriorizacaoService';
 
 const brl = (v) => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -15,7 +14,6 @@ const br = (iso) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(
 const FONTE = {
   manual: 'Manual', email: 'E-mail', whatsapp: 'WhatsApp', historico: 'Histórico', faturamento: 'Envio ao financeiro',
 };
-const PRIORIDADE = { 1: 'Prioridade 1', 2: 'Prioridade 2', 0: '' };
 
 function Estrelas({ valor, onChange, disabled }) {
   const cor = (ativo) => (ativo ? '#f5b301' : 'color-mix(in srgb, var(--fg) 30%, transparent)');
@@ -109,6 +107,11 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
   const [encerrados, setEncerrados] = useState(false);
   const [filtro, setFiltro] = useState('todos');
   const [busca, setBusca] = useState('');
+  const [mesRel, setMesRel] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [gerando, setGerando] = useState(false);
 
   const carregar = useCallback(async () => {
     setCarregando(true); setErro('');
@@ -151,7 +154,7 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
     const g = (lst) => ({ n: lst.length, amee: lst.reduce((s, p) => s + (p.total_amee || 0), 0) });
     const mesAtual = new Date().toISOString().slice(0, 7);
     return {
-      todos: g(procs),
+      todos: g(procs.filter((p) => p.deferido)),
       p1: g(procs.filter((p) => p.estrela === 1)),
       p2: g(procs.filter((p) => p.estrela === 2)),
       demais: g(procs.filter((p) => !p.estrela)),
@@ -174,53 +177,15 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
     }).sort((a, b) => (a.estrela || 9) - (b.estrela || 9) || (b.total_amee || 0) - (a.total_amee || 0));
   }, [procs, filtro, busca]);
 
-  const gerar = () => {
-    const linha = (p) => ({
-      Prioridade: PRIORIDADE[p.estrela] || '',
-      Processo: p.id_processo,
-      UC: p.uc,
-      Cliente: p.cliente,
-      Distribuidora: p.concessionaria,
-      Instância: p.instancia,
-      Etapa: p.etapa,
-      Status: p.status,
-      'Data procedência': br(p.data_procedencia),
-      'Crédito cliente (R$)': Number((p.total_cliente || 0).toFixed(2)),
-      'Repasse AMEE (R$)': Number((p.total_amee || 0).toFixed(2)),
-      'Comprovante (data)': p.comprovante ? br(p.comprovante.data) : 'Não chegou',
-      'Comprovante (fonte)': p.comprovante ? (FONTE[p.comprovante.fonte] || p.comprovante.fonte) : '',
-      'Dias até o comprovante': p.dias_ate_comprovante ?? '',
-      'Data estimada (sistema)': br(p.data_estimada),
-      'Base da estimativa': p.base_estimativa || '',
-      'Data prevista (manual)': br(p.data_manual),
-      Observação: p.observacao || '',
-      'Última movimentação': br(p.ultima_movimentacao),
-    });
-    const marcados = procs.filter((p) => p.estrela).sort((a, b) => a.estrela - b.estrela || b.total_amee - a.total_amee);
-    const resumoLinhas = [
-      ['Relatório de priorização de casos deferidos', ''],
-      ['Gerado em', new Date().toLocaleString('pt-BR')],
-      ['', ''],
-      ['Grupo', 'Casos', 'Repasse AMEE (R$)'],
-      ['Prioridade 1', resumo.p1.n, Number(resumo.p1.amee.toFixed(2))],
-      ['Prioridade 2', resumo.p2.n, Number(resumo.p2.amee.toFixed(2))],
-      ['Demais deferidos (fora da lista)', resumo.demais.n, Number(resumo.demais.amee.toFixed(2))],
-      ['Total de deferidos', resumo.todos.n, Number(resumo.todos.amee.toFixed(2))],
-      ['', ''],
-      ['Com comprovante', resumo.comprovados.n, Number(resumo.comprovados.amee.toFixed(2))],
-      ['Comprovantes no mês', resumo.compMes.n, Number(resumo.compMes.amee.toFixed(2))],
-      ['Sem comprovante e já passaram da data estimada', resumo.atrasados, ''],
-      ['Tempo médio até o comprovante (dias)', dados?.media_geral_dias ?? '', `procedências desde ${br(dados?.inicio_media)}; ${dados?.casos_na_media ?? 0} casos`],
-      ['', ''],
-      ['Distribuidora', 'Média (dias)', 'Casos'],
-      ...(dados?.medias_por_dist || []).map((m) => [m.concessionaria, m.media_dias, m.casos]),
-    ];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumoLinhas), 'Resumo');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(marcados.map(linha)), 'Priorizados');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(procs.filter((p) => !p.estrela).map(linha)), 'Demais deferidos');
-    const d = new Date();
-    XLSX.writeFile(wb, `Relatorio_Priorizacao_${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.xlsx`);
+  const gerar = async () => {
+    setGerando(true); setErro('');
+    try {
+      await baixarRelatorioPriorizacaoXlsx(mesRel);
+    } catch {
+      setErro('Não foi possível gerar o relatório.');
+    } finally {
+      setGerando(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -243,7 +208,10 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
             </div>
             <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <button type="button" className="cpv2-btn" onClick={carregar} disabled={carregando}><RefreshCw size={14} /> Atualizar</button>
-              <button type="button" className="cpv2-btn cpv2-btn--primary" onClick={gerar} disabled={!procs.length}><Download size={14} /> Gerar relatório</button>
+              <input type="month" value={mesRel} onChange={(e) => setMesRel(e.target.value)} title="Mês de referência do relatório" />
+              <button type="button" className="cpv2-btn cpv2-btn--primary" onClick={gerar} disabled={gerando || !mesRel}>
+                <Download size={14} /> {gerando ? 'Gerando…' : 'Gerar relatório'}
+              </button>
               <button type="button" className="cpv2-modal__close" onClick={onClose} aria-label="Fechar"><X size={18} /></button>
             </span>
           </div>
@@ -298,7 +266,8 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
                   {visiveis.map((p) => (
                     <tr key={p.id_processo}>
                       <td style={td}><Estrelas valor={p.estrela} disabled={!podeEditar} onChange={(v) => mudarEstrela(p.id_processo, v)} /></td>
-                      <td style={td}><a href={`/processos/${p.id_processo}`} target="_blank" rel="noreferrer">{p.id_processo}</a><div style={{ fontSize: 11, color: 'var(--cpv2-text-muted)' }}>UC {p.uc}</div></td>
+                      <td style={td}><a href={`/processos/${p.id_processo}`} target="_blank" rel="noreferrer">{p.id_processo}</a><div style={{ fontSize: 11, color: 'var(--cpv2-text-muted)' }}>UC {p.uc}</div>
+                        {!p.deferido ? <div style={{ fontSize: 10.5, color: 'var(--cpv2-warning, #b45309)' }} title="Marcado na lista, mas ainda não está deferido no sistema">não deferido</div> : null}</td>
                       <td style={td}>{p.cliente}</td>
                       <td style={td}>{p.concessionaria}</td>
                       <td style={td}>{p.instancia}<div style={{ fontSize: 11, color: 'var(--cpv2-text-muted)' }}>{p.etapa}{p.status ? ` · ${p.status}` : ''}</div></td>
