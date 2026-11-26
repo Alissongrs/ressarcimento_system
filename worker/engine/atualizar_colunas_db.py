@@ -207,6 +207,41 @@ def _coleta_campos(out_v2: dict) -> dict:
     return cols
 
 
+def _cnpj_e_distribuidora(digitos: str, out_v2: dict) -> bool:
+    """CNPJ da própria distribuidora (emissor da fatura ou raiz do catálogo distribuidoras.json)."""
+    emissor = re.sub(r"\D", "", str(((out_v2.get("distribuidora") or {}).get("cnpj_emissor")) or ""))
+    if emissor and digitos[:8] == emissor[:8]:
+        return True
+    try:
+        import identificacao
+        return digitos[:8] in identificacao.catalogo()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _cpf_cnpj_cliente(cli: dict, out_v2: dict):
+    """26/11/2026: o CNPJ lido da fatura vale se for um CNPJ inteiro, com dígito verificador certo e que não é da
+    distribuidora; senão vale o da origem (cliente.cnpj_cliente, que o override da origem grava com
+    _cnpj_cliente_fonte='origem' — antes essa chave nunca chegava à coluna). OCR das escaneadas EDP SP/Enel SP/Light
+    gravava o CNPJ da distribuidora (02302100000106, 61.695.227/0001-93-) e a Enel SP um mascarado (59.***-80)."""
+    lido = cli.get("cnpj")
+    if lido:
+        dig = re.sub(r"\D", "", str(lido))
+        try:
+            from confirmacao import dv_cnpj
+            dv_ok = dv_cnpj(dig)
+        except Exception:  # noqa: BLE001
+            dv_ok = len(dig) == 14
+        if "*" not in str(lido) and len(dig) == 14 and dv_ok and not _cnpj_e_distribuidora(dig, out_v2):
+            return lido
+    origem = cli.get("cnpj_cliente") if cli.get("_cnpj_cliente_fonte") == "origem" else None
+    if origem:
+        return origem
+    if lido and ("*" in str(lido) or _cnpj_e_distribuidora(re.sub(r"\D", "", str(lido)), out_v2)):
+        return None
+    return lido or cli.get("cpf")
+
+
 def _coleta_campos_base(out_v2: dict) -> dict:
     """Mapeia out_v2 → dict {coluna: valor} pra UPDATE SQL.
 
@@ -531,7 +566,7 @@ def _coleta_campos_base(out_v2: dict) -> dict:
         "numero_medidor":        ident.get("medidor"),
         # Cliente — com blacklist anti-label + sentinel _FORCE_NULL (Fix F)
         "nome_cliente":          razao_final,
-        "cpf_cnpj":              cli.get("cnpj") or cli.get("cpf"),
+        "cpf_cnpj":              _cpf_cnpj_cliente(cli, out_v2),
         # Classificação — prioriza ligacao_tecnica (Fix A)
         "classe_consumidor":     classe_val,
         "subgrupo_tarifario":    subgrupo_val,

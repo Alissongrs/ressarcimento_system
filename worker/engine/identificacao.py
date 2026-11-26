@@ -290,6 +290,13 @@ def parse_uc(s: str) -> str | None:
             continue
         if re.fullmatch(r"\d{1,2}/\d{1,2}", tok) or re.fullmatch(r"\d{5}-\d{3}", tok):
             continue
+        # 26/11/2026: telefone de atendimento não é UC — EDP SP escaneada: "0800 723 4321" em fonte grande virava a
+        # UC pela regra da maior fonte (08007234321 em 2 faturas)
+        if re.fullmatch(r"0[38]00\d{6,8}", dig):
+            continue
+        # número decimal (constante/tarifa "0.04200" da Enel SP escaneada) não é UC
+        if re.fullmatch(r"0[.,]\d+", tok):
+            continue
         return tok
     return None
 

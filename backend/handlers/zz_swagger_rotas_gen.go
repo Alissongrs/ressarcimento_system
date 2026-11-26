@@ -2335,6 +2335,53 @@ func swaggerRotaPost_api_v1_processos__id__suspender() {}
 // @Router /api/v1/processos/{id}/retomar [post]
 func swaggerRotaPost_api_v1_processos__id__retomar() {}
 
+// @Summary Get relatorio priorizacao
+// @Description Gestor ou admin. Handler: handlers.GetRelatorioPriorizacao.
+// @Tags Relatórios
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/relatorios/priorizacao [get]
+func swaggerRotaGet_api_v1_relatorios_priorizacao() {}
+
+// @Summary Put relatorio priorizacao
+// @Description Gestor ou admin. Handler: handlers.PutRelatorioPriorizacao.
+// @Tags Relatórios
+// @Accept json
+// @Produce json
+// @Param id path string true "id"
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/relatorios/priorizacao/{id} [put]
+func swaggerRotaPut_api_v1_relatorios_priorizacao__id_() {}
+
+// @Summary Post comprovante processo
+// @Description Gestor ou admin. Handler: handlers.PostComprovanteProcesso.
+// @Tags Relatórios
+// @Accept json
+// @Produce json
+// @Param id path string true "id"
+// @Param body body object false "Corpo da requisição (JSON)"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/relatorios/priorizacao/{id}/comprovante [post]
+func swaggerRotaPost_api_v1_relatorios_priorizacao__id__comprovante() {}
+
+// @Summary Delete comprovante processo
+// @Description Gestor ou admin. Handler: handlers.DeleteComprovanteProcesso.
+// @Tags Relatórios
+// @Produce json
+// @Param idc path string true "idc"
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/relatorios/priorizacao/comprovante/{idc} [delete]
+func swaggerRotaDelete_api_v1_relatorios_priorizacao_comprovante__idc_() {}
+
 // @Summary Get processos suspensos
 // @Description Gestor ou admin. Handler: handlers.GetProcessosSuspensos.
 // @Tags Processos
