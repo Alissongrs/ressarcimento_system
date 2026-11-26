@@ -136,6 +136,9 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
     atualizarLocal(id, { data_manual });
     try { await salvarPriorizacao(id, { data_manual }); } catch { setErro('Falha ao salvar a data.'); }
   };
+  const salvarObs = async (id, observacao) => {
+    try { await salvarPriorizacao(id, { observacao }); } catch { setErro('Falha ao salvar a observação.'); }
+  };
   const onRegistrar = async (id, payload) => {
     try { await registrarComprovante(id, payload); await carregar(); } catch (e) { setErro(e?.response?.data?.error || 'Falha ao registrar.'); }
   };
@@ -190,6 +193,7 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
       'Data estimada (sistema)': br(p.data_estimada),
       'Base da estimativa': p.base_estimativa || '',
       'Data prevista (manual)': br(p.data_manual),
+      Observação: p.observacao || '',
       'Última movimentação': br(p.ultima_movimentacao),
     });
     const marcados = procs.filter((p) => p.estrela).sort((a, b) => a.estrela - b.estrela || b.total_amee - a.total_amee);
@@ -286,6 +290,7 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
                     <th style={th}>Comprovante</th>
                     <th style={th}>Data estimada (sistema)</th>
                     <th style={th}>Data prevista (manual)</th>
+                    <th style={th}>Observação</th>
                     <th style={th}>Última mov.</th>
                   </tr>
                 </thead>
@@ -313,6 +318,12 @@ export default function RelatorioPriorizacaoModal({ isOpen, onClose, podeEditar 
                       <td style={td}>
                         <input type="date" value={p.data_manual || ''} disabled={!podeEditar}
                           onChange={(e) => mudarData(p.id_processo, e.target.value)} />
+                      </td>
+                      <td style={td}>
+                        <textarea rows={2} style={{ minWidth: 200, width: '100%', resize: 'vertical', font: 'inherit' }}
+                          disabled={!podeEditar} value={p.observacao || ''} placeholder="Motivo, combinado com a distribuidora…"
+                          onChange={(e) => atualizarLocal(p.id_processo, { observacao: e.target.value })}
+                          onBlur={(e) => salvarObs(p.id_processo, e.target.value)} />
                       </td>
                       <td style={td}>{br(p.ultima_movimentacao)}</td>
                     </tr>

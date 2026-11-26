@@ -379,6 +379,8 @@ func runAdditiveMigrations(db *sql.DB) error {
 		  criado_em        DATETIME     NOT NULL,
 		  KEY idx_comprovante_processo (id_processo)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
+	// 26/11/2026: observação da Luana por processo (motivo de estar ou não na lista)
+	addColumnIfMissing(db, "FT_RELATORIO_PRIORIZACAO", "observacao", "VARCHAR(1000) NULL")
 
 	// ↑ Próximas mudanças ADITIVAS entram acima desta linha.
 	log.Println("[migrate-aditivo] concluído")

@@ -57,6 +57,7 @@ type priorizacaoItem struct {
 	EnvioFinanceiro  string                  `json:"data_envio_financeiro"`
 	Estrela          int                     `json:"estrela"`
 	DataManual       string                  `json:"data_manual"`
+	Observacao       string                  `json:"observacao"`
 	Comprovante      *priorizacaoComprovante `json:"comprovante"`
 	DiasComprovante  *int                    `json:"dias_ate_comprovante"`
 	DataEstimada     string                  `json:"data_estimada"`
@@ -114,7 +115,7 @@ func GetRelatorioPriorizacao(c *gin.Context) {
 		       COALESCE(d.credito_simples, p.credito_simples, 0) + COALESCE(d.credito_dobro, p.credito_dobro, 0),
 		       COALESCE(d.repasse_simples, p.repasse_simples, 0) + COALESCE(d.repasse_dobro, p.repasse_dobro, 0),
 		       DATE_FORMAT(f.data_envio_financeiro,'%Y-%m-%d'),
-		       COALESCE(r.estrela,0), DATE_FORMAT(r.data_manual,'%Y-%m-%d')
+		       COALESCE(r.estrela,0), DATE_FORMAT(r.data_manual,'%Y-%m-%d'), COALESCE(r.observacao,'')
 		  FROM FT_PROCESSOS p
 		  LEFT JOIN DM_INSTANCIAS i ON i.id_instancia = p.id_instancia_atual
 		  LEFT JOIN DM_ETAPAS e ON e.id_etapa = p.id_etapa_atual
@@ -137,7 +138,7 @@ func GetRelatorioPriorizacao(c *gin.Context) {
 		it := &priorizacaoItem{}
 		var proc, mov, envio, manual sql.NullString
 		if err := rows.Scan(&it.IDProcesso, &it.UC, &it.Cliente, &it.Concessionaria, &it.Instancia, &it.Etapa, &it.IDEtapa,
-			&it.Status, &proc, &mov, &it.TotalCliente, &it.TotalAmee, &envio, &it.Estrela, &manual); err != nil {
+			&it.Status, &proc, &mov, &it.TotalCliente, &it.TotalAmee, &envio, &it.Estrela, &manual, &it.Observacao); err != nil {
 			log.Printf("GetRelatorioPriorizacao scan: %v", err)
 			continue
 		}
@@ -294,8 +295,9 @@ func PutRelatorioPriorizacao(c *gin.Context) {
 	var in struct {
 		Estrela    *int    `json:"estrela"`
 		DataManual *string `json:"data_manual"`
+		Observacao *string `json:"observacao"`
 	}
-	if err := c.ShouldBindJSON(&in); err != nil || (in.Estrela == nil && in.DataManual == nil) {
+	if err := c.ShouldBindJSON(&in); err != nil || (in.Estrela == nil && in.DataManual == nil && in.Observacao == nil) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "nada para gravar"})
 		return
 	}
@@ -328,6 +330,19 @@ func PutRelatorioPriorizacao(c *gin.Context) {
 		_, err = db.Exec(`INSERT INTO FT_RELATORIO_PRIORIZACAO (id_processo, estrela, data_manual, atualizado_por, atualizado_em) VALUES (?,0,?,?,?)
 		                  ON DUPLICATE KEY UPDATE data_manual = VALUES(data_manual), atualizado_por = VALUES(atualizado_por), atualizado_em = VALUES(atualizado_em)`,
 			id, data, uid, agora)
+	}
+	if err == nil && in.Observacao != nil {
+		obs := strings.TrimSpace(*in.Observacao)
+		if len([]rune(obs)) > 1000 {
+			obs = string([]rune(obs)[:1000])
+		}
+		var v any
+		if obs != "" {
+			v = obs
+		}
+		_, err = db.Exec(`INSERT INTO FT_RELATORIO_PRIORIZACAO (id_processo, estrela, observacao, atualizado_por, atualizado_em) VALUES (?,0,?,?,?)
+		                  ON DUPLICATE KEY UPDATE observacao = VALUES(observacao), atualizado_por = VALUES(atualizado_por), atualizado_em = VALUES(atualizado_em)`,
+			id, v, uid, agora)
 	}
 	if err != nil {
 		log.Printf("PutRelatorioPriorizacao: %v", err)
