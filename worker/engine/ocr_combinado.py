@@ -63,8 +63,11 @@ def _prova_ponta(m):
     return _medicao(m, "leit_ant_ativa_ponta", "leit_atu_ativa_ponta", "consumo_ativo_ponta_kwh")
 
 
-def _prova_kwh_total(m):
-    t, fp, p = _num(m.get("kwh_total")), _num(m.get("consumo_ativo_fponta_kwh")), _num(m.get("consumo_ativo_ponta_kwh"))
+def _prova_kwh_total(m, fixo):
+    # 26/11/2026: o consumo que prova o total vem só do v4 (fixo) — o consumo do v6 sai da medição (MEDIDO) e a
+    # coluna guarda o FATURADO; total provado por um medido seria o medido.
+    t = _num(m.get("kwh_total"))
+    fp, p = _num(fixo.get("consumo_ativo_fponta_kwh")), _num(fixo.get("consumo_ativo_ponta_kwh"))
     if t is None or fp is None:
         return False
     grupo_a = str(m.get("grupo_tarifario") or "").strip().upper().startswith("A") or \
@@ -84,9 +87,17 @@ def _prova_pis_cofins(m):
     return 0.17 <= p / c <= 0.24
 
 
+def _aliq_icms_impressa(a) -> bool:
+    """26/11/2026: alíquota de ICMS que pode estar impressa — múltiplo de 0,5 entre 7% e 35% (12, 17, 17,5, 18, 20,
+    22,5, 25…). Uma alíquota derivada (valor/base, ex.: 15,6436% da EDP SP) fecha a conta base × alíq = valor sozinha,
+    então não prova nada: EDP SP 12/2023 tinha base, valor e alíquota errados e passava."""
+    pct = a * 100
+    return 7 <= pct <= 35 and abs(pct * 2 - round(pct * 2)) < 1e-6
+
+
 def _prova_icms(m):
     v, base, a = _num(m.get("icms_valor")), _num(m.get("icms_base_calculo")), _aliq(m.get("icms_aliquota"))
-    if v is None or base is None or a is None or v <= 0:
+    if v is None or base is None or a is None or v <= 0 or not _aliq_icms_impressa(a):
         return False
     return _perto(base * a, v, rel=0.01, abs_=0.05)
 
@@ -158,7 +169,15 @@ def _prova(campo, m, fixo):
         return _prova_grupo(m, fixo)
     if p == "modalidade":
         return _prova_modalidade(m, fixo)
+    if p is _prova_kwh_total:
+        return p(m, fixo)
     return p(m)
+
+
+# 26/11/2026: consumo do v6 só PROVA as leituras e o K (é o consumo MEDIDO impresso na medição); não é gravado, porque
+# a coluna guarda o FATURADO (com perdas/média) — CPFL Paulista 05/2026: medido 28.649 × faturado 29.365,34.
+SO_PROVA = {"consumo_ativo_fponta_kwh": "consumo da medição é o medido; a coluna guarda o faturado",
+            "consumo_ativo_ponta_kwh": "consumo da medição é o medido; a coluna guarda o faturado"}
 
 
 def combinar(v4: dict, v6: dict):
@@ -183,6 +202,9 @@ def combinar(v4: dict, v6: dict):
             break
     for c in cand - set(aceitos):
         recusados[c] = "sem prova"
+    for c in SO_PROVA.keys() & set(aceitos):
+        del aceitos[c]
+        recusados[c] = SO_PROVA[c]
     col = dict(v4)
     col.update({c: v6[c] for c in aceitos})
     return col, aceitos, recusados
