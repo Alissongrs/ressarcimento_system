@@ -2345,6 +2345,16 @@ func swaggerRotaPost_api_v1_processos__id__retomar() {}
 // @Router /api/v1/relatorios/priorizacao [get]
 func swaggerRotaGet_api_v1_relatorios_priorizacao() {}
 
+// @Summary Get relatorio priorizacao xlsx
+// @Description Gestor ou admin. Handler: handlers.GetRelatorioPriorizacaoXLSX.
+// @Tags Relatórios
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /api/v1/relatorios/priorizacao/xlsx [get]
+func swaggerRotaGet_api_v1_relatorios_priorizacao_xlsx() {}
+
 // @Summary Put relatorio priorizacao
 // @Description Gestor ou admin. Handler: handlers.PutRelatorioPriorizacao.
 // @Tags Relatórios
