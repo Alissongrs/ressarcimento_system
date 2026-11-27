@@ -501,8 +501,12 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 		}
 		return ""
 	}
+	// 27/11 (Luana): toda linha finalizada no mês fica verde (antes só P2 sem data e não priorizados)
 	linhaVenc := func(l prioLinha, rot, fill string) {
 		r++
+		if finalizadoEm(mesIni, mesFim)(l) {
+			fill = "92D050"
+		}
 		cli := l.str(l.vCliente(), l.it.Cliente)
 		conc := l.str(l.vConc(), l.it.Concessionaria)
 		uc := l.str(l.vUC(), l.it.UC)
@@ -517,10 +521,10 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 		put(cel("D", r), "", l.it.IDProcesso, st(fill, "000000", false, 11, "0", true))
 		put(cel("E", r), "", cli, st(fill, "000000", false, 10, "", true))
 		put(cel("F", r), cel("G", r), conc, st(fill, "000000", false, 10, "", true))
-		put(cel("H", r), "", credT, st("", "000000", false, 11, fmtBRL, true))
-		put(cel("I", r), "", repS, st("", "000000", false, 11, fmtBRL, true))
-		put(cel("J", r), "", repD, st("", "000000", false, 11, fmtBRL, true))
-		put(cel("K", r), cel("L", r), l.amee(), st("", "000000", false, 11, fmtBRL, true))
+		put(cel("H", r), "", credT, st(fill, "000000", false, 11, fmtBRL, true))
+		put(cel("I", r), "", repS, st(fill, "000000", false, 11, fmtBRL, true))
+		put(cel("J", r), "", repD, st(fill, "000000", false, 11, fmtBRL, true))
+		put(cel("K", r), cel("L", r), l.amee(), st(fill, "000000", false, 11, fmtBRL, true))
 		put(cel("M", r), "", data(l.it.DataManual), st(fill, "000000", false, 11, fmtData, true))
 		var env interface{} = ""
 		if e := l.envio(); !e.IsZero() {
