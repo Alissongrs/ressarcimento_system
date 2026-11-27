@@ -335,16 +335,10 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 	card("K", "M", 9, "Repasse AMEE Recebido no mês", vFin, "FFF4E5", fmtBRL)
 	sA := semanas[semAtual]
 	nVenc, vVenc := soma(prior, previstoEm(sA.ini, sA.fim))
-	nComp := 0
-	for _, l := range prior {
-		if l.it.Comprovante != nil || l.it.Finalizado != "" {
-			nComp++
-		}
-	}
+	// 27/11 (Luana): sem o card "Comprovante recebido" — parte dos casos é paga por compensação em fatura, sem comprovante
 	card("B", "D", 13, "Semana atual", fmt.Sprintf("%s a %s", dm(sA.ini), dm(sA.fim)), "E7E6E6", "")
 	card("E", "G", 13, "Previsão Vencimentos da Semana", nVenc, "E7E6E6", fmtInt)
 	card("H", "J", 13, "Valor Previsão Vencimentos da Semana", vVenc, "E7E6E6", fmtBRL)
-	card("K", "M", 13, "Comprovante recebido (priorizados)", fmt.Sprintf("%d de %d", nComp, len(prior)), "E7E6E6", "")
 
 	// pipeline / SLA / movimentações
 	put("B18", "C18", "Pipeline Atual dos Priorizados", st(azul, "FFFFFF", true, 11, "", false))
@@ -426,7 +420,11 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 		put(cel("C", r), "", n, st(fill, "111827", false, 11, fmtInt, true))
 		put(cel("D", r), "", v, st(fill, "111827", false, 11, fmtBRL, true))
 	}
-	totEsp, totFin, totNE, totNF := 0.0, 0.0, 0, 0
+	// 27/11 (Luana): Diferença só nas semanas já encerradas (antes da semana atual); a atual e as futuras ficam em
+	// branco. O total da Diferença soma só as semanas encerradas.
+	const fmtDif = `"R$ "#,##0.00;[Red]-"R$ "#,##0.00`
+	totEsp, totFin, totDif, totNE, totNF := 0.0, 0.0, 0.0, 0, 0
+	algumaEncerrada := false
 	for i, s := range semanas {
 		r := 28 + i
 		fill := cinza
@@ -437,13 +435,16 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 		nF, fin := soma(todos, finalizadoEm(s.ini, s.fim))
 		totEsp, totFin, totNE, totNF = totEsp+esp, totFin+fin, totNE+nE, totNF+nF
 		rot := fmt.Sprintf("%dª Semana (%s a %s)", i+1, dm(s.ini), dm(s.fim))
-		if i == semAtual && !hoje.Before(mesIni) && !hoje.After(mesFim) {
-			rot += " ◄"
-		}
 		put(cel("G", r), "", rot, st(fill, "111827", false, 10, "", true))
 		put(cel("H", r), "", esp, st(fill, "111827", false, 11, fmtBRL, true))
 		put(cel("I", r), "", fin, st(fill, "111827", false, 11, fmtBRL, true))
-		put(cel("J", r), "", fin-esp, st(fill, "111827", false, 11, `"R$ "#,##0.00;[Red]-"R$ "#,##0.00`, true))
+		var dif interface{} = ""
+		if s.fim.Before(hoje) {
+			dif = fin - esp
+			totDif += fin - esp
+			algumaEncerrada = true
+		}
+		put(cel("J", r), "", dif, st(fill, "111827", false, 11, fmtDif, true))
 		var ating interface{} = "—"
 		if esp > 0 {
 			ating = fin / esp
@@ -456,7 +457,11 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 	put(cel("G", rt), "", "Total", st(azulClaro, "111827", true, 11, "", true))
 	put(cel("H", rt), "", totEsp, st(azulClaro, "111827", true, 11, fmtBRL, true))
 	put(cel("I", rt), "", totFin, st(azulClaro, "111827", true, 11, fmtBRL, true))
-	put(cel("J", rt), "", totFin-totEsp, st(azulClaro, "111827", true, 11, `"R$ "#,##0.00;[Red]-"R$ "#,##0.00`, true))
+	var difT interface{} = ""
+	if algumaEncerrada {
+		difT = totDif
+	}
+	put(cel("J", rt), "", difT, st(azulClaro, "111827", true, 11, fmtDif, true))
 	var atingT interface{} = "—"
 	if totEsp > 0 {
 		atingT = totFin / totEsp
