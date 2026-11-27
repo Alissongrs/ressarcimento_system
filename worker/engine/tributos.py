@@ -211,6 +211,35 @@ def _linha_total_quadro(toks_por_linha: list[list[tuple[str, float]]]) -> dict[s
     return {}
 
 
+def _icms_itens_e_total(toks_por_linha: list[list[tuple[str, float]]]) -> Trio | None:
+    """ICMS sem rótulo de tributo: o quadro de itens imprime em CADA linha "base, alíquota, ICMS" e a linha TOTAL só
+    a base e o ICMS somados, sem alíquota (EDP ES 620724: "TUSD Energia Ponta … 749,04 17,000 127,34" e "TOTAL
+    6.238,03 288,44 4.761,98 809,54"). Vale quando todos os itens com ICMS têm a MESMA alíquota impressa, cada trio
+    fecha e a soma das bases e dos ICMS dos itens é exatamente a base e o ICMS impressos no TOTAL. Antes ficava a
+    alíquota do mapa antigo (18 % em vez de 17 % impresso)."""
+    trios: list[Trio] = []
+    for toks in toks_por_linha:
+        if any(re.fullmatch(r"total:?", normalizar(t).strip()) for t, _ in toks):
+            continue
+        nums = [(t.strip().rstrip("%"), v) for t, _ in toks if (v := _num(t)) is not None]
+        for i in range(len(nums) - 2):
+            b, a, v = nums[i][1], nums[i + 1][1], nums[i + 2][1]
+            if v > 0 and b > v and a in _ALIQ_ICMS and abs(b * a / 100 - v) <= 0.02:
+                trios.append((round(b, 2), a, round(v, 2)))
+                break
+    if not trios or len({t[1] for t in trios}) != 1:
+        return None
+    sb, sv = round(sum(t[0] for t in trios), 2), round(sum(t[2] for t in trios), 2)
+    for toks in toks_por_linha:
+        for k, (tok, _x) in enumerate(toks):
+            if not re.fullmatch(r"total:?", normalizar(tok).strip()):
+                continue
+            vals = [v for t, _ in toks[k + 1:] if (v := _num(t)) is not None]
+            if any(abs(x - sb) <= 0.01 for x in vals) and any(abs(x - sv) <= 0.01 for x in vals):
+                return sb, trios[0][1], sv
+    return None
+
+
 def ler_tributos(pdf_bytes: bytes | None, itens: list[Item] | None = None) -> dict | None:
     if itens is None:
         itens, _, _ = itens_do_pdf(pdf_bytes, 3)
@@ -262,6 +291,9 @@ def ler_tributos(pdf_bytes: bytes | None, itens: list[Item] | None = None) -> di
     for trib, trio in total_quadro.items():
         if not achados[trib]:
             achados[trib].append(trio)
+    icms_itens = _icms_itens_e_total(toks_por_linha) if not achados["icms"] and not icms_st else None
+    if icms_itens:
+        achados["icms"].append(icms_itens)
     if not any(achados.values()) and not any(pares.values()) and not any(impressos.values()) and not icms_st:
         return None
     out: dict = {"obs": [f"{t}: linha TOTAL do quadro descritivo, fecha base × alíquota impressa" for t in total_quadro]}

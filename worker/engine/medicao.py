@@ -1114,7 +1114,9 @@ def _demanda_item(itens_fatura: list, partes: bool = False) -> list[float]:
         d = normalizar(it.get("descricao") or "")
         u = (it.get("unidade") or "").upper().replace(" ", "")
         q = it.get("quantidade_numerica")
-        if "demanda" not in d or not u.startswith("KW") or u.startswith("KWH") or not isinstance(q, (int, float)) or q <= 0:
+        # Energisa MT: "TUSD em kW - Fora Ponta" / "TUSD em kW isenta de ICMS - F. Ponta" = demanda sem a palavra
+        if ("demanda" not in d and not re.search(r"\btusd em kw\b", d)) or not u.startswith("KW") or u.startswith("KWH") \
+                or not isinstance(q, (int, float)) or q <= 0:
             continue
         if re.search(r"diferen|retroativ|ultrapass|reativ|lei estadual|geracao|complement|exced"
                      + ("" if partes else r"|isent|sem icms"), d):
@@ -1152,7 +1154,9 @@ def _demanda_linhas(itens_pdf: list, posto: str = "fp") -> tuple[list[float], bo
     231,84" + "... PONTA ISENTA ICMS kW 88,16"). 21/11/2026: rótulo "DEMANDA LIVRE - kW 90" (quadro da contratada,
     Equatorial GO) não é parcela — o hífen antes do kW marca rótulo; "ICMSkW" colado (Copel) é separado."""
     vistos, vals, isenta = set(), [], False
-    rx = re.compile(r"demanda(?:(?!demanda).){0,60}?\bkw\)?(?:\s+icms)?\s+(\d{1,3}(?:\.\d{3})*,\d+|\d+(?:[.,]\d+)?)\b")
+    # 26/11/2026: Energisa MT imprime a demanda como "TUSD em kW - Fora Ponta KW 51,52" + "TUSD em kW isenta de
+    # ICMS - F. Ponta KW 53,48" (soma 105 = contratada), sem a palavra demanda
+    rx = re.compile(r"(?:demanda|\btusd em kw\b)(?:(?!demanda|tusd).){0,60}?\bkw\)?(?:\s+icms)?\s+(\d{1,3}(?:\.\d{3})*,\d+|\d+(?:[.,]\d+)?)\b")
     for ln in agrupar_linhas(itens_pdf or []):
         n = re.sub(r"icmskw\b", "icms kw", normalizar(" ".join(t for t, _ in pedacos(ln))))
         for m in rx.finditer(n):
@@ -1622,6 +1626,42 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
                     cons_fp = q
                 confirma[posto] = True
                 med["obs"].append(f"{posto}: faturado impresso no item {q} (medido {base} × {q / base:.4f})")
+    # 26/11/2026: número da tabela de medição cortado na borda (Energisa MT 620760/620768: o PDF tem "18300,519999" e
+    # "21227,009999", mas o 1º dígito fica escondido atrás da linha da tabela — o PyMuPDF lê "8300,519999" e
+    # "1227,009999"; o liteparse lê inteiro). O item faturado do posto ("TUSD em kWh - Fora Ponta KWH 18.300,52") é
+    # o IMPRESSO e o consumo grava o faturado: vale o item quando é o ÚNICO kWh do posto, maior, e os seus dígitos
+    # TERMINAM com os dígitos lidos na tabela. A leitura atual com anterior 0 tem o mesmo corte e é corrigida junto.
+    if v2_out.get("_fonte_itens") != "ocr":
+        for posto in ("p", "fp"):
+            atual = cons_p if posto == "p" else cons_fp
+            if atual is None or atual <= 0 or _exato(atual):
+                continue
+            qs = set()
+            for it in itens:
+                if not isinstance(it, dict):
+                    continue
+                q, u = it.get("quantidade_numerica"), (it.get("unidade") or "").upper().replace(" ", "")
+                d = normalizar(it.get("descricao") or "")
+                if not isinstance(q, (int, float)) or q <= 0 or not u.startswith("KWH") \
+                        or re.search(r"injet|compens|band|exced|reativ|dispon|deduc|escassez|ajuste|retroat|diferen", d):
+                    continue
+                p_it, _ = classificar_posto(re.sub(r"[.]", " ", d))
+                if (p_it if p_it in ("p", "fp") else "fp") == posto:
+                    qs.add(round(float(q), 2))
+            if len(qs) != 1:
+                continue
+            q = qs.pop()
+            dq, da = f"{q:.2f}".replace(".", ""), f"{round(float(atual), 2):.2f}".replace(".", "")
+            if q > atual and len(dq) > len(da) and dq.endswith(da):
+                if posto == "p":
+                    cons_p = q
+                else:
+                    cons_fp = q
+                confirma[posto] = True
+                le = (med.get("leituras") or {}).get(posto) or ((med.get("leituras") or {}).get("unico") if posto == "fp" else None)
+                if le and not le.get("ant") and le.get("atu") is not None and abs(float(le["atu"]) * float(le.get("constante") or 1) - atual) <= 0.01:
+                    le["atu"] = round(float(le["atu"]) + (q - atual) / float(le.get("constante") or 1), 6)
+                med["obs"].append(f"{posto}: tabela de medição com dígito cortado ({atual}); vale o item impresso {q}")
     med["consumo_faturado"] = {**fat, **({"p": cons_p} if cons_p is not None else {}),
                                **({"fp": cons_fp} if cons_fp is not None else {}),
                                **({"reservado": cons_res} if cons_res is not None else {})}
