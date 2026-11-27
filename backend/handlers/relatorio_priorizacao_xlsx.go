@@ -420,11 +420,11 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 		put(cel("C", r), "", n, st(fill, "111827", false, 11, fmtInt, true))
 		put(cel("D", r), "", v, st(fill, "111827", false, 11, fmtBRL, true))
 	}
-	// 27/11 (Luana): Diferença só nas semanas já encerradas (antes da semana atual); a atual e as futuras ficam em
-	// branco. O total da Diferença soma só as semanas encerradas.
+	// 27/11 (Luana): Diferença nas semanas já iniciadas até a data da exportação (inclui a semana atual); só as
+	// futuras ficam em branco. O total da Diferença soma só essas semanas.
 	const fmtDif = `"R$ "#,##0.00;[Red]-"R$ "#,##0.00`
 	totEsp, totFin, totDif, totNE, totNF := 0.0, 0.0, 0.0, 0, 0
-	algumaEncerrada := false
+	algumaIniciada := false
 	for i, s := range semanas {
 		r := 28 + i
 		fill := cinza
@@ -439,10 +439,10 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 		put(cel("H", r), "", esp, st(fill, "111827", false, 11, fmtBRL, true))
 		put(cel("I", r), "", fin, st(fill, "111827", false, 11, fmtBRL, true))
 		var dif interface{} = ""
-		if s.fim.Before(hoje) {
+		if !s.ini.After(hoje) {
 			dif = fin - esp
 			totDif += fin - esp
-			algumaEncerrada = true
+			algumaIniciada = true
 		}
 		put(cel("J", r), "", dif, st(fill, "111827", false, 11, fmtDif, true))
 		var ating interface{} = "—"
@@ -458,7 +458,7 @@ func GetRelatorioPriorizacaoXLSX(c *gin.Context) {
 	put(cel("H", rt), "", totEsp, st(azulClaro, "111827", true, 11, fmtBRL, true))
 	put(cel("I", rt), "", totFin, st(azulClaro, "111827", true, 11, fmtBRL, true))
 	var difT interface{} = ""
-	if algumaEncerrada {
+	if algumaIniciada {
 		difT = totDif
 	}
 	put(cel("J", rt), "", difT, st(azulClaro, "111827", true, 11, fmtDif, true))
