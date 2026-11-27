@@ -1634,7 +1634,7 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     if v2_out.get("_fonte_itens") != "ocr":
         for posto in ("p", "fp"):
             atual = cons_p if posto == "p" else cons_fp
-            if atual is None or atual <= 0 or _exato(atual):
+            if atual is not None and (atual <= 0 or _exato(atual)):
                 continue
             qs = set()
             for it in itens:
@@ -1651,6 +1651,25 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             if len(qs) != 1:
                 continue
             q = qs.pop()
+            if atual is None:
+                # 620764: o corte deixou "1482,519999" colado à leitura anterior e o molde nem reconheceu a linha do
+                # posto (o extrator antigo somava 28 kW ao kWh: 11.510,52). Vale o número da linha "Energia ativa …
+                # <posto>" da tabela que é o final do item faturado
+                rot = "fora ponta" if posto == "fp" else "ponta"
+                for ln in agrupar_linhas(itens_pdf or []):
+                    txt = normalizar(" ".join(t for t, _ in pedacos(ln)))
+                    if "energia ativa" not in txt or rot not in txt or (posto == "p" and "fora ponta" in txt):
+                        continue
+                    for _t, _x in pedacos(ln):
+                        v = parse_num(_t.strip())
+                        if v is not None and 0 < v < q \
+                                and f"{q:.2f}".replace(".", "").endswith(f"{round(float(v), 2):.2f}".replace(".", "")):
+                            atual = float(v)
+                            break
+                    if atual is not None:
+                        break
+                if atual is None:
+                    continue
             dq, da = f"{q:.2f}".replace(".", ""), f"{round(float(atual), 2):.2f}".replace(".", "")
             if q > atual and len(dq) > len(da) and dq.endswith(da):
                 if posto == "p":

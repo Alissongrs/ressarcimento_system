@@ -221,10 +221,17 @@ def _icms_itens_e_total(toks_por_linha: list[list[tuple[str, float]]]) -> Trio |
     for toks in toks_por_linha:
         if any(re.fullmatch(r"total:?", normalizar(t).strip()) for t, _ in toks):
             continue
-        nums = [(t.strip().rstrip("%"), v) for t, _ in toks if (v := _num(t)) is not None]
+        # crédito de GD impresso com o menos no fim ("2.122,91- 17,000 360,90-", EDP ES 616748): entra negativo
+        nums = []
+        for t, _ in toks:
+            s = t.strip()
+            neg = s.endswith("-") and len(s) > 1
+            v = _num(s[:-1] if neg else s)
+            if v is not None:
+                nums.append((s, -abs(v) if neg else v))
         for i in range(len(nums) - 2):
             b, a, v = nums[i][1], nums[i + 1][1], nums[i + 2][1]
-            if v > 0 and b > v and a in _ALIQ_ICMS and abs(b * a / 100 - v) <= 0.02:
+            if v != 0 and abs(b) > abs(v) and (b > 0) == (v > 0) and a in _ALIQ_ICMS and abs(b * a / 100 - v) <= 0.02:
                 trios.append((round(b, 2), a, round(v, 2)))
                 break
     if not trios or len({t[1] for t in trios}) != 1:
