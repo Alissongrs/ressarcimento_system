@@ -4946,6 +4946,13 @@ _DB_ORIGEM = _conexao_env("DB_FATURAS", "DB_FATURAS_URL", connection_timeout=15)
 _CACHE_ORIGEM: dict[str, dict] = {}
 
 
+def _norm_txt_origem(s: str) -> str:
+    """minúsculas, sem acento, espaços simples — para conferir se um valor da origem está impresso."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"\s+", " ", s)
+
+
 def enriquecer_via_origem_sgeeasy(uid) -> dict:
     """Consulta Faturas_Registradas_Cache pela UID e retorna metadados.
 
@@ -4998,7 +5005,12 @@ def enriquecer_via_origem_sgeeasy(uid) -> dict:
         def _clean(v):
             v = ("" if v is None else str(v)).strip().lstrip("`'\" ").strip()
             return v or None
-        if _clean(r.get("UC")):              out["codigo_instalacao"] = _clean(r["UC"])
+        # 27/11/2026: a origem guarda a UC como "262474400428 - QUA" (número + 3 letras do nome do cliente); o
+        # sufixo não está na fatura e ia parar no numero_instalacao. Fica só o número.
+        _uc_org = _clean(r.get("UC"))
+        if _uc_org:
+            _uc_org = re.sub(r"\s+-\s+[A-Za-zÀ-ÿ]{2,6}$", "", _uc_org).strip() or None
+        if _uc_org:                          out["codigo_instalacao"] = _uc_org
         if r.get("Cod_UC"):                  out["cod_uc"] = str(r["Cod_UC"]).strip()
         if _clean(r.get("Conta_Contrato")):  out["conta_contrato"] = _clean(r["Conta_Contrato"])
         if _clean(r.get("RAZAO_SOCIAL")):    out["razao_social"] = _clean(r["RAZAO_SOCIAL"])
@@ -5589,7 +5601,7 @@ def extrair_demanda_faturada_fp(texto: str) -> float | None:
             for ln in texto.splitlines():
                 l2 = _DFP_CODIGO.sub("", ln.strip(), count=1)
                 u = _DFP_ULT.search(l2)
-                if u and not (re.search(r"PONTA", l2, re.I) and not re.search(r"F\.?\s*P|FORA", l2, re.I)):
+                if u and not (re.search(r"PONTA", l2, re.I) and not re.search(r"\bF\.?\s*P|FORA", l2, re.I)):
                     try: ult += _dfp_f(u.group(1) or u.group(2))
                     except (ValueError, TypeError): pass
             soma = sum(v for v, _ in vals)
@@ -9864,6 +9876,35 @@ def aplicar_complementos(out_v2: dict, texto: str, cascata: dict = None, pdf_pat
             origem = enriquecer_via_origem_sgeeasy(uid)
             if origem:
                 out_v2["_origem_sgeeasy"] = origem
+                # 27/11/2026 (usuário): "deixa vazio quando não está impresso" — o valor da origem só entra na
+                # extração quando está IMPRESSO na fatura (mesmos dígitos/palavras no texto); senão fica só em
+                # _origem_sgeeasy para consulta. CNPJ mascarado ("33.***.***/****-90") não traz o da origem.
+                _txt_n = _norm_txt_origem(texto or "")
+                _txt_d = re.sub(r"\D", "", texto or "")
+                def _imp_dig(v, minimo=5):
+                    d = re.sub(r"\D", "", str(v or "")).lstrip("0")
+                    return len(d) >= minimo and d in _txt_d
+                def _imp_txt(v):
+                    t = _norm_txt_origem(str(v or ""))
+                    return len(t) >= 3 and t in _txt_n
+                def _imp_data(d):
+                    if not hasattr(d, "strftime"):
+                        return False
+                    return d.strftime("%d/%m/%Y") in (texto or "") or d.strftime("%d.%m.%Y") in (texto or "")
+                def _imp_mes(m):
+                    m = str(m or "")
+                    if not re.fullmatch(r"\d{2}/\d{4}", m):
+                        return False
+                    mm, aa = int(m[:2]), m[3:]
+                    ab = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][mm - 1]
+                    return bool(re.search(rf"(?<!\d){m[:2]}/{aa}\b|\b{ab}\w*\s*[/\-]?\s*(?:{aa}|{aa[2:]})\b", _txt_n))
+                origem = dict(origem)
+                for _k, _ok in (("data_vencimento", _imp_data), ("codigo_instalacao", _imp_dig),
+                                ("razao_social", _imp_txt), ("cnpj_cliente", lambda v: _imp_dig(v, 11)),
+                                ("modalidade_tarifaria", _imp_txt), ("classe_consumo", _imp_txt),
+                                ("mes_referencia", _imp_mes), ("conta_contrato", _imp_dig)):
+                    if origem.get(_k) is not None and not _ok(origem[_k]):
+                        origem.pop(_k)
                 rvv = out_v2.setdefault("referencia_vencimento_valor", {})
                 if origem.get("data_vencimento"): rvv["data_vencimento_origem"] = origem["data_vencimento"]
                 if origem.get("valor_total_fatura"): rvv["valor_total_origem"] = origem["valor_total_fatura"]

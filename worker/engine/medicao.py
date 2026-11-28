@@ -106,6 +106,9 @@ def pedacos(itens_linha: list[Item]) -> list[tuple[str, float]]:
     for tok, x in out:
         if junt and tok[:1] in ".," and re.fullmatch(r"-?\d+", junt[-1][0]) and re.fullmatch(r"[.,][\d.,%]+", tok):
             junt[-1] = (junt[-1][0] + tok, junt[-1][1])
+        elif junt and re.fullmatch(r"\d{1,3}(\.\d{3})+", junt[-1][0]) and re.fullmatch(r"\.\d{3}(,\d+)?", tok):
+            # 27/11/2026 Equatorial PI: leitura "44.691.314" sai em dois pedaços ('44.691' + '.314')
+            junt[-1] = (junt[-1][0] + tok, junt[-1][1])
         else:
             junt.append((tok, x))
     return junt
@@ -161,11 +164,13 @@ def classificar_grandeza(s: str) -> str:
         return "energia_compensada"
     if "ufer" in n:
         return "ufer"
-    if "dmcr" in n or (("demanda" in n or re.search(r"\bdem\b", n)) and ("reativ" in n or "rtv" in n or "reat" in n)):
+    # 27/11/2026: o OCR come letras ("Energia Reatva-Kva", CPFL 600638) — a linha reativa virava energia ativa
+    _reat = "reativ" in n or "rtv" in n or re.search(r"\breat\b|\brea\w{0,2}v[ao]\b|\bkva\b", n)
+    if "dmcr" in n or (("demanda" in n or re.search(r"\bdem\b", n)) and (_reat or "reat" in n)):
         return "demanda_reativa"
     if "demanda" in n or re.search(r"\bdem\b", n) or "fio" in n:  # Light ML: "Componente Fio-kW" = demanda
         return "demanda"
-    if "reativ" in n or "rtv" in n or re.search(r"\breat\b", n):  # "Consumo Reativo", "Energia Reativa", "ENRGRTV"
+    if _reat:  # "Consumo Reativo", "Energia Reativa", "ENRGRTV"
         return "energia_reativa"
     if "kvarh" in n or "kvar" in n:
         return "energia_reativa"
@@ -266,6 +271,8 @@ def _ler_enel(itens: list[Item]) -> tuple[list[Registro], float | None] | None:
         toks = [(t, x) for t, x in pedacos(dentro) if x < cab["x_fim"] - 1]
         if not toks:
             continue
+        if toks[0][1] >= cab["x_cons"] - 6 and all(parse_num(t) is None for t, _ in toks):
+            continue  # 27/11/2026 Equatorial PI: título do quadro vizinho ("Informações sobre Consumo") no meio da tabela
         # linha de perda de transformação: "PERDA DE TRANSF.- 2,5%"
         texto = " ".join(t for t, _ in toks)
         texto_pre = " ".join(t for t, _ in toks[: next((k for k, (t, _) in enumerate(toks) if parse_num(t) is not None), len(toks))])
@@ -475,6 +482,7 @@ RE_CONTR_TXT = [
     re.compile(r"montante em todos os periodos\s*:?\s*(?P<val>\d[\d.,]*)\s*kw"),              # Copel
     re.compile(r"\bcomponente fio\s+(?P<val>\d[\d.,]*)\s*$"),                                 # Light
     re.compile(r"montante fora (?:de )?ponta\s*:?\s*(?P<val>\d[\d.,]*)\s*kw"),               # Copel azul
+    re.compile(r"demanda todos os periodos\s*:?\s*(?P<val>\d[\d.,]*)\s*kw"),                  # Elektro verde (27/11/2026)
 ]
 RE_CONTR_TXT_P = [re.compile(r"montante na ponta\s*:?\s*(?P<val>\d[\d.,]*)\s*kw")]       # Copel azul
 
@@ -1175,6 +1183,21 @@ def _demanda_linhas(itens_pdf: list, posto: str = "fp") -> tuple[list[float], bo
     return vals, (isenta and len(vals) == 2)
 
 
+def _numeros_impressos(itens_pdf: list[Item]) -> list[float]:
+    """Números impressos nas linhas de energia/consumo kWh (sem injetada/compensada/reativa/bandeira/histórico)."""
+    out = []
+    for ln in agrupar_linhas(itens_pdf or []):
+        toks = pedacos(ln)
+        n = normalizar(" ".join(t for t, _ in toks))
+        if not re.search(r"kwh|consumo|energia", n) or re.search(r"injet|compens|reativ|band|histor|media|medio|escassez", n):
+            continue
+        for tok, _ in toks:
+            v = parse_num(tok.strip())
+            if v is not None and v > 0:
+                out.append(round(float(v), 4))
+    return out
+
+
 def _consumo_impresso(itens_pdf: list[Item], posto: str, alvo: float) -> float | None:
     """Número impresso numa linha de consumo do posto (não injetada/compensada/reativa/bandeira) que bate com `alvo`
     (até 1 kWh ou 0,2 % — a fatura trunca/arredonda). Um só candidato; dois diferentes = dúvida, nada."""
@@ -1589,8 +1612,12 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
     # itens 60,254 / 605,431 = medido × 1,0207 nos dois postos), ou a perda nem estar legível e a física não fechar
     # (590986: "Uso Sistema Encar.NP/FP" 289,05 / 7.125,53 = medido × 1,025). Vale o IMPRESSO no item quando CADA
     # posto medido tem um só item kWh com fator 1,005–1,10 sobre o medido e o fator é o mesmo em todos. Só texto exato.
+    # 27/11/2026: vale também no OCR (CPFL 600638 e EDP SP 358334 gravavam o MEDIDO: o v4 não lê a perda e o item é
+    # o faturado), com prova mais forte por causa do risco de leitura: dois postos com o MESMO fator, ou um posto só
+    # com o fator da perda padrão de 2,5 % (1,0225–1,0275).
     medido = med.get("consumo_medido") or {}
-    if v2_out.get("_fonte_itens") != "ocr" and medido:
+    _ocr_itens = v2_out.get("_fonte_itens") == "ocr"
+    if medido:
         cand: dict = {}
         precisa = 0
         for posto in ("p", "fp"):
@@ -1617,8 +1644,26 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
                 qs = qs_consumo
             if len(qs) == 1:
                 cand[posto] = (qs.pop(), base)
+        # 28/11/2026 (EDP SP 358334/358584 no OCR em carga): sem itens kWh quantificados e sem o "2,5 %" legível, o
+        # faturado não era provado e gravava o medido. Prova pelo TEXTO impresso: ponta E fora ponta têm, cada um, um
+        # número impresso = medido × f com o MESMO f (1,005–1,10, diferença ≤ 0,001) e esse f é único
+        if _ocr_itens and not cand and precisa >= 2:
+            _nums = set(_numeros_impressos(itens_pdf))
+            _bases = {p_: (medido.get(p_) if p_ == "p" else (medido.get("fp") or medido.get("unico"))) for p_ in ("p", "fp")}
+            _rz = {p_: {v: v / b for v in _nums if b and 1.005 <= v / b <= 1.10} for p_, b in _bases.items() if b}
+            if len(_rz) == 2 and _rz["p"] and _rz["fp"]:
+                _pares = [(vp, vf) for vp, fp_ in _rz["p"].items() for vf, ff in _rz["fp"].items() if abs(fp_ - ff) <= 0.001]
+                _fs = {round(_rz["p"][vp], 3) for vp, _ in _pares}
+                if _pares and len(_fs) == 1:
+                    # mesmo número em precisões diferentes ("2.992,44" e "2.992,4424"): o de mais casas
+                    _mc = lambda q: len(f"{q:.4f}".rstrip("0"))
+                    vp = max({a for a, _ in _pares}, key=_mc)
+                    vf = max({b for _, b in _pares}, key=_mc)
+                    if max(abs(a - vp) for a, _ in _pares) <= 0.01 and max(abs(b - vf) for _, b in _pares) <= 0.01:
+                        cand = {"p": (vp, _bases["p"]), "fp": (vf, _bases["fp"])}
         zs = [q / b for q, b in cand.values()]
-        if cand and len(cand) == precisa and max(zs) - min(zs) < 0.004:
+        _prova_ocr = (not _ocr_itens) or (len(cand) >= 2) or (len(cand) == 1 and 1.0225 <= zs[0] <= 1.0275)
+        if cand and len(cand) == precisa and max(zs) - min(zs) < 0.004 and _prova_ocr:
             for posto, (q, base) in cand.items():
                 if posto == "p":
                     cons_p = q
@@ -1626,6 +1671,29 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
                     cons_fp = q
                 confirma[posto] = True
                 med["obs"].append(f"{posto}: faturado impresso no item {q} (medido {base} × {q / base:.4f})")
+    # 27/11/2026: reservado com o mesmo fator do faturado (EDP SP 358334: medido 2.315,664, item "TUSD Energia FPonta
+    # Cap." 2.373,56 = × 1,025). Só quando a ponta/fora ponta já viraram o item impresso com um fator único e existe UM
+    # item com o reservado × esse fator; senão fica o que estava.
+    if cons_res and not _exato(cons_res):
+        _fs = []
+        for _posto, _atual in (("p", cons_p), ("fp", cons_fp)):
+            _base = medido.get(_posto) if _posto == "p" else (medido.get("fp") or medido.get("unico"))
+            # o posto virou o faturado impresso: item exato, ou número impresso confirmado acima (OCR sem itens)
+            if _base and _atual and (_exato(_atual) or confirma.get(_posto)) and 1.005 <= float(_atual) / _base <= 1.10:
+                _fs.append(float(_atual) / _base)
+        if _fs and max(_fs) - min(_fs) < 0.004:
+            _alvo = float(cons_res) * (sum(_fs) / len(_fs))
+            _tol = max(0.02, 0.0005 * _alvo)
+            _qs = [q for q in _qtd_itens if abs(q - _alvo) <= _tol]
+            if not _qs:  # OCR sem itens quantificados (EDP SP 358584): o número impresso no texto da página
+                _qs = sorted({v for v in _numeros_impressos(itens_pdf) if abs(v - _alvo) <= _tol})
+                # o mesmo número impresso com precisões diferentes (EDP SP 358334: "2.373,56" no item e "2.373,5556"
+                # no detalhe da pág. 2) é um só: vale o de mais casas, como na ponta/fora ponta
+                if len(_qs) > 1 and max(_qs) - min(_qs) <= 0.01:
+                    _qs = [max(_qs, key=lambda q: len(f"{q:.4f}".rstrip("0")))]
+            if len(_qs) == 1:
+                med["obs"].append(f"reservado: faturado impresso no item {_qs[0]} (medido {cons_res} × {_alvo / float(cons_res):.4f})")
+                cons_res = _qs[0]
     # 26/11/2026: número da tabela de medição cortado na borda (Energisa MT 620760/620768: o PDF tem "18300,519999" e
     # "21227,009999", mas o 1º dígito fica escondido atrás da linha da tabela — o PyMuPDF lê "8300,519999" e
     # "1227,009999"; o liteparse lê inteiro). O item faturado do posto ("TUSD em kWh - Fora Ponta KWH 18.300,52") é
@@ -1699,6 +1767,30 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
         if len(postos) > 1 and not all(confirma.get(p) for p in postos):
             med["validado"], med["validado_por"] = False, None
             med["obs"].append("OCR: consumo por posto não confirmado pelos itens da fatura; medição não gravada")
+        # 27/11/2026 (Enel SP 600635): o OCR perdeu a linha "F PONTA INDUTIV" e comeu a constante da ponta; sobrou um
+        # posto que fecha sozinho (2.705,555) e o kWh total saía 2.705 em vez de 28.473. Medição incompleta não grava:
+        # (a) linha de energia ativa com leituras e sem consumo lido; (b) posto único que não bate com o item "Consumo
+        # <posto>" impresso quando esse item existe.
+        elif med["validado"]:
+            _incompleta = any(r.get("grandeza") == "energia_ativa" and r.get("leit_ant") is not None
+                              and r.get("consumo") is None for r in med["registros"])
+            _diverge = False
+            if len(postos) == 1 and not confirma.get(postos[0]):
+                for it in itens:
+                    if not isinstance(it, dict):
+                        continue
+                    q, u = it.get("quantidade_numerica"), (it.get("unidade") or "").upper().replace(" ", "")
+                    d = normalizar(it.get("descricao") or "")
+                    if isinstance(q, (int, float)) and q > 0 and u.startswith("KWH") and "consumo" in d \
+                            and not re.search(r"injet|compens|reativ|exced", d):
+                        p_it, _ = classificar_posto(re.sub(r"[.]", " ", d))
+                        if (p_it if p_it in ("p", "fp") else "fp") == postos[0]:
+                            _diverge = True
+                            break
+            if _incompleta or _diverge:
+                med["validado"], med["validado_por"] = False, None
+                med["obs"].append("OCR: tabela de medição incompleta (linha de energia ativa sem consumo lido ou posto "
+                                  "que não bate com o item de consumo); medição não gravada")
     aplicar: dict = {}
     if med.get("medidor"):
         aplicar["numero_medidor"] = med["medidor"]
@@ -1745,6 +1837,14 @@ def aplicar_medicao(v2_out: dict, pdf_bytes: bytes) -> dict:
             for r in med["registros"]:
                 if r.get("grandeza") == "demanda" and "faturad" in normalizar(r.get("grandeza_txt") or "") and r.get("consumo") is not None:
                     df[r.get("posto") or "fp"] = max(df.get(r.get("posto") or "fp", 0.0), float(r["consumo"]))
+            # 27/11/2026 Enel RJ (Ampla 614736): a tabela imprime "Demanda Faturada-kW 21,36" (é a MEDIDA) e o item
+            # cobra "Demanda Distribuição kW 60,000". O item cobrado é o faturado: quando o extrator de itens não o
+            # trouxe, vale a parcela única lida no texto do quadro de itens
+            if df.get("fp") is not None and not dem_itens and med["fonte"] != "ocr" and "azul" not in modalidade:
+                _dl, _ = _demanda_linhas(itens_pdf, "fp")
+                if len(set(_dl)) == 1 and _dl[0] != df["fp"]:
+                    med["obs"].append(f"demanda faturada: item cobrado {_dl[0]} no lugar da linha da tabela {df['fp']}")
+                    df["fp"] = _dl[0]
         # perda de transformação IMPRESSA (linha da tabela ou texto "Perdas 2,5 %"): vai para a coluna; a inferida
         # pelos itens é cálculo e fica só na observação
         if med.get("perda_pct") is not None and med.get("perda_origem") in ("linha", "texto"):

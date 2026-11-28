@@ -279,6 +279,11 @@ def itens_do_pdf(pdf_bytes: bytes, max_paginas: int = 2) -> tuple[list[Item], fl
 # ─── parsers de valor ─────────────────────────────────────────────────────────
 def parse_uc(s: str) -> str | None:
     """Primeiro identificador plausível (5 a 15 dígitos, com pontos/traços/barras) que não é data, CEP, CNPJ, valor ou página."""
+    # 27/11/2026 Enel SP: "0200010704 / 100134605116" = código antigo / código novo da UC (REN 1095/24); vale o novo,
+    # o mesmo que a origem guarda
+    m2 = re.fullmatch(r"\s*(\d[\d.\-]{6,})\s*/\s*(\d[\d.\-]{6,})\s*", s or "")
+    if m2 and len(re.sub(r"\D", "", m2.group(2))) > len(re.sub(r"\D", "", m2.group(1))):
+        s = m2.group(2)
     for m in RE_ID.finditer(s):
         tok = m.group(1).strip().rstrip("/-. ")
         if " " in tok:
@@ -345,7 +350,7 @@ def parse_nf(s: str) -> str | None:
     return dig if 4 <= len(dig) <= 12 else None
 
 
-PARSER = {"uc": parse_uc, "cliente": parse_uc, "mes": parse_mesano, "vencimento": parse_data, "emissao": parse_data,
+PARSER = {"uc": parse_uc, "uc_seu_codigo": parse_uc, "uc_forte": parse_uc, "pn": parse_uc, "cliente": parse_uc,"mes": parse_mesano, "vencimento": parse_data, "emissao": parse_data,
           "nf": parse_nf, "total": parse_dinheiro, "dias": parse_int, "leit_ant": parse_data, "leit_atu": parse_data}
 
 # ─── rótulos (texto normalizado; ordem = prioridade) ──────────────────────────
@@ -356,6 +361,13 @@ ROTULOS = {
         r"\bn[o.º]*\s*da\s+instalacao\b", r"\binstalacao\s*/\s*unid", r"\binstalacao\s*:", r"^instalacao$",
         r"\bseu\s+codigo\b", r"\bcodigo\s+unico\b", r"^uc$", r"^uc\s*[:/]",
     ],
+    # 27/11/2026: CPFL antiga imprime "PN | SEU CÓDIGO" numa linha e os dois números na de baixo, o PN em destaque.
+    # A instalação é o SEU CÓDIGO (as faturas com texto gravam ele): lido abaixo do rótulo ANTES do destaque.
+    "uc_seu_codigo": [r"\bseu\s+codigo\b"],
+    # 27/11/2026: rótulo explícito da UC com o número ABAIXO (CPFL nova: quadro "Número da UC" 1.250.676.035-57) vale
+    # por cima do destaque do cabeçalho — o destaque pegava o Nº Medidor (401038238)
+    "uc_forte": [r"\bnumero\s+da\s+uc\b", r"\bn[o.º]*\s*da\s+uc\b", r"\bn[o.º]*\s*da\s+unidade\s+consumidora\b"],
+    "pn": [r"^pn$"],  # CPFL antiga: PN (parceiro de negócio) — não é a UC
     "cliente": [r"\bcodigo\s+do\s+cliente\b", r"\bn[o.º]*\s*do\s+cliente\b", r"\bconta\s+contrato\b", r"\bparceiro\s+de\s+negocio\b", r"\bcod\.?\s*cliente\b"],
     "mes": [r"\breferente\s+a\b", r"\bref\.?\s*:?\s*mes\s*/\s*ano\b", r"\bconta\s+mes\b", r"\bconta\s+do\s+mes\b",
             r"\bmes\s*/\s*ano\b", r"\bmes\s+faturado\b", r"\bmes\s+de\s+referencia\b", r"\bcompetencia\b", r"^referencia$"],
@@ -370,7 +382,7 @@ ROTULOS = {
 _ROTULOS_RE = {k: [re.compile(p) for p in v] for k, v in ROTULOS.items()}
 _IGNORAR = re.compile(r"fatura do mes|arrecadad|historico|demonstrativ|saldo|conforme ren|aneel|\bcep\b")
 _IGNORAR_TIPO = {"mes": re.compile(r"proxima leitura|leitura proximo|consumo faturado"), "dias": re.compile(r"proxima leitura|leitura proximo")}
-SO_PAGINA_1 = {"uc", "cliente", "mes", "vencimento", "total", "dias", "leit_ant", "leit_atu"}
+SO_PAGINA_1 = {"uc", "uc_seu_codigo", "uc_forte", "pn","cliente", "mes", "vencimento", "total", "dias", "leit_ant", "leit_atu"}
 
 
 def _tokens_com_x(it: Item) -> list[tuple[str, float]]:
@@ -637,9 +649,13 @@ def classificacao_de(texto: str) -> dict:
     n = normalizar(texto)
     n = re.sub(r"bandeira[^.|\n]{0,60}|band\.? ?tarif[^.|\n]{0,40}", " ", n)
     out: dict = {}
-    m = re.search(r"(?:grupo|subgrupo|classific|tarif|modalidade)[^\n]{0,80}?(?<![a-z0-9])(a3a|a4|a3|a2|a1|as|b1|b2|b3|b4)(?![0-9a-z])", n)
+    # 27/11/2026 Enel SP 613243: quadro "A - A4 - VERDE - Comercial" (grupo - subgrupo - modalidade) vale primeiro;
+    # a busca solta pegava o "Torre B1" do endereço da distribuidora quando o OCR mexia na ordem das linhas
+    m = re.search(r"(?<![a-z0-9])[ab]\s*-\s*(a3a|a4|a3|a2|a1|as|b1|b2|b3|b4)\s*-\s*(?:verde|azul|convencional|branca)\b", n)
     if not m:
-        m = re.search(r"(?<![a-z0-9])(a3a|a4|b3|b2|b1|b4)(?![0-9a-z])", n[:3000])
+        m = re.search(r"(?:grupo|subgrupo|classific|tarif|modalidade)[^\n]{0,80}?(?<![a-z0-9])(a3a|a4|a3|a2|a1|as|b1|b2|b3|b4)(?![0-9a-z])", n)
+    if not m:
+        m = re.search(r"(?<!torre )(?<!bloco )(?<!sala )(?<!conj )(?<![a-z0-9])(a3a|a4|b3|b2|b1|b4)(?![0-9a-z])", n[:3000])
     if m:
         out["subgrupo"] = m.group(1).upper()
         out["grupo"] = out["subgrupo"][0]
@@ -694,10 +710,48 @@ def identificar(pdf_bytes: bytes) -> dict:
     cab = _cabecalho(itens, ph)
     # UC: rótulo na mesma linha (preciso) > destaque do cabeçalho > rótulo abaixo/direita
     r = _por_rotulo(itens, "uc", modos=("mesma linha",))
+    if r is None:
+        r = _por_rotulo(itens, "uc_seu_codigo", modos=("abaixo",))
+    if r is None:
+        r = _por_rotulo(itens, "uc_forte", modos=("abaixo",))
     if r is None and "uc" in cab:
         r = cab["uc"]
+        # 27/11/2026 CPFL antiga escaneada (356855/356851): o número logo abaixo do rótulo "PN" (60008679) não é a
+        # UC; no OCR em carga o "SEU CÓDIGO" às vezes não sai e o destaque pegava o PN
+        _pn = _por_rotulo(itens, "pn", modos=("abaixo",))
+        if _pn and re.sub(r"\D", "", str(_pn[0])) == re.sub(r"\D", "", str(r[0])):
+            _outros = [u for u in (cab.get("_uc_candidatos") or []) if re.sub(r"\D", "", u) != re.sub(r"\D", "", str(_pn[0]))]
+            r = (_outros[-1], "destaque: candidato que não é o PN") if _outros else None
     if r is None:
         r = _por_rotulo(itens, "uc", modos=("abaixo", "direita"))
+    # 27/11/2026 CPFL 620736: o quadro "Número da UC" (1.250.676.035-57) não sai nos itens do liteparse e o destaque
+    # pegava o Nº Medidor. A própria fatura avisa 'consulte o novo código ... no campo "Número da UC"': vale o
+    # número com a máscara nova (d.ddd.ddd.ddd-dd) impresso na camada de texto da página 1, se for um só
+    if re.search(r'no campo\W{0,3}numero da uc', n) and (r is None or not re.fullmatch(r"\d{1,3}(\.\d{3}){3}-\d{2}", str(r[0]))):
+        try:
+            import fitz as _fitz
+            _t1 = _fitz.open(stream=pdf_bytes, filetype="pdf")[0].get_text()
+            _ms = set(re.findall(r"(?<![\d.])\d{1,3}(?:\.\d{3}){3}-\d{2}(?![\d])", _t1))
+            if len(_ms) == 1:
+                r = (_ms.pop(), "texto: campo Número da UC (máscara nova)")
+        except Exception:  # noqa: BLE001
+            pass
+    # 28/11/2026 CPFL antiga escaneada (356855/356851, OCR em carga): a faixa "PN | SEU CÓDIGO" sai junta e o
+    # "abaixo" do SEU CÓDIGO pegava o PN. O PN também está impresso sob o rótulo "PN" do cabeçalho: UC igual ao
+    # PN não vale — fica o outro número da linha abaixo do SEU CÓDIGO
+    if r is not None:
+        _pn = _por_rotulo(itens, "pn", modos=("abaixo",))
+        _dg = lambda v: re.sub(r"\D", "", str(v)).lstrip("0")
+        if _pn and _dg(_pn[0]) == _dg(r[0]):
+            r = None
+            for it in [i for i in itens if i.page == 0 and re.search(r"(?<!dados do )\bseu\s+codigo\b", i.norm)]:
+                abaixo = sorted((o for o in itens if o.page == 0 and 0 < o.y - it.y <= it.h * 4.5 + 12
+                                 and abs(o.x - it.x) <= 200), key=lambda o: (o.y, o.x))
+                outs = [v for o in abaixo for tok, _ in _tokens_com_x(o) for v in [parse_uc(tok)]
+                        if v and _dg(v) != _dg(_pn[0]) and len(_dg(v)) >= 6]
+                if outs:
+                    r = (outs[0], "rotulo:SEU CÓDIGO|abaixo, sem o PN")
+                    break
     if r is not None:
         out["uc"], out["_origem"]["uc"] = r
     if cab.get("_uc_candidatos"):

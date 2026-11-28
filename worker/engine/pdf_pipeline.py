@@ -2270,7 +2270,8 @@ def _gravar_mirror_origem(cur, conn, uid, row):
     rc = conn.cursor(dictionary=True)
     try:
         rc.execute(f"SELECT consumo_ativo_ponta_kwh ap, consumo_ativo_fponta_kwh afp, "
-                   f"consumo_ativo_reservado_kwh ar, valor_total_fatura vt, medicao_grandezas_json mj FROM {TBL_FDE} "
+                   f"consumo_ativo_reservado_kwh ar, valor_total_fatura vt, medicao_grandezas_json mj, "
+                   f"leit_atu_ativa_fponta lfp FROM {TBL_FDE} "
                    f"WHERE uid=%s", (uid,))
         a = rc.fetchone() or {}
     finally:
@@ -2281,7 +2282,7 @@ def _gravar_mirror_origem(cur, conn, uid, row):
         """Valida SEM confiar na origem (origem é mal-tratada). O extrator (leitura
         do PDF) é a referência; a origem NUNCA sobrescreve. Regras:
           - batem (±5%)            → confirmado (ok).
-          - extrator vazio/0       → preenche da origem, mas marca NAO_VALIDADO (candidato).
+          - extrator vazio         → fica VAZIO (não impresso), origem só na flag ORIGEM_NAO_IMPRESSO.
           - divergem               → MANTÉM extrator, marca DIVERGE_revisar (pendente).
         A resolução real (qual está certo) é por PROVA — fórmula leitura×K / SEFAZ —
         ou revisão humana; nunca por 'a origem disse'."""
@@ -2291,8 +2292,11 @@ def _gravar_mirror_origem(cur, conn, uid, row):
         if ext is None:
             if orig is None or orig == 0:
                 return ("keep", None)
-            flags.append({"campo": campo, "origem": orig, "extrator": ext, "status": "ORIGEM_NAO_VALIDADO"})
-            return ("set", orig)                       # preenche gap (candidato, não confirmado)
+            # 27/11/2026 (usuário): "deixa vazio quando não está impresso". O extrator não leu o valor no PDF →
+            # o campo fica VAZIO; a origem só fica anotada na flag para a revisão (Energisa 615576: a origem punha
+            # 4.798,251 = medido × 1,025, número que não está na fatura)
+            flags.append({"campo": campo, "origem": orig, "extrator": ext, "status": "ORIGEM_NAO_IMPRESSO"})
+            return ("keep", None)
         if orig is None:
             return ("keep", None)                      # extrator tem, origem não → mantém extrator
         if abs(ext - orig) <= max(0.5, 0.05 * abs(orig)):
@@ -2315,21 +2319,12 @@ def _gravar_mirror_origem(cur, conn, uid, row):
         if val is not None:
             sets.append(f"`{col}` = %s"); vals.append(val)
     # cadastrais que o extrator pode ter — COALESCE
-    for col, val in [("cpf_cnpj", _s(row.get("CNPJ_Fatura"))), ("distribuidora", _s(row.get("Concessionaria"))),
-                     # numero_nf: o PDF (extrator) tem os zeros à esquerda; origem (NroNF) os perde.
-                     # COALESCE → extrator vence; origem só preenche se vazio.
-                     ("numero_nf", _s(row.get("NroNF"))),
-                     ("cnpj_distribuidora_filial", _s(row.get("CNPJ_Concessionaria"))),
-                     ("numero_medidor", _s(row.get("NroMedidor"))),
-                     ("data_leitura_anterior", row.get("Dt_Leitura_Anterior")),
-                     ("data_leitura_atual", row.get("Dt_Leitura_Atual")), ("dias_faturados", _n(row.get("Qtd_Dias"))),
-                     ("demanda_contratada_ponta_kw", _n(row.get("KW_Contratada_Ponta"))),
-                     ("demanda_contratada_fponta_kw", _n(row.get("KW_Contratada_FPonta"))),
-                     # demanda_faturada NÃO vem mais da origem (KW_Registrada vem errado/arredondado);
-                     # agora é a demanda MEDIDA do PDF (itens_fatura), populada no atualizar_colunas.
-                     ("consumo_reativo_excedente_kvarh", ufer),
-                     ("energia_injetada_kwh", _n(row.get("KWH_Total_Injet"))),
-                     ("kwh_total", _n(row.get("KWH_Total")) or None)]:
+    # 27/11/2026 (usuário): "deixa vazio quando não está impresso / aplica a mesma regra nos outros campos" — a
+    # origem não preenche mais o que o extrator deixou vazio: CNPJ do cliente, NF, CNPJ da filial, medidor, datas
+    # de leitura, dias, contratada, reativo excedente, injetada e kWh total. Fica só o nome da distribuidora
+    # (cadastro, para agrupar). Os valores da origem continuam na tabela de origem para consulta.
+    _ = ufer
+    for col, val in [("distribuidora", _s(row.get("Concessionaria")))]:
         # zero da origem não é dado (21/11/2026): KW_Contratada = 0 entrava em fatura Grupo B e em A que imprime 80 kW
         if val is not None and not (isinstance(val, (int, float)) and val == 0):
             sets.append(f"`{col}` = COALESCE(`{col}`, %s)"); vals.append(val)
@@ -2342,7 +2337,9 @@ def _gravar_mirror_origem(cur, conn, uid, row):
     ]:
         # 22/11/2026: tabela de medição lida e sem reservado → a origem não preenche (Enel SP: punha ali o fora
         # ponta indutivo e o kWh total somava duas vezes)
-        if col == "consumo_ativo_reservado_kwh" and ext is None and a.get("mj") \
+        # 27/11/2026: só com a medição GRAVADA (leitura fora ponta escrita): no OCR não validado (Enel SP 600637,
+        # FP capacitivo + indutivo) a tabela lida é parcial e o kWh total perdia o indutivo (50.731 → 12.738)
+        if col == "consumo_ativo_reservado_kwh" and ext is None and a.get("mj") and a.get("lfp") is not None \
                 and '"reservado"' not in str(a.get("mj")):
             continue
         acao, novo = valida(col, ext, orig)
@@ -2351,7 +2348,7 @@ def _gravar_mirror_origem(cur, conn, uid, row):
 
     sets.append("revisar_campos = %s"); vals.append(_json.dumps({"flags": flags}, ensure_ascii=False, default=str))
     sets.append("revisao_status = %s")
-    vals.append("pendente" if any(("DIVERGE" in f["status"] or "NAO_VALIDADO" in f["status"]) for f in flags) else "ok")
+    vals.append("pendente" if any(("DIVERGE" in f["status"] or "NAO_VALIDADO" in f["status"] or "NAO_IMPRESSO" in f["status"]) for f in flags) else "ok")
     try:
         cur.execute(f"UPDATE {TBL_FDE} SET {', '.join(sets)} WHERE uid=%s", (*vals, uid))
         conn.commit()
